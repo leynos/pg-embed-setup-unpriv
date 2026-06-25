@@ -516,7 +516,11 @@ template invalidation explicit without hashing the migration directory.
 
 ### Performance comparison
 
-The following table compares test isolation approaches:
+The following table reports approximate benchmark results from one development
+test environment. Treat the timings as environment-dependent guidance rather
+than guaranteed performance figures.
+
+_Table 2: Performance comparison for test isolation approaches._
 
 | Approach                       | Bootstrap | Per-test overhead | Isolation |
 | ------------------------------ | --------- | ----------------- | --------- |
