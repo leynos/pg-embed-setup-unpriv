@@ -16,7 +16,10 @@ use std::time::Duration;
 
 use crate::CleanupMode;
 use crate::error::BootstrapResult;
-use platform::{force_shutdown, parse_pid, process_is_running_for_platform, request_shutdown};
+use platform::{
+    force_shutdown, parse_postmaster_process, postmaster_process_is_running,
+    prepare_process_exit_failsafe, request_shutdown,
+};
 use postgresql_embedded::Settings;
 
 mod platform;
@@ -26,6 +29,7 @@ struct ShutdownState {
     settings: Settings,
     shutdown_timeout: Duration,
     cleanup_mode: CleanupMode,
+    _exit_failsafe: platform::ProcessExitFailsafe,
 }
 
 /// Initialisation guard for the atexit callback.
@@ -42,6 +46,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const POST_SIGKILL_GRACE: Duration = Duration::from_millis(100);
 
 /// Platform-specific process identifier stored in `postmaster.pid`.
+// Test-support re-exports document this helper under docsrs, but only
+// feature-gated integration tests call it.
+#[cfg_attr(docsrs, allow(dead_code))]
+#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub type PostmasterPid = platform::PostmasterPid;
 
 /// Registers an atexit hook that will stop the `PostgreSQL` postmaster on
@@ -68,6 +76,7 @@ pub(super) fn register_shutdown_hook(
     }
 
     register_atexit()?;
+    let exit_failsafe = prepare_process_exit_failsafe(read_postmaster_process(&settings.data_dir));
 
     // Store state only AFTER atexit succeeds, so a failed registration
     // does not poison the slot for future attempts.
@@ -75,6 +84,7 @@ pub(super) fn register_shutdown_hook(
         settings,
         shutdown_timeout,
         cleanup_mode,
+        _exit_failsafe: exit_failsafe,
     });
 
     log_registration_success();
@@ -125,41 +135,41 @@ extern "C" fn shutdown_callback() {
         return;
     };
 
-    let Some(pid) = read_postmaster_pid(&state.settings.data_dir) else {
+    let Some(process) = read_postmaster_process(&state.settings.data_dir) else {
         // PID file missing — cluster already stopped or was never started.
         best_effort_cleanup(state);
         return;
     };
 
-    if !process_is_running(pid) {
+    if !postmaster_process_is_running(process) {
         best_effort_cleanup(state);
         return;
     }
 
-    stop_postmaster(pid, state);
+    stop_postmaster(process, state);
     best_effort_cleanup(state);
 }
 
 /// Requests postmaster shutdown and escalates on timeout.
-fn stop_postmaster(pid: PostmasterPid, state: &ShutdownState) {
-    request_shutdown(pid);
+fn stop_postmaster(process: platform::PostmasterProcess, state: &ShutdownState) {
+    request_shutdown(process);
 
-    if wait_for_exit(pid, state.shutdown_timeout) {
+    if wait_for_exit(process, state.shutdown_timeout) {
         return;
     }
 
     // Timeout expired — escalate to forceful platform termination.
-    force_shutdown(pid);
+    force_shutdown(process);
     std::thread::sleep(POST_SIGKILL_GRACE);
 }
 
 /// Polls until the process exits or the timeout elapses.
 ///
 /// Returns `true` if the process exited within the timeout.
-fn wait_for_exit(pid: PostmasterPid, timeout: Duration) -> bool {
+fn wait_for_exit(process: platform::PostmasterProcess, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        if !process_is_running(pid) {
+        if !postmaster_process_is_running(process) {
             return true;
         }
         if std::time::Instant::now() >= deadline {
@@ -178,19 +188,33 @@ fn wait_for_exit(pid: PostmasterPid, timeout: Duration) -> bool {
 /// Returns `None` if the file is missing, empty, cannot be parsed, or
 /// contains a non-positive value.
 #[must_use]
+// Test-support re-exports document this helper under docsrs, but only
+// feature-gated integration tests call it.
+#[cfg_attr(docsrs, allow(dead_code))]
+#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub fn read_postmaster_pid(data_dir: &Path) -> Option<PostmasterPid> {
     let pid_file = data_dir.join("postmaster.pid");
     let contents = std::fs::read_to_string(&pid_file).ok()?;
     let first_line = contents.lines().next()?;
-    parse_pid(first_line)
+    platform::parse_pid(first_line)
+}
+
+fn read_postmaster_process(data_dir: &Path) -> Option<platform::PostmasterProcess> {
+    let pid_file = data_dir.join("postmaster.pid");
+    let contents = std::fs::read_to_string(&pid_file).ok()?;
+    parse_postmaster_process(&contents)
 }
 
 /// Returns `true` if a process with the given PID is currently running.
 ///
 /// Invalid PIDs are rejected immediately by the platform implementation.
 #[must_use]
+// Test-support re-exports document this helper under docsrs, but only
+// feature-gated integration tests call it.
+#[cfg_attr(docsrs, allow(dead_code))]
+#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub fn process_is_running(pid: PostmasterPid) -> bool {
-    process_is_running_for_platform(pid)
+    platform::process_is_running_for_platform(pid)
 }
 
 // ---------------------------------------------------------------------------
