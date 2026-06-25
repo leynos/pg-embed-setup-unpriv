@@ -415,6 +415,37 @@ cross-compile output before Milestone 1 begins.
   returned the free CLI rate limit, so the mandated `vsleep` backoff ran for
   `89` minutes before retrying. The post-backoff retry completed with
   `status=review_completed` and `findings=0`.
+- [x] (2026-06-25T18:55:30Z) Remote CI run `28192593707` for commit
+  `df8afb5` showed Linux root, Linux unprivileged, and macOS all green. Windows
+  built both binaries and passed the CLI smoke test, then failed only in
+  `shutdown_hook_lifecycle::postmaster_exits_after_child_process_with_shutdown_hook`:
+  the parent observed postmaster PID `2388` still running after the child
+  exited and waited `30s`. The runner cleanup also found orphaned `postgres`
+  processes (`2388` and `8056`). The fix replaces the Windows shutdown hook's
+  `taskkill` shell-out with direct `kernel32` process-tree enumeration and
+  termination through `CreateToolhelp32Snapshot`, `OpenProcess`,
+  `TerminateProcess`, and `WaitForSingleObject`, without adding a runtime
+  dependency.
+- [x] (2026-06-25T19:00:27Z) Local validation for the direct Windows reaper
+  patch passed before commit. Cross-target checks passed for
+  `x86_64-pc-windows-msvc` and `aarch64-apple-darwin` with
+  `RUSTFLAGS="-D warnings"` and the CI feature set. The focused Linux
+  orphan-detection lifecycle test passed. Required gates passed:
+  `make check-fmt`, `make lint`, `make test`, `make markdownlint`, and
+  `make nixie`; the full test gate ran `275` tests with `3` skipped and then
+  `151` `dev-worker` tests with `0` skipped. Evidence:
+  `/tmp/check-windows-direct-reaper-after-ffi-fix-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-direct-reaper-windows-mac-support-validation.out`,
+  `/tmp/test-shutdown-hook-lifecycle-direct-reaper-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-direct-reaper-windows-mac-support-validation.out`,
+  `/tmp/lint-direct-reaper-windows-mac-support-validation.out`,
+  `/tmp/test-direct-reaper-windows-mac-support-validation.out`,
+  `/tmp/mdlint-direct-reaper-windows-mac-support-validation.out`, and
+  `/tmp/nixie-direct-reaper-windows-mac-support-validation.out`. An additional
+  exploratory Windows-target Clippy run no longer reports this patch's
+  `platform.rs` FFI calls after the raw-pointer fix, but it still fails on
+  older Windows-target lint findings in unrelated modules, so it is not used as
+  a commit gate.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -588,6 +619,14 @@ cross-compile output before Milestone 1 begins.
   tests: the product joins `XDG_CACHE_HOME` and `CACHE_SUBDIR` through platform
   path APIs, so Windows naturally renders `\` separators. Impact: treat these
   as test corrections, not source-portability changes.
+- Observation: remote CI run `28192593707` proved the first Windows reaper
+  shape was insufficient. The Windows job reached the orphan-detection test
+  after successful binary build and CLI smoke, but `taskkill /PID <pid> /T`
+  from the atexit hook did not stop the postmaster tree: the parent timed out
+  after `30s`, and GitHub runner cleanup later killed two orphaned `postgres`
+  processes. Impact: spawning `taskkill` inside the process-exit path is not a
+  reliable cleanup primitive for this test cluster; the Windows hook must use
+  direct process handles and kill descendants itself.
 
 ## Decision log
 
@@ -683,6 +722,13 @@ cross-compile output before Milestone 1 begins.
   the no-new-runtime dependency tolerance, and kills the PostgreSQL process
   tree rather than only the postmaster process. Date/Author: 2026-06-25,
   implementation agent.
+- Decision: replace the Windows reaper's `taskkill` shell-out with direct
+  Win32 process-tree termination, still without adding `windows-sys`. The hook
+  enumerates descendants with a Toolhelp process snapshot, terminates children
+  before the postmaster with `TerminateProcess`, and waits briefly on each
+  handle. Rationale: hosted Windows CI proved `taskkill` was not dependable
+  inside the atexit path, while adding a Windows crate would breach the plan's
+  dependency tolerance. Date/Author: 2026-06-25, implementation agent.
 - Decision: serialize the shutdown-hook integration tests with the existing
   scenario guard instead of treating "data directory exists but is not empty"
   as a soft skip. Rationale: that error is expected only under concurrent use
