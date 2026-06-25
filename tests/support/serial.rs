@@ -6,15 +6,16 @@
 //! mutex, then environment mutex). Following this order prevents deadlocks when
 //! multiple suites mutate process-wide state.
 
+use rstest::fixture;
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
+
 #[cfg(unix)]
 use std::fs::OpenOptions;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
-#[cfg(unix)]
-use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
-
-use rstest::fixture;
+#[cfg(not(unix))]
+use std::time::{Duration, Instant};
 
 static SCENARIO_MUTEX: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
 
@@ -22,7 +23,17 @@ static SCENARIO_MUTEX: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new
 type ProcessLock = std::fs::File;
 
 #[cfg(not(unix))]
-type ProcessLock = ();
+#[derive(Debug)]
+struct ProcessLock {
+    path: PathBuf,
+}
+
+#[cfg(not(unix))]
+impl Drop for ProcessLock {
+    fn drop(&mut self) {
+        let _unused = std::fs::remove_dir(&self.path);
+    }
+}
 
 #[derive(Debug)]
 #[must_use = "Hold this guard for the duration of the serialized scenario"]
@@ -41,17 +52,15 @@ pub struct ScenarioLocalGuard {
 ///
 /// Acquires a global mutex to ensure that scenarios relying on shared state
 /// (such as process environment variables or singleton resources) execute
-/// serially, preventing cross-test interference. A cross-process file lock is
-/// also acquired so independent test binaries coordinate access to the shared
-/// `PostgreSQL` cache and installation directories. On non-Unix platforms this
-/// lock is a no-op, so cross-process runs may still race when touching shared
-/// caches.
+/// serially, preventing cross-test interference. A cross-process lock is also
+/// acquired so independent test binaries coordinate access to the shared
+/// `PostgreSQL` cache and installation directories.
 ///
 /// # Behaviour
 ///
 /// - Acquires the global `SCENARIO_MUTEX` and wraps the guard.
-/// - If the mutex is poisoned (a previous test panicked whilst holding the lock), the poison is
-///   cleared and execution continues.
+/// - If the mutex is poisoned (a previous test panicked whilst holding the lock),
+///   the poison is cleared and execution continues.
 /// - The guard is automatically released when dropped at the end of the test.
 ///
 /// # Examples
@@ -85,8 +94,8 @@ pub fn serial_guard() -> ScenarioSerialGuard {
 /// # Behaviour
 ///
 /// - Acquires the global `SCENARIO_MUTEX` and wraps the guard.
-/// - If the mutex is poisoned (a previous test panicked whilst holding the lock), the poison is
-///   cleared and execution continues.
+/// - If the mutex is poisoned (a previous test panicked whilst holding the lock),
+///   the poison is cleared and execution continues.
 /// - The guard is automatically released when dropped at the end of the test.
 ///
 /// # Examples
@@ -153,7 +162,38 @@ fn acquire_process_lock() -> ProcessLock {
 }
 
 #[cfg(not(unix))]
-fn acquire_process_lock() -> ProcessLock { () }
+fn acquire_process_lock() -> ProcessLock {
+    let target_dir =
+        std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| PathBuf::from("target"), PathBuf::from);
+    std::fs::create_dir_all(&target_dir).unwrap_or_else(|err| {
+        panic!(
+            "failed to create target dir for scenario lock at {}: {err}",
+            target_dir.display()
+        );
+    });
+
+    let lock_path = target_dir.join("pg-embed-setup-unpriv.serial.lockdir");
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        match std::fs::create_dir(&lock_path) {
+            Ok(()) => return ProcessLock { path: lock_path },
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting to acquire scenario lock at {}",
+                    lock_path.display()
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => {
+                panic!(
+                    "failed to acquire scenario lock at {}: {err}",
+                    lock_path.display()
+                );
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -183,7 +223,8 @@ mod tests {
     fn acquire_process_lock_places_lock_file_in_cargo_target_dir(
         serial_guard: ScenarioSerialGuard,
     ) {
-        use std::{env, ffi::OsString, fs};
+        use std::ffi::OsString;
+        use std::{env, fs};
 
         use pg_embedded_setup_unpriv::test_support::scoped_env;
 
@@ -209,8 +250,7 @@ mod tests {
             .collect();
         assert!(
             !entries.is_empty(),
-            "expected acquire_process_lock to create a lock file in {tmp_dir:?}, but directory \
-             was empty"
+            "expected acquire_process_lock to create a lock file in {tmp_dir:?}, but directory was empty"
         );
 
         // Best-effort cleanup; errors are non-fatal in test teardown.
