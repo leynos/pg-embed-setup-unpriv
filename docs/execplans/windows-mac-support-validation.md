@@ -310,6 +310,10 @@ cross-compile output before Milestone 1 begins.
   `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and
   `aarch64-apple-darwin` with `RUSTFLAGS="-D warnings"` plus the full Linux
   gates; evidence remains in the shutdown-hook `/tmp/*` gate logs.
+- [x] (2026-06-25T14:25:00Z) CodeRabbit reviewed commit `fd668fe` after the
+  deterministic gates passed. `coderabbit review --agent` completed with
+  `status=review_completed` and `findings=0`, so no Windows cleanup concerns
+  needed clearing before the CI matrix milestone.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
