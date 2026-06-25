@@ -341,6 +341,17 @@ cross-compile output before Milestone 1 begins.
   deterministic gates passed. `coderabbit review --agent` completed with
   `status=review_completed` and `findings=0`, so the CI matrix milestone had no
   concerns to clear before remote CI observation.
+- [x] (2026-06-25T15:03:00Z) Remote CI run `28178598283` exposed a macOS
+  compile failure in the new `Test (aarch64-apple-darwin)` leg: the
+  `cluster-unit-tests,async-api` feature set compiled Linux/BSD root bootstrap
+  tests that import `nobody_uid`, but that helper is intentionally not exported
+  on macOS. The fix gates `bootstrap_privileges` and the root-specific settings
+  tests to the same root-capable Unix target set as the public helper exports,
+  and gates a Unix-only `rstest` import in `tests/support/serial.rs` after the
+  Windows feature check found it as an unused import. Local evidence:
+  `/tmp/check-darwin-ci-feature-root-target-gates-windows-mac-support-validation.out`
+  and
+  `/tmp/check-windows-ci-feature-root-target-gates-windows-mac-support-validation.out`.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -488,6 +499,11 @@ cross-compile output before Milestone 1 begins.
   `7da7c6d89033d13cbb1c64803d108ddca97e69c2`. Impact: the workflow can satisfy
   the repository's SHA pinning policy without drifting from the planned
   shared-actions revision.
+- Observation: remote macOS CI compiles the test harness for the
+  `cluster-unit-tests,async-api` feature set before running any tests, so a
+  root-only Linux/BSD helper import fails even when the corresponding scenario
+  would have skipped at runtime. Impact: root-specific test binaries and helper
+  imports must be target-gated at compile time, not just skipped dynamically.
 
 ## Decision log
 
@@ -608,6 +624,12 @@ cross-compile output before Milestone 1 begins.
   keyed by pinned PostgreSQL version; setting the version in CI avoids a broad
   cache key that silently changes when upstream defaults move. Date/Author:
   2026-06-25, implementation agent.
+- Decision: gate root-specific privilege tests to the same root-capable Unix
+  target set as the public `nobody_uid` and directory ownership helpers.
+  Rationale: macOS support is the unprivileged in-process path; compiling
+  Linux/BSD owner-changing tests there contradicts the existing public API
+  boundary and fails before runtime skips can apply. Date/Author: 2026-06-25,
+  implementation agent.
 
 ## Outcomes & retrospective
 

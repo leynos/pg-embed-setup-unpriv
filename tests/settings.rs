@@ -6,22 +6,59 @@ use std::path::Path;
 
 #[cfg(unix)]
 use nix::unistd::geteuid;
-#[cfg(all(unix, feature = "privileged-tests"))]
+#[cfg(all(
+    unix,
+    feature = "privileged-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 use pg_embedded_setup_unpriv::Error as PgEmbeddedError;
 use pg_embedded_setup_unpriv::PgEnvCfg;
 #[cfg(all(
     unix,
-    any(feature = "privileged-tests", feature = "cluster-unit-tests")
+    any(feature = "privileged-tests", feature = "cluster-unit-tests"),
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
 ))]
 use pg_embedded_setup_unpriv::nobody_uid;
 #[cfg(unix)]
 use pg_embedded_setup_unpriv::{ExecutionPrivileges, detect_execution_privileges};
-#[cfg(all(unix, feature = "cluster-unit-tests"))]
+#[cfg(all(
+    unix,
+    feature = "cluster-unit-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 use pg_embedded_setup_unpriv::{make_data_dir_private, make_dir_accessible};
 use postgresql_embedded::VersionReq;
 use rstest::{fixture, rstest};
 
-#[cfg(all(unix, feature = "privileged-tests"))]
+#[cfg(all(
+    unix,
+    feature = "privileged-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 #[expect(
     deprecated,
     reason = "Tests assert the deprecated helper surfaces its failure path"
@@ -183,11 +220,31 @@ fn with_temp_euid_changes_uid() -> color_eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(all(unix, feature = "cluster-unit-tests"))]
+#[cfg(all(
+    unix,
+    feature = "cluster-unit-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 #[path = "support/cap_fs_settings.rs"]
 mod cap_fs;
 
-#[cfg(all(unix, feature = "cluster-unit-tests"))]
+#[cfg(all(
+    unix,
+    feature = "cluster-unit-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 mod dir_accessible_tests {
     use super::*;
     use cap_std::fs::{MetadataExt, PermissionsExt};
