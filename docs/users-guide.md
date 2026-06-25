@@ -89,8 +89,8 @@ cargo binstall pg-embed-setup-unpriv
    Ownership fix-ups occur on every call so running the tool twice remains
    idempotent.
 
-4. Pass the resulting paths and credentials to your tests. If you use
-   `postgresql_embedded` directly after the setup step, it can reuse the staged
+4. Pass the resulting paths and credentials to the test suite. Direct
+   `postgresql_embedded` usage after the setup step can reuse the staged
    binaries and data directory without needing `root`.
 
 ## Bootstrap for test suites
@@ -129,9 +129,9 @@ rather than when PostgreSQL launches.
 
 `bootstrap_for_tests()` also inserts a small set of PostgreSQL server
 configuration entries into `bootstrap.settings.configuration` to minimize
-background and parallel worker processes for ephemeral test clusters. Override
-these values by mutating the configuration map before starting the cluster if
-your tests need different behaviour.
+background and parallel worker processes for ephemeral test clusters. Suites
+that need different behaviour can override these values by mutating the
+configuration map before starting the cluster.
 
 ## Resource Acquisition Is Initialization (RAII) test clusters
 
@@ -188,7 +188,7 @@ Enable the feature in your `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-pg-embed-setup-unpriv = { version = "0.2", features = ["async-api"] }
+pg-embed-setup-unpriv = { version = "0.5.1", features = ["async-api"] }
 ```
 
 Then use `start_async()` and `stop_async()` in your async tests:
@@ -299,18 +299,28 @@ eliminating per-test bootstrap overhead.
 ```rust,no_run
 use pg_embedded_setup_unpriv::{test_support::shared_test_cluster, TestCluster};
 use rstest::rstest;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn unique_database_name() -> String {
+    let id = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("shared_cluster_test_{}_{id}", std::process::id())
+}
 
 #[rstest]
 fn uses_shared_cluster(shared_test_cluster: &'static TestCluster) {
-    // Create a per-test database for isolation
-    shared_test_cluster.create_database("my_test_db").unwrap();
+    let db_name = unique_database_name();
 
-    // Run tests against the database
-    let url = shared_test_cluster.connection().database_url("my_test_db");
-    assert!(url.contains("my_test_db"));
+    // Create a per-test database for isolation.
+    shared_test_cluster.create_database(&db_name).unwrap();
 
-    // Clean up (optional - the database is dropped when the cluster shuts down)
-    shared_test_cluster.drop_database("my_test_db").unwrap();
+    // Run tests against the database.
+    let url = shared_test_cluster.connection().database_url(&db_name);
+    assert!(url.contains(&db_name));
+
+    // Clean up the per-test database.
+    shared_test_cluster.drop_database(&db_name).unwrap();
 }
 ```
 
