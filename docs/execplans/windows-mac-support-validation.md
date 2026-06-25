@@ -352,6 +352,10 @@ cross-compile output before Milestone 1 begins.
   `/tmp/check-darwin-ci-feature-root-target-gates-windows-mac-support-validation.out`
   and
   `/tmp/check-windows-ci-feature-root-target-gates-windows-mac-support-validation.out`.
+- [x] (2026-06-25T15:14:00Z) CodeRabbit reviewed corrective commit `15ff4a1`
+  after the cross-target checks and full local gates passed.
+  `coderabbit review --agent` completed with `status=review_completed` and
+  `findings=0`.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
