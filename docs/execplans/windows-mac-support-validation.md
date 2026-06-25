@@ -446,6 +446,13 @@ cross-compile output before Milestone 1 begins.
   `platform.rs` FFI calls after the raw-pointer fix, but it still fails on
   older Windows-target lint findings in unrelated modules, so it is not used as
   a commit gate.
+- [x] (2026-06-25T19:10:48Z) CodeRabbit reviewed corrective commit `ba7285b`
+  after deterministic gates passed. The first CLI attempt stalled after the
+  summarization phase and was stopped by exact process group; the retry also
+  appeared stalled, then flushed a completed structured result after the exact
+  process group was stopped. The captured log shows `status=review_completed`
+  and `findings=0`, so there are no CodeRabbit concerns to clear before pushing
+  the direct Windows reaper fix.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
