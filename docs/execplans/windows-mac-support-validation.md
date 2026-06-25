@@ -1,11 +1,11 @@
 # Validate Windows and macOS support via a CI matrix and cargo binstall
 
-This ExecPlan (execution plan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & discoveries`,
-`Decision log`, and `Outcomes & retrospective` must be kept up to date as work
-proceeds. Each revision must remain self-contained.
+This ExecPlan (execution plan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & discoveries`, `Decision log`,
+and `Outcomes & retrospective` must be kept up to date as work proceeds. Each
+revision must remain self-contained.
 
-Status: DRAFT
+Status: IN PROGRESS
 
 No `PLANS.md` file exists in the repository.
 
@@ -15,11 +15,11 @@ Today `pg-embed-setup-unpriv` is built, tested, and packaged for Linux only.
 Continuous Integration (CI) runs solely on `ubuntu-latest`, and the release
 workflow publishes `cargo binstall` archives for `x86_64-unknown-linux-gnu` and
 `aarch64-unknown-linux-gnu`. The library already contains substantial
-platform-conditional code — the privilege-drop path and the
-`atexit` shutdown hook are already gated off non-Unix targets — and the roadmap
-appendix already states the intended behaviour on macOS and Windows. But
-nothing in CI proves that the crate even compiles on those platforms, let alone
-that its unprivileged in-process path works, that shared clusters are cleaned up
+platform-conditional code — the privilege-drop path and the `atexit` shutdown
+hook are already gated off non-Unix targets — and the roadmap appendix already
+states the intended behaviour on macOS and Windows. But nothing in CI proves
+that the crate even compiles on those platforms, let alone that its
+unprivileged in-process path works, that shared clusters are cleaned up
 correctly, or that `cargo binstall` can install the published binaries there.
 
 After this change a contributor can observe the following:
@@ -41,8 +41,8 @@ After this change a contributor can observe the following:
    per-target metadata-resolution audit.
 4. The README install matrix, the users' guide, and the roadmap appendix
    describe the supported platforms and their caveats accurately, including the
-   hard limitation that no Windows-on-ARM PostgreSQL binaries exist upstream and
-   that POSIX file-mode privacy guarantees do not hold on Windows.
+   hard limitation that no Windows-on-ARM PostgreSQL binaries exist upstream
+   and that POSIX file-mode privacy guarantees do not hold on Windows.
 
 The user-visible outcome is simple to state: the same `TestCluster` test code
 that passes on Linux also passes on macOS and Windows unprivileged, leaves no
@@ -70,9 +70,10 @@ These are hard invariants. Violating one requires escalation, not a workaround.
 - Prefer reusing the `leynos/shared-actions` composite actions over hand-rolled
   workflow logic, since the user nominated that repository as the reference for
   this work. In particular, prefer `stage-release-artefacts` (which already
-  produces a `cargo binstall` archive with Windows path handling and a `.sha256`
-  sidecar) and the `rust-toy-app.yml` cross-OS matrix shape over bespoke
-  Makefile/zip branching, unless a documented reason makes the action unsuitable.
+  produces a `cargo binstall` archive with Windows path handling and a
+  `.sha256` sidecar) and the `rust-toy-app.yml` cross-OS matrix shape over
+  bespoke Makefile/zip branching, unless a documented reason makes the action
+  unsuitable.
 - Any helper script that is genuinely required (after the reuse-first
   evaluation above) must follow the df12 scripting standards: a single-file
   Python program targeting Python 3.13 with a `uv` shebang and inline metadata
@@ -105,12 +106,12 @@ blocker set must be observed, not predicted.
   from an earlier estimate after review found the blocker set differs from the
   first survey; confirm against Milestone 0.)
 - Interface: if any public API signature, trait bound, or exported item must
-  change (beyond adding platform-conditional `cfg` attributes to existing items,
-  or removing a confirmed-dead dependency), stop and escalate.
+  change (beyond adding platform-conditional `cfg` attributes to existing
+  items, or removing a confirmed-dead dependency), stop and escalate.
 - Dependencies: if a new runtime dependency beyond reorganising or removing the
   existing `nix`/`xdg`/`openssl-sys` declarations is required, or if a build
-  tool (for example Perl or NASM on the Windows runner) cannot be provisioned by
-  the existing `setup-rust` action, stop and escalate.
+  tool (for example Perl or NASM on the Windows runner) cannot be provisioned
+  by the existing `setup-rust` action, stop and escalate.
 - Cleanup correctness: if the Windows orphan-detection test cannot be made to
   pass after two documented attempts (whether by a real reaper or by proving no
   Windows path leaks a guard), stop and escalate; do not ship a green
@@ -131,8 +132,9 @@ blocker set must be observed, not predicted.
   Milestone 2 by more than 50%, stop and reconsider caching/matrix scope.
 - Ambiguity: if a materially different interpretation emerges (for example
   whether Windows-on-ARM must be a `binstall` target despite having no
-  PostgreSQL binaries, or whether macOS/Windows `binstall` binaries are required
-  at all versus library-only support), stop and present options with trade-offs.
+  PostgreSQL binaries, or whether macOS/Windows `binstall` binaries are
+  required at all versus library-only support), stop and present options with
+  trade-offs.
 
 ## Risks
 
@@ -152,64 +154,64 @@ cross-compile output before Milestone 1 begins.
   `0o700` privacy intent of `make_data_dir_private` does not hold on Windows.
 - Risk: `nix` is declared as an unconditional dependency (`Cargo.toml` line 115)
   but does not build on Windows. Severity: high. Likelihood: high (certain).
-  Mitigation: move `nix` into `[target.'cfg(unix)'.dependencies]`. macOS (a Unix
-  target) keeps it.
+  Mitigation: move `nix` into `[target.'cfg(unix)'.dependencies]`. macOS (a
+  Unix target) keeps it.
 - Risk: `tests/settings.rs:7` has a top-level, unconditional
-  `use nix::unistd::geteuid;`, and `tests/settings.rs` has no `required-features`
-  (`Cargo.toml` lines 109-111), so it is compiled on every platform under
-  `--all-targets`. Once `nix` is `cfg(unix)`-gated, this test fails to compile on
-  Windows. Severity: high. Likelihood: high (certain). Mitigation: gate the
-  import and the `geteuid`-dependent test bodies with `#[cfg(unix)]`; audit the
-  whole `tests/` tree for other top-level `nix`/`libc`/`std::os::unix` imports —
-  the original survey covered `src/` only.
+  `use nix::unistd::geteuid;`, and `tests/settings.rs` has no
+  `required-features` (`Cargo.toml` lines 109-111), so it is compiled on every
+  platform under `--all-targets`. Once `nix` is `cfg(unix)`-gated, this test
+  fails to compile on Windows. Severity: high. Likelihood: high (certain).
+  Mitigation: gate the import and the `geteuid`-dependent test bodies with
+  `#[cfg(unix)]`; audit the whole `tests/` tree for other top-level `nix`/
+  `libc` /`std::os::unix` imports — the original survey covered `src/` only.
 - Risk: `xdg = "3"` (`Cargo.toml` line 125) is a Unix-only crate and appears to
   be a dead dependency — there are no `xdg::`/`use xdg` references anywhere in
   `src/` (the `xdg_*` identifiers are field and function names, not crate use).
   On Windows it may fail to build. Severity: medium. Likelihood: medium.
-  Mitigation: confirm it is unused with `cargo +nightly udeps` or a build with it
-  removed, then remove it (preferred) or gate it behind `cfg(unix)`.
+  Mitigation: confirm it is unused with `cargo +nightly udeps` or a build with
+  it removed, then remove it (preferred) or gate it behind `cfg(unix)`.
 - Risk: shared `TestCluster` fixtures that leak the guard with
   `std::mem::forget` rely on the `atexit` shutdown hook to reap the postmaster.
   That hook is a *no-op* on non-Unix (`src/cluster/handle.rs:325-330`), and
   `src/cluster/mod.rs:61` already gates `mod shutdown_hook` to `unix`. So on
   Windows and macOS a forgotten guard leaves an orphaned postmaster (on macOS
-  the no-op is the chosen design, but the orphan still occurs). Severity:
-  high. Likelihood: medium. Mitigation: decide explicitly — implement a real
-  non-Unix reaper (Windows Job Objects or `OpenProcess`+`TerminateProcess`;
-  macOS can reuse the POSIX hook because signals are available there) or prove no
+  the no-op is the chosen design, but the orphan still occurs). Severity: high.
+  Likelihood: medium. Mitigation: decide explicitly — implement a real non-Unix
+  reaper (Windows Job Objects or `OpenProcess`+`TerminateProcess`; macOS can
+  reuse the POSIX hook because signals are available there) or prove no
   cross-platform test path forgets a guard — and prove the outcome with an
   orphan-detection test. Note: macOS is a Unix target, so the existing POSIX
   hook already compiles there; only Windows truly lacks a reaper.
-- Risk: `openssl-sys` is an unconditional dependency with the `vendored` feature
-  (`Cargo.toml` line 140). Building vendored OpenSSL on Windows MSVC requires
-  Perl and NASM, which may not be present on the runner; this is a link/build
-  failure invisible to `cargo check`. Severity: medium. Likelihood: medium.
-  Mitigation: in Milestone 0/1 determine whether `openssl-sys` is actually
-  pulled into the Windows/macOS build graph and needed; if it only forces
-  vendored linking for the Linux `postgres`/`diesel` build, gate it behind
-  `cfg(unix)` and/or the `diesel-support` feature, else document the runner
-  provisioning step. Escalate if neither is feasible.
+- Risk: `openssl-sys` was an unconditional dependency with the `vendored`
+  feature (`Cargo.toml` line 140 before Milestone 1). Building vendored OpenSSL
+  on Windows MSVC requires Perl and NASM, and cross-checking macOS from Linux
+  sends Darwin compiler flags to the Linux host compiler. Severity: medium.
+  Likelihood: observed. Mitigation: Milestone 1 removes the crate's direct
+  vendored `openssl-sys` dependency. The remaining `postgresql_embedded` default
+  `native-tls` graph uses platform TLS on Windows and macOS, so `openssl-sys`
+  no longer appears in those target checks; Linux continues to use the native
+  OpenSSL path validated by the existing Linux gates.
 - Risk: `pq-sys` (bundled, behind `diesel-support`) builds libpq from source and
   may fail or be slow on Windows. Severity: medium. Likelihood: medium.
   Mitigation: scope the Windows test job to exclude `diesel-support`; enable it
-  later as a deliberate, separately budgeted follow-up; record the outcome. Apply
-  the same feature discipline to macOS rather than silently using `--all-features`
-  there (which would pull `pq-sys` at ~10x runner billing).
+  later as a deliberate, separately budgeted follow-up; record the outcome.
+  Apply the same feature discipline to macOS rather than silently using
+  `--all-features` there (which would pull `pq-sys` at ~10x runner billing).
 - Risk: the embedded PostgreSQL backend downloads binaries at runtime from the
-  theseus release host and may hit `api.github.com` rate limits (the token raises
-  but does not partition the limit, so concurrent matrix legs across PRs share
-  the budget), or fail on Windows because of Unix-socket assumptions (the
+  theseus release host and may hit `api.github.com` rate limits (the token
+  raises but does not partition the limit, so concurrent matrix legs across PRs
+  share the budget), or fail on Windows because of Unix-socket assumptions (the
   embedded settings ignore Unix sockets on Windows and use TCP). Severity:
   medium. Likelihood: medium-high. Mitigation: make the theseus download a
   mandatory `actions/cache` keyed on the pinned PostgreSQL version + OS + arch
   (not "where practical"); pass `GITHUB_TOKEN`; add bounded retries around
   cluster start; decide now whether the new legs are required or advisory and
-  record it; verify TCP connection on Windows. A red leg must be distinguishable
-  between "crate broken" and "download throttled".
+  record it; verify TCP connection on Windows. A red leg must be
+  distinguishable between "crate broken" and "download throttled".
 - Risk: there are no `aarch64-pc-windows-msvc` PostgreSQL binaries upstream, so
-  the embedded cluster cannot run on Windows-on-ARM. Severity: low (scope only).
-  Likelihood: high (certain). Mitigation: do not target Windows-on-ARM for tests
-  or `binstall`; document the limitation.
+  the embedded cluster cannot run on Windows-on-ARM. Severity: low (scope
+  only). Likelihood: high (certain). Mitigation: do not target Windows-on-ARM
+  for tests or `binstall`; document the limitation.
 - Risk: `--dry-run` resolves and fetches a `binstall` asset but does not extract
   or place the binary, so it cannot catch a wrong *internal* archive path. A
   published Windows `.zip` with the wrong directory or binary name would pass a
@@ -226,28 +228,55 @@ cross-compile output before Milestone 1 begins.
   test the produced archive's internal layout.
 - Risk: `macos-latest` is now Apple Silicon (`aarch64-apple-darwin`), so an
   unqualified macOS job no longer produces `x86_64-apple-darwin`, and the Intel
-  archive would ship without ever being executed in CI (dry-run resolves but does
-  not run it). Severity: low-medium. Likelihood: high. Mitigation: either add an
-  Intel-macOS run leg, or document that Intel macOS is build-and-resolve
+  archive would ship without ever being executed in CI (dry-run resolves but
+  does not run it). Severity: low-medium. Likelihood: high. Mitigation: either
+  add an Intel-macOS run leg, or document that Intel macOS is build-and-resolve
   validated only, and accept that gap deliberately.
 
 ## Progress
 
-- [ ] Milestone 0 (prototype, gating): run a *real* `cargo check`/build for
-  `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and `aarch64-apple-darwin`
-  against current HEAD; enumerate every actual compile error and re-ground the
-  Risk register from observed output (not prediction).
+- [x] (2026-06-25T13:18:31Z) Milestone 0 (prototype, gating): run a *real*
+  `cargo check`/build for `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and
+  `aarch64-apple-darwin` against current HEAD; enumerate every actual compile
+  error and re-ground the Risk register from observed output (not prediction).
+- [x] (2026-06-25T13:31:00Z) Milestone 1 dependency portability: remove the
+  direct vendored `openssl-sys` dependency, keep `postgresql_embedded` on its
+  default native-TLS backend, move `nix` behind `cfg(unix)`, remove the dead
+  direct `xdg` dependency, and re-run the three cross-target checks to reveal
+  any remaining source blockers. Evidence:
+  `/tmp/check-windows-after-lock-test-gate-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-after-test-gates-windows-mac-support-validation.out`, and
+  `/tmp/check-darwin-arm-after-test-gates-windows-mac-support-validation.out`.
+- [x] (2026-06-25T14:18:00Z) Milestone 1 source portability: cfg-split
+  POSIX-only filesystem mode application, Unix-only privilege-drop preparation,
+  worker discovery, worker subprocess invocation, and Unix-specific test
+  helpers so the library, `pg_embedded_setup_unpriv`, and `pg_worker` typecheck
+  on `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and
+  `aarch64-apple-darwin`. Re-ran all three target checks with
+  `RUSTFLAGS="-D warnings"`; evidence:
+  `/tmp/check-windows-deny-warnings-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-deny-warnings-windows-mac-support-validation.out`, and
+  `/tmp/check-darwin-arm-deny-warnings-windows-mac-support-validation.out`.
+- [x] (2026-06-25T14:52:00Z) First Milestone 1 portability commit gates passed
+  on Linux: `make check-fmt`, `make lint`, `make test`, `make markdownlint`, and
+  `make nixie`. Evidence: `/tmp/fmt-windows-mac-support-validation.out`,
+  `/tmp/lint-windows-mac-support-validation.out`,
+  `/tmp/test-windows-mac-support-validation.out`,
+  `/tmp/mdlint-windows-mac-support-validation.out`, and
+  `/tmp/nixie-windows-mac-support-validation.out`. The test gate ran two
+  nextest passes: `270` passed with `4` skipped for all targets/all features,
+  then `151` passed with `0` skipped for the `dev-worker` feature pass.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
-  macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import gating;
-  remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve the
-  Windows shared-cluster cleanup question with an orphan-detection test (Red →
-  Green). Exit gate includes one real Windows link-and-run.
+  macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
+  gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
+  the Windows shared-cluster cleanup question with an orphan-detection test
+  (Red → Green). Exit gate includes one real Windows link-and-run.
 - [ ] Milestone 2: add a test-only macOS and Windows CI matrix (tests +
   orphan-detection), with mandatory theseus caching and a recorded cost budget;
   observe it pass.
 - [ ] Milestone 3: add `binstall` packaging for macOS and Windows, preferring
-  `stage-release-artefacts`; extend the release workflow to build and upload the
-  new archives.
+  `stage-release-artefacts`; extend the release workflow to build and upload
+  the new archives.
 - [ ] Milestone 4: validate `binstall` with a real install-and-run per OS at
   pull-request time and an end-to-end check against real assets at release time.
 - [ ] Milestone 5: update README, users' guide, roadmap appendix (and close
@@ -261,10 +290,10 @@ cross-compile output before Milestone 1 begins.
   `#[cfg(unix)] mod shutdown_hook;`, the re-exports at lines 63-67 are gated,
   and `src/cluster/handle.rs:312-330` already has a `#[cfg(unix)]` real
   implementation plus a `#[cfg(not(unix))]` no-op. Evidence: direct reads.
-  Impact: the earlier claim that `shutdown_hook` is the "primary Windows compile
-  blocker" was wrong; there is nothing to port for compilation. The remaining
-  questions are the genuine compile blockers (below) and the *behavioural* gap
-  that the non-Unix no-op leaves shared clusters unreaped.
+  Impact: the earlier claim that `shutdown_hook` is the "primary Windows
+  compile blocker" was wrong; there is nothing to port for compilation. The
+  remaining questions are the genuine compile blockers (below) and the
+  *behavioural* gap that the non-Unix no-op leaves shared clusters unreaped.
 - Observation: the genuine unconditional Windows compile blockers are
   `src/fs.rs` (cap-std `PermissionsExt`/`from_mode`), the unconditional `nix`
   dependency, the unconditional `use nix::unistd::geteuid;` in
@@ -275,40 +304,99 @@ cross-compile output before Milestone 1 begins.
   the `tests/` tree and the dead dependency.
 - Observation: the roadmap appendix and `docs/users-guide.md` already specify
   the intended macOS (unprivileged in-process; root fails fast) and Windows
-  (always unprivileged) behaviour, and roadmap item 3.3.2 ("guardrails that fail
-  fast on unsupported root scenarios on non-Linux systems") is still open.
+  (always unprivileged) behaviour, and roadmap item 3.3.2 ("guardrails that
+  fail fast on unsupported root scenarios on non-Linux systems") is still open.
   Evidence: `docs/roadmap.md` lines 50-85; `docs/users-guide.md` lines 20-45.
-  Impact: this plan implements and validates that documented intent and can close
-  3.3.2.
+  Impact: this plan implements and validates that documented intent and can
+  close 3.3.2.
 - Observation: `leynos/shared-actions` already provides tri-platform building
   blocks — `setup-rust`, `rust-build-release`, and `stage-release-artefacts`
-  support Windows and macOS; `rust-toy-app.yml` is the canonical cross-OS matrix
-  reference; `upload-codescene-coverage` is POSIX-only with no Windows path. The
-  current default-branch HEAD is `7da7c6d89033d13cbb1c64803d108ddca97e69c2`; the
-  repo is pinned at `b61ad14766ae81b830abdaf066eb3d9b6c4f537b`. Evidence:
-  inspection of the repository's actions and workflows. Impact: prefer reusing
-  these actions; the design-review panel recommends adopting
-  `stage-release-artefacts` + the toy-app matrix as the primary packaging path.
-- Observation (from the design-review panel): a `--dry-run` `binstall` check does
-  not extract the archive, so it cannot catch a wrong internal layout; and the
-  release runner could build the archive via a different code path than the
+  support Windows and macOS; `rust-toy-app.yml` is the canonical cross-OS
+  matrix reference; `upload-codescene-coverage` is POSIX-only with no Windows
+  path. The current default-branch HEAD is
+  `7da7c6d89033d13cbb1c64803d108ddca97e69c2`; the repo is pinned at
+  `b61ad14766ae81b830abdaf066eb3d9b6c4f537b`. Evidence: inspection of the
+  repository's actions and workflows. Impact: prefer reusing these actions; the
+  design-review panel recommends adopting `stage-release-artefacts` + the
+  toy-app matrix as the primary packaging path.
+- Observation (from the design-review panel): a `--dry-run` `binstall` check
+  does not extract the archive, so it cannot catch a wrong internal layout; and
+  the release runner could build the archive via a different code path than the
   PR-time check, so the artefact that ships may not be the one tested. Impact:
   validation must include a real install-and-run, and local/release archive
   production should share one code path.
+- Observation: Milestone 0's three current-HEAD cross-target checks all fail
+  before this crate's Rust source is typechecked because `openssl-sys` is an
+  unconditional direct dependency with `features = ["vendored"]`. On
+  `x86_64-apple-darwin` and `aarch64-apple-darwin`, the Linux host compiler
+  rejects Darwin flags such as `-arch` and `-mmacosx-version-min`; on
+  `x86_64-pc-windows-msvc`, OpenSSL's configure step rejects the Linux Perl
+  because it does not produce Windows-style paths. Evidence:
+  `/tmp/check-darwin-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-arm-windows-mac-support-validation.out`, and
+  `/tmp/check-windows-windows-mac-support-validation.out`. Impact: the
+  source-level `fs.rs`/`nix` errors are currently masked; dependency
+  portability must be fixed first and the cross-target checks rerun.
+- Observation: `cargo tree --target x86_64-pc-windows-msvc -i openssl-sys`
+  shows two routes into `openssl-sys`: the crate's direct dependency and the
+  default `postgresql_embedded` native-TLS feature.
+  `cargo info postgresql_embedded@0.20.2` shows a supported `rustls` feature,
+  and `postgresql_archive@0.20.2` exposes matching `rustls` support. Impact:
+  the first implementation attempt disabled default `postgresql_embedded`
+  features and opted into `tokio`, `theseus`, and `rustls`, but that path was
+  later rejected after direct validation.
+- Observation: the `rustls` route pulls in `ring`/`aws-lc-sys` for this
+  dependency graph, and the Linux-hosted Windows cross-check then needs MSVC
+  tools such as `lib.exe` and NASM. This violates the dependency tolerance that
+  no new build tool should be required for portability validation. Evidence:
+  the failed intermediate `x86_64-pc-windows-msvc` check after enabling
+  `postgresql_embedded`'s `rustls` feature. Impact: keep
+  `postgresql_embedded`'s default native TLS backend and remove only this
+  crate's direct vendored OpenSSL dependency.
+- Observation: after removing the direct vendored `openssl-sys` dependency, the
+  native-TLS target graph is portable for the required checks: Windows uses the
+  platform TLS backend, macOS uses Security.framework, and Linux keeps its
+  native OpenSSL path. The three cross-target checks and the same checks with
+  `RUSTFLAGS="-D warnings"` all pass. Impact: no new runtime dependency or
+  runner build-tool provisioning is needed for Milestone 1 compilation.
+- Observation: `tests/cluster_split_constructors.rs` and
+  `tests/recovery_integration.rs` existed as integration tests without explicit
+  `[[test]]` entries, so Cargo treated them as default tests during
+  `--all-targets` cross-checks instead of applying their intended feature
+  scopes. Impact: add explicit `[[test]]` entries with
+  `required-features = ["cluster-unit-tests"]` and
+  `required-features = ["dev-worker"]` respectively, matching the feature gates
+  used by neighbouring integration tests.
+- Observation: making Unix-only `worker_env_tests` visible to the Linux
+  all-feature lint pass exposed an existing `expect()`-based `rstest` fixture
+  setup that violated the repository's `clippy::expect_used` policy. Impact:
+  convert that fixture setup and the two affected tests to return
+  `color_eyre::Result` and use `ensure!`/`?`, so setup and assertion failures
+  report errors without panicking.
+- Observation: a literal audit found that `src/cache/lock.rs` and
+  `src/cache/operations/copy.rs` already contain Unix/non-Unix implementations,
+  so their Unix imports are not new blockers. The top-level `xdg` crate remains
+  unused; the only matches are `Cargo.toml`, this ExecPlan, and local `xdg_*`
+  path variable/function names. Evidence:
+  `rg "PermissionsExt|from_mode|nix::|std::os::unix|libc::|xdg" src tests` and
+  `rg "xdg::|use xdg|xdg ="`. Impact: Milestone 1 keeps those existing cache
+  splits and focuses on dependency gating plus the unguarded filesystem mode
+  helper.
 
 ## Decision log
 
 - Decision: re-ground the entire library-portability analysis against current
   HEAD before implementing Milestone 1, treating the Risk register as a
-  hypothesis list until Milestone 0's real cross-compile confirms it. Rationale:
-  the first survey mis-read the `shutdown_hook` gating; confidence levels were
-  asserted without a real `cargo check --target`. Date/Author: 2026-06-25,
-  planning agent (incorporating Logisphere review).
-- Decision: there is no Windows `shutdown_hook` *compilation* work; instead treat
-  Windows shared-cluster cleanup as a *behavioural* task — decide reaper vs.
-  prove-no-leak, validated by an orphan-detection test. Rationale: the module is
-  already `cfg(unix)`-gated with a non-Unix no-op; the real risk is an orphaned
-  postmaster, not a build failure. Date/Author: 2026-06-25, planning agent.
+  hypothesis list until Milestone 0's real cross-compile confirms it.
+  Rationale: the first survey mis-read the `shutdown_hook` gating; confidence
+  levels were asserted without a real `cargo check --target`. Date/Author:
+  2026-06-25, planning agent (incorporating Logisphere review).
+- Decision: there is no Windows `shutdown_hook` *compilation* work; instead
+  treat Windows shared-cluster cleanup as a *behavioural* task — decide reaper
+  vs. prove-no-leak, validated by an orphan-detection test. Rationale: the
+  module is already `cfg(unix)`-gated with a non-Unix no-op; the real risk is
+  an orphaned postmaster, not a build failure. Date/Author: 2026-06-25,
+  planning agent.
 - Decision: prefer `leynos/shared-actions/stage-release-artefacts` (and the
   `rust-toy-app.yml` matrix shape) as the primary packaging and cross-OS path;
   demote any hand-rolled Makefile `.zip`/`.exe` branching to a documented
@@ -325,11 +413,11 @@ cross-compile output before Milestone 1 begins.
 - Decision: do not add a bespoke Python `binstall` self-test unless the
   reuse-first evaluation shows the shared action plus a small Rust/CI check is
   insufficient; if one is added, it follows the df12 scripting standards.
-  Rationale: importing a full Python (uv/cyclopts/cuprum/cmd-mox) substrate into
-  a Rust+Make repo to assert an archive listing is disproportionate for a small
-  maintainer team, and a renderer that re-implements the `binstall` template
-  grammar can agree with itself while disagreeing with the real resolver.
-  Date/Author: 2026-06-25, planning agent (incorporating review).
+  Rationale: importing a full Python (uv/cyclopts/cuprum/cmd-mox) substrate
+  into a Rust+Make repo to assert an archive listing is disproportionate for a
+  small maintainer team, and a renderer that re-implements the `binstall`
+  template grammar can agree with itself while disagreeing with the real
+  resolver. Date/Author: 2026-06-25, planning agent (incorporating review).
 - Decision: target `x86_64-pc-windows-msvc` for Windows and both
   `aarch64-apple-darwin` and `x86_64-apple-darwin` for macOS; do not target
   `aarch64-pc-windows-msvc`. Rationale: MSVC is the standard distributable
@@ -337,27 +425,50 @@ cross-compile output before Milestone 1 begins.
   arches; theseus publishes no arm64 Windows PostgreSQL binaries. Date/Author:
   2026-06-25, planning agent.
 - Decision: macOS and Windows CI legs run the unprivileged in-process path and
-  tests only; linting, formatting, Markdown lint, coverage, and CodeScene upload
-  stay on a single Linux job. Rationale: the user's requirement ("the Windows and
-  Mac CI branches should run tests only"); lint/format results are
+  tests only; linting, formatting, Markdown lint, coverage, and CodeScene
+  upload stay on a single Linux job. Rationale: the user's requirement ("the
+  Windows and Mac CI branches should run tests only"); lint/format results are
   platform-independent; `upload-codescene-coverage` has no Windows path.
   Date/Author: 2026-06-25, planning agent.
 - Decision: keep `pkg-fmt = "tgz"` as the default (Linux and macOS) and add a
   single Windows override to `zip`; rely on the existing `bin-dir` template's
-  `{ binary-ext }` for the `.exe` suffix. Rationale: minimal metadata change that
-  matches cargo-binstall conventions. Date/Author: 2026-06-25, planning agent.
-- Decision: bump the `leynos/shared-actions` pin to the current default-branch
-  HEAD `7da7c6d89033d13cbb1c64803d108ddca97e69c2` across all workflows. Rationale:
-  a clean fast-forward that picks up the tri-platform actions; keep one
-  consistent pin. (Verify the SHA at implementation time; if it has advanced, pin
-  to the then-current HEAD and note it here.) Date/Author: 2026-06-25, planning
+  `{ binary-ext }` for the `.exe` suffix. Rationale: minimal metadata change
+  that matches cargo-binstall conventions. Date/Author: 2026-06-25, planning
   agent.
+- Decision: bump the `leynos/shared-actions` pin to the current default-branch
+  HEAD `7da7c6d89033d13cbb1c64803d108ddca97e69c2` across all workflows.
+  Rationale: a clean fast-forward that picks up the tri-platform actions; keep
+  one consistent pin. (Verify the SHA at implementation time; if it has
+  advanced, pin to the then-current HEAD and note it here.) Date/Author:
+  2026-06-25, planning agent.
 - Decision (recorded, not adopted): a viable alternative is library-only
   Windows/macOS support with no `binstall` binaries, dropping Milestones 3-4.
   Rejected because the user explicitly requested `cargo binstall` support for
   both platforms; kept on record because the CLI's headline value (privilege
-  drop) is Linux-only, so if that requirement is ever relaxed this is the 80/20.
-  Date/Author: 2026-06-25, planning agent (Wafflecat alternative).
+  drop) is Linux-only, so if that requirement is ever relaxed this is the
+  80/20. Date/Author: 2026-06-25, planning agent (Wafflecat alternative).
+- Decision: proceed from draft to implementation on 2026-06-25 after the user
+  explicitly requested implementation of this plan. Rationale: the execplans
+  workflow requires approval before implementation; the user's request supplies
+  that approval and also requires the plan to remain current during execution.
+  Date/Author: 2026-06-25, implementation agent.
+- Decision (rejected after validation): resolve OpenSSL portability by switching
+  `postgresql_embedded` from default native TLS to explicit `rustls` support.
+  Rationale for trying it: Milestone 0 proved vendored OpenSSL blocks all three
+  target checks before source diagnostics, and `postgresql_embedded`/
+  `postgresql_archive` both expose `rustls` feature flags for the same archive
+  download path. Rejection rationale: the resulting `ring`/`aws-lc-sys` graph
+  required additional Windows build tools during the Linux-hosted cross-check,
+  breaching the dependency tolerance. Date/Author: 2026-06-25, implementation
+  agent.
+- Decision: resolve OpenSSL portability by removing only the crate's direct
+  vendored `openssl-sys` dependency and keeping `postgresql_embedded` on native
+  TLS. Rationale: without the direct vendored dependency, Windows and macOS use
+  platform TLS and no longer build OpenSSL in the cross-target checks; Linux
+  keeps the native OpenSSL path covered by the existing Linux gates. This
+  avoids adding runtime crates or runner build tools while satisfying all three
+  `cargo check --target ... --all-targets` checks with `-D warnings`.
+  Date/Author: 2026-06-25, implementation agent.
 
 ## Outcomes & retrospective
 
@@ -375,9 +486,9 @@ package version `0.5.1`) that provides zero-configuration PostgreSQL test
 fixtures. Its central type, `TestCluster`, starts an embedded PostgreSQL server
 on construction and stops it on drop. The embedded server comes from the
 `postgresql_embedded` crate (version 0.20.2, `tokio` feature), which downloads
-prebuilt PostgreSQL binaries at runtime from the theseus release host and caches
-them under the user's home directory. The download requires outbound network and
-benefits from `GITHUB_TOKEN` to avoid `api.github.com` rate limits.
+prebuilt PostgreSQL binaries at runtime from the theseus release host and
+caches them under the user's home directory. The download requires outbound
+network and benefits from `GITHUB_TOKEN` to avoid `api.github.com` rate limits.
 
 The crate has two privilege modes. On Linux it can run as root, delegating
 filesystem work to a `pg_worker` subprocess that drops to the `nobody` account
@@ -396,13 +507,13 @@ Key files and their current platform posture (verified against HEAD):
 - `src/cluster/mod.rs` — `#[cfg(unix)] mod shutdown_hook;` (lines 61-62);
   `process_is_running`/`read_postmaster_pid` re-exports gated (lines 63-67).
   Already correct for Windows compilation.
-- `src/cluster/handle.rs` — `register_shutdown_on_exit_impl` has a `#[cfg(unix)]`
-  real body and a `#[cfg(not(unix))]` no-op returning `Ok(())` (lines 316-330).
-  The no-op is why a forgotten guard is not reaped on non-Unix.
+- `src/cluster/handle.rs` — `register_shutdown_on_exit_impl` has a
+  `#[cfg(unix)]` real body and a `#[cfg(not(unix))]` no-op returning `Ok(())`
+  (lines 316-330). The no-op is why a forgotten guard is not reaped on non-Unix.
 - `src/cluster/shutdown_hook.rs` — POSIX `atexit`/`kill`/`SIGTERM`/`SIGKILL`
   implementation; already compiled only on Unix. Its public functions take
-  `libc::pid_t` (which is `i32` on the supported targets); because the module is
-  Unix-gated, no cross-platform signature change is needed.
+  `libc::pid_t` (which is `i32` on the supported targets); because the module
+  is Unix-gated, no cross-platform signature change is needed.
 - `src/test_support/shared_singleton.rs` — provides
   `shared_cluster()`/`shared_cluster_handle()`, which call
   `register_shutdown_on_exit` and `std::mem::forget` the guard. On non-Unix the
@@ -412,19 +523,21 @@ Key files and their current platform posture (verified against HEAD):
   `[package.metadata.binstall]` block (lines 12-15); test gating via features
   in the `[[test]]` tables (lines 34-112).
 - `tests/settings.rs` — line 7 `use nix::unistd::geteuid;` is unconditional and
-  the test has no `required-features`, so `--all-targets` compiles it everywhere.
-- `.github/workflows/ci.yml` — single `ubuntu-latest` job, `[unprivileged, root]`
-  matrix; format, Markdown lint, Clippy, `cargo nextest`, coverage, CodeScene
-  upload; uses `leynos/shared-actions` pinned at
-  `b61ad14766ae81b830abdaf066eb3d9b6c4f537b`.
+  the test has no `required-features`, so `--all-targets` compiles it
+  everywhere.
+- `.github/workflows/ci.yml` — single `ubuntu-latest` job,
+  `[unprivileged, root]` matrix; format, Markdown lint, Clippy,
+  `cargo nextest`, coverage, CodeScene upload; uses `leynos/shared-actions`
+  pinned at `b61ad14766ae81b830abdaf066eb3d9b6c4f537b`.
 - `.github/workflows/release.yml` — on `v*`, `build-assets` matrix of
   `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, each running
   `make release-archive` and `gh release upload "$TAG" dist/*.tgz --clobber`
   (line 100; note the `*.tgz` glob).
 - `Makefile` — `release-archive` builds for `$(TARGET)`, copies bare-named
-  binaries into a staging dir named `pg-embed-setup-unpriv-$(TARGET)-v$(VERSION)`,
-  and `tar -czf`s it; `RELEASE_ARCHIVE_FILE` is hard-coded `.tgz` (line 24). The
-  staging copy has no `.exe` suffix.
+  binaries into a staging dir named
+  `pg-embed-setup-unpriv-$(TARGET)-v$(VERSION)`, and `tar -czf`s it;
+  `RELEASE_ARCHIVE_FILE` is hard-coded `.tgz` (line 24). The staging copy has no
+  `.exe` suffix.
 - `.config/nextest.toml` — `global-timeout = "10m"`; a `serial` test group; a
   30s cap on the `settings` binary.
 
@@ -433,13 +546,15 @@ External facts established during research:
 - cargo-binstall template variables resolve per target: `{ binary-ext }` is
   `.exe` on Windows, empty elsewhere; `{ archive-suffix }` derives from
   `pkg-fmt`. Per-target overrides under
-  `[package.metadata.binstall.overrides.<target-or-cfg>]` may override `pkg-url`,
-  `pkg-fmt`, and `bin-dir`; exact target names beat `cfg(...)` expressions, and
-  multiple matching `cfg` expressions evaluate in declaration order.
+  `[package.metadata.binstall.overrides.<target-or-cfg>]` may override
+  `pkg-url`, `pkg-fmt`, and `bin-dir`; exact target names beat `cfg(...)`
+  expressions, and multiple matching `cfg` expressions evaluate in declaration
+  order.
 - `cargo binstall` flags for CI: `--dry-run` (resolve+fetch, no install — does
   not extract), `--manifest-path`, `--target <triple>`,
-  `--strategies crate-meta-data` (use only package metadata so a fallback cannot
-  mask a broken URL), `--install-path <dir>`, `--no-confirm`, `--github-token`.
+  `--strategies crate-meta-data` (use only package metadata so a fallback
+  cannot mask a broken URL), `--install-path <dir>`, `--no-confirm`,
+  `--github-token`.
 - Runners: `windows-latest` = `windows-2025` (x64); `macos-latest` = `macos-15`
   on Apple Silicon (arm64); Intel macOS is `macos-15-intel`/`macos-13`.
   Windows-on-ARM runners exist but have no upstream PostgreSQL binaries.
@@ -464,25 +579,25 @@ cargo check --target x86_64-pc-windows-msvc --all-targets 2>&1 | tee /tmp/check-
 ```
 
 Record every distinct error in `Surprises & discoveries` and rewrite the Risk
-register to match. Confirm or refute: `fs.rs` mode blocker, `nix` in the Windows
-graph, `tests/settings.rs` `nix` import, the dead `xdg` crate, and whether
-`openssl-sys` is even pulled in. Go/no-go: a written, observed blocker list. If
-it exceeds the Milestone 1 scope tolerance, stop and escalate.
+register to match. Confirm or refute: `fs.rs` mode blocker, `nix` in the
+Windows graph, `tests/settings.rs` `nix` import, the dead `xdg` crate, and
+whether `openssl-sys` is even pulled in. Go/no-go: a written, observed blocker
+list. If it exceeds the Milestone 1 scope tolerance, stop and escalate.
 
 ### Milestone 1 — Compile and cleanup correctly on Windows and macOS
 
 Scope is whatever Milestone 0 observed; the tasks below are the expected set.
 
 1. Reorganise dependencies in `Cargo.toml`: move `nix` to
-   `[target.'cfg(unix)'.dependencies]`; remove the dead `xdg` dependency (after
-   confirming with a removed-build or `cargo udeps`); resolve `openssl-sys`
-   (gate behind `cfg(unix)`/`diesel-support` if Milestone 0 shows it unneeded on
-   Windows/macOS, else document runner provisioning). Keep caret requirements.
+   `[target.'cfg(unix)'.dependencies]`; remove the dead direct `xdg`
+   dependency; remove the direct vendored `openssl-sys` dependency; keep
+   `postgresql_embedded` on native TLS because the `rustls` attempt required
+   extra Windows build tools during cross-checking. Keep caret requirements.
 
 2. Gate `src/fs.rs`: apply `Permissions::from_mode`/`PermissionsExt` only under
    `#[cfg(unix)]`; provide a Windows no-op (or access-control equivalent) that
-   preserves the function signatures. Add a code comment and a users'-guide note
-   that POSIX `0o700` privacy is not enforced on Windows.
+   preserves the function signatures. Add a code comment and a users'-guide
+   note that POSIX `0o700` privacy is not enforced on Windows.
 
 3. Audit the `tests/` tree for top-level Unix-only imports. Gate
    `tests/settings.rs:7` (`use nix::unistd::geteuid;`) and its dependent bodies
@@ -507,12 +622,12 @@ Scope is whatever Milestone 0 observed; the tasks below are the expected set.
 5. Confirm both declared binaries (`pg_embedded_setup_unpriv` and `pg_worker`)
    compile on all platforms; `pg_worker`'s non-Unix `main` stub remains.
 
-Go/no-go: the three cross-checks pass; the Linux gateway is unchanged and green;
-and one *real* Windows link-and-run is exercised before proceeding — a throwaway
-`workflow_dispatch` job on `windows-latest` that builds the crate and starts a
-single `TestCluster` — so link/runtime surprises (OpenSSL, `pq-sys`, theseus
-download, TCP sockets, the new reaper) land while the change set is still small.
-Commit per atomic change.
+Go/no-go: the three cross-checks pass; the Linux gateway is unchanged and
+green; and one *real* Windows link-and-run is exercised before proceeding — a
+throwaway `workflow_dispatch` job on `windows-latest` that builds the crate and
+starts a single `TestCluster` — so link/runtime surprises (OpenSSL, `pq-sys`,
+theseus download, TCP sockets, the new reaper) land while the change set is
+still small. Commit per atomic change.
 
 ### Milestone 2 — Test-only macOS and Windows CI matrix
 
@@ -532,12 +647,12 @@ runs-on: ${{ matrix.os }}
 ```
 
 Each leg: check out; run `leynos/shared-actions/.github/actions/setup-rust`
-(bumped pin); restore a **mandatory** `actions/cache` for the theseus PostgreSQL
-download keyed on the pinned PostgreSQL version + OS + arch; run the unprivileged
-test suite plus the orphan-detection test. Pass `GITHUB_TOKEN`. Do not run lint,
-format, coverage, or CodeScene upload. Add `concurrency:` cancellation for
-superseded pushes to bound cost. Choose feature sets deliberately and
-symmetrically:
+(bumped pin); restore a **mandatory** `actions/cache` for the theseus
+PostgreSQL download keyed on the pinned PostgreSQL version + OS + arch; run the
+unprivileged test suite plus the orphan-detection test. Pass `GITHUB_TOKEN`. Do
+not run lint, format, coverage, or CodeScene upload. Add `concurrency:`
+cancellation for superseded pushes to bound cost. Choose feature sets
+deliberately and symmetrically:
 
 - macOS and Windows both start with
   `--no-default-features --features cluster-unit-tests,async-api` (the
@@ -547,7 +662,8 @@ symmetrically:
   budgeted follow-up; record whether it builds. Do not silently use
   `--all-features` on macOS — that pulls `pq-sys` at ~10x billing.
 - Install `cargo-nextest` the same way the Linux job does
-  (`cargo binstall -y cargo-nextest@<pinned>`), which works on Windows and macOS.
+  (`cargo binstall -y cargo-nextest@<pinned>`), which works on Windows and
+  macOS.
 
 Record an expected per-PR CI-minute budget (Linux ×2 privilege + macOS +
 Windows) and a wall-clock target. Confirm the `.config/nextest.toml` 10-minute
@@ -568,19 +684,19 @@ pull request; the Linux job is unchanged and green; the cost budget is recorded.
    ```
 
    Keep the existing `pkg-url`, `bin-dir`, and default `pkg-fmt = "tgz"`. The
-   `bin-dir` template already appends `{ binary-ext }`, yielding `pg_worker.exe`
-   on Windows.
+   `bin-dir` template already appends `{ binary-ext }`, yielding
+   `pg_worker.exe` on Windows.
 
 2. Produce the archives via `shared-actions/stage-release-artefacts` (primary
    path), which already handles Windows path normalisation, the `.exe` suffix,
    the `.zip`-vs-`.tgz` choice, and a `.sha256` sidecar from one TOML config —
-   eliminating the local-vs-release divergence risk. Keep `make release-archive`
-   for local development only. If, after evaluation, the action cannot be used
-   and the Makefile path is retained, change all three coupled sites together:
-   the bare binary name → `.exe` on `*-windows-*` (`Makefile:53-56`), the
-   hard-coded `RELEASE_ARCHIVE_FILE` suffix `.tgz` → `.zip` for Windows
-   (`Makefile:24`), and the `gh release upload dist/*.tgz` glob
-   (`release.yml:100`) → include `*.zip`.
+   eliminating the local-vs-release divergence risk. Keep
+   `make release-archive` for local development only. If, after evaluation, the
+   action cannot be used and the Makefile path is retained, change all three
+   coupled sites together: the bare binary name → `.exe` on `*-windows-*`
+   (`Makefile:53-56`), the hard-coded `RELEASE_ARCHIVE_FILE` suffix `.tgz` →
+   `.zip` for Windows (`Makefile:24`), and the `gh release upload dist/*.tgz`
+   glob (`release.yml:100`) → include `*.zip`.
 
 3. Extend the `build-assets` matrix in `release.yml` to add
    `x86_64-pc-windows-msvc` (`windows-latest`), `aarch64-apple-darwin`
@@ -589,14 +705,15 @@ pull request; the Linux job is unchanged and green; the cost budget is recorded.
    exactly match the `pkg-url` template per target.
 
 Go/no-go: each OS produces a correctly named archive whose internal layout
-matches `bin-dir` (proven by Milestone 4's real install, not just by inspection).
+matches `bin-dir` (proven by Milestone 4's real install, not just by
+inspection).
 
 ### Milestone 4 — Validate binstall by real install-and-run
 
 1. Pull-request-time real install. On each of `ubuntu-latest`, `macos-latest`,
-   and `windows-latest`, build the archive (via the same code path as the release
-   job), then run a real, non-dry-run install into a scratch directory and
-   execute the installed binary:
+   and `windows-latest`, build the archive (via the same code path as the
+   release job), then run a real, non-dry-run install into a scratch directory
+   and execute the installed binary:
 
    ```bash
    cargo binstall --manifest-path Cargo.toml --target <host-triple> \
@@ -607,16 +724,14 @@ matches `bin-dir` (proven by Milestone 4's real install, not just by inspection)
 
    This proves extraction and `bin-dir` placement on the real OS — the failure
    `--dry-run` cannot catch. (If pointing `binstall` at a locally built archive
-   needs a `file://` `pkg-url` override or a temporary pre-release, document the
-   chosen mechanism here.) Only fall back to a df12-compliant helper script if
-   this cannot be expressed as a CI step plus a small Rust check.
+   needs a `file://` `pkg-url` override or a temporary pre-release, document
+   the chosen mechanism here.) Only fall back to a df12-compliant helper script
+   if this cannot be expressed as a CI step plus a small Rust check.
 
 2. Release-time breadth audit. After `build-assets`, on each OS, loop
-   `cargo binstall --manifest-path Cargo.toml --target <triple>
-   --strategies crate-meta-data --github-token "$GITHUB_TOKEN" --no-confirm
-   --dry-run pg-embed-setup-unpriv` over all supported triples to confirm every
-   published URL resolves, plus one real install-and-run of the host target's
-   asset.
+   `cargo binstall --manifest-path Cargo.toml --target <triple> --strategies crate-meta-data --github-token "$GITHUB_TOKEN" --no-confirm --dry-run pg-embed-setup-unpriv`
+   over all supported triples to confirm every published URL resolves, plus
+   one real install-and-run of the host target's asset.
 
 Go/no-go: the real install-and-run passes on all three OSes at PR time, and the
 release audit passes against the real assets.
@@ -665,10 +780,11 @@ This section must be updated with real transcripts and URLs as work proceeds.
 
 Acceptance is behavioural and observable:
 
-- Library portability: `cargo check --target x86_64-pc-windows-msvc
-  --all-targets`, `--target x86_64-apple-darwin`, and
-  `--target aarch64-apple-darwin` all complete without error after Milestone 1,
-  with the dead `xdg` dependency removed and `nix` Unix-gated.
+- Library portability:
+  `cargo check --target x86_64-pc-windows-msvc --all-targets`,
+  `--target x86_64-apple-darwin`, and `--target aarch64-apple-darwin` all
+  complete without error after Milestone 1, with the dead `xdg` dependency
+  removed and `nix` Unix-gated.
 - Cleanup correctness: the orphan-detection test fails on Windows before the
   fix (Red — leaked postmaster) and passes after (Green — no orphan), and runs
   in the cross-platform matrix.
@@ -677,9 +793,9 @@ Acceptance is behavioural and observable:
   green, exercising the unprivileged in-process `TestCluster` path; they run
   tests only. The Linux job remains green and unchanged in scope. A recorded CI
   budget exists.
-- binstall (real): on each OS, `cargo binstall --install-path <tmp>` installs the
-  CLI and the installed binary runs `--version` successfully. The release-time
-  dry-run audit resolves all five supported triples.
+- binstall (real): on each OS, `cargo binstall --install-path <tmp>` installs
+  the CLI and the installed binary runs `--version` successfully. The
+  release-time dry-run audit resolves all five supported triples.
 - Scope honesty: the Windows `diesel-support`/`pq-sys` path and Intel-macOS
   execution are explicitly documented as validated-later or
   resolve-only-not-executed, not silently implied as covered.
@@ -703,12 +819,12 @@ behavioural checks for the two genuinely new behaviours.
 ## Idempotence and recovery
 
 Adding `rustup` targets, editing workflows, editing `Cargo.toml` metadata,
-removing a dead dependency, and adding tests are all idempotent and re-runnable.
-The release dry-run audit installs nothing; the real install targets a scratch
-directory. If a CI leg fails, re-running the workflow is safe. If archive naming
-is wrong, fix the metadata/packaging and re-run; no production state is mutated
-by validation. Keep the working tree clean: remove `/tmp` logs and any throwaway
-tags or `workflow_dispatch` artefacts after use.
+removing a dead dependency, and adding tests are all idempotent and
+re-runnable. The release dry-run audit installs nothing; the real install
+targets a scratch directory. If a CI leg fails, re-running the workflow is
+safe. If archive naming is wrong, fix the metadata/packaging and re-run; no
+production state is mutated by validation. Keep the working tree clean: remove
+`/tmp` logs and any throwaway tags or `workflow_dispatch` artefacts after use.
 
 ## Artifacts and notes
 
@@ -721,20 +837,21 @@ target; and the recorded CI-minute budget. The `shared-actions`
 ## Interfaces and dependencies
 
 - `Cargo.toml` dependency changes: move `nix` to
-  `[target.'cfg(unix)'.dependencies] nix = { version = "0.30.1",
-  default-features = false, features = ["user", "fs"] }`; remove the dead
-  `xdg = "3"`; gate `openssl-sys` behind `cfg(unix)`/`diesel-support` if
-  Milestone 0 proves it unnecessary on Windows/macOS. No new runtime crates are
-  expected (a Win32 reaper can use `std`/`windows-sys` only if Milestone 1 shows
-  it necessary — adding `windows-sys` would be a new dependency and triggers the
-  dependency tolerance, so escalate before adding it).
+  `[target.'cfg(unix)'.dependencies] nix = { version = "0.30.1", default-features = false, features = ["user", "fs"] }`;
+  remove the dead direct `xdg = "3"`; remove the direct vendored `openssl-sys`
+  dependency; keep
+  `postgresql_embedded = { version = "0.20.2", features = ["tokio"] }` on its
+  default native-TLS backend. No new runtime crates are expected (a Win32
+  reaper can use `std`/`windows-sys` only if Milestone 1 shows it necessary —
+  adding `windows-sys` would be a new dependency and triggers the dependency
+  tolerance, so escalate before adding it).
 - `src/fs.rs`: keep `set_permissions`/`ensure_dir_exists` signatures unchanged;
   apply mode bits only under `#[cfg(unix)]`.
 - `src/cluster/shutdown_hook.rs` and `register_shutdown_on_exit`: no
   cross-platform signature change. The module is already `cfg(unix)`-gated and
-  its `libc::pid_t` parameters never reach Windows. Do not introduce a
-  `pid_t`→`i32` rename (the earlier draft's suggestion); it is unnecessary and
-  would churn the Unix-only re-exports.
+  its `libc::pid_t` parameters never reach Windows. Do not introduce a `pid_t`→
+  `i32` rename (the earlier draft's suggestion); it is unnecessary and would
+  churn the Unix-only re-exports.
 - New non-Unix cleanup: `register_shutdown_on_exit` must, on Windows, register a
   real process-exit reaper (preferred: a Job Object created at cluster start so
   the postmaster is killed on handle close), preserving the existing
@@ -761,21 +878,22 @@ What changed and why:
   "port shutdown_hook / TerminateProcess / Red-Green shutdown-hook compile" and
   the `pid_t`→`i32` workstreams.
 - Replaced the wrong primary blocker with the real ones: `src/fs.rs`
-  (cap-std `PermissionsExt`/`from_mode`), the unconditional `nix` dependency, the
-  unconditional `use nix::unistd::geteuid;` in `tests/settings.rs`, and the
+  (cap-std `PermissionsExt`/`from_mode`), the unconditional `nix` dependency,
+  the unconditional `use nix::unistd::geteuid;` in `tests/settings.rs`, and the
   apparently-dead Unix-only `xdg` crate. Added a `tests/` audit.
 - Added the genuine new risk the original missed: the non-Unix no-op shutdown
   hook leaves `mem::forget` shared clusters unreaped on Windows (orphaned
   postmaster). Reframed the Windows work as behavioural cleanup proven by an
   orphan-detection Red→Green test.
-- Strengthened binstall validation from `--dry-run` (which does not extract) to a
-  real install-and-run per OS; flagged the three coupled packaging edit sites.
+- Strengthened binstall validation from `--dry-run` (which does not extract) to
+  a real install-and-run per OS; flagged the three coupled packaging edit sites.
 - Made theseus download caching mandatory (not "where practical"), added a CI
   cost budget and concurrency cancellation, and made the macOS/Windows feature
   sets symmetric so macOS does not silently build `pq-sys` via `--all-features`.
-- Flipped the packaging default to reuse `shared-actions/stage-release-artefacts`
-  and the `rust-toy-app.yml` matrix; demoted the bespoke Python self-test to a
-  last resort (still df12-compliant if needed).
+- Flipped the packaging default to reuse
+  `shared-actions/stage-release-artefacts` and the `rust-toy-app.yml` matrix;
+  demoted the bespoke Python self-test to a last resort (still df12-compliant
+  if needed).
 - Reframed Milestone 0 as `cfg`-resolution-only de-risking and pulled one real
   Windows link-and-run into the Milestone 1 exit gate.
 
@@ -783,3 +901,14 @@ How it affects remaining work: Milestone 1's scope shifts from a non-existent
 compile port to `fs.rs`/dependency gating plus a Windows reaper; the tolerances
 were re-baselined accordingly. No implementation has begun; Status is DRAFT
 pending review.
+
+Revision 3 (2026-06-25), at implementation start. What changed and why:
+
+- Marked the ExecPlan `IN PROGRESS` after explicit user approval to proceed.
+- Added a timestamped Milestone 0 progress entry and decision-log note so a
+  future reader can distinguish approved implementation work from the earlier
+  planning-only pull request.
+
+How it affects remaining work: Milestone 0 must still run first and re-ground
+the risk list from observed cross-target compiler output before Milestone 1
+code changes begin.

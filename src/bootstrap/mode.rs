@@ -1,10 +1,13 @@
 //! Detects execution privileges and selects the appropriate orchestration mode.
 
 use camino::Utf8PathBuf;
+
+#[cfg(unix)]
+use crate::error::BootstrapError;
+use crate::error::BootstrapResult;
+
 #[cfg(unix)]
 use nix::unistd::geteuid;
-
-use crate::error::{BootstrapError, BootstrapResult};
 
 /// Represents the privileges the process is running with when bootstrapping `PostgreSQL`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +33,7 @@ pub enum ExecutionMode {
 ///
 /// # Examples
 /// ```
-/// use pg_embedded_setup_unpriv::{ExecutionPrivileges, detect_execution_privileges};
+/// use pg_embedded_setup_unpriv::{detect_execution_privileges, ExecutionPrivileges};
 ///
 /// let privileges = detect_execution_privileges();
 /// let mode = match privileges {

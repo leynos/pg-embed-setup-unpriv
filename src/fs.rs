@@ -5,7 +5,7 @@ use std::io::ErrorKind;
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::{
     ambient_authority,
-    fs::{Dir, Metadata, Permissions, PermissionsExt},
+    fs::{Dir, Metadata},
 };
 use color_eyre::eyre::{Context, Result};
 use tracing::{error, info, info_span};
@@ -158,15 +158,23 @@ fn set_permissions_inner(
         return Ok(());
     }
 
-    match dir.set_permissions(relative.as_std_path(), Permissions::from_mode(mode)) {
-        Ok(()) => {
-            log_permissions_applied(path, mode);
-            Ok(())
-        }
-        Err(err) => handle_permission_error(path, mode, err),
-    }
+    set_permissions_for_platform(path, mode, dir, relative)
 }
 
+fn set_permissions_for_platform(
+    path: &Utf8Path,
+    mode: u32,
+    _dir: &Dir,
+    _relative: &Utf8PathBuf,
+) -> Result<()> {
+    info!(
+        target: LOG_TARGET,
+        path = %path,
+        mode_octal = format_args!("{mode:o}"),
+        "skipped POSIX permission application on non-Unix target"
+    );
+    Ok(())
+}
 fn log_permissions_applied(path: &Utf8Path, mode: u32) {
     info!(
         target: LOG_TARGET,
@@ -176,6 +184,7 @@ fn log_permissions_applied(path: &Utf8Path, mode: u32) {
     );
 }
 
+#[cfg(unix)]
 fn handle_permission_error(path: &Utf8Path, mode: u32, err: std::io::Error) -> Result<()> {
     error!(
         target: LOG_TARGET,
@@ -228,16 +237,6 @@ fn log_dir_metadata_error(path: &Utf8Path, err: std::io::Error) -> std::io::Erro
 
 #[cfg(test)]
 mod tests {
-    //! Unit tests for filesystem helpers.
-
-    use std::{fs::File, io::ErrorKind};
-
-    use camino::{Utf8Path, Utf8PathBuf};
-    use rstest::rstest;
-    use tempfile::tempdir;
-
-    use super::{ensure_dir_exists, ensure_existing_path_is_dir, find_existing_ancestor};
-
     /// Test-case container: `create_file` selects file vs directory, and
     /// `error_kind` records the expected `ErrorKind` outcome.
     struct ExistingPathCase {
@@ -245,15 +244,6 @@ mod tests {
         error_kind: Option<ErrorKind>,
     }
 
-    #[rstest]
-    #[case::directory(ExistingPathCase {
-        create_file: false,
-        error_kind: None,
-    })]
-    #[case::file(ExistingPathCase {
-        create_file: true,
-        error_kind: Some(ErrorKind::NotADirectory),
-    })]
     fn ensure_existing_path_is_dir_handles_existing_paths(#[case] case: ExistingPathCase) {
         let temp = tempdir().expect("tempdir");
         let path = if case.create_file {

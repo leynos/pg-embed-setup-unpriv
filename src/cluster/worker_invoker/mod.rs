@@ -95,6 +95,7 @@ fn spawn_worker_inner(
         ),
     )))]
     {
+        let _ = (bootstrap, env_vars);
         return Err(BootstrapError::from(eyre!(
             "privilege drop not supported on this target; refusing to run as root: {}",
             operation.error_context()

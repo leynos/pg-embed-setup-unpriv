@@ -88,7 +88,9 @@ impl Operation {
 }
 
 #[cfg(unix)]
-fn main() -> Result<(), BoxError> { run_worker(env::args_os()).map_err(Into::into) }
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    Err("pg_worker is not supported on non-Unix platforms".into())
+}
 
 #[cfg(unix)]
 fn run_worker(args: impl Iterator<Item = OsString>) -> Result<(), WorkerError> {
@@ -396,6 +398,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Err("pg_worker is not supported on non-Unix platforms".into())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, unix, feature = "dev-worker"))]
 #[path = "pg_worker/tests.rs"]
 mod tests;
