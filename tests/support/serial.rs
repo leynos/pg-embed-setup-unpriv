@@ -7,14 +7,15 @@
 //! multiple suites mutate process-wide state.
 
 use rstest::fixture;
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 #[cfg(unix)]
 use std::fs::OpenOptions;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
-#[cfg(unix)]
-use std::path::PathBuf;
+#[cfg(not(unix))]
+use std::time::{Duration, Instant};
 
 static SCENARIO_MUTEX: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
 
@@ -22,7 +23,17 @@ static SCENARIO_MUTEX: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new
 type ProcessLock = std::fs::File;
 
 #[cfg(not(unix))]
-type ProcessLock = ();
+#[derive(Debug)]
+struct ProcessLock {
+    path: PathBuf,
+}
+
+#[cfg(not(unix))]
+impl Drop for ProcessLock {
+    fn drop(&mut self) {
+        let _unused = std::fs::remove_dir(&self.path);
+    }
+}
 
 #[derive(Debug)]
 #[must_use = "Hold this guard for the duration of the serialized scenario"]
@@ -41,11 +52,9 @@ pub struct ScenarioLocalGuard {
 ///
 /// Acquires a global mutex to ensure that scenarios relying on shared state
 /// (such as process environment variables or singleton resources) execute
-/// serially, preventing cross-test interference. A cross-process file lock is
-/// also acquired so independent test binaries coordinate access to the shared
-/// `PostgreSQL` cache and installation directories. On non-Unix platforms this
-/// lock is a no-op, so cross-process runs may still race when touching shared
-/// caches.
+/// serially, preventing cross-test interference. A cross-process lock is also
+/// acquired so independent test binaries coordinate access to the shared
+/// `PostgreSQL` cache and installation directories.
 ///
 /// # Behaviour
 ///
@@ -154,7 +163,36 @@ fn acquire_process_lock() -> ProcessLock {
 
 #[cfg(not(unix))]
 fn acquire_process_lock() -> ProcessLock {
-    ()
+    let target_dir =
+        std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| PathBuf::from("target"), PathBuf::from);
+    std::fs::create_dir_all(&target_dir).unwrap_or_else(|err| {
+        panic!(
+            "failed to create target dir for scenario lock at {}: {err}",
+            target_dir.display()
+        );
+    });
+
+    let lock_path = target_dir.join("pg-embed-setup-unpriv.serial.lockdir");
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        match std::fs::create_dir(&lock_path) {
+            Ok(()) => return ProcessLock { path: lock_path },
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting to acquire scenario lock at {}",
+                    lock_path.display()
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => {
+                panic!(
+                    "failed to acquire scenario lock at {}: {err}",
+                    lock_path.display()
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

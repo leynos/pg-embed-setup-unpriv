@@ -247,7 +247,7 @@ cross-compile output before Milestone 1 begins.
   `/tmp/check-windows-after-lock-test-gate-windows-mac-support-validation.out`,
   `/tmp/check-darwin-after-test-gates-windows-mac-support-validation.out`, and
   `/tmp/check-darwin-arm-after-test-gates-windows-mac-support-validation.out`.
-- [x] (2026-06-25T14:18:00Z) Milestone 1 source portability: cfg-split
+- [x] (2026-06-25T13:42:00Z) Milestone 1 source portability: cfg-split
   POSIX-only filesystem mode application, Unix-only privilege-drop preparation,
   worker discovery, worker subprocess invocation, and Unix-specific test
   helpers so the library, `pg_embedded_setup_unpriv`, and `pg_worker` typecheck
@@ -257,7 +257,7 @@ cross-compile output before Milestone 1 begins.
   `/tmp/check-windows-deny-warnings-windows-mac-support-validation.out`,
   `/tmp/check-darwin-deny-warnings-windows-mac-support-validation.out`, and
   `/tmp/check-darwin-arm-deny-warnings-windows-mac-support-validation.out`.
-- [x] (2026-06-25T14:52:00Z) First Milestone 1 portability commit gates passed
+- [x] (2026-06-25T13:46:00Z) First Milestone 1 portability commit gates passed
   on Linux: `make check-fmt`, `make lint`, `make test`, `make markdownlint`, and
   `make nixie`. Evidence: `/tmp/fmt-windows-mac-support-validation.out`,
   `/tmp/lint-windows-mac-support-validation.out`,
@@ -266,6 +266,50 @@ cross-compile output before Milestone 1 begins.
   `/tmp/nixie-windows-mac-support-validation.out`. The test gate ran two
   nextest passes: `270` passed with `4` skipped for all targets/all features,
   then `151` passed with `0` skipped for the `dev-worker` feature pass.
+- [x] (2026-06-25T13:52:00Z) CodeRabbit reviewed commit `dd06cf7` after the
+  deterministic gates passed. `coderabbit review --agent` completed with
+  `status=review_completed` and `findings=0`, so no portability concerns needed
+  clearing before the Windows cleanup milestone.
+- [x] (2026-06-25T14:05:00Z) Implemented Windows shared-cluster cleanup by
+  compiling the process-exit shutdown hook on Windows, using `taskkill /T` for
+  graceful and forced process-tree termination, and adding a private Win32
+  `OpenProcess`/`GetExitCodeProcess` liveness probe. The public
+  `register_shutdown_on_exit` signature remains unchanged; the test-only PID
+  helper is now a platform alias. Focused checks pass for
+  `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and `aarch64-apple-darwin`,
+  including `RUSTFLAGS="-D warnings"` variants, with evidence in
+  `/tmp/check-windows-shutdown-hook-windows-mac-support-validation.out`,
+  `/tmp/check-windows-deny-warnings-shutdown-hook-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-shutdown-hook-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-deny-warnings-shutdown-hook-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-arm-shutdown-hook-windows-mac-support-validation.out`, and
+  `/tmp/check-darwin-arm-deny-warnings-shutdown-hook-windows-mac-support-validation.out`.
+- [x] (2026-06-25T14:06:00Z) The orphan-detection lifecycle test now runs by
+  default on Unix and Windows targets. Local Linux execution passed with the
+  child process leaking the guard, exiting through the atexit hook, and the
+  parent observing the postmaster exit. Evidence:
+  `/tmp/test-shutdown-hook-lifecycle-windows-mac-support-validation.out`.
+- [x] (2026-06-25T14:10:00Z) Windows cleanup milestone gates passed after the
+  shutdown-hook tests were serialized with the existing cross-process scenario
+  guard. Evidence: `/tmp/fmt-shutdown-hook-windows-mac-support-validation.out`,
+  `/tmp/lint-shutdown-hook-windows-mac-support-validation.out`,
+  `/tmp/test-shutdown-hook-windows-mac-support-validation.out`,
+  `/tmp/mdlint-shutdown-hook-windows-mac-support-validation.out`, and
+  `/tmp/nixie-shutdown-hook-windows-mac-support-validation.out`. The test gate
+  ran two nextest passes: `275` passed with `3` skipped for all targets/all
+  features, then `151` passed with `0` skipped for the `dev-worker` feature
+  pass. Final cross-target checks also pass for `x86_64-pc-windows-msvc`,
+  `x86_64-apple-darwin`, and `aarch64-apple-darwin`, including
+  `RUSTFLAGS="-D warnings"` variants, with evidence in the same
+  `/tmp/check-*-shutdown-hook-windows-mac-support-validation.out` logs listed
+  above.
+- [x] (2026-06-25T14:15:00Z) Strengthened the shared test serial guard for the
+  upcoming Windows CI leg: non-Unix platforms now use an atomic lock directory
+  instead of a no-op process lock, so independent nextest binaries coordinate
+  access to the shared `PostgreSQL` data/cache directories. Re-ran
+  `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and
+  `aarch64-apple-darwin` with `RUSTFLAGS="-D warnings"` plus the full Linux
+  gates; evidence remains in the shutdown-hook `/tmp/*` gate logs.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -382,6 +426,26 @@ cross-compile output before Milestone 1 begins.
   `rg "xdg::|use xdg|xdg ="`. Impact: Milestone 1 keeps those existing cache
   splits and focuses on dependency gating plus the unguarded filesystem mode
   helper.
+- Observation: `libc::atexit` is available on Windows through the existing
+  `libc` dependency, so the process-exit registration mechanism does not
+  require a new runtime crate. Windows still needs different process controls:
+  POSIX signals cannot terminate the postmaster tree there. Impact: the Windows
+  implementation keeps the existing atexit shape, uses the native `taskkill`
+  utility for process-tree termination, and limits raw Win32 FFI to liveness
+  checks.
+- Observation: making the orphan-detection parent test run by default exposed a
+  deterministic nextest contention point. The focused lifecycle test passed,
+  but the first full `make test` run failed because another cluster test was
+  using the shared `/var/tmp/pg-embed-1000/data` directory while the child
+  process tried to start. Impact: the shutdown-hook registration and lifecycle
+  integration tests must hold the existing `tests/support/serial.rs`
+  cross-process scenario guard before creating a real `TestCluster`.
+- Observation: `tests/support/serial.rs` previously provided only an in-process
+  mutex on non-Unix targets. That would leave Windows nextest runs exposed to
+  the same cross-binary cluster-directory race seen locally on Linux before the
+  shutdown-hook tests acquired the guard. Impact: non-Unix test runs now use an
+  atomic lock directory under `CARGO_TARGET_DIR` for cross-process coordination
+  without adding a dependency.
 
 ## Decision log
 
@@ -469,6 +533,25 @@ cross-compile output before Milestone 1 begins.
   avoids adding runtime crates or runner build tools while satisfying all three
   `cargo check --target ... --all-targets` checks with `-D warnings`.
   Date/Author: 2026-06-25, implementation agent.
+- Decision: implement the Windows shared-cluster reaper without adding a direct
+  `windows-sys` dependency. The hook uses the existing `libc::atexit`
+  registration, `taskkill /PID <pid> /T` followed by
+  `taskkill /PID <pid> /T /F` on timeout, and a private `kernel32` FFI wrapper
+  only for liveness probing. Rationale: this preserves the public API, honours
+  the no-new-runtime dependency tolerance, and kills the PostgreSQL process
+  tree rather than only the postmaster process. Date/Author: 2026-06-25,
+  implementation agent.
+- Decision: serialize the shutdown-hook integration tests with the existing
+  scenario guard instead of treating "data directory exists but is not empty"
+  as a soft skip. Rationale: that error is expected only under concurrent use
+  of the shared test cluster directory; serializing preserves the regression
+  value of the orphan-detection test and keeps failures meaningful on CI
+  runners. Date/Author: 2026-06-25, implementation agent.
+- Decision: implement the non-Unix scenario process lock as a lock directory
+  with a bounded wait instead of adding a test dependency or using another FFI
+  boundary. Rationale: directory creation is atomic on the supported
+  filesystems and works on Windows runners, while the existing Unix `flock`
+  path remains unchanged. Date/Author: 2026-06-25, implementation agent.
 
 ## Outcomes & retrospective
 

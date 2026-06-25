@@ -274,7 +274,8 @@ impl ClusterHandle {
     ///
     /// Intended for shared clusters where the [`ClusterGuard`](super::ClusterGuard)
     /// is intentionally forgotten. The hook sends SIGTERM and waits up to
-    /// the configured shutdown timeout before escalating to SIGKILL.
+    /// the configured shutdown timeout before escalating to the platform's
+    /// forceful termination mechanism.
     ///
     /// The method is idempotent: subsequent calls after the first
     /// successful registration are no-ops. Only one cluster can be
@@ -282,13 +283,14 @@ impl ClusterHandle {
     ///
     /// # Platform Support
     ///
-    /// Supported on Unix (Linux, macOS). On other platforms this method is a
-    /// silent no-op that returns `Ok(())`, so callers need not gate on
-    /// `cfg(unix)`.
+    /// Supported on Unix (Linux, macOS) and Windows. On other platforms this
+    /// method is a silent no-op that returns `Ok(())`, so callers need not gate
+    /// on platform cfgs.
     ///
     /// # Errors
     ///
-    /// Returns an error if `libc::atexit` registration fails (Unix only).
+    /// Returns an error if `libc::atexit` registration fails on a supported
+    /// platform.
     ///
     /// # Examples
     ///
@@ -313,7 +315,7 @@ impl ClusterHandle {
         self.register_shutdown_on_exit_impl()
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn register_shutdown_on_exit_impl(&self) -> BootstrapResult<()> {
         super::shutdown_hook::register_shutdown_hook(
             self.bootstrap.settings.clone(),
@@ -322,10 +324,11 @@ impl ClusterHandle {
         )
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     fn register_shutdown_on_exit_impl(&self) -> BootstrapResult<()> {
-        // No-op on non-Unix platforms. The atexit hook relies on POSIX
-        // signals (SIGTERM/SIGKILL) which are not available here.
+        // No-op on unsupported platforms. Unix and Windows both have concrete
+        // process-exit reapers; other targets can still use normal Drop-based
+        // cleanup.
         Ok(())
     }
 }

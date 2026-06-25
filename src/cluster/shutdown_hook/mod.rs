@@ -7,8 +7,8 @@
 //! This module provides [`register_shutdown_hook`], which stores cluster
 //! metadata in a [`Mutex`] and registers an `extern "C"` callback via
 //! [`libc::atexit`]. When the process exits, the callback reads the
-//! postmaster PID from disk, sends SIGTERM (signal 15, terminate), polls for
-//! exit, and escalates to SIGKILL if the timeout elapses.
+//! postmaster PID from disk, asks the platform to stop it, polls for exit, and
+//! escalates to forceful termination if the timeout elapses.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -16,7 +16,10 @@ use std::time::Duration;
 
 use crate::CleanupMode;
 use crate::error::BootstrapResult;
+use platform::{force_shutdown, parse_pid, process_is_running_for_platform, request_shutdown};
 use postgresql_embedded::Settings;
+
+mod platform;
 
 /// State captured at registration time and read by the atexit callback.
 struct ShutdownState {
@@ -37,6 +40,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Grace period after SIGKILL before proceeding to cleanup.
 const POST_SIGKILL_GRACE: Duration = Duration::from_millis(100);
+
+/// Platform-specific process identifier stored in `postmaster.pid`.
+pub type PostmasterPid = platform::PostmasterPid;
 
 /// Registers an atexit hook that will stop the `PostgreSQL` postmaster on
 /// process exit.
@@ -106,8 +112,8 @@ fn register_atexit() -> BootstrapResult<()> {
 
 /// Callback invoked by the C runtime during process exit.
 ///
-/// Reads the postmaster PID from disk, sends SIGTERM, waits for exit, and
-/// escalates to SIGKILL if the configured timeout expires.
+/// Reads the postmaster PID from disk, asks the platform to terminate it, and
+/// escalates to forceful termination if the configured timeout expires.
 extern "C" fn shutdown_callback() {
     let Ok(guard) = SHUTDOWN_STATE.try_lock() else {
         // Mutex is poisoned or held by another thread — bail to avoid
@@ -134,47 +140,23 @@ extern "C" fn shutdown_callback() {
     best_effort_cleanup(state);
 }
 
-/// Sends SIGTERM to the postmaster and escalates to SIGKILL on timeout.
-fn stop_postmaster(pid: libc::pid_t, state: &ShutdownState) {
-    send_sigterm(pid);
+/// Requests postmaster shutdown and escalates on timeout.
+fn stop_postmaster(pid: PostmasterPid, state: &ShutdownState) {
+    request_shutdown(pid);
 
     if wait_for_exit(pid, state.shutdown_timeout) {
         return;
     }
 
-    // Timeout expired — escalate to SIGKILL.
-    send_sigkill(pid);
+    // Timeout expired — escalate to forceful platform termination.
+    force_shutdown(pid);
     std::thread::sleep(POST_SIGKILL_GRACE);
-}
-
-// ---------------------------------------------------------------------------
-// Signal helpers
-// ---------------------------------------------------------------------------
-
-/// Sends SIGTERM to the given PID.
-fn send_sigterm(pid: libc::pid_t) {
-    // SAFETY: Sending SIGTERM to a process we own. The PID was read from the
-    // postmaster.pid file written by our PostgreSQL child process. If the PID
-    // is stale (process already exited), `kill` returns -1 with ESRCH, which
-    // we ignore.
-    unsafe {
-        libc::kill(pid, libc::SIGTERM);
-    }
-}
-
-/// Sends SIGKILL to the given PID.
-fn send_sigkill(pid: libc::pid_t) {
-    // SAFETY: Same rationale as `send_sigterm`. SIGKILL cannot be caught or
-    // ignored, so the process will terminate immediately if it still exists.
-    unsafe {
-        libc::kill(pid, libc::SIGKILL);
-    }
 }
 
 /// Polls until the process exits or the timeout elapses.
 ///
 /// Returns `true` if the process exited within the timeout.
-fn wait_for_exit(pid: libc::pid_t, timeout: Duration) -> bool {
+fn wait_for_exit(pid: PostmasterPid, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         if !process_is_running(pid) {
@@ -196,35 +178,19 @@ fn wait_for_exit(pid: libc::pid_t, timeout: Duration) -> bool {
 /// Returns `None` if the file is missing, empty, cannot be parsed, or
 /// contains a non-positive value.
 #[must_use]
-pub fn read_postmaster_pid(data_dir: &Path) -> Option<libc::pid_t> {
+pub fn read_postmaster_pid(data_dir: &Path) -> Option<PostmasterPid> {
     let pid_file = data_dir.join("postmaster.pid");
     let contents = std::fs::read_to_string(&pid_file).ok()?;
     let first_line = contents.lines().next()?;
-    let pid = first_line.trim().parse::<libc::pid_t>().ok()?;
-    if pid > 0 { Some(pid) } else { None }
+    parse_pid(first_line)
 }
 
 /// Returns `true` if a process with the given PID is currently running.
 ///
-/// Non-positive PIDs are rejected immediately (returns `false`) to avoid
-/// calling `libc::kill` with 0 (current process group) or negative values
-/// (process groups).
+/// Invalid PIDs are rejected immediately by the platform implementation.
 #[must_use]
-pub fn process_is_running(pid: libc::pid_t) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-    // SAFETY: `kill` with signal 0 probes whether the process exists without
-    // delivering a signal. This is a standard POSIX technique for checking
-    // process liveness. The guard above ensures `pid` is positive.
-    let rc = unsafe { libc::kill(pid, 0) };
-    if rc == 0 {
-        return true;
-    }
-    !matches!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(code) if code == libc::ESRCH
-    )
+pub fn process_is_running(pid: PostmasterPid) -> bool {
+    process_is_running_for_platform(pid)
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +225,7 @@ mod tests {
     fn read_postmaster_pid_parses_first_line(
         pid_dir: Result<TempDir>,
         #[case] file_content: Option<&str>,
-        #[case] expected: Option<libc::pid_t>,
+        #[case] expected: Option<PostmasterPid>,
     ) -> Result<()> {
         let dir = pid_dir?;
         if let Some(content) = file_content {
@@ -274,7 +240,7 @@ mod tests {
 
     #[test]
     fn process_is_running_returns_true_for_current_process() -> Result<()> {
-        let pid = libc::pid_t::try_from(std::process::id())?;
+        let pid = PostmasterPid::try_from(std::process::id())?;
 
         ensure!(process_is_running(pid), "current process should be running");
         Ok(())
@@ -284,19 +250,31 @@ mod tests {
     fn process_is_running_returns_false_for_nonexistent_pid() -> Result<()> {
         // PID i32::MAX is extremely unlikely to be in use.
         ensure!(
-            !process_is_running(i32::MAX),
+            !process_is_running(PostmasterPid::MAX),
             "nonexistent PID should not be running"
         );
         Ok(())
     }
 
-    #[rstest]
-    #[case::zero(0)]
-    #[case::negative(-1)]
-    fn process_is_running_rejects_non_positive_pid(#[case] pid: libc::pid_t) -> Result<()> {
+    #[test]
+    fn process_is_running_rejects_zero_pid() -> Result<()> {
+        let pid = 0;
+
         ensure!(
             !process_is_running(pid),
-            "non-positive PID {pid} should not be considered running"
+            "zero PID should not be considered running"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_is_running_rejects_negative_pid() -> Result<()> {
+        let pid = -1;
+
+        ensure!(
+            !process_is_running(pid),
+            "negative PID should not be considered running"
         );
         Ok(())
     }

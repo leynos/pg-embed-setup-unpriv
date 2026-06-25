@@ -58,13 +58,13 @@ pub(crate) mod panic_utils;
 mod runtime;
 mod runtime_mode;
 mod shutdown;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod shutdown_hook;
 #[cfg(all(
-    unix,
+    any(unix, windows),
     any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
 ))]
-pub use self::shutdown_hook::{process_is_running, read_postmaster_pid};
+pub use self::shutdown_hook::{PostmasterPid, process_is_running, read_postmaster_pid};
 mod startup;
 mod temporary_database;
 mod worker_invoker;

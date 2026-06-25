@@ -26,10 +26,10 @@ mod worker_env;
 mod fixtures_docs;
 
 #[cfg(all(
-    unix,
+    any(unix, windows),
     any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
 ))]
-pub use crate::cluster::{process_is_running, read_postmaster_pid};
+pub use crate::cluster::{PostmasterPid, process_is_running, read_postmaster_pid};
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub use errors::{bootstrap_error, privilege_error};
 pub use filesystem::ambient_dir_and_path;
