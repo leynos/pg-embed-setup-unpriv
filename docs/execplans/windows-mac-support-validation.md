@@ -375,6 +375,11 @@ cross-compile output before Milestone 1 begins.
   `/tmp/test-non-utf8-env-test-windows-mac-support-validation.out`,
   `/tmp/mdlint-non-utf8-env-test-windows-mac-support-validation.out`, and
   `/tmp/nixie-non-utf8-env-test-windows-mac-support-validation.out`.
+- [x] (2026-06-25T17:20:00Z) CodeRabbit reviewed corrective commit `52288e4`
+  after the deterministic gates passed. The first CLI review attempt hit the
+  free allowance rate limit, so the mandated `vsleep $(shuf -i 45-90 -n 1)m`
+  backoff was run before retrying. The retry completed with
+  `status=review_completed` and `findings=0`.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
