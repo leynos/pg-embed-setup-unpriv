@@ -5,7 +5,6 @@ use std::{
     os::unix::{ffi::OsStringExt, fs::PermissionsExt},
 };
 
-use super::{BootstrapErrorKind, WORKER_BINARY_NAME, discover_worker_from_path_value};
 
 #[test]
 fn discover_worker_returns_none_when_path_is_absent() {
@@ -14,6 +13,7 @@ fn discover_worker_returns_none_when_path_is_absent() {
 }
 
 #[test]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn discover_worker_errors_on_non_utf8_path_entry() {
     let temp = tempfile::tempdir().expect("tempdir");
     let valid_dir = temp.path().join("valid");
