@@ -409,6 +409,12 @@ cross-compile output before Milestone 1 begins.
   `/tmp/test-path-worker-env-ci-fix-windows-mac-support-validation.out`,
   `/tmp/mdlint-path-worker-env-ci-fix-windows-mac-support-validation.out`, and
   `/tmp/nixie-path-worker-env-ci-fix-windows-mac-support-validation.out`.
+- [x] (2026-06-25T18:40:26Z) CodeRabbit reviewed corrective commit `4047e62`
+  after deterministic gates passed. Two initial CLI attempts stalled after
+  summarization and were stopped by exact process group; the next attempt
+  returned the free CLI rate limit, so the mandated `vsleep` backoff ran for
+  `89` minutes before retrying. The post-backoff retry completed with
+  `status=review_completed` and `findings=0`.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
