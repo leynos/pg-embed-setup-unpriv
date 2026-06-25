@@ -5,9 +5,13 @@ name: CI
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
-    name: Build and Test (${{ matrix.privilege }})
+    name: Linux Build and Test (${{ matrix.privilege }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -22,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@b61ad14766ae81b830abdaf066eb3d9b6c4f537b
+        uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
       - name: Format
         run: make check-fmt
       - name: Markdown lint
@@ -43,7 +47,7 @@ jobs:
           cargo nextest run --all-targets --all-features
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/generate-coverage@b61ad14766ae81b830abdaf066eb3d9b6c4f537b
+        uses: leynos/shared-actions/.github/actions/generate-coverage@7da7c6d89033d13cbb1c64803d108ddca97e69c2
         with:
           output-path: lcov.info
           format: lcov
@@ -72,8 +76,66 @@ jobs:
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: ${{ env.CS_ACCESS_TOKEN && matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@b61ad14766ae81b830abdaf066eb3d9b6c4f537b
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@7da7c6d89033d13cbb1c64803d108ddca97e69c2
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
           installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
+
+  cross-platform-tests:
+    name: Test (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PG_BINARY_CACHE_DIR: ${{ github.workspace }}/.postgres-binary-cache
+      PG_TEST_BACKEND: postgresql_embedded
+      PG_VERSION_REQ: "=17.4.0"
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+      - name: Restore PostgreSQL binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.PG_BINARY_CACHE_DIR }}
+          key: pg-embedded-postgresql-17.4.0-${{ runner.os }}-${{ runner.arch }}
+      - name: Install cargo-nextest
+        shell: bash
+        run: cargo binstall -y cargo-nextest@0.9.122
+      - name: Build binaries
+        shell: bash
+        run: >-
+          cargo build
+          --no-default-features
+          --features cluster-unit-tests,async-api
+          --bins
+      - name: Run CLI version smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          binary=target/debug/pg_embedded_setup_unpriv
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            binary="${binary}.exe"
+          fi
+
+          "$binary" --version
+      - name: Test unprivileged surface
+        shell: bash
+        run: >-
+          cargo nextest run
+          --all-targets
+          --no-default-features
+          --features cluster-unit-tests,async-api
