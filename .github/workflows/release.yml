@@ -82,6 +82,12 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
@@ -89,11 +95,13 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
       - name: Build release archive
+        shell: bash
         run: >-
-          make release-archive
-          TARGET=${{ matrix.target }}
-          VERSION=${{ needs.prepare.outputs.version }}
+          uv run --script scripts/release_archive.py
+          ${{ matrix.target }}
+          --release-version ${{ needs.prepare.outputs.version }}
       - name: Upload release archive
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}

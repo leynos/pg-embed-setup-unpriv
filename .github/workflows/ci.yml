@@ -139,3 +139,114 @@ jobs:
           --all-targets
           --no-default-features
           --features cluster-unit-tests,async-api
+
+  binstall-packaging:
+    name: Binstall (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      RELEASE_PORT: "8765"
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+      - name: Build cargo-binstall archive
+        shell: bash
+        run: >-
+          uv run --script scripts/release_archive.py
+          ${{ matrix.target }}
+      - name: Install from local cargo-binstall archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          install_dir="$PWD/.binstall-bin"
+          cert_dir="$RUNNER_TEMP/binstall-cert"
+          rm -rf "$install_dir" "$cert_dir"
+          mkdir -p "$install_dir" "$cert_dir"
+
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout "$cert_dir/ca.key" \
+            -out "$cert_dir/ca.pem" \
+            -subj "/CN=pg local test CA" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign"
+          openssl req -newkey rsa:2048 -nodes \
+            -keyout "$cert_dir/server.key" \
+            -out "$cert_dir/server.csr" \
+            -subj "/CN=127.0.0.1" \
+            -addext "subjectAltName=IP:127.0.0.1"
+          openssl x509 -req \
+            -in "$cert_dir/server.csr" \
+            -CA "$cert_dir/ca.pem" \
+            -CAkey "$cert_dir/ca.key" \
+            -CAcreateserial \
+            -days 1 \
+            -out "$cert_dir/server.pem" \
+            -copy_extensions copy
+
+          if command -v python3 >/dev/null 2>&1; then
+            python_bin=python3
+          else
+            python_bin=python
+          fi
+
+          CERT_DIR="$cert_dir" "$python_bin" - <<'PY' >"$RUNNER_TEMP/binstall-http.log" 2>&1 &
+          from functools import partial
+          from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+          import os
+          import ssl
+
+          cert_dir = Path(os.environ["CERT_DIR"])
+          handler = partial(SimpleHTTPRequestHandler, directory=str(Path("dist").resolve()))
+          server = ThreadingHTTPServer(("127.0.0.1", 8765), handler)
+          context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+          context.load_cert_chain(cert_dir / "server.pem", cert_dir / "server.key")
+          server.socket = context.wrap_socket(server.socket, server_side=True)
+          server.serve_forever()
+          PY
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --cacert "$cert_dir/ca.pem" -fsS "https://127.0.0.1:${RELEASE_PORT}/" >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" -eq 30 ]]; then
+              cat "$RUNNER_TEMP/binstall-http.log" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          cargo binstall -y \
+            --manifest-path Cargo.toml \
+            --targets "${{ matrix.target }}" \
+            --strategies crate-meta-data \
+            --pkg-url "https://127.0.0.1:${RELEASE_PORT}/{ name }-{ target }-v{ version }{ archive-suffix }" \
+            --root-certificates "$cert_dir/ca.pem" \
+            --install-path "$install_dir" \
+            --force \
+            pg-embed-setup-unpriv
+
+          binary_ext=""
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            binary_ext=".exe"
+          fi
+
+          test -f "$install_dir/pg_embedded_setup_unpriv${binary_ext}"
+          test -f "$install_dir/pg_worker${binary_ext}"
+          "$install_dir/pg_embedded_setup_unpriv${binary_ext}" --version
