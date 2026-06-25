@@ -307,13 +307,36 @@ cross-compile output before Milestone 1 begins.
   upcoming Windows CI leg: non-Unix platforms now use an atomic lock directory
   instead of a no-op process lock, so independent nextest binaries coordinate
   access to the shared `PostgreSQL` data/cache directories. Re-ran
-  `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and
-  `aarch64-apple-darwin` with `RUSTFLAGS="-D warnings"` plus the full Linux
-  gates; evidence remains in the shutdown-hook `/tmp/*` gate logs.
+  `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and `aarch64-apple-darwin`
+  with `RUSTFLAGS="-D warnings"` plus the full Linux gates; evidence remains in
+  the shutdown-hook `/tmp/*` gate logs.
 - [x] (2026-06-25T14:25:00Z) CodeRabbit reviewed commit `fd668fe` after the
   deterministic gates passed. `coderabbit review --agent` completed with
   `status=review_completed` and `findings=0`, so no Windows cleanup concerns
   needed clearing before the CI matrix milestone.
+- [x] (2026-06-25T14:31:45Z) Implemented the Milestone 2 workflow shape
+  locally: added workflow-level cancellation, bumped all
+  `leynos/shared-actions` references to verified HEAD
+  `7da7c6d89033d13cbb1c64803d108ddca97e69c2`, added a required `macos-latest`/
+  `windows-latest` test-only job, pinned `actions/cache` v4.3.0 to
+  `0057852bfaa89a56745cba8c7296529d2fc39830`, and configured the cross-platform
+  test legs to build both regular binaries, run the CLI `--version` smoke test,
+  restore/cache `PG_BINARY_CACHE_DIR`, and run the `cluster-unit-tests` plus
+  `async-api` nextest feature set. Local command validation passed for the same
+  feature set with `245` tests passed and `1` skipped; evidence:
+  `/tmp/build-bins-cross-feature-windows-mac-support-validation.out`,
+  `/tmp/test-cross-feature-windows-mac-support-validation.out`, and
+  `/tmp/actionlint-ci-matrix-windows-mac-support-validation.out`.
+- [x] (2026-06-25T14:43:00Z) CI matrix milestone deterministic gates passed
+  locally before CodeRabbit review. Evidence:
+  `/tmp/actionlint-ci-matrix-final-windows-mac-support-validation.out`,
+  `/tmp/fmt-ci-matrix-windows-mac-support-validation.out`,
+  `/tmp/lint-ci-matrix-windows-mac-support-validation.out`,
+  `/tmp/test-ci-matrix-windows-mac-support-validation.out`,
+  `/tmp/mdlint-ci-matrix-windows-mac-support-validation.out`, and
+  `/tmp/nixie-ci-matrix-windows-mac-support-validation.out`. The full test gate
+  ran two nextest passes: `275` passed with `3` skipped, then `151` passed with
+  `0` skipped.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -450,6 +473,17 @@ cross-compile output before Milestone 1 begins.
   shutdown-hook tests acquired the guard. Impact: non-Unix test runs now use an
   atomic lock directory under `CARGO_TARGET_DIR` for cross-process coordination
   without adding a dependency.
+- Observation: `PgEnvCfg` only pins a `postgresql_embedded` version when
+  `PG_VERSION_REQ` is supplied; otherwise the backend resolves the default
+  requirement at runtime. Impact: the cross-platform CI legs set
+  `PG_VERSION_REQ="=17.4.0"` so the mandatory PostgreSQL binary cache key is
+  stable and scoped to one known upstream binary version.
+- Observation: `actions/cache` tag v4.3.0 currently resolves to
+  `0057852bfaa89a56745cba8c7296529d2fc39830`, and `leynos/shared-actions`
+  default-branch HEAD still resolves to
+  `7da7c6d89033d13cbb1c64803d108ddca97e69c2`. Impact: the workflow can satisfy
+  the repository's SHA pinning policy without drifting from the planned
+  shared-actions revision.
 
 ## Decision log
 
@@ -556,6 +590,20 @@ cross-compile output before Milestone 1 begins.
   boundary. Rationale: directory creation is atomic on the supported
   filesystems and works on Windows runners, while the existing Unix `flock`
   path remains unchanged. Date/Author: 2026-06-25, implementation agent.
+- Decision: make the new macOS and Windows CI test legs required by the
+  workflow rather than advisory. Rationale: the purpose of this change is to
+  prove unprivileged `TestCluster` execution and orphan cleanup on those
+  platforms; advisory legs would not protect the promised support boundary.
+  Initial cost budget is approximately `42` runner-minutes per pull request:
+  Linux unprivileged about `14`, Linux root about `8`, macOS about `10`, and
+  Windows about `10`, with a parallel wall-clock target under `15` minutes.
+  Date/Author: 2026-06-25, implementation agent.
+- Decision: pin the cross-platform CI tests to `PG_VERSION_REQ="=17.4.0"` and
+  cache `PG_BINARY_CACHE_DIR` by PostgreSQL version, runner OS, and runner
+  architecture. Rationale: the plan requires mandatory theseus download caching
+  keyed by pinned PostgreSQL version; setting the version in CI avoids a broad
+  cache key that silently changes when upstream defaults move. Date/Author:
+  2026-06-25, implementation agent.
 
 ## Outcomes & retrospective
 

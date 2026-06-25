@@ -5,9 +5,12 @@ name: CI
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-test:
-    name: Build and Test (${{ matrix.privilege }})
+    name: Linux Build and Test (${{ matrix.privilege }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -88,3 +91,61 @@ jobs:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
           installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
+
+  cross-platform-tests:
+    name: Test (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PG_BINARY_CACHE_DIR: ${{ github.workspace }}/.postgres-binary-cache
+      PG_TEST_BACKEND: postgresql_embedded
+      PG_VERSION_REQ: "=17.4.0"
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
+      - name: Restore PostgreSQL binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.PG_BINARY_CACHE_DIR }}
+          key: pg-embedded-postgresql-17.4.0-${{ runner.os }}-${{ runner.arch }}
+      - name: Install cargo-nextest
+        shell: bash
+        run: cargo binstall -y cargo-nextest@0.9.122
+      - name: Build binaries
+        shell: bash
+        run: >-
+          cargo build
+          --no-default-features
+          --features cluster-unit-tests,async-api
+          --bins
+      - name: Run CLI version smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          binary=target/debug/pg_embedded_setup_unpriv
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            binary="${binary}.exe"
+          fi
+
+          "$binary" --version
+      - name: Test unprivileged surface
+        shell: bash
+        run: >-
+          cargo nextest run
+          --all-targets
+          --no-default-features
+          --features cluster-unit-tests,async-api
