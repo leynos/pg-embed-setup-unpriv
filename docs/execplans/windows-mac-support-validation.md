@@ -529,9 +529,8 @@ cross-compile output before Milestone 1 begins.
   `postgres(.exe)` image name and matching creation time before assigning it to
   the Job Object or terminating its tree, and keeps the public PID-only
   test-support helper feature-gated so docs builds remain warning-free. Local
-  validation passed after the fix: Windows target check,
-  `make check-fmt`, `make lint`, `make test`, `make markdownlint`, and
-  `make nixie`. Evidence:
+  validation passed after the fix: Windows target check, `make check-fmt`,
+  `make lint`, `make test`, `make markdownlint`, and `make nixie`. Evidence:
   `/tmp/coderabbit-job-object-tree-loop-uncommitted-light-after-backoff-windows-mac-support-validation.out`,
   `/tmp/check-windows-job-object-identity-gated-helpers-windows-mac-support-validation.out`,
   `/tmp/check-fmt-job-object-identity-gated-helpers-windows-mac-support-validation.out`,
@@ -546,15 +545,22 @@ cross-compile output before Milestone 1 begins.
   Object identity-guard patch with
   `coderabbit review --agent --light --type uncommitted` after deterministic
   gates passed. The review completed with `status=review_completed` and
-  `findings=0`, so the PID-reuse concern is cleared before committing.
-  Evidence:
+  `findings=0`, so the PID-reuse concern is cleared before committing. Evidence:
   `/tmp/coderabbit-job-object-identity-postfix-windows-mac-support-validation.out`.
-- [ ] Milestone 1: make the library and both binaries compile on Windows and
+- [x] (2026-06-25T23:22:06Z) Remote CI run `28206487696` for commit `de0e441`
+  passed all four pull-request jobs. macOS passed in `1m38s`; Windows passed in
+  `5m45s` after building both binaries, running the CLI smoke test, and running
+  the unprivileged surface tests that include the shutdown-hook
+  orphan-detection scenario. Linux root and Linux unprivileged were also green.
+  Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28206487696` and
+  `/tmp/ci-watch-job-object-identity-windows-mac-support-validation.out`.
+- [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
   the Windows shared-cluster cleanup question with an orphan-detection test
   (Red → Green). Exit gate includes one real Windows link-and-run.
-- [ ] Milestone 2: add a test-only macOS and Windows CI matrix (tests +
+- [x] Milestone 2: add a test-only macOS and Windows CI matrix (tests +
   orphan-detection), with mandatory theseus caching and a recorded cost budget;
   observe it pass.
 - [ ] Milestone 3: add `binstall` packaging for macOS and Windows, preferring
@@ -749,6 +755,13 @@ cross-compile output before Milestone 1 begins.
   Windows shutdown hook now treats the PID and PostgreSQL start timestamp as a
   pair, then verifies the live process image and creation time before assigning
   or terminating the process tree.
+- Observation: remote CI run `28206487696` proved the Job Object failsafe with
+  PID-reuse protection satisfies the hosted Windows orphan-detection scenario.
+  The Windows job built both binaries, passed the CLI smoke test, ran the
+  unprivileged surface tests, and completed without runner cleanup reporting
+  orphaned PostgreSQL processes. Impact: Approach 3 is the accepted Windows
+  cleanup implementation; no fourth cleanup approach is needed before moving to
+  `binstall` packaging.
 
 ## Decision log
 
