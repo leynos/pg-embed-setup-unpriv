@@ -37,7 +37,16 @@ fn debug_target_dir() -> color_eyre::Result<tempfile::TempDir> {
     Ok(dir)
 }
 
-#[cfg(unix)]
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 #[rstest]
 fn staged_worker_is_world_executable_and_in_temp_dir() -> color_eyre::Result<()> {
     let debug_target_dir = debug_target_dir()?;

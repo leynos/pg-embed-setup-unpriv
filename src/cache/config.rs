@@ -117,26 +117,26 @@ mod tests {
 
     /// Consolidated test for `resolve_cache_dir` with various environment configurations.
     #[rstest]
-    #[case::explicit_env_var(Some("/custom/cache/path"), None, "/custom/cache/path")]
+    #[case::explicit_env_var(Some("/custom/cache/path"), None, platform_path("/custom/cache/path"))]
     #[case::xdg_fallback(
         None,
         Some("/home/testuser/.cache"),
-        &format!("/home/testuser/.cache/{CACHE_SUBDIR}")
+        platform_cache_path("/home/testuser/.cache")
     )]
     #[case::empty_env_var_uses_xdg(
         Some(""),
         Some("/home/testuser/.cache"),
-        &format!("/home/testuser/.cache/{CACHE_SUBDIR}")
+        platform_cache_path("/home/testuser/.cache")
     )]
     #[case::whitespace_only_uses_xdg(
         Some("   "),
         Some("/home/testuser/.cache"),
-        &format!("/home/testuser/.cache/{CACHE_SUBDIR}")
+        platform_cache_path("/home/testuser/.cache")
     )]
     fn resolve_cache_dir_respects_env_priority(
         #[case] pg_cache_dir: Option<&str>,
         #[case] xdg_cache_home: Option<&str>,
-        #[case] expected: &str,
+        #[case] expected: Utf8PathBuf,
     ) {
         let env_vars = vec![
             (
@@ -151,7 +151,15 @@ mod tests {
 
         let _guard = scoped_env(env_vars);
         let result = resolve_cache_dir();
-        assert_eq!(result.as_str(), expected);
+        assert_eq!(result, expected);
+    }
+
+    fn platform_path(path: &str) -> Utf8PathBuf {
+        Utf8PathBuf::from_path_buf(PathBuf::from(path)).expect("test path should be valid UTF-8")
+    }
+
+    fn platform_cache_path(cache_home: &str) -> Utf8PathBuf {
+        platform_path(cache_home).join(CACHE_SUBDIR)
     }
 
     #[test]

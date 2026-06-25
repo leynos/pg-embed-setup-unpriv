@@ -380,6 +380,35 @@ cross-compile output before Milestone 1 begins.
   free allowance rate limit, so the mandated `vsleep $(shuf -i 45-90 -n 1)m`
   backoff was run before retrying. The retry completed with
   `status=review_completed` and `findings=0`.
+- [x] (2026-06-25T16:53:37Z) Remote CI run `28185956153` exposed two
+  deterministic test-portability assumptions after corrective commit `52288e4`:
+  the macOS test leg built both binaries and passed the CLI smoke test, then
+  failed only because `staged_worker_is_world_executable_and_in_temp_dir`
+  assumes the system temp directory is world-executable for the `nobody` user;
+  the Windows test leg built both binaries and passed the CLI smoke test, then
+  failed because `resolve_cache_dir_respects_env_priority` compared hard-coded
+  POSIX-style strings instead of platform path values. Linux root and
+  unprivileged jobs were green in the same run. The fix gates the root/nobody
+  temp traversal assertion to root-capable Unix targets and makes the cache
+  test build expected values through `PathBuf`/`Utf8PathBuf`.
+- [x] (2026-06-25T16:56:43Z) Local validation for the run `28185956153`
+  corrective patch passed before commit. Cross-target checks passed for
+  `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` with
+  `RUSTFLAGS="-D warnings"` and the CI feature set. Focused tests passed:
+  `resolve_cache_dir_respects_env_priority` ran `4` cases, and
+  `test_support::worker_env::tests` ran `6` cases. Full commit gates passed:
+  `make check-fmt`, `make lint`, `make test`, `make markdownlint`, and
+  `make nixie`; the test gate ran `275` tests with `3` skipped and then `151`
+  `dev-worker` tests with `0` skipped. Evidence:
+  `/tmp/check-darwin-path-worker-env-ci-fix-windows-mac-support-validation.out`,
+  `/tmp/check-windows-path-worker-env-ci-fix-windows-mac-support-validation.out`,
+  `/tmp/test-cache-config-paths-windows-mac-support-validation.out`,
+  `/tmp/test-worker-env-path-gate-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-path-worker-env-ci-fix-windows-mac-support-validation.out`,
+  `/tmp/lint-path-worker-env-ci-fix-windows-mac-support-validation.out`,
+  `/tmp/test-path-worker-env-ci-fix-windows-mac-support-validation.out`,
+  `/tmp/mdlint-path-worker-env-ci-fix-windows-mac-support-validation.out`, and
+  `/tmp/nixie-path-worker-env-ci-fix-windows-mac-support-validation.out`.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -544,6 +573,15 @@ cross-compile output before Milestone 1 begins.
   downloading `cap-primitives` from crates.io, with a connection reset before
   crate compilation. Impact: this is external network noise; rerun failed
   workflow jobs after the run completes before making code changes for Windows.
+- Observation: remote CI run `28185956153` showed both cross-platform test legs
+  now reach runtime after building the regular binaries and running the CLI
+  smoke test. The remaining macOS failure was a Linux/BSD root-helper
+  assertion: its check that the system temp directory is world-executable is
+  required for `nobody` traversal, not for macOS unprivileged support. The
+  remaining Windows failure was an assertion bug in `src/cache/config.rs`
+  tests: the product joins `XDG_CACHE_HOME` and `CACHE_SUBDIR` through platform
+  path APIs, so Windows naturally renders `\` separators. Impact: treat these
+  as test corrections, not source-portability changes.
 
 ## Decision log
 
@@ -676,6 +714,13 @@ cross-compile output before Milestone 1 begins.
   non-UTF-8 `PATH` entry after the filesystem object exists; on macOS the
   filesystem rejects the fixture path first, so the failure does not test
   product behaviour. Date/Author: 2026-06-25, implementation agent.
+- Decision: gate `staged_worker_is_world_executable_and_in_temp_dir` to the
+  same root-capable Unix target set as the public `nobody_uid` helpers and
+  compare cache directory expectations as `Utf8PathBuf` values. Rationale:
+  macOS support is the unprivileged in-process path, so root/nobody traversal
+  checks should not run there; Windows path tests should assert the semantic
+  path chosen by `resolve_cache_dir`, not the separator spelling of a POSIX
+  string. Date/Author: 2026-06-25, implementation agent.
 
 ## Outcomes & retrospective
 
