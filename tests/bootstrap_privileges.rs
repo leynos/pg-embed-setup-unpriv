@@ -1,5 +1,14 @@
 //! Behavioural tests covering privilege-aware bootstrap flows.
-#![cfg(unix)]
+#![cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 
 use color_eyre::eyre::{Result, ensure, eyre};
 use nix::unistd::geteuid;

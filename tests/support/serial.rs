@@ -199,6 +199,7 @@ fn acquire_process_lock() -> ProcessLock {
 mod tests {
     //! Unit tests for scenario serialization guards.
 
+    #[cfg(unix)]
     use rstest::rstest;
 
     use super::*;
