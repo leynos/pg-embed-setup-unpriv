@@ -4,21 +4,24 @@ use camino::Utf8PathBuf;
 use color_eyre::eyre::{ensure, eyre};
 use std::path::Path;
 
+#[cfg(unix)]
 use nix::unistd::geteuid;
-#[cfg(feature = "privileged-tests")]
+#[cfg(all(unix, feature = "privileged-tests"))]
 use pg_embedded_setup_unpriv::Error as PgEmbeddedError;
-#[cfg(any(
-    feature = "privileged-tests",
-    all(unix, feature = "cluster-unit-tests")
+use pg_embedded_setup_unpriv::PgEnvCfg;
+#[cfg(all(
+    unix,
+    any(feature = "privileged-tests", feature = "cluster-unit-tests")
 ))]
 use pg_embedded_setup_unpriv::nobody_uid;
-use pg_embedded_setup_unpriv::{ExecutionPrivileges, PgEnvCfg, detect_execution_privileges};
+#[cfg(unix)]
+use pg_embedded_setup_unpriv::{ExecutionPrivileges, detect_execution_privileges};
 #[cfg(all(unix, feature = "cluster-unit-tests"))]
 use pg_embedded_setup_unpriv::{make_data_dir_private, make_dir_accessible};
 use postgresql_embedded::VersionReq;
 use rstest::{fixture, rstest};
 
-#[cfg(feature = "privileged-tests")]
+#[cfg(all(unix, feature = "privileged-tests"))]
 #[expect(
     deprecated,
     reason = "Tests assert the deprecated helper surfaces its failure path"

@@ -324,6 +324,6 @@ fn is_worker_binary(path: &std::path::Path) -> bool {
     path.is_file()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "worker_env_tests.rs"]
 pub mod tests;

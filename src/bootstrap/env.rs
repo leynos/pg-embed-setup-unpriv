@@ -11,24 +11,25 @@ use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::fs::PermissionsExt;
 use color_eyre::eyre::Report;
 use std::env::{self, VarError};
+#[cfg(unix)]
 use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Duration;
 #[cfg(unix)]
 const WORKER_BINARY_NAME: &str = "pg_worker";
-#[cfg(windows)]
-const WORKER_BINARY_NAME: &str = "pg_worker.exe";
 pub(super) const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_SHUTDOWN_TIMEOUT_SECS: u64 = 600;
 const SHUTDOWN_TIMEOUT_ENV: &str = "PG_SHUTDOWN_TIMEOUT_SECS";
 
+#[cfg(unix)]
 fn discover_worker_from_path() -> BootstrapResult<Option<Utf8PathBuf>> {
     discover_worker_from_path_value(env::var_os("PATH"))
 }
 
 /// Hard-fails on non-UTF-8 PATH entries, skips empty/"." entries, and returns
 /// the first executable match for `WORKER_BINARY_NAME`.
+#[cfg(unix)]
 fn discover_worker_from_path_value(
     path_var: Option<OsString>,
 ) -> BootstrapResult<Option<Utf8PathBuf>> {
@@ -64,11 +65,6 @@ fn is_executable(path: &Utf8Path) -> bool {
         use std::os::unix::fs::PermissionsExt;
         m.permissions().mode() & 0o111 != 0
     })
-}
-
-#[cfg(not(unix))]
-fn is_executable(_path: &Utf8Path) -> bool {
-    true
 }
 
 /// Common Unix paths where time zone databases may be installed.

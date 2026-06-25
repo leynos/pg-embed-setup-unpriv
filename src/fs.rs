@@ -2,9 +2,11 @@
 
 use crate::observability::LOG_TARGET;
 use camino::{Utf8Path, Utf8PathBuf};
+#[cfg(unix)]
+use cap_std::fs::{Permissions, PermissionsExt};
 use cap_std::{
     ambient_authority,
-    fs::{Dir, Metadata, Permissions, PermissionsExt},
+    fs::{Dir, Metadata},
 };
 use color_eyre::eyre::{Context, Result};
 use std::io::ErrorKind;
@@ -156,6 +158,16 @@ fn set_permissions_inner(
         return Ok(());
     }
 
+    set_permissions_for_platform(path, mode, dir, relative)
+}
+
+#[cfg(unix)]
+fn set_permissions_for_platform(
+    path: &Utf8Path,
+    mode: u32,
+    dir: &Dir,
+    relative: &Utf8PathBuf,
+) -> Result<()> {
     match dir.set_permissions(relative.as_std_path(), Permissions::from_mode(mode)) {
         Ok(()) => {
             log_permissions_applied(path, mode);
@@ -165,6 +177,23 @@ fn set_permissions_inner(
     }
 }
 
+#[cfg(not(unix))]
+fn set_permissions_for_platform(
+    path: &Utf8Path,
+    mode: u32,
+    _dir: &Dir,
+    _relative: &Utf8PathBuf,
+) -> Result<()> {
+    info!(
+        target: LOG_TARGET,
+        path = %path,
+        mode_octal = format_args!("{mode:o}"),
+        "skipped POSIX permission application on non-Unix target"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
 fn log_permissions_applied(path: &Utf8Path, mode: u32) {
     info!(
         target: LOG_TARGET,
@@ -174,6 +203,7 @@ fn log_permissions_applied(path: &Utf8Path, mode: u32) {
     );
 }
 
+#[cfg(unix)]
 fn handle_permission_error(path: &Utf8Path, mode: u32, err: std::io::Error) -> Result<()> {
     error!(
         target: LOG_TARGET,
@@ -228,7 +258,9 @@ fn log_dir_metadata_error(path: &Utf8Path, err: std::io::Error) -> std::io::Erro
 mod tests {
     //! Unit tests for filesystem helpers.
 
-    use super::{ensure_dir_exists, ensure_existing_path_is_dir, find_existing_ancestor};
+    #[cfg(unix)]
+    use super::ensure_dir_exists;
+    use super::{ensure_existing_path_is_dir, find_existing_ancestor};
     use camino::{Utf8Path, Utf8PathBuf};
     use rstest::rstest;
     use std::fs::File;

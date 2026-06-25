@@ -6,6 +6,16 @@ use tokio::runtime::Runtime;
 
 use crate::error::{BootstrapError, BootstrapResult};
 use crate::observability::LOG_TARGET;
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 use crate::worker_process::{self, WorkerRequest, WorkerRequestArgs};
 use crate::{ExecutionMode, ExecutionPrivileges, TestBootstrapSettings};
 
@@ -92,6 +102,7 @@ fn spawn_worker_inner(
         ),
     )))]
     {
+        let _ = (bootstrap, env_vars);
         return Err(BootstrapError::from(eyre!(
             "privilege drop not supported on this target; refusing to run as root: {}",
             operation.error_context()

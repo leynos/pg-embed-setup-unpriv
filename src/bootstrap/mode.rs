@@ -2,7 +2,9 @@
 
 use camino::Utf8PathBuf;
 
-use crate::error::{BootstrapError, BootstrapResult};
+#[cfg(unix)]
+use crate::error::BootstrapError;
+use crate::error::BootstrapResult;
 
 #[cfg(unix)]
 use nix::unistd::geteuid;
