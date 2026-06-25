@@ -1,8 +1,13 @@
 //! Tests for bootstrap environment discovery helpers.
 
-use super::{BootstrapErrorKind, WORKER_BINARY_NAME, discover_worker_from_path_value};
+use super::discover_worker_from_path_value;
+#[cfg(all(unix, not(target_os = "macos")))]
+use super::{BootstrapErrorKind, WORKER_BINARY_NAME};
+#[cfg(all(unix, not(target_os = "macos")))]
 use std::ffi::OsString;
+#[cfg(all(unix, not(target_os = "macos")))]
 use std::os::unix::ffi::OsStringExt;
+#[cfg(all(unix, not(target_os = "macos")))]
 use std::os::unix::fs::PermissionsExt;
 
 #[test]
@@ -12,6 +17,7 @@ fn discover_worker_returns_none_when_path_is_absent() {
 }
 
 #[test]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn discover_worker_errors_on_non_utf8_path_entry() {
     let temp = tempfile::tempdir().expect("tempdir");
     let valid_dir = temp.path().join("valid");

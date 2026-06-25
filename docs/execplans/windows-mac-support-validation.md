@@ -356,6 +356,25 @@ cross-compile output before Milestone 1 begins.
   after the cross-target checks and full local gates passed.
   `coderabbit review --agent` completed with `status=review_completed` and
   `findings=0`.
+- [x] (2026-06-25T15:31:00Z) Remote CI run `28179624023` exposed two
+  follow-up items after corrective commit `15ff4a1`: the macOS leg reached
+  runtime and failed only because
+  `discover_worker_errors_on_non_utf8_path_entry` tries to create a
+  deliberately invalid byte sequence that APFS rejects with "Illegal byte
+  sequence" before the bootstrap helper is exercised; the Windows leg failed
+  earlier while crates.io reset the connection downloading `cap-primitives`, so
+  it should be retried after the workflow completes rather than treated as a
+  source failure. The macOS fix gates that single fixture-style test away from
+  macOS while keeping the PATH-absent worker-discovery test active there. Local
+  evidence:
+  `/tmp/check-darwin-non-utf8-env-test-windows-mac-support-validation.out`,
+  `/tmp/check-windows-non-utf8-env-test-windows-mac-support-validation.out`,
+  `/tmp/test-ci-feature-non-utf8-env-test-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-non-utf8-env-test-windows-mac-support-validation.out`,
+  `/tmp/lint-non-utf8-env-test-windows-mac-support-validation.out`,
+  `/tmp/test-non-utf8-env-test-windows-mac-support-validation.out`,
+  `/tmp/mdlint-non-utf8-env-test-windows-mac-support-validation.out`, and
+  `/tmp/nixie-non-utf8-env-test-windows-mac-support-validation.out`.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -508,6 +527,18 @@ cross-compile output before Milestone 1 begins.
   root-only Linux/BSD helper import fails even when the corresponding scenario
   would have skipped at runtime. Impact: root-specific test binaries and helper
   imports must be target-gated at compile time, not just skipped dynamically.
+- Observation: remote macOS CI reached the unprivileged test runtime in run
+  `28179624023`; the remaining deterministic macOS failure was not in worker
+  discovery itself, but in the Unix test fixture creating a filename from raw
+  bytes `0xff, 0xfe, 0xfd`. APFS rejects that pathname with "Illegal byte
+  sequence" before `discover_worker_from_path_value` runs. Impact: the
+  non-UTF-8 PATH-entry fixture is only portable to Unix filesystems that allow
+  arbitrary non-NUL bytes in path components; macOS must retain coverage
+  through other worker-discovery tests unless a different fixture is designed.
+- Observation: the same run's Windows leg failed in the binary build step while
+  downloading `cap-primitives` from crates.io, with a connection reset before
+  crate compilation. Impact: this is external network noise; rerun failed
+  workflow jobs after the run completes before making code changes for Windows.
 
 ## Decision log
 
@@ -634,6 +665,12 @@ cross-compile output before Milestone 1 begins.
   Linux/BSD owner-changing tests there contradicts the existing public API
   boundary and fails before runtime skips can apply. Date/Author: 2026-06-25,
   implementation agent.
+- Decision: gate the non-UTF-8 worker PATH-entry fixture off macOS while
+  leaving it active on Unix targets that can create the raw-byte path
+  component. Rationale: the test is meant to validate bootstrap handling of a
+  non-UTF-8 `PATH` entry after the filesystem object exists; on macOS the
+  filesystem rejects the fixture path first, so the failure does not test
+  product behaviour. Date/Author: 2026-06-25, implementation agent.
 
 ## Outcomes & retrospective
 
