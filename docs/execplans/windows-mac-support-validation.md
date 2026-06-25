@@ -453,6 +453,102 @@ cross-compile output before Milestone 1 begins.
   process group was stopped. The captured log shows `status=review_completed`
   and `findings=0`, so there are no CodeRabbit concerns to clear before pushing
   the direct Windows reaper fix.
+- [x] (2026-06-25T19:29:13Z) Remote CI run `28194422551` for commit
+  `611e380` proved the direct Win32 reaper still does not satisfy the Windows
+  orphan-detection test. Linux root, Linux unprivileged, and macOS all passed.
+  Windows built both binaries and passed the CLI smoke test, then failed only in
+  `shutdown_hook_lifecycle::postmaster_exits_after_child_process_with_shutdown_hook`:
+  the parent observed postmaster PID `2908` still running after the child
+  exited and waited `30s`; runner cleanup then terminated orphaned `postgres`
+  processes `2908` and `4584`.
+- [ ] (2026-06-25T19:29:13Z) User approved continuing past the original
+  two-attempt Windows cleanup tolerance with up to four further approaches.
+  Approach 3 is a Windows Job Object failsafe: assign the postmaster process
+  tree to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job when the shutdown hook is
+  registered, so the operating system reaps the tree when the process exits
+  even if the `atexit` callback is skipped or cannot complete.
+- [x] (2026-06-25T19:38:14Z) Implemented Approach 3 locally by splitting the
+  Windows shutdown-hook FFI into
+  `src/cluster/shutdown_hook/platform/windows.rs` and
+  `src/cluster/shutdown_hook/platform/windows/job.rs`, then retaining a
+  kill-on-close Job Object in the registered shutdown state. Local target
+  checks pass for `x86_64-pc-windows-msvc`, `aarch64-apple-darwin`, and
+  `x86_64-apple-darwin` with `RUSTFLAGS="-D warnings"` and the CI feature set.
+  The focused Linux shutdown-hook lifecycle test still passes. Evidence:
+  `/tmp/check-windows-job-object-after-visibility-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-job-object-windows-mac-support-validation.out`,
+  `/tmp/check-darwin-intel-job-object-windows-mac-support-validation.out`, and
+  `/tmp/test-shutdown-hook-lifecycle-job-object-windows-mac-support-validation.out`.
+- [x] (2026-06-25T19:46:38Z) Approach 3 deterministic gates passed locally
+  before CodeRabbit review, but the CodeRabbit retry returned the free CLI
+  allowance rate limit with a reported `18 minutes and 9 seconds` reset. Per
+  the user instruction, pause with `vsleep "$(shuf -i 45-90 -n 1)m"` before
+  retrying CodeRabbit rather than proceeding to commit without the review.
+  Evidence:
+  `/tmp/check-fmt-job-object-after-const-windows-mac-support-validation.out`,
+  `/tmp/lint-job-object-after-const-windows-mac-support-validation.out`,
+  `/tmp/test-job-object-rerun-windows-mac-support-validation.out`,
+  `/tmp/mdlint-job-object-windows-mac-support-validation.out`,
+  `/tmp/nixie-job-object-windows-mac-support-validation.out`, and
+  `/tmp/coderabbit-job-object-retry-windows-mac-support-validation.out`.
+- [x] (2026-06-25T19:54:27Z) Manual review during the CodeRabbit backoff found
+  that the first Job Object implementation used `.any(...)` while assigning the
+  discovered process tree, which short-circuited after the first successful
+  assignment and left later descendants unattempted. The implementation now
+  iterates over every discovered PID and records whether at least one
+  assignment succeeded.
+- [x] (2026-06-25T19:57:16Z) Local validation after the Job Object tree-loop
+  fix passed before retrying CodeRabbit. Evidence:
+  `/tmp/check-windows-job-object-tree-loop-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-job-object-tree-loop-windows-mac-support-validation.out`,
+  `/tmp/lint-job-object-tree-loop-windows-mac-support-validation.out`,
+  `/tmp/test-job-object-tree-loop-windows-mac-support-validation.out`,
+  `/tmp/mdlint-job-object-tree-loop-windows-mac-support-validation.out`, and
+  `/tmp/nixie-job-object-tree-loop-windows-mac-support-validation.out`. The
+  test gate ran two nextest passes: `275` passed with `3` skipped, then `151`
+  passed with `0` skipped.
+- [x] (2026-06-25T21:25:55Z) After the mandated backoff completed, three
+  CodeRabbit attempts still failed to produce a review result: two full
+  `coderabbit review --agent` runs and one
+  `coderabbit review --agent --type uncommitted` run all stalled after the
+  `summarizing` status and were stopped by their exact process groups. A final
+  scoped light attempt, `coderabbit review --agent --light --type uncommitted`,
+  returned another free CLI rate limit with a reported
+  `49 minutes and 40 seconds` reset. Per the user instruction, pause again with
+  `vsleep "$(shuf -i 45-90 -n 1)m"` before retrying CodeRabbit. Evidence:
+  `/tmp/coderabbit-job-object-tree-loop-windows-mac-support-validation.out`,
+  `/tmp/coderabbit-job-object-tree-loop-retry-windows-mac-support-validation.out`,
+  `/tmp/coderabbit-job-object-tree-loop-uncommitted-windows-mac-support-validation.out`,
+  and
+  `/tmp/coderabbit-job-object-tree-loop-uncommitted-light-windows-mac-support-validation.out`.
+- [x] (2026-06-25T23:06:31Z) CodeRabbit's scoped light retry produced one
+  `major` finding before the second rate-limit cycle: the Windows cleanup path
+  used a bare PID from `postmaster.pid`, so PID reuse could assign or terminate
+  an unrelated process. The fix parses the PostgreSQL start timestamp from
+  `postmaster.pid`, verifies the live Windows process still has a
+  `postgres(.exe)` image name and matching creation time before assigning it to
+  the Job Object or terminating its tree, and keeps the public PID-only
+  test-support helper feature-gated so docs builds remain warning-free. Local
+  validation passed after the fix: Windows target check,
+  `make check-fmt`, `make lint`, `make test`, `make markdownlint`, and
+  `make nixie`. Evidence:
+  `/tmp/coderabbit-job-object-tree-loop-uncommitted-light-after-backoff-windows-mac-support-validation.out`,
+  `/tmp/check-windows-job-object-identity-gated-helpers-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-job-object-identity-gated-helpers-windows-mac-support-validation.out`,
+  `/tmp/lint-job-object-identity-gated-helpers-windows-mac-support-validation.out`,
+  `/tmp/test-job-object-identity-gated-helpers-windows-mac-support-validation.out`,
+  `/tmp/mdlint-job-object-identity-gated-helpers-windows-mac-support-validation.out`,
+  and
+  `/tmp/nixie-job-object-identity-gated-helpers-windows-mac-support-validation.out`.
+  The test gate ran two nextest passes: `275` passed with `3` skipped, then
+  `151` passed with `0` skipped.
+- [x] (2026-06-25T23:13:04Z) CodeRabbit re-reviewed the uncommitted Job
+  Object identity-guard patch with
+  `coderabbit review --agent --light --type uncommitted` after deterministic
+  gates passed. The review completed with `status=review_completed` and
+  `findings=0`, so the PID-reuse concern is cleared before committing.
+  Evidence:
+  `/tmp/coderabbit-job-object-identity-postfix-windows-mac-support-validation.out`.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -634,6 +730,25 @@ cross-compile output before Milestone 1 begins.
   processes. Impact: spawning `taskkill` inside the process-exit path is not a
   reliable cleanup primitive for this test cluster; the Windows hook must use
   direct process handles and kill descendants itself.
+- Observation: remote CI run `28194422551` proved direct
+  `TerminateProcess` calls from the Windows atexit path were also insufficient.
+  The failure shape was unchanged: the postmaster PID from `postmaster.pid`
+  stayed alive for the parent process's full `30s` polling window, and the
+  GitHub runner later cleaned up the same `postgres` process tree. Impact: the
+  next approach must not depend solely on the atexit callback reaching and
+  terminating the postmaster during process teardown.
+- Observation: the first local Job Object patch used `.any(...)` to assign the
+  discovered Windows process tree to the kill-on-close job. Because `.any(...)`
+  short-circuits on the first success, a successful root-process assignment
+  prevented any later descendants from being attempted. Impact: assigning the
+  tree must be expressed as an explicit loop that visits every PID and records
+  whether at least one assignment succeeded.
+- Observation: CodeRabbit found that the Job Object and forced-termination
+  paths must not trust a bare PID from `postmaster.pid`, because Windows may
+  reuse that PID for an unrelated process before cleanup runs. Impact: the
+  Windows shutdown hook now treats the PID and PostgreSQL start timestamp as a
+  pair, then verifies the live process image and creation time before assigning
+  or terminating the process tree.
 
 ## Decision log
 
@@ -736,6 +851,25 @@ cross-compile output before Milestone 1 begins.
   handle. Rationale: hosted Windows CI proved `taskkill` was not dependable
   inside the atexit path, while adding a Windows crate would breach the plan's
   dependency tolerance. Date/Author: 2026-06-25, implementation agent.
+- Decision: continue past the original two-attempt Windows cleanup tolerance
+  after explicit user approval on 2026-06-25. Try up to four additional
+  approaches, recording each in this ExecPlan and validating with the hosted
+  Windows orphan-detection test. Rationale: the original tolerance correctly
+  forced escalation before a third cleanup strategy; the user has now supplied
+  the required direction to keep iterating. Date/Author: 2026-06-25,
+  implementation agent.
+- Decision: make the third Windows cleanup approach a Job Object failsafe
+  rather than another command executed from the atexit callback. Rationale:
+  assigning the postmaster tree to a kill-on-close job gives the operating
+  system an exit-time handle to close even if the callback does not run, cannot
+  acquire state, or cannot finish process termination. Date/Author: 2026-06-25,
+  implementation agent.
+- Decision: require Windows cleanup to verify the live postmaster identity
+  before Job Object assignment or process termination. Rationale: a PID-only
+  cleanup path can target an unrelated process after PID reuse; comparing the
+  expected PostgreSQL start timestamp from `postmaster.pid` with the live
+  process creation time keeps cleanup conservative without changing public
+  APIs. Date/Author: 2026-06-25, implementation agent.
 - Decision: serialize the shutdown-hook integration tests with the existing
   scenario guard instead of treating "data directory exists but is not empty"
   as a soft skip. Rationale: that error is expected only under concurrent use
