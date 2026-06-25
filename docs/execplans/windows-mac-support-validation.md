@@ -337,6 +337,10 @@ cross-compile output before Milestone 1 begins.
   `/tmp/nixie-ci-matrix-windows-mac-support-validation.out`. The full test gate
   ran two nextest passes: `275` passed with `3` skipped, then `151` passed with
   `0` skipped.
+- [x] (2026-06-25T14:53:00Z) CodeRabbit reviewed commit `341d330` after the
+  deterministic gates passed. `coderabbit review --agent` completed with
+  `status=review_completed` and `findings=0`, so the CI matrix milestone had no
+  concerns to clear before remote CI observation.
 - [ ] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
