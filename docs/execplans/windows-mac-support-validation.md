@@ -752,6 +752,26 @@ implemented.
   was observed with authenticated `gh` commands. Evidence:
   `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28214611615` and
   `/tmp/gh-watch-28214611615-windows-mac-support-validation.out`.
+- [x] (2026-06-26T03:45:00Z) Implemented the release-time asset audit in
+  `.github/workflows/release.yml`. The new `audit-draft-assets` matrix runs on
+  all five supported release targets, downloads the just-uploaded draft release
+  assets with `gh release download`, serves those exact files over local HTTPS,
+  dry-runs `cargo-binstall` resolution for all five supported triples, and
+  performs one real install-and-run of the host target before the draft is
+  published. A follow-up `verify-published-assets` job runs after publication
+  and dry-runs the public `pkg-url` template for all five targets. Local gates
+  passed before CodeRabbit review: `actionlint`, `make check-fmt`, `make lint`,
+  `make test`, `make markdownlint`, `make nixie`, and `git diff --check`.
+  CodeRabbit reviewed the uncommitted release-audit diff afterwards and returned
+  `status=review_completed` with `findings=0`. Evidence:
+  `/tmp/actionlint-release-asset-audit-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-release-asset-audit-windows-mac-support-validation.out`,
+  `/tmp/lint-release-asset-audit-windows-mac-support-validation.out`,
+  `/tmp/test-release-asset-audit-windows-mac-support-validation.out`,
+  `/tmp/mdlint-release-asset-audit-windows-mac-support-validation.out`,
+  `/tmp/nixie-release-asset-audit-windows-mac-support-validation.out`, and
+  `/tmp/diff-check-release-asset-audit-windows-mac-support-validation.out`, and
+  `/tmp/coderabbit-release-asset-audit-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -765,7 +785,8 @@ implemented.
 - [ ] Milestone 4: validate `binstall` with a real install-and-run per OS at
   pull-request time and an end-to-end check against real assets at release
   time. The pull-request-time real install-and-run is complete as of CI run
-  `28214611615`; the release-time asset audit remains to implement.
+  `28214611615`; the release-time asset audit is implemented and will execute
+  on the next release tag.
 - [ ] Milestone 5: update README, users' guide, roadmap appendix (and close
   item 3.3.2), and the design doc; run all commit gateways; finalise.
 
@@ -1033,6 +1054,11 @@ implemented.
   keep the explicit X.509v3 certificate generation; the remaining Milestone 4
   work is the release-time asset audit, not another local HTTPS transport
   approach.
+- Observation: the release audit must run before the draft release is
+  published if it is to block bad assets. Impact: audit the exact uploaded
+  draft assets through `gh release download` and local HTTPS before publishing,
+  then add a small post-publication public-URL dry-run to verify GitHub's
+  published `releases/download` URLs.
 
 ## Decision log
 
@@ -1125,6 +1151,12 @@ implemented.
   Linux real install-and-run checks pass without weakening TLS validation, so
   the additional fallback approaches are unnecessary unless a later regression
   reopens the failure. Date/Author: 2026-06-26, implementation agent.
+- Decision: split the release-time `binstall` audit into a blocking draft-asset
+  audit and a post-publication URL audit. Rationale: the draft-asset audit can
+  fail the workflow before a broken release becomes public while still using
+  the exact assets uploaded to GitHub; the post-publication dry-run then
+  verifies the public `pkg-url` template once those URLs exist. Date/Author:
+  2026-06-26, implementation agent.
 - Decision: do not add a bespoke Python `binstall` self-test unless the
   reuse-first evaluation shows the shared action plus a small Rust/CI check is
   insufficient; if one is added, it follows the df12 scripting standards.
@@ -1325,7 +1357,11 @@ Key files and their current platform posture (verified against HEAD):
   installed CLI.
 - `.github/workflows/release.yml` — on `v*`, `build-assets` publishes Linux
   x86-64, Linux arm64, Windows x86-64, macOS arm64, and macOS Intel archives by
-  calling `scripts/release_archive.py`, then uploads `dist/*.tgz`.
+  calling `scripts/release_archive.py`, then uploads `dist/*.tgz`. Before
+  publication, `audit-draft-assets` downloads those uploaded assets, dry-runs
+  `cargo-binstall` for all five targets, and real-installs the host target on
+  each release runner. After publication, `verify-published-assets` dry-runs
+  the public GitHub release URLs.
 - `Makefile` — `release-archive` validates `TARGET`/`VERSION` and delegates to
   `scripts/release_archive.py` for the cross-platform archive layout.
 - `.config/nextest.toml` — `global-timeout = "10m"`; a `serial` test group; a
