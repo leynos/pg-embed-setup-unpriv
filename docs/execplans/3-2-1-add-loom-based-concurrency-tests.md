@@ -81,6 +81,19 @@ command, observe deterministic pass/fail results, and still have the normal
       roadmap entry; recorded that behavioural tests are not applicable.
     - [x] (2026-01-12 22:15Z) Ran `make check-fmt`, `make lint`, `make test`,
       and Loom tests with `cargo test --features "loom-tests" --lib -- --ignored`.
+    - [x] (2026-06-26 12:07Z) Replaced the Loom test lock payload with an
+      in-memory fake environment map and routed env access through `EnvLockOps`
+      so production still calls `std::env` directly.
+    - [x] (2026-06-26 12:07Z) Added Loom scenarios for non-empty
+      backup/restore bookkeeping, spawn-while-held acquisition, panic-path
+      cleanup, asymmetric lifetimes, and per-thread depth tracking.
+    - [x] (2026-06-26 12:07Z) Ran
+      `cargo test --features "loom-tests" --lib -- --ignored`; all seven Loom
+      tests passed and the model run completed in 0.01s after compilation.
+    - [x] (2026-06-26 12:13Z) Ran `make check-fmt`, `make lint`,
+      `make test`, `make markdownlint`, and `make nixie`; all gates passed.
+    - [x] (2026-06-26 13:23Z) Ran `coderabbit review --agent`; CodeRabbit
+      completed the review with zero findings after the rate-limit backoff.
 
 ## Surprises & Discoveries
 
@@ -105,6 +118,16 @@ command, observe deterministic pass/fail results, and still have the normal
       Impact: document `cargo test --features "loom-tests" --lib -- --ignored`
       to target library tests only.
 
+    - Observation: `loom::sync::Mutex` wraps a `std::sync::Mutex` and unwraps
+      poison internally before returning its `LockResult`.
+      Evidence: the first panic-path model test restored during unwind, then a
+      subsequent fake-env snapshot panicked at `LOOM_ENV_LOCK.lock()` because
+      the inner mutex was poisoned.
+      Impact: the Loom panic test now asserts the restore mutations occurred
+      and the thread-local scope state reset, without reacquiring the fake
+      Loom mutex after the deliberate unwind. Production poison recovery
+      remains covered by the standard `recovers_from_poisoned_lock` test.
+
 ## Decision Log
 
     - Decision: Gate Loom tests behind the `loom-tests` feature and mark
@@ -121,12 +144,30 @@ command, observe deterministic pass/fail results, and still have the normal
       not leak into production or standard test builds.
       Date/Author: 2026-01-12 / Codex
 
+    - Decision: Route env reads and writes through `EnvLockOps` while passing
+      the held guard into each operation.
+      Rationale: production behaviour remains direct `std::env` access under
+      `ENV_LOCK`, while Loom can model backup and restore bookkeeping against
+      an in-memory map without touching the real process environment.
+      Date/Author: 2026-06-26 / Codex
+
+    - Decision: Keep the global Loom bounds at `max_threads = 3`,
+      `max_branches = 64`, and `preemption_bound = Some(3)`.
+      Rationale: the expanded scenarios pass within the existing compact state
+      space, preserving the fast opt-in model run.
+      Date/Author: 2026-06-26 / Codex
+
 ## Outcomes & Retrospective
 
 - Delivered Loom-backed `ScopedEnv` concurrency tests gated behind the
   `loom-tests` feature, with a dedicated Loom lock and thread-local state.
+- Expanded Loom coverage to include a fake non-empty environment, common
+  spawn-while-held setup, asymmetric scope lifetimes, panic-path cleanup, and
+  independent per-thread depth tracking.
 - Verified the standard gates (`make check-fmt`, `make lint`, `make test`) and
   the Loom suite (`cargo test --features "loom-tests" --lib -- --ignored`).
+- Re-verified documentation gates with `make markdownlint` and `make nixie`
+  after updating the developer guide and this ExecPlan.
 - Noted that the `database_lifecycle` integration tests are long-running under
   `make test`, so plan for extended runtimes during validation.
 
