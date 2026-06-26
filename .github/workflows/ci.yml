@@ -220,29 +220,70 @@ jobs:
           rm -rf "$install_dir" "$cert_dir"
           mkdir -p "$install_dir" "$cert_dir"
 
-          env MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+          cat > "$cert_dir/ca.cnf" <<'EOF'
+          [ req ]
+          prompt = no
+          distinguished_name = ca_dn
+          x509_extensions = v3_ca
+          default_md = sha256
+          string_mask = utf8only
+
+          [ ca_dn ]
+          O = pg-embed-setup-unpriv
+          CN = pg local test CA
+
+          [ v3_ca ]
+          subjectKeyIdentifier = hash
+          authorityKeyIdentifier = keyid:always
+          basicConstraints = critical,CA:TRUE,pathlen:0
+          keyUsage = critical,keyCertSign,cRLSign
+          EOF
+          env MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes \
+            -sha256 \
+            -days 1 \
+            -set_serial 1 \
             -keyout "$cert_dir/ca.key" \
             -out "$cert_dir/ca.pem" \
-            -subj "/CN=pg local test CA" \
-            -addext "basicConstraints=critical,CA:TRUE" \
-            -addext "keyUsage=critical,keyCertSign,cRLSign"
+            -config "$cert_dir/ca.cnf"
+
+          cat > "$cert_dir/server-req.cnf" <<'EOF'
+          [ req ]
+          prompt = no
+          distinguished_name = server_dn
+          default_md = sha256
+          string_mask = utf8only
+
+          [ server_dn ]
+          O = pg-embed-setup-unpriv
+          CN = 127.0.0.1
+          EOF
           env MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes \
+            -sha256 \
             -keyout "$cert_dir/server.key" \
             -out "$cert_dir/server.csr" \
-            -subj "/CN=127.0.0.1"
-          printf '%s\n' \
-            "subjectAltName = IP:127.0.0.1" \
-            "extendedKeyUsage = serverAuth" \
-            "keyUsage = critical,digitalSignature,keyEncipherment" \
-            > "$cert_dir/server-ext.cnf"
+            -config "$cert_dir/server-req.cnf"
+          cat > "$cert_dir/server-ext.cnf" <<'EOF'
+          [ server_cert ]
+          subjectKeyIdentifier = hash
+          authorityKeyIdentifier = keyid,issuer
+          basicConstraints = critical,CA:FALSE
+          subjectAltName = IP:127.0.0.1
+          extendedKeyUsage = serverAuth
+          keyUsage = critical,digitalSignature,keyEncipherment
+          EOF
           env MSYS_NO_PATHCONV=1 openssl x509 -req \
             -in "$cert_dir/server.csr" \
             -CA "$cert_dir/ca.pem" \
             -CAkey "$cert_dir/ca.key" \
-            -CAcreateserial \
+            -set_serial 2 \
+            -sha256 \
             -days 1 \
             -out "$cert_dir/server.pem" \
-            -extfile "$cert_dir/server-ext.cnf"
+            -extfile "$cert_dir/server-ext.cnf" \
+            -extensions server_cert
+          openssl verify -x509_strict -purpose sslserver \
+            -CAfile "$cert_dir/ca.pem" \
+            "$cert_dir/server.pem"
 
           if command -v python3 >/dev/null 2>&1; then
             python_bin=python3

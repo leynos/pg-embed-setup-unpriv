@@ -563,8 +563,7 @@ implemented.
   `/tmp/check-fmt-binstall-packaging-final-windows-mac-support-validation.out`,
   `/tmp/lint-binstall-packaging-final-windows-mac-support-validation.out`,
   `/tmp/test-binstall-packaging-final-windows-mac-support-validation.out`,
-  `/tmp/mdlint-binstall-packaging-final-windows-mac-support-validation.out`,
-  and
+  `/tmp/mdlint-binstall-packaging-final-windows-mac-support-validation.out`, and
   `/tmp/nixie-binstall-packaging-final-windows-mac-support-validation.out`.
 - [x] (2026-06-25T23:54:32Z) Requested CodeRabbit review for the uncommitted
   Milestone 3 packaging patch after the deterministic gates above. The scoped
@@ -574,13 +573,13 @@ implemented.
 - [x] (2026-06-26T00:02:45Z) Pushed commit `b14b0b7` and observed CI run
   `28208052710`. The existing macOS test job, Windows test job, and Linux root
   job reached green, but the new Linux `Binstall (x86_64-unknown-linux-gnu)`
-  job failed in the real install step before downloading the local archive.
-  The hosted setup action installed cargo-binstall `1.16.6`, which fails to
-  parse this local manifest with `can't load root workspace`; local reproduction
-  with a temporary `1.16.6` install produced the same error, while the same
-  archive and HTTPS server passed with cargo-binstall `1.19.1`. Patched the
-  packaging CI job to install cargo-binstall `1.19.1` into a job-local
-  directory and prepend it to `PATH` before the validation install. Evidence:
+  job failed in the real install step before downloading the local archive. The
+  hosted setup action installed cargo-binstall `1.16.6`, which fails to parse
+  this local manifest with `can't load root workspace`; local reproduction with
+  a temporary `1.16.6` install produced the same error, while the same archive
+  and HTTPS server passed with cargo-binstall `1.19.1`. Patched the packaging
+  CI job to install cargo-binstall `1.19.1` into a job-local directory and
+  prepend it to `PATH` before the validation install. Evidence:
   `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28208052710`,
   `/tmp/ci-binstall-linux-failure-log-api-windows-mac-support-validation.out`,
   `/tmp/cargo-binstall-1.16.6-installs-1.19.1-windows-mac-support-validation.out`,
@@ -594,9 +593,8 @@ implemented.
   without test-support features exposed unused Windows shutdown-hook helper
   imports under `-D warnings`; the Windows PID/probe re-exports and the probe
   function are now compiled only when the test-support API is compiled. Local
-  `cargo check --target x86_64-pc-windows-msvc --release --bin
-  pg_embedded_setup_unpriv --bin pg_worker` and `actionlint` passed after
-  those fixes. Evidence:
+  `cargo check --target x86_64-pc-windows-msvc --release --bin pg_embedded_setup_unpriv --bin pg_worker`
+  and `actionlint` passed after those fixes. Evidence:
   `/tmp/ci-binstall-macos-failure-log-api-windows-mac-support-validation.out`,
   `/tmp/ci-binstall-windows-failure-log-api-windows-mac-support-validation.out`,
   `/tmp/check-windows-release-binstall-fixes-windows-mac-support-validation.out`,
@@ -611,11 +609,12 @@ implemented.
   `/tmp/actionlint-binstall-packaging-binstall-version-fix-windows-mac-support-validation.out`,
   `/tmp/mdlint-binstall-packaging-binstall-version-fix-windows-mac-support-validation.out`,
   `/tmp/nixie-binstall-packaging-binstall-version-fix-windows-mac-support-validation.out`,
-  and `/tmp/coderabbit-binstall-version-fix-windows-mac-support-validation.out`.
+  and
+  `/tmp/coderabbit-binstall-version-fix-windows-mac-support-validation.out`.
 - [x] (2026-06-26T00:08:55Z) Re-ran the full local gate set after the combined
-  Linux/macOS/Windows packaging CI fixes. `cargo check --target
-  x86_64-pc-windows-msvc --release --bin pg_embedded_setup_unpriv --bin
-  pg_worker`, `actionlint`, `make check-fmt`, `make lint`, `make test`,
+  Linux/macOS/Windows packaging CI fixes.
+  `cargo check --target x86_64-pc-windows-msvc --release --bin pg_embedded_setup_unpriv --bin pg_worker`,
+  `actionlint`, `make check-fmt`, `make lint`, `make test`,
   `make markdownlint`, `make nixie`, and `git diff --check` passed. The Linux
   test gate again ran two nextest passes: `275` tests passed with `3` skipped,
   then `151` tests passed with `0` skipped. Evidence:
@@ -625,7 +624,8 @@ implemented.
   `/tmp/lint-binstall-packaging-ci-fixes-windows-mac-support-validation.out`,
   `/tmp/test-binstall-packaging-ci-fixes-windows-mac-support-validation.out`,
   `/tmp/mdlint-binstall-packaging-ci-fixes-windows-mac-support-validation.out`,
-  and `/tmp/nixie-binstall-packaging-ci-fixes-windows-mac-support-validation.out`.
+  and
+  `/tmp/nixie-binstall-packaging-ci-fixes-windows-mac-support-validation.out`.
 - [x] (2026-06-26T01:28:12Z) CodeRabbit reviewed the combined
   Linux/macOS/Windows packaging CI fixes after the full local gate set passed
   and after the required randomised backoff for the free CLI rate limit.
@@ -639,12 +639,12 @@ implemented.
   authentication token is expired, so CI observation continues through the
   authenticated `gh` CLI until that connector is repaired. Linux root, Linux
   unprivileged, macOS tests, Windows tests, and the Linux real `binstall` job
-  all passed. The macOS `binstall` job failed while bootstrapping
-  cargo-binstall `1.19.1`: source fallback replaced the Cargo-home
-  `cargo-binstall` binary instead of writing to the requested
-  `$RUNNER_TEMP/cargo-binstall-1.19.1` directory. The Windows `binstall` job
-  built the archive but failed when Git Bash rewrote OpenSSL's `/CN=...`
-  certificate subject into a `C:/Program Files/Git/...` path. Evidence:
+  all passed. The macOS `binstall` job failed while bootstrapping cargo-binstall
+  `1.19.1`: source fallback replaced the Cargo-home `cargo-binstall` binary
+  instead of writing to the requested `$RUNNER_TEMP/cargo-binstall-1.19.1`
+  directory. The Windows `binstall` job built the archive but failed when Git
+  Bash rewrote OpenSSL's `/CN=...` certificate subject into a
+  `C:/Program Files/Git/...` path. Evidence:
   `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28211320490`,
   `/tmp/ci-binstall-macos-af35126-job-logs-api-windows-mac-support-validation.out`,
   `/tmp/ci-binstall-windows-af35126-job-logs-api-windows-mac-support-validation.out`,
@@ -702,6 +702,46 @@ implemented.
   `/tmp/diff-check-binstall-readiness-curl-windows-mac-support-validation.out`,
   and
   `/tmp/coderabbit-binstall-readiness-curl-windows-mac-support-validation.out`.
+- [x] (2026-06-26T02:10:43Z) Pushed commit `35a6bbd` and observed CI run
+  `28212300565`. Linux root, Linux unprivileged, macOS tests, Windows tests,
+  Linux `binstall`, and Windows `binstall` all passed. The macOS `binstall` job
+  reached the real `cargo-binstall` install step and failed while validating
+  the local HTTPS archive: `rustls-platform-verifier`/Apple Security rejected
+  the extra root certificate with
+  `"pg local test CA" certificate is not standards compliant: -67903`. The
+  GitHub MCP workflow-log tool was tried first again, but the connector token
+  remains expired, so logs were fetched with the authenticated `gh` CLI.
+  Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28212300565`,
+  `/tmp/ci-binstall-macos-35a6bbd-job-logs-api-windows-mac-support-validation.out`,
+  and `/tmp/gh-watch-28212300565-windows-mac-support-validation.out`.
+- [x] (2026-06-26T02:14:28Z) User approved continuing with four more approaches
+  for the remaining macOS `binstall` validation failure. Approach 1 replaces
+  the ad hoc one-line OpenSSL root/server certificate generation with explicit
+  config files, a non-empty organisation in both subjects, fixed short serial
+  numbers, explicit CA/server X.509v3 extensions, and an
+  `openssl verify -x509_strict -purpose sslserver` check before the local HTTPS
+  server starts. Local Linux real-install validation still passes with
+  cargo-binstall `1.19.1` and the new certificate profile. Deterministic gates
+  passed before CodeRabbit review: `actionlint`, `make fmt`, `make check-fmt`,
+  `make lint`, `make test`, `make markdownlint`, `make nixie`, and
+  `git diff --check`. The first CodeRabbit attempt hit the free CLI rate limit,
+  so the mandated randomised backoff ran for `52` minutes before retrying. The
+  retry completed with `status=review_completed` and `findings=0`. Evidence:
+  `/tmp/actionlint-binstall-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/explicit-cert-strict-verify-windows-mac-support-validation.out`,
+  `/tmp/release-archive-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/binstall-local-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/fmt-binstall-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-binstall-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/lint-binstall-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/test-binstall-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/mdlint-binstall-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/nixie-binstall-explicit-cert-windows-mac-support-validation.out`, and
+  `/tmp/diff-check-binstall-explicit-cert-windows-mac-support-validation.out`,
+  `/tmp/coderabbit-binstall-explicit-cert-windows-mac-support-validation.out`,
+  and
+  `/tmp/coderabbit-binstall-explicit-cert-retry-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -923,9 +963,9 @@ implemented.
   `http.server`.
 - Observation: cargo-binstall `1.16.6`, the version installed by the pinned
   shared setup action at implementation time, cannot parse this crate through
-  `--manifest-path Cargo.toml` for the local cargo-binstall validation path;
-  it reports `can't load root workspace` before trying the local package URL.
-  The same archive and command shape work with cargo-binstall `1.19.1`, and
+  `--manifest-path Cargo.toml` for the local cargo-binstall validation path; it
+  reports `can't load root workspace` before trying the local package URL. The
+  same archive and command shape work with cargo-binstall `1.19.1`, and
   `1.16.6` can bootstrap `1.19.1` into an isolated install directory. Impact:
   the `binstall-packaging` job must pin the cargo-binstall version it uses for
   validation instead of inheriting the shared action's bundled version.
@@ -951,8 +991,8 @@ implemented.
   source build and replace the existing Cargo-home `cargo-binstall` executable
   rather than honouring the requested `--install-path`. Impact: the CI job must
   discover the effective installed binary path after bootstrap and verify its
-  version, instead of assuming `$RUNNER_TEMP/cargo-binstall-1.19.1` contains the
-  executable.
+  version, instead of assuming `$RUNNER_TEMP/cargo-binstall-1.19.1` contains
+  the executable.
 - Observation: on the hosted Windows runner, Git Bash/MSYS path conversion
   rewrites OpenSSL certificate subject arguments such as `/CN=pg local test CA`
   into paths rooted under `C:/Program Files/Git/`, which OpenSSL rejects as an
@@ -962,11 +1002,20 @@ implemented.
   throwaway local CA during the curl readiness probe, but in platform-specific
   ways: macOS curl reports `unable to get local issuer certificate`, while
   Windows curl backed by SChannel reports `the revocation status is unknown`.
-  In both cases the local HTTPS server is already accepting connections and
-  the failure happens before `cargo-binstall` can run. Impact: the readiness
-  probe should only test server availability; the cargo-binstall command below
-  it remains the cross-platform CA-validation gate through
-  `--root-certificates`.
+  In both cases the local HTTPS server is already accepting connections and the
+  failure happens before `cargo-binstall` can run. Impact: the readiness probe
+  should only test server availability; the cargo-binstall command below it
+  remains the cross-platform CA-validation gate through `--root-certificates`.
+- Observation: after the readiness-probe fix, CI run `28212300565` proved the
+  remaining `binstall` failure is macOS-specific and happens inside
+  `cargo-binstall`'s Rust TLS stack. Windows `binstall` passed the same local
+  HTTPS validation, while macOS failed with Apple Security error `-67903`,
+  reported by `rustls-platform-verifier` as the extra root certificate not
+  being standards compliant. Local `openssl verify -x509_strict` accepts the
+  original chain, so this is a platform verifier policy difference rather than
+  a plain OpenSSL chain-building failure. Impact: first try a more explicit
+  root/server certificate profile; if that still fails, stop relying on a
+  custom CA as the macOS PR-time validation transport.
 
 ## Decision log
 
@@ -1009,18 +1058,18 @@ implemented.
   2026-06-25, planning agent.
 - Decision: install cargo-binstall `1.19.1` into `$RUNNER_TEMP` in the
   `binstall-packaging` job and prepend that directory to `PATH` before running
-  the validation install. Rationale: the shared action's bundled
-  cargo-binstall `1.16.6` fails on this local-manifest validation path; the
-  newer tool version is isolated to the packaging job and can be installed by
-  the older tool before the crate-under-test is validated. Date/Author:
-  2026-06-26, implementation agent.
+  the validation install. Rationale: the shared action's bundled cargo-binstall
+  `1.16.6` fails on this local-manifest validation path; the newer tool version
+  is isolated to the packaging job and can be installed by the older tool
+  before the crate-under-test is validated. Date/Author: 2026-06-26,
+  implementation agent.
 - Decision: after bootstrapping cargo-binstall `1.19.1`, accept either the
   requested job-local install directory or Cargo home's `bin` directory as the
   effective tool location, then verify that `cargo-binstall -V` reports
   `1.19.1` before adding that directory to `PATH`. Rationale: hosted macOS can
   source-build the tool and replace the Cargo-home executable despite
-  `--install-path`, so version verification is the stable contract. Date/Author:
-  2026-06-26, implementation agent.
+  `--install-path`, so version verification is the stable contract.
+  Date/Author: 2026-06-26, implementation agent.
 - Decision: sign the local HTTPS server certificate with a generated OpenSSL
   extension file instead of relying on `openssl x509 -copy_extensions`.
   Rationale: Linux accepted `-copy_extensions`, but the hosted macOS OpenSSL
@@ -1039,6 +1088,21 @@ implemented.
   hosted macOS/Windows curl backends reject the generated one-day CA before
   that command can exercise the real install path. Date/Author: 2026-06-26,
   implementation agent.
+- Decision: continue past the original `binstall` validation tolerance after
+  explicit user approval on 2026-06-26. Try up to four further approaches,
+  recording each in this ExecPlan and validating through deterministic local
+  gates plus hosted CI. Rationale: the original tolerance correctly forced
+  escalation after the primary and alternate `binstall` validation attempts;
+  the user has now supplied the required direction to keep iterating.
+  Date/Author: 2026-06-26, implementation agent.
+- Decision: make the first resumed macOS `binstall` approach a more explicit
+  throwaway certificate profile rather than weakening TLS validation.
+  Rationale: the latest hosted run proves Windows can install from the local
+  HTTPS archive and macOS reaches `cargo-binstall`; the failing component is
+  Apple Security's acceptance of the extra root anchor, so the least invasive
+  next step is to generate CA and server certificates with explicit X.509v3
+  extensions, fixed short serials, and a fuller subject identity. Date/Author:
+  2026-06-26, implementation agent.
 - Decision: do not add a bespoke Python `binstall` self-test unless the
   reuse-first evaluation shows the shared action plus a small Rust/CI check is
   insufficient; if one is added, it follows the df12 scripting standards.
