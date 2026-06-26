@@ -742,6 +742,16 @@ implemented.
   `/tmp/coderabbit-binstall-explicit-cert-windows-mac-support-validation.out`,
   and
   `/tmp/coderabbit-binstall-explicit-cert-retry-windows-mac-support-validation.out`.
+- [x] (2026-06-26T03:20:17Z) Pushed commit `87791d7` and observed CI run
+  `28214611615` to green. Linux root, Linux unprivileged, macOS tests, Windows
+  tests, Linux `binstall`, Windows `binstall`, and macOS `binstall` all passed.
+  The explicit X.509v3 CA/server certificate profile resolved the hosted macOS
+  Apple Security `-67903` rejection, and the real `cargo-binstall` install now
+  succeeds on all three pull-request runners. The GitHub MCP workflow-run tool
+  was retried for this commit and still returned `token_expired`, so the CI run
+  was observed with authenticated `gh` commands. Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28214611615` and
+  `/tmp/gh-watch-28214611615-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -753,7 +763,9 @@ implemented.
 - [x] Milestone 3: add `binstall` packaging for macOS and Windows; extend the
   release workflow to build and upload the new archives.
 - [ ] Milestone 4: validate `binstall` with a real install-and-run per OS at
-  pull-request time and an end-to-end check against real assets at release time.
+  pull-request time and an end-to-end check against real assets at release
+  time. The pull-request-time real install-and-run is complete as of CI run
+  `28214611615`; the release-time asset audit remains to implement.
 - [ ] Milestone 5: update README, users' guide, roadmap appendix (and close
   item 3.3.2), and the design doc; run all commit gateways; finalise.
 
@@ -1016,6 +1028,11 @@ implemented.
   a plain OpenSSL chain-building failure. Impact: first try a more explicit
   root/server certificate profile; if that still fails, stop relying on a
   custom CA as the macOS PR-time validation transport.
+- Observation: CI run `28214611615` proved the stricter local CA profile is
+  accepted by `cargo-binstall` on hosted macOS, Windows, and Linux. Impact:
+  keep the explicit X.509v3 certificate generation; the remaining Milestone 4
+  work is the release-time asset audit, not another local HTTPS transport
+  approach.
 
 ## Decision log
 
@@ -1103,6 +1120,11 @@ implemented.
   next step is to generate CA and server certificates with explicit X.509v3
   extensions, fixed short serials, and a fuller subject identity. Date/Author:
   2026-06-26, implementation agent.
+- Decision: stop iterating on the macOS local HTTPS transport after Approach 1.
+  Rationale: the first resumed approach made the hosted macOS, Windows, and
+  Linux real install-and-run checks pass without weakening TLS validation, so
+  the additional fallback approaches are unnecessary unless a later regression
+  reopens the failure. Date/Author: 2026-06-26, implementation agent.
 - Decision: do not add a bespoke Python `binstall` self-test unless the
   reuse-first evaluation shows the shared action plus a small Rust/CI check is
   insufficient; if one is added, it follows the df12 scripting standards.
