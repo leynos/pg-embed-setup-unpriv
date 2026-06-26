@@ -571,6 +571,69 @@ implemented.
   light review completed with `status=review_completed` and `findings=0`.
   Evidence:
   `/tmp/coderabbit-binstall-packaging-windows-mac-support-validation.out`.
+- [x] (2026-06-26T00:02:45Z) Pushed commit `b14b0b7` and observed CI run
+  `28208052710`. The existing macOS test job, Windows test job, and Linux root
+  job reached green, but the new Linux `Binstall (x86_64-unknown-linux-gnu)`
+  job failed in the real install step before downloading the local archive.
+  The hosted setup action installed cargo-binstall `1.16.6`, which fails to
+  parse this local manifest with `can't load root workspace`; local reproduction
+  with a temporary `1.16.6` install produced the same error, while the same
+  archive and HTTPS server passed with cargo-binstall `1.19.1`. Patched the
+  packaging CI job to install cargo-binstall `1.19.1` into a job-local
+  directory and prepend it to `PATH` before the validation install. Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28208052710`,
+  `/tmp/ci-binstall-linux-failure-log-api-windows-mac-support-validation.out`,
+  `/tmp/cargo-binstall-1.16.6-installs-1.19.1-windows-mac-support-validation.out`,
+  and local reproduction output from the temporary `1.16.6` run.
+- [x] (2026-06-26T00:06:54Z) Pulled the remaining failed jobs from the same
+  hosted run before committing the cargo-binstall version fix. macOS failed in
+  the certificate-signing step because its OpenSSL does not support
+  `openssl x509 -copy_extensions copy`; the CI script now writes a portable
+  `server-ext.cnf` and signs the server certificate with `-extfile`. Windows
+  failed while building the release archive because a release binary build
+  without test-support features exposed unused Windows shutdown-hook helper
+  imports under `-D warnings`; the Windows PID/probe re-exports and the probe
+  function are now compiled only when the test-support API is compiled. Local
+  `cargo check --target x86_64-pc-windows-msvc --release --bin
+  pg_embedded_setup_unpriv --bin pg_worker` and `actionlint` passed after
+  those fixes. Evidence:
+  `/tmp/ci-binstall-macos-failure-log-api-windows-mac-support-validation.out`,
+  `/tmp/ci-binstall-windows-failure-log-api-windows-mac-support-validation.out`,
+  `/tmp/check-windows-release-binstall-fixes-windows-mac-support-validation.out`,
+  and
+  `/tmp/actionlint-binstall-packaging-portable-openssl-windows-mac-support-validation.out`.
+- [x] (2026-06-26T00:04:22Z) Re-ran deterministic checks for the
+  cargo-binstall version fix before review: `actionlint`, `make markdownlint`,
+  `make nixie`, and `git diff --check` passed. CodeRabbit then reviewed the
+  uncommitted workflow/doc patch with
+  `coderabbit review --agent --light --type uncommitted` and completed with
+  `status=review_completed` and `findings=0`. Evidence:
+  `/tmp/actionlint-binstall-packaging-binstall-version-fix-windows-mac-support-validation.out`,
+  `/tmp/mdlint-binstall-packaging-binstall-version-fix-windows-mac-support-validation.out`,
+  `/tmp/nixie-binstall-packaging-binstall-version-fix-windows-mac-support-validation.out`,
+  and `/tmp/coderabbit-binstall-version-fix-windows-mac-support-validation.out`.
+- [x] (2026-06-26T00:08:55Z) Re-ran the full local gate set after the combined
+  Linux/macOS/Windows packaging CI fixes. `cargo check --target
+  x86_64-pc-windows-msvc --release --bin pg_embedded_setup_unpriv --bin
+  pg_worker`, `actionlint`, `make check-fmt`, `make lint`, `make test`,
+  `make markdownlint`, `make nixie`, and `git diff --check` passed. The Linux
+  test gate again ran two nextest passes: `275` tests passed with `3` skipped,
+  then `151` tests passed with `0` skipped. Evidence:
+  `/tmp/check-windows-release-binstall-fixes-windows-mac-support-validation.out`,
+  `/tmp/actionlint-binstall-packaging-portable-openssl-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-binstall-packaging-ci-fixes-windows-mac-support-validation.out`,
+  `/tmp/lint-binstall-packaging-ci-fixes-windows-mac-support-validation.out`,
+  `/tmp/test-binstall-packaging-ci-fixes-windows-mac-support-validation.out`,
+  `/tmp/mdlint-binstall-packaging-ci-fixes-windows-mac-support-validation.out`,
+  and `/tmp/nixie-binstall-packaging-ci-fixes-windows-mac-support-validation.out`.
+- [x] (2026-06-26T01:28:12Z) CodeRabbit reviewed the combined
+  Linux/macOS/Windows packaging CI fixes after the full local gate set passed
+  and after the required randomised backoff for the free CLI rate limit.
+  `coderabbit review --agent --light --type uncommitted` completed with
+  `status=review_completed` and `findings=0`, so there are no CodeRabbit
+  concerns to clear before committing and pushing the corrective patch.
+  Evidence:
+  `/tmp/coderabbit-binstall-ci-fixes-retry-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -790,6 +853,26 @@ implemented.
   a throwaway CA and passing that CA via `--root-certificates`. Impact: the CI
   `binstall` job uses a local HTTPS server rather than a plain Python
   `http.server`.
+- Observation: cargo-binstall `1.16.6`, the version installed by the pinned
+  shared setup action at implementation time, cannot parse this crate through
+  `--manifest-path Cargo.toml` for the local cargo-binstall validation path;
+  it reports `can't load root workspace` before trying the local package URL.
+  The same archive and command shape work with cargo-binstall `1.19.1`, and
+  `1.16.6` can bootstrap `1.19.1` into an isolated install directory. Impact:
+  the `binstall-packaging` job must pin the cargo-binstall version it uses for
+  validation instead of inheriting the shared action's bundled version.
+- Observation: macOS's hosted OpenSSL accepts `openssl req -addext` in the
+  request step but rejects `openssl x509 -copy_extensions copy` in the signing
+  step. Impact: certificate extensions for the local HTTPS server must be
+  supplied through an explicit `-extfile` that works across Linux, macOS, and
+  Windows OpenSSL builds.
+- Observation: `make lint` and the cross-platform test jobs compile Windows
+  with test-support features, but the release archive builder compiles the
+  production binaries without those features. That narrower production build
+  exposed unused Windows shutdown-hook PID helper re-exports that the earlier
+  all-feature gates could not see. Impact: Milestone 3 needs a release-target
+  Windows check as part of its packaging evidence, not only all-targets test
+  checks.
 
 ## Decision log
 
@@ -830,6 +913,19 @@ implemented.
   with `--dry-run` per-target resolution as a secondary breadth check.
   Rationale: `--dry-run` cannot catch extraction/placement faults. Date/Author:
   2026-06-25, planning agent.
+- Decision: install cargo-binstall `1.19.1` into `$RUNNER_TEMP` in the
+  `binstall-packaging` job and prepend that directory to `PATH` before running
+  the validation install. Rationale: the shared action's bundled
+  cargo-binstall `1.16.6` fails on this local-manifest validation path; the
+  newer tool version is isolated to the packaging job and can be installed by
+  the older tool before the crate-under-test is validated. Date/Author:
+  2026-06-26, implementation agent.
+- Decision: sign the local HTTPS server certificate with a generated OpenSSL
+  extension file instead of relying on `openssl x509 -copy_extensions`.
+  Rationale: Linux accepted `-copy_extensions`, but the hosted macOS OpenSSL
+  rejected it; an explicit `subjectAltName`/`serverAuth` `-extfile` keeps the
+  throwaway CA validation portable. Date/Author: 2026-06-26, implementation
+  agent.
 - Decision: do not add a bespoke Python `binstall` self-test unless the
   reuse-first evaluation shows the shared action plus a small Rust/CI check is
   insufficient; if one is added, it follows the df12 scripting standards.

@@ -5,10 +5,15 @@ mod windows;
 
 #[cfg(windows)]
 pub(super) use self::windows::{
-    PostmasterPid, PostmasterProcess, ProcessExitFailsafe, force_shutdown, parse_pid,
-    parse_postmaster_process, postmaster_process_is_running, prepare_process_exit_failsafe,
-    process_is_running_for_platform, request_shutdown,
+    PostmasterProcess, ProcessExitFailsafe, force_shutdown, parse_postmaster_process,
+    postmaster_process_is_running, prepare_process_exit_failsafe, request_shutdown,
 };
+
+#[cfg(all(
+    windows,
+    any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
+))]
+pub(super) use self::windows::{PostmasterPid, parse_pid, process_is_running_for_platform};
 
 /// Platform-specific process identifier stored in `postmaster.pid`.
 #[cfg(unix)]

@@ -71,6 +71,7 @@ pub(in crate::cluster::shutdown_hook) fn force_shutdown(process: PostmasterProce
 }
 
 /// Returns `true` when the process exists and has not exited.
+#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub(in crate::cluster::shutdown_hook) fn process_is_running_for_platform(
     pid: PostmasterPid,
 ) -> bool {
