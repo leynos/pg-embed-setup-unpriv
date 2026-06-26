@@ -4,6 +4,7 @@ use std::future::Future;
 use color_eyre::eyre::{Context, eyre};
 use tokio::runtime::Runtime;
 
+use crate::bootstrap::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
 use crate::error::{BootstrapError, BootstrapResult};
 use crate::observability::LOG_TARGET;
 #[cfg(all(
@@ -70,6 +71,10 @@ fn execute_root_operation(
         if let Some(hook) = hook_slot {
             return hook(bootstrap, env_vars, operation);
         }
+    }
+
+    if !root_privilege_drop_supported() {
+        return Err(unsupported_root_privilege_drop_error());
     }
 
     match bootstrap.execution_mode {

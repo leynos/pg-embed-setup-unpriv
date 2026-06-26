@@ -11,8 +11,7 @@ use camino::{Utf8Path, Utf8PathBuf};
         target_os = "dragonfly",
     ),
 ))]
-use color_eyre::eyre::Context;
-use color_eyre::eyre::eyre;
+use color_eyre::eyre::{Context, eyre};
 use postgresql_embedded::Settings;
 
 use crate::{
@@ -22,7 +21,10 @@ use crate::{
     observability::LOG_TARGET,
 };
 
-use super::env::{TestBootstrapEnvironment, XdgDirs, prepare_timezone_env};
+use super::{
+    env::{TestBootstrapEnvironment, XdgDirs, prepare_timezone_env},
+    mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error},
+};
 
 #[cfg(all(
     unix,
@@ -68,6 +70,10 @@ pub(super) fn prepare_bootstrap(
     settings: Settings,
     cfg: &PgEnvCfg,
 ) -> BootstrapResult<PreparedBootstrap> {
+    if privileges == super::mode::ExecutionPrivileges::Root && !root_privilege_drop_supported() {
+        return Err(unsupported_root_privilege_drop_error());
+    }
+
     #[cfg(all(
         unix,
         any(
@@ -97,9 +103,9 @@ pub(super) fn prepare_bootstrap(
     )))]
     {
         match privileges {
-            super::mode::ExecutionPrivileges::Root => Err(BootstrapError::from(eyre!(
-                "privilege drop is not supported on this target; run without root privileges"
-            ))),
+            super::mode::ExecutionPrivileges::Root => {
+                unreachable!("root privilege drop support is checked before platform dispatch")
+            }
             super::mode::ExecutionPrivileges::Unprivileged => bootstrap_unprivileged(settings, cfg),
         }
     }

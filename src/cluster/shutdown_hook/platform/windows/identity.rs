@@ -64,7 +64,7 @@ pub(super) fn process_matches_postmaster(
     image_file_name_is_postgres(process) && creation_time_matches(process, expected)
 }
 
-fn image_file_name_is_postgres(process: *mut c_void) -> bool {
+pub(super) fn image_file_name_is_postgres(process: *mut c_void) -> bool {
     process_image_name(process)
         .as_deref()
         .and_then(|name| name.rsplit(['\\', '/']).next())

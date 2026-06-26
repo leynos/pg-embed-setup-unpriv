@@ -181,9 +181,11 @@ fn set_permissions_for_platform(
 fn set_permissions_for_platform(
     path: &Utf8Path,
     mode: u32,
-    _dir: &Dir,
-    _relative: &Utf8PathBuf,
+    dir: &Dir,
+    relative: &Utf8PathBuf,
 ) -> Result<()> {
+    dir.metadata(relative.as_std_path())
+        .with_context(|| format!("stat {}", path.as_str()))?;
     info!(
         target: LOG_TARGET,
         path = %path,

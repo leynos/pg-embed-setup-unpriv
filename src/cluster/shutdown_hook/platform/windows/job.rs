@@ -91,6 +91,9 @@ impl JobHandle {
         let Some(process) = ProcessHandle::open_assign_to_job(pid) else {
             return false;
         };
+        if !process.is_active_postgres() {
+            return false;
+        }
         self.assign_process_handle(&process)
     }
 
