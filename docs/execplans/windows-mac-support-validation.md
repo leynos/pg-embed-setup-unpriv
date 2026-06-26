@@ -634,6 +634,43 @@ implemented.
   concerns to clear before committing and pushing the corrective patch.
   Evidence:
   `/tmp/coderabbit-binstall-ci-fixes-retry-windows-mac-support-validation.out`.
+- [x] (2026-06-26T01:40:48Z) Pushed commit `af35126` and observed CI run
+  `28211320490`. The GitHub MCP workflow-read tool was tried first, but its
+  authentication token is expired, so CI observation continues through the
+  authenticated `gh` CLI until that connector is repaired. Linux root, Linux
+  unprivileged, macOS tests, Windows tests, and the Linux real `binstall` job
+  all passed. The macOS `binstall` job failed while bootstrapping
+  cargo-binstall `1.19.1`: source fallback replaced the Cargo-home
+  `cargo-binstall` binary instead of writing to the requested
+  `$RUNNER_TEMP/cargo-binstall-1.19.1` directory. The Windows `binstall` job
+  built the archive but failed when Git Bash rewrote OpenSSL's `/CN=...`
+  certificate subject into a `C:/Program Files/Git/...` path. Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28211320490`,
+  `/tmp/ci-binstall-macos-af35126-job-logs-api-windows-mac-support-validation.out`,
+  `/tmp/ci-binstall-windows-af35126-job-logs-api-windows-mac-support-validation.out`,
+  and `/tmp/gh-watch-28211320490-windows-mac-support-validation.out`.
+- [x] (2026-06-26T01:40:48Z) Applied the next local `binstall` workflow patch:
+  after installing cargo-binstall `1.19.1`, resolve the actual binary from
+  either the requested job-local directory or `${CARGO_HOME:-$HOME/.cargo}/bin`
+  and verify the version before adding it to `PATH`; for the throwaway HTTPS
+  certificates, set `MSYS_NO_PATHCONV=1` only on the OpenSSL commands that pass
+  `/CN=...` subjects. Deterministic gates passed before review: `actionlint`,
+  `make check-fmt`, `make lint`, `make test`, `make markdownlint`,
+  `make nixie`, and `git diff --check`. Evidence:
+  `/tmp/actionlint-binstall-pathconv-fallback-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-binstall-pathconv-fallback-windows-mac-support-validation.out`,
+  `/tmp/lint-binstall-pathconv-fallback-windows-mac-support-validation.out`,
+  `/tmp/test-binstall-pathconv-fallback-windows-mac-support-validation.out`,
+  `/tmp/mdlint-binstall-pathconv-fallback-windows-mac-support-validation.out`,
+  `/tmp/nixie-binstall-pathconv-fallback-windows-mac-support-validation.out`,
+  and
+  `/tmp/diff-check-binstall-pathconv-fallback-final-windows-mac-support-validation.out`.
+- [x] (2026-06-26T01:43:09Z) CodeRabbit reviewed the uncommitted
+  cargo-binstall path-resolution and Windows OpenSSL path-conversion patch
+  after deterministic gates passed.
+  `coderabbit review --agent --light --type uncommitted` completed with
+  `status=review_completed` and `findings=0`. Evidence:
+  `/tmp/coderabbit-binstall-pathconv-fallback-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -873,6 +910,23 @@ implemented.
   all-feature gates could not see. Impact: Milestone 3 needs a release-target
   Windows check as part of its packaging evidence, not only all-targets test
   checks.
+- Observation: the GitHub MCP workflow-read tool is currently unusable in this
+  session because the connector returns an expired-token error. Impact: use the
+  authenticated `gh` CLI for CI observation and raw job-log retrieval until the
+  connector token is refreshed; keep the MCP failure recorded because the
+  user's preferred validation route was attempted.
+- Observation: on the hosted Apple Silicon macOS runner, bootstrapping
+  cargo-binstall `1.19.1` from cargo-binstall `1.16.6` may fall back to a
+  source build and replace the existing Cargo-home `cargo-binstall` executable
+  rather than honouring the requested `--install-path`. Impact: the CI job must
+  discover the effective installed binary path after bootstrap and verify its
+  version, instead of assuming `$RUNNER_TEMP/cargo-binstall-1.19.1` contains the
+  executable.
+- Observation: on the hosted Windows runner, Git Bash/MSYS path conversion
+  rewrites OpenSSL certificate subject arguments such as `/CN=pg local test CA`
+  into paths rooted under `C:/Program Files/Git/`, which OpenSSL rejects as an
+  invalid subject name. Impact: the workflow must disable MSYS path conversion
+  for the OpenSSL invocations that pass slash-prefixed certificate subjects.
 
 ## Decision log
 
@@ -920,12 +974,24 @@ implemented.
   newer tool version is isolated to the packaging job and can be installed by
   the older tool before the crate-under-test is validated. Date/Author:
   2026-06-26, implementation agent.
+- Decision: after bootstrapping cargo-binstall `1.19.1`, accept either the
+  requested job-local install directory or Cargo home's `bin` directory as the
+  effective tool location, then verify that `cargo-binstall -V` reports
+  `1.19.1` before adding that directory to `PATH`. Rationale: hosted macOS can
+  source-build the tool and replace the Cargo-home executable despite
+  `--install-path`, so version verification is the stable contract. Date/Author:
+  2026-06-26, implementation agent.
 - Decision: sign the local HTTPS server certificate with a generated OpenSSL
   extension file instead of relying on `openssl x509 -copy_extensions`.
   Rationale: Linux accepted `-copy_extensions`, but the hosted macOS OpenSSL
   rejected it; an explicit `subjectAltName`/`serverAuth` `-extfile` keeps the
   throwaway CA validation portable. Date/Author: 2026-06-26, implementation
   agent.
+- Decision: set `MSYS_NO_PATHCONV=1` only for the OpenSSL commands that pass
+  `/CN=...` certificate subjects in the Windows `binstall` validation job.
+  Rationale: this prevents Git Bash from rewriting certificate subjects while
+  leaving ordinary path conversion available for the rest of the cargo-binstall
+  install step. Date/Author: 2026-06-26, implementation agent.
 - Decision: do not add a bespoke Python `binstall` self-test unless the
   reuse-first evaluation shows the shared action plus a small Rust/CI check is
   insufficient; if one is added, it follows the df12 scripting standards.

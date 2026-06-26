@@ -167,19 +167,44 @@ jobs:
         run: |
           set -euo pipefail
 
-          binstall_dir="$RUNNER_TEMP/cargo-binstall-1.19.1"
-          mkdir -p "$binstall_dir"
+          requested_binstall_dir="$RUNNER_TEMP/cargo-binstall-1.19.1"
+          mkdir -p "$requested_binstall_dir"
           cargo binstall -y \
-            --install-path "$binstall_dir" \
+            --install-path "$requested_binstall_dir" \
             --force \
             cargo-binstall@1.19.1
-          echo "$binstall_dir" >> "$GITHUB_PATH"
 
-          binstall_bin="$binstall_dir/cargo-binstall"
+          effective_binstall_dir="$requested_binstall_dir"
+          binstall_bin="$requested_binstall_dir/cargo-binstall"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             binstall_bin="${binstall_bin}.exe"
           fi
-          "$binstall_bin" -V
+
+          if [[ ! -x "$binstall_bin" ]]; then
+            cargo_home_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+            fallback_binstall_bin="$cargo_home_bin/cargo-binstall"
+            if [[ "${{ runner.os }}" == "Windows" ]]; then
+              fallback_binstall_bin="${fallback_binstall_bin}.exe"
+            fi
+            if [[ -x "$fallback_binstall_bin" ]]; then
+              effective_binstall_dir="$cargo_home_bin"
+              binstall_bin="$fallback_binstall_bin"
+            fi
+          fi
+
+          if [[ ! -x "$binstall_bin" ]]; then
+            echo "cargo-binstall 1.19.1 was not found after installation" >&2
+            echo "checked $requested_binstall_dir and ${CARGO_HOME:-$HOME/.cargo}/bin" >&2
+            exit 1
+          fi
+
+          echo "$effective_binstall_dir" >> "$GITHUB_PATH"
+          binstall_version="$("$binstall_bin" -V)"
+          echo "$binstall_version"
+          if [[ "$binstall_version" != *"1.19.1"* ]]; then
+            echo "expected cargo-binstall 1.19.1, got $binstall_version" >&2
+            exit 1
+          fi
       - name: Build cargo-binstall archive
         shell: bash
         run: >-
@@ -195,13 +220,13 @@ jobs:
           rm -rf "$install_dir" "$cert_dir"
           mkdir -p "$install_dir" "$cert_dir"
 
-          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+          env MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
             -keyout "$cert_dir/ca.key" \
             -out "$cert_dir/ca.pem" \
             -subj "/CN=pg local test CA" \
             -addext "basicConstraints=critical,CA:TRUE" \
             -addext "keyUsage=critical,keyCertSign,cRLSign"
-          openssl req -newkey rsa:2048 -nodes \
+          env MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes \
             -keyout "$cert_dir/server.key" \
             -out "$cert_dir/server.csr" \
             -subj "/CN=127.0.0.1"
@@ -210,7 +235,7 @@ jobs:
             "extendedKeyUsage = serverAuth" \
             "keyUsage = critical,digitalSignature,keyEncipherment" \
             > "$cert_dir/server-ext.cnf"
-          openssl x509 -req \
+          env MSYS_NO_PATHCONV=1 openssl x509 -req \
             -in "$cert_dir/server.csr" \
             -CA "$cert_dir/ca.pem" \
             -CAkey "$cert_dir/ca.key" \
