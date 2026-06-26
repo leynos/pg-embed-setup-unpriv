@@ -7,7 +7,14 @@
 //! [`OrthoConfig`](https://github.com/leynos/ortho-config). The binary exits
 //! with status code `0` on success and `1` on error.
 
+use clap::Parser;
+
+#[derive(Debug, Parser)]
+#[command(version, about, long_about = None)]
+struct Cli;
+
 fn main() -> color_eyre::eyre::Result<()> {
+    Cli::parse();
     pg_embedded_setup_unpriv::run().map_err(|err| color_eyre::eyre::eyre!(err))?;
     Ok(())
 }

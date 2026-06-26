@@ -772,6 +772,40 @@ implemented.
   `/tmp/nixie-release-asset-audit-windows-mac-support-validation.out`, and
   `/tmp/diff-check-release-asset-audit-windows-mac-support-validation.out`, and
   `/tmp/coderabbit-release-asset-audit-windows-mac-support-validation.out`.
+- [x] (2026-06-26T03:39:36Z) Remote CI run `28215289980` for commit
+  `1f42ac7` failed only in the Linux `Binstall (x86_64-unknown-linux-gnu)` job
+  after the local archive install had succeeded. The installed
+  `pg_embedded_setup_unpriv --version` command entered bootstrap, then failed
+  while `postgresql_embedded` queried the unauthenticated GitHub releases API
+  for `theseus-rs/postgresql-binaries` and received `403 Forbidden`. Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28215289980`,
+  `/tmp/gh-watch-28215289980-windows-mac-support-validation.out`, and
+  `/tmp/ci-binstall-linux-1f42ac7-job-logs-api-windows-mac-support-validation.out`.
+- [x] (2026-06-26T03:42:10Z) User requested four more approaches for the
+  current `binstall` failure. Approach 1 is to make `--version` a real CLI flag
+  that exits before bootstrap rather than giving the packaging job more network
+  credentials. The red test `cargo test --test cli` now invokes the real binary
+  with an invalid `PG_VERSION_REQ`; it fails because the current binary ignores
+  `--version` and parses bootstrap configuration. The green implementation
+  adds Clap parsing in `src/main.rs` and a regression test in `tests/cli.rs`;
+  `--version` now exits before bootstrap and prints the package version. Local
+  gates passed before CodeRabbit review: focused red/green CLI tests,
+  `make check-fmt`, `make lint`, `make test`, `make markdownlint`,
+  `make nixie`, and `git diff --check`. Evidence:
+  `/tmp/test-cli-version-red-windows-mac-support-validation.out`,
+  `/tmp/test-cli-version-green-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-cli-version-windows-mac-support-validation.out`,
+  `/tmp/lint-cli-version-windows-mac-support-validation.out`,
+  `/tmp/test-cli-version-windows-mac-support-validation.out`,
+  `/tmp/mdlint-cli-version-windows-mac-support-validation.out`,
+  `/tmp/nixie-cli-version-windows-mac-support-validation.out`, and
+  `/tmp/diff-check-cli-version-windows-mac-support-validation.out`.
+- [x] (2026-06-26T03:43:14Z) CodeRabbit reviewed the uncommitted CLI
+  `--version` fix after deterministic gates passed.
+  `coderabbit review --agent --light --type uncommitted` completed with
+  `status=review_completed` and `findings=0`, so there are no CodeRabbit
+  concerns to clear before committing Approach 1. Evidence:
+  `/tmp/coderabbit-cli-version-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -1059,6 +1093,14 @@ implemented.
   draft assets through `gh release download` and local HTTPS before publishing,
   then add a small post-publication public-URL dry-run to verify GitHub's
   published `releases/download` URLs.
+- Observation: CI run `28215289980` proved that the setup binary's advertised
+  `--version` smoke check was not actually a version path. `src/main.rs` called
+  `pg_embedded_setup_unpriv::run()` directly, while `PgEnvCfg::load()` feeds
+  OrthoConfig a fixed program name and intentionally ignores CLI arguments.
+  Impact: `--version` was ignored, so the installed binary started PostgreSQL
+  bootstrap and could fail on external `theseus-rs/postgresql-binaries` API
+  rate limits even though the archive layout and installation were already
+  correct.
 
 ## Decision log
 
@@ -1157,6 +1199,13 @@ implemented.
   the exact assets uploaded to GitHub; the post-publication dry-run then
   verifies the public `pkg-url` template once those URLs exist. Date/Author:
   2026-06-26, implementation agent.
+- Decision: fix the `binstall` install-and-run failure by adding real
+  `--version` handling in the setup binary instead of passing GitHub
+  credentials or PostgreSQL cache state into the packaging job. Rationale: the
+  plan's observable contract says the packaging job runs the installed binary's
+  `--version`; a version command should not depend on PostgreSQL discovery,
+  network access, or bootstrap configuration. Date/Author: 2026-06-26,
+  implementation agent.
 - Decision: do not add a bespoke Python `binstall` self-test unless the
   reuse-first evaluation shows the shared action plus a small Rust/CI check is
   insufficient; if one is added, it follows the df12 scripting standards.
