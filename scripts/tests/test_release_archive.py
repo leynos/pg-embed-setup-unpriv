@@ -43,6 +43,27 @@ def archive_members(archive: Path) -> list[str]:
         return tar.getnames()
 
 
+def assert_build_release_binaries_invokes_cargo(
+    repo: Path,
+    *,
+    binaries: tuple[str, ...],
+    expected_args: tuple[str, ...],
+    build_jobs: str | None,
+) -> None:
+    """Assert the release binary build delegates to Cargo as expected."""
+    with CmdMox() as mox:
+        mox.mock("cargo").with_args(*expected_args).returns()
+        mox.replay()
+
+        release_archive.build_release_binaries(
+            repo=repo,
+            target="x86_64-unknown-linux-gnu",
+            binaries=binaries,
+            cargo="cargo",
+            build_jobs=build_jobs,
+        )
+
+
 def test_windows_targets_use_exe_suffix() -> None:
     assert release_archive.binary_extension("x86_64-pc-windows-msvc") == ".exe"
     assert release_archive.binary_extension("aarch64-apple-darwin") == ""
@@ -73,52 +94,46 @@ def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) ->
 
 def test_build_release_binaries_invokes_cargo_with_all_bins(tmp_path: Path) -> None:
     binaries = ("pg_embedded_setup_unpriv", "pg_worker")
+    expected_args = (
+        "build",
+        "--release",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--bin",
+        binaries[0],
+        "--bin",
+        binaries[1],
+    )
+    build_jobs = None
 
-    with CmdMox() as mox:
-        mox.mock("cargo").with_args(
-            "build",
-            "--release",
-            "--target",
-            "x86_64-unknown-linux-gnu",
-            "--bin",
-            binaries[0],
-            "--bin",
-            binaries[1],
-        ).returns()
-        mox.replay()
-
-        release_archive.build_release_binaries(
-            repo=tmp_path,
-            target="x86_64-unknown-linux-gnu",
-            binaries=binaries,
-            cargo="cargo",
-            build_jobs=None,
-        )
+    assert_build_release_binaries_invokes_cargo(
+        tmp_path,
+        binaries=binaries,
+        expected_args=expected_args,
+        build_jobs=build_jobs,
+    )
 
 
 def test_build_release_binaries_preserves_build_jobs_flags(tmp_path: Path) -> None:
     binaries = ("pg_embedded_setup_unpriv",)
+    expected_args = (
+        "build",
+        "--release",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--jobs",
+        "2",
+        "--bin",
+        binaries[0],
+    )
+    build_jobs = "--jobs 2"
 
-    with CmdMox() as mox:
-        mox.mock("cargo").with_args(
-            "build",
-            "--release",
-            "--target",
-            "x86_64-unknown-linux-gnu",
-            "--jobs",
-            "2",
-            "--bin",
-            binaries[0],
-        ).returns()
-        mox.replay()
-
-        release_archive.build_release_binaries(
-            repo=tmp_path,
-            target="x86_64-unknown-linux-gnu",
-            binaries=binaries,
-            cargo="cargo",
-            build_jobs="--jobs 2",
-        )
+    assert_build_release_binaries_invokes_cargo(
+        tmp_path,
+        binaries=binaries,
+        expected_args=expected_args,
+        build_jobs=build_jobs,
+    )
 
 
 def test_main_rejects_version_mismatch_before_build(tmp_path: Path) -> None:
