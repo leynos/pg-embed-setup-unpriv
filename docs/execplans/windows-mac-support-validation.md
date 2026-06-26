@@ -671,6 +671,37 @@ implemented.
   `coderabbit review --agent --light --type uncommitted` completed with
   `status=review_completed` and `findings=0`. Evidence:
   `/tmp/coderabbit-binstall-pathconv-fallback-windows-mac-support-validation.out`.
+- [x] (2026-06-26T01:55:29Z) Pushed commit `e963d04` and observed CI run
+  `28211894514`. Linux root, Linux unprivileged, macOS tests, Windows tests,
+  and the Linux real `binstall` job all passed. The macOS and Windows
+  `binstall` jobs both reached the local HTTPS readiness loop after building
+  their release archives, then failed before `cargo-binstall` ran: macOS curl
+  rejected the throwaway CA with `unable to get local issuer certificate`, and
+  Windows curl/SChannel rejected it with `the revocation status is unknown`.
+  Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28211894514`,
+  `/tmp/ci-binstall-macos-e963d04-job-logs-api-windows-mac-support-validation.out`,
+  `/tmp/ci-binstall-windows-e963d04-job-logs-api-windows-mac-support-validation.out`,
+  and `/tmp/gh-watch-28211894514-windows-mac-support-validation.out`.
+- [x] (2026-06-26T01:58:05Z) Applied the next local `binstall` workflow patch:
+  make the curl readiness probe use `--insecure` because it only waits for the
+  local HTTPS server to accept connections; keep the
+  `--root-certificates "$cert_dir/ca.pem"` argument on `cargo binstall`
+  unchanged as the actual CA-trust validation. Deterministic gates passed
+  before review: `actionlint`, `make check-fmt`, `make lint`, `make test`,
+  `make markdownlint`, `make nixie`, and `git diff --check`. CodeRabbit then
+  reviewed the uncommitted patch with
+  `coderabbit review --agent --light --type uncommitted` and completed with
+  `status=review_completed` and `findings=0`. Evidence:
+  `/tmp/actionlint-binstall-readiness-curl-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-binstall-readiness-curl-windows-mac-support-validation.out`,
+  `/tmp/lint-binstall-readiness-curl-windows-mac-support-validation.out`,
+  `/tmp/test-binstall-readiness-curl-windows-mac-support-validation.out`,
+  `/tmp/mdlint-binstall-readiness-curl-windows-mac-support-validation.out`,
+  `/tmp/nixie-binstall-readiness-curl-windows-mac-support-validation.out`,
+  `/tmp/diff-check-binstall-readiness-curl-windows-mac-support-validation.out`,
+  and
+  `/tmp/coderabbit-binstall-readiness-curl-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -927,6 +958,15 @@ implemented.
   into paths rooted under `C:/Program Files/Git/`, which OpenSSL rejects as an
   invalid subject name. Impact: the workflow must disable MSYS path conversion
   for the OpenSSL invocations that pass slash-prefixed certificate subjects.
+- Observation: the hosted macOS and Windows `binstall` runners both reject the
+  throwaway local CA during the curl readiness probe, but in platform-specific
+  ways: macOS curl reports `unable to get local issuer certificate`, while
+  Windows curl backed by SChannel reports `the revocation status is unknown`.
+  In both cases the local HTTPS server is already accepting connections and
+  the failure happens before `cargo-binstall` can run. Impact: the readiness
+  probe should only test server availability; the cargo-binstall command below
+  it remains the cross-platform CA-validation gate through
+  `--root-certificates`.
 
 ## Decision log
 
@@ -992,6 +1032,13 @@ implemented.
   Rationale: this prevents Git Bash from rewriting certificate subjects while
   leaving ordinary path conversion available for the rest of the cargo-binstall
   install step. Date/Author: 2026-06-26, implementation agent.
+- Decision: use `curl --insecure` only in the local HTTPS readiness loop, not
+  in the actual `cargo-binstall` install. Rationale: the loop's contract is to
+  wait until the throwaway server accepts HTTPS connections; trust validation
+  belongs to the subsequent `cargo binstall --root-certificates` command, and
+  hosted macOS/Windows curl backends reject the generated one-day CA before
+  that command can exercise the real install path. Date/Author: 2026-06-26,
+  implementation agent.
 - Decision: do not add a bespoke Python `binstall` self-test unless the
   reuse-first evaluation shows the shared action plus a small Rust/CI check is
   insufficient; if one is added, it follows the df12 scripting standards.

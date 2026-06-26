@@ -269,7 +269,9 @@ jobs:
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
 
           for attempt in {1..30}; do
-            if curl --cacert "$cert_dir/ca.pem" -fsS "https://127.0.0.1:${RELEASE_PORT}/" >/dev/null; then
+            # This only gates server readiness; cargo-binstall validates
+            # the throwaway CA with --root-certificates below.
+            if curl --insecure -fsS "https://127.0.0.1:${RELEASE_PORT}/" >/dev/null; then
               break
             fi
             if [[ "$attempt" -eq 30 ]]; then
