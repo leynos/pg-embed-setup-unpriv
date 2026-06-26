@@ -273,9 +273,9 @@ impl ClusterHandle {
     /// when the process terminates.
     ///
     /// Intended for shared clusters where the [`ClusterGuard`](super::ClusterGuard)
-    /// is intentionally forgotten. The hook sends SIGTERM and waits up to
-    /// the configured shutdown timeout before escalating to the platform's
-    /// forceful termination mechanism.
+    /// is intentionally forgotten. The hook requests platform shutdown and
+    /// waits up to the configured shutdown timeout before escalating to the
+    /// platform's forceful termination mechanism.
     ///
     /// The method is idempotent: subsequent calls after the first
     /// successful registration are no-ops. Only one cluster can be
@@ -283,9 +283,11 @@ impl ClusterHandle {
     ///
     /// # Platform Support
     ///
-    /// Supported on Unix (Linux, macOS) and Windows. On other platforms this
-    /// method is a silent no-op that returns `Ok(())`, so callers need not gate
-    /// on platform cfgs.
+    /// Supported on Unix (Linux, macOS) and Windows. Windows shutdown requests
+    /// terminate the postmaster process tree immediately because the process
+    /// exit hook cannot safely issue a graceful `PostgreSQL` shutdown command. On
+    /// other platforms this method is a silent no-op that returns `Ok(())`, so
+    /// callers need not gate on platform cfgs.
     ///
     /// # Errors
     ///

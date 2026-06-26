@@ -1,18 +1,18 @@
 //! Resolves and stages worker binaries for privileged test runs.
 
 use std::ffi::OsString;
+#[cfg(any(test, unix))]
+use std::path::PathBuf;
 use std::sync::OnceLock;
+#[cfg(any(test, unix))]
+use std::{fs, io};
 
-#[cfg(unix)]
+#[cfg(any(test, unix))]
 use sha2::{Digest, Sha256};
-#[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
-use std::path::{Path, PathBuf};
-#[cfg(unix)]
-use std::{fs, io};
+use std::path::Path;
 
 /// Returns the worker binary path staged for privileged test execution.
 ///
@@ -168,7 +168,7 @@ fn create_staging_directory_secure(staged_dir: &Path) -> io::Result<()> {
 /// Returns a tuple of:
 /// - The staging directory in `{temp_dir}/pg-worker-{profile}-{hash}/`
 /// - The target profile directory (if found) for writing the pointer file
-#[cfg(unix)]
+#[cfg(any(test, unix))]
 fn find_staging_directory(source: &std::path::Path) -> (PathBuf, Option<PathBuf>) {
     let path_hash = compute_path_hash(source);
     let (profile_name, target_profile_dir) = find_profile_directory(source);
@@ -179,7 +179,7 @@ fn find_staging_directory(source: &std::path::Path) -> (PathBuf, Option<PathBuf>
 /// Walks up from source to find the Cargo profile directory (debug/release).
 ///
 /// Returns the profile name and the profile directory path if found.
-#[cfg(unix)]
+#[cfg(any(test, unix))]
 fn find_profile_directory(source: &std::path::Path) -> (&'static str, Option<PathBuf>) {
     let mut current = source.parent();
 
@@ -197,7 +197,7 @@ fn find_profile_directory(source: &std::path::Path) -> (&'static str, Option<Pat
 ///
 /// Returns `Some((profile_name, profile_dir))` if the directory is a profile dir
 /// (debug/release) or a deps directory whose parent is a profile dir.
-#[cfg(unix)]
+#[cfg(any(test, unix))]
 fn check_directory_for_profile(dir: &std::path::Path) -> Option<(&'static str, Option<PathBuf>)> {
     let dir_name = dir.file_name().and_then(|n| n.to_str())?;
 
@@ -210,7 +210,7 @@ fn check_directory_for_profile(dir: &std::path::Path) -> Option<(&'static str, O
 }
 
 /// Checks if the parent of a deps directory is a profile directory.
-#[cfg(unix)]
+#[cfg(any(test, unix))]
 fn check_deps_parent_for_profile(
     deps_dir: &std::path::Path,
 ) -> Option<(&'static str, Option<PathBuf>)> {
@@ -231,16 +231,16 @@ fn check_deps_parent_for_profile(
 ///
 /// This function is only called from `check_deps_parent_for_profile` after
 /// "debug" and "release" have already been handled, so it always returns "unknown".
-#[cfg(unix)]
+#[cfg(any(test, unix))]
 const fn profile_name_to_static(_name: &str) -> &'static str {
     "unknown"
 }
 
 /// Computes a short hash of the source path for staging directory uniqueness.
-#[cfg(unix)]
+#[cfg(any(test, unix))]
 fn compute_path_hash(source: &std::path::Path) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(source.as_os_str().as_bytes());
+    hasher.update(source.as_os_str().as_encoded_bytes());
     let result = hasher.finalize();
     // Use first 8 hex chars for brevity. SHA-256 always produces 32 bytes.
     let bytes: [u8; 32] = result.into();
@@ -254,7 +254,7 @@ fn compute_path_hash(source: &std::path::Path) -> String {
 ///
 /// The pointer file contains the full path to the staged binary in the system
 /// temporary directory.
-#[cfg(unix)]
+#[cfg(any(test, unix))]
 fn write_pointer_file(
     target_dir: &std::path::Path,
     staged_path: &std::path::Path,
@@ -263,7 +263,7 @@ fn write_pointer_file(
     let temp_path = target_dir.join("pg_worker_staged.path.tmp");
 
     // Write atomically: write to temp file, then rename
-    fs::write(&temp_path, staged_path.as_os_str().as_bytes())?;
+    fs::write(&temp_path, staged_path.as_os_str().as_encoded_bytes())?;
     fs::rename(&temp_path, &pointer_path)?;
     Ok(())
 }
@@ -324,6 +324,6 @@ fn is_worker_binary(path: &std::path::Path) -> bool {
     path.is_file()
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[path = "worker_env_tests.rs"]
 pub mod tests;

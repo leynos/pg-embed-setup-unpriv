@@ -94,6 +94,8 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
       - name: Build release archive
         shell: bash
         run: >-

@@ -1841,3 +1841,28 @@ Revision 3 (2026-06-25), at implementation start. What changed and why:
 How it affects remaining work: Milestone 0 must still run first and re-ground
 the risk list from observed cross-target compiler output before Milestone 1
 code changes begin.
+
+Revision 4 (2026-06-26), after review-finding validation. What changed and why:
+
+- Verified the latest inline and outside-diff findings against the current
+  branch. All listed items except the already-documented
+  `read_postmaster_pid` helper still had a current-code manifestation and were
+  addressed with narrow changes.
+- Added explicit `uv` setup to the release workflow before invoking
+  `scripts/release_archive.py`, keeping `uv run --script` as the Python 3.13
+  provisioning boundary.
+- Preserved cargo wrapper arguments in the release archive builder by splitting
+  the configured Cargo command before appending the `build` subcommand.
+- Clarified macOS root fail-fast behaviour separately from Windows and other
+  unprivileged in-process paths in the design docs.
+- Kept non-Unix worker-env coverage active by moving pure staging-directory and
+  pointer-file helper tests out from behind the Unix-only module gate while
+  leaving permission assertions Unix-specific.
+- Hardened the non-Unix serial lockdir fallback by treating a newly-created
+  lock directory without an owner file as active for a short grace period, so a
+  competing process does not reap a live lock before the owner file is written.
+
+Validation recorded for this pass: `make check-fmt`, `make markdownlint`,
+`make nixie`, `make lint`, `make test`, release archive pytest with the script
+dependencies provisioned by `uv`, Windows and macOS narrow cross-target checks,
+`git diff --check`, and `coderabbit review --agent` with zero findings.

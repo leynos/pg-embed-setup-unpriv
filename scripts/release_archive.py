@@ -90,12 +90,14 @@ def release_binary_path(repo: Path, target: str, binary: str) -> Path:
 
 def build_release_binaries(spec: ReleaseBuildSpec) -> None:
     """Build the selected release binaries for `spec.target`."""
-    args = ["build", "--release", "--target", spec.target]
+    cargo_command = shlex.split(spec.cargo)
+    program, *program_args = cargo_command
+    args = [*program_args, "build", "--release", "--target", spec.target]
     args.extend(cargo_build_job_args(spec.build_jobs))
     for binary in spec.binaries:
         args.extend(["--bin", binary])
 
-    command = cuprum_sh.make(Program(spec.cargo), catalogue=catalogue_for(spec.cargo))
+    command = cuprum_sh.make(Program(program), catalogue=catalogue_for(program))
     result = command(*args).run_sync(
         capture=False,
         echo=True,

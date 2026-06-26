@@ -262,6 +262,8 @@ mod tests {
 
     #[cfg(unix)]
     use super::ensure_dir_exists;
+    #[cfg(not(unix))]
+    use super::set_permissions;
     use super::{ensure_existing_path_is_dir, find_existing_ancestor};
     use camino::{Utf8Path, Utf8PathBuf};
     use rstest::rstest;
@@ -407,6 +409,30 @@ mod tests {
         assert!(
             target.exists(),
             "directory should still exist after second call"
+        );
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn set_permissions_checks_target_exists_before_skipping_posix_permissions() {
+        let temp = tempdir().expect("tempdir");
+        let base =
+            Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).expect("utf8 tempdir path");
+        let existing = base.join("existing");
+        std::fs::create_dir(&existing).expect("create existing target");
+
+        set_permissions(&existing, 0o700).expect("existing target should skip permissions");
+
+        let missing = base.join("missing");
+        let err = set_permissions(&missing, 0o700)
+            .expect_err("missing target should still return NotFound");
+        let has_not_found = err
+            .chain()
+            .filter_map(|source| source.downcast_ref::<std::io::Error>())
+            .any(|source| source.kind() == ErrorKind::NotFound);
+        assert!(
+            has_not_found,
+            "expected NotFound in error chain for missing target, got {err:?}"
         );
     }
 }
