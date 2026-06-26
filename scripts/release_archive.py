@@ -14,6 +14,7 @@ import shutil
 import shlex
 import tarfile
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated
@@ -37,6 +38,28 @@ CATALOGUE = ProgramCatalogue(
 )
 
 app = App(help=__doc__)
+
+
+@dataclass(frozen=True)
+class ReleaseBuildSpec:
+    """Build inputs for the release binaries."""
+
+    repo: Path
+    target: str
+    binaries: tuple[str, ...]
+    cargo: str
+    build_jobs: str | None = None
+
+
+@dataclass(frozen=True)
+class ReleaseArchiveSpec:
+    """Archive staging inputs for cargo-binstall release assets."""
+
+    repo: Path
+    target: str
+    version: str
+    dist_dir: Path
+    binaries: tuple[str, ...]
 
 
 def binary_extension(target: str) -> str:
@@ -65,25 +88,18 @@ def release_binary_path(repo: Path, target: str, binary: str) -> Path:
     return repo / "target" / target / "release" / f"{binary}{binary_extension(target)}"
 
 
-def build_release_binaries(
-    *,
-    repo: Path,
-    target: str,
-    binaries: tuple[str, ...],
-    cargo: str,
-    build_jobs: str | None,
-) -> None:
-    """Build the selected release binaries for `target`."""
-    args = ["build", "--release", "--target", target]
-    args.extend(cargo_build_job_args(build_jobs))
-    for binary in binaries:
+def build_release_binaries(spec: ReleaseBuildSpec) -> None:
+    """Build the selected release binaries for `spec.target`."""
+    args = ["build", "--release", "--target", spec.target]
+    args.extend(cargo_build_job_args(spec.build_jobs))
+    for binary in spec.binaries:
         args.extend(["--bin", binary])
 
-    command = cuprum_sh.make(Program(cargo), catalogue=catalogue_for(cargo))
+    command = cuprum_sh.make(Program(spec.cargo), catalogue=catalogue_for(spec.cargo))
     result = command(*args).run_sync(
         capture=False,
         echo=True,
-        context=ExecutionContext(cwd=repo),
+        context=ExecutionContext(cwd=spec.repo),
     )
     if result.exit_code != 0:
         raise SystemExit(result.exit_code)
@@ -115,24 +131,17 @@ def catalogue_for(cargo: str) -> ProgramCatalogue:
     )
 
 
-def stage_archive(
-    *,
-    repo: Path,
-    target: str,
-    version: str,
-    dist_dir: Path,
-    binaries: tuple[str, ...],
-) -> Path:
+def stage_archive(spec: ReleaseArchiveSpec) -> Path:
     """Stage release binaries and return the produced `.tgz` path."""
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    stem = archive_stem(target, version)
-    archive_path = dist_dir / f"{stem}.tgz"
+    spec.dist_dir.mkdir(parents=True, exist_ok=True)
+    stem = archive_stem(spec.target, spec.version)
+    archive_path = spec.dist_dir / f"{stem}.tgz"
     archive_path.unlink(missing_ok=True)
 
     with TemporaryDirectory(prefix=f"{stem}-") as tmp:
         staging_root = Path(tmp) / stem
         staging_root.mkdir()
-        copy_release_binaries(repo, target, binaries, staging_root)
+        copy_release_binaries(spec.repo, spec.target, spec.binaries, staging_root)
         with tarfile.open(archive_path, "w:gz", format=tarfile.PAX_FORMAT) as archive:
             archive.add(staging_root, arcname=stem)
 
@@ -198,18 +207,22 @@ def main(
 
     binaries = tuple(binary or DEFAULT_BINARIES)
     build_release_binaries(
-        repo=repo,
-        target=target,
-        binaries=binaries,
-        cargo=cargo,
-        build_jobs=build_jobs,
+        ReleaseBuildSpec(
+            repo=repo,
+            target=target,
+            binaries=binaries,
+            cargo=cargo,
+            build_jobs=build_jobs,
+        )
     )
     archive_path = stage_archive(
-        repo=repo,
-        target=target,
-        version=selected_version,
-        dist_dir=repo / dist_dir,
-        binaries=binaries,
+        ReleaseArchiveSpec(
+            repo=repo,
+            target=target,
+            version=selected_version,
+            dist_dir=repo / dist_dir,
+            binaries=binaries,
+        )
     )
     print(archive_path)
 
