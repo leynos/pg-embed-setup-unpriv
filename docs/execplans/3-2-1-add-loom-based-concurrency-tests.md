@@ -154,10 +154,10 @@ environment, and decide on the Loom gating strategy (feature only vs feature
 plus `#[ignore]`). Record the decision in the design document.
 
 Stage B: Add the Loom feature flag and any required sync abstraction. Introduce
-an optional `loom` dependency and a `loom-tests` feature. If needed, add a
-small `src/env/sync.rs` module to alias `Mutex`, `MutexGuard`, and
-`PoisonError` to std or Loom types. Ensure `ENV_LOCK` initialization works for
-both backends. Add module-level docs for any new module.
+an optional `loom` dependency and a `loom-tests` feature. If needed, add a small
+`src/env/sync.rs` module to alias `Mutex`, `MutexGuard`, and `PoisonError` to
+std or Loom types. Ensure `ENV_LOCK` initialization works for both backends.
+Add module-level docs for any new module.
 
 Stage C: Implement Loom-based concurrency tests. Add a new test module under
 `src/env/tests/` (for example `loom.rs`) gated by the feature flag. Use
@@ -205,7 +205,7 @@ fails.
    and ensure tests operate on empty env change sets so global env state is
    unchanged across runs.
 
-6. Add or update behavioural tests using rstest-bdd (v0.3.2). If adding new
+6. Add or update behavioural tests using rstest-bdd (v0.5.0). If adding new
    `.feature` files, place them under `tests/features/` and wire up scenario
    macros in a new or existing `tests/*.rs` file.
 
