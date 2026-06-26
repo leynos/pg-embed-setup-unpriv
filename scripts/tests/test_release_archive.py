@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import tarfile
 from pathlib import Path
 
@@ -13,6 +14,7 @@ SPEC = importlib.util.spec_from_file_location("release_archive", SCRIPT_PATH)
 assert SPEC is not None
 release_archive = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
+sys.modules[SPEC.name] = release_archive
 SPEC.loader.exec_module(release_archive)
 
 
@@ -56,11 +58,13 @@ def assert_build_release_binaries_invokes_cargo(
         mox.replay()
 
         release_archive.build_release_binaries(
-            repo=repo,
-            target="x86_64-unknown-linux-gnu",
-            binaries=binaries,
-            cargo="cargo",
-            build_jobs=build_jobs,
+            release_archive.ReleaseBuildSpec(
+                repo=repo,
+                target="x86_64-unknown-linux-gnu",
+                binaries=binaries,
+                cargo="cargo",
+                build_jobs=build_jobs,
+            )
         )
 
 
@@ -76,11 +80,13 @@ def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) ->
         write_release_binary(tmp_path, target, binary)
 
     archive = release_archive.stage_archive(
-        repo=tmp_path,
-        target=target,
-        version="0.5.1",
-        dist_dir=tmp_path / "dist",
-        binaries=binaries,
+        release_archive.ReleaseArchiveSpec(
+            repo=tmp_path,
+            target=target,
+            version="0.5.1",
+            dist_dir=tmp_path / "dist",
+            binaries=binaries,
+        )
     )
 
     root = "pg-embed-setup-unpriv-x86_64-pc-windows-msvc-v0.5.1"
