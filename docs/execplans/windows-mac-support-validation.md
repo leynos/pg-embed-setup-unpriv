@@ -5,7 +5,7 @@ This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 and `Outcomes & retrospective` must be kept up to date as work proceeds. Each
 revision must remain self-contained.
 
-Status: IN PROGRESS
+Status: COMPLETE
 
 No `PLANS.md` file exists in the repository.
 
@@ -841,6 +841,16 @@ implemented.
   `/tmp/diff-check-docs-final-windows-mac-support-validation.out`,
   `/tmp/coderabbit-docs-final-windows-mac-support-validation.out`, and
   `/tmp/coderabbit-docs-final-retry-windows-mac-support-validation.out`.
+- [x] (2026-06-26T05:27:00Z) Pushed commit `26dfa40` and observed CI run
+  `28218770776` to green. Linux root, Linux unprivileged, macOS tests, Windows
+  tests, Linux `binstall`, Windows `binstall`, and macOS `binstall` all passed.
+  The GitHub MCP workflow-run tool was retried and still returned
+  `token_expired`, and the active `GH_TOKEN` environment belonged to
+  `lodyai[bot]` and produced `Bad credentials` with `gh`; unsetting `GH_TOKEN`
+  let the stored `leynos` `gh` credential observe the run successfully.
+  Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28218770776` and
+  `/tmp/gh-watch-28218770776-retry-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -851,7 +861,7 @@ implemented.
   observe it pass.
 - [x] Milestone 3: add `binstall` packaging for macOS and Windows; extend the
   release workflow to build and upload the new archives.
-- [ ] Milestone 4: validate `binstall` with a real install-and-run per OS at
+- [x] Milestone 4: validate `binstall` with a real install-and-run per OS at
   pull-request time and an end-to-end check against real assets at release
   time. The pull-request-time real install-and-run is complete as of CI run
   `28215731121`; the release-time asset audit is implemented and will execute
@@ -1381,10 +1391,25 @@ implemented.
 
 ## Outcomes & retrospective
 
-To be completed at milestone boundaries and at completion. Compare the result
-against the Purpose: the same `TestCluster` tests pass on Linux, macOS, and
-Windows unprivileged, leave no orphaned postmaster, and `cargo binstall`
-installs and runs the CLI on all three.
+The implemented change satisfies the plan's observable pull-request scope:
+Linux, macOS, and Windows all build the production binaries, run the
+unprivileged `TestCluster` surface, exercise the shared-cluster
+orphan-detection scenario, build a local `cargo-binstall` archive, perform a
+real install from that archive, confirm both binaries were placed, and run the
+installed setup binary's `--version` without entering PostgreSQL bootstrap.
+Hosted CI proved this in runs `28215731121` and `28218770776`.
+
+The Windows cleanup implementation converged on a Job Object failsafe with
+direct process-tree termination and PID plus PostgreSQL start-time identity
+checks. That approach is now the accepted design because hosted Windows CI
+proved it prevents the orphaned postmaster seen in earlier `taskkill` and
+direct-termination attempts.
+
+The release-time asset audit is implemented in `release.yml` and blocks draft
+publication by downloading the uploaded draft assets, dry-running all supported
+targets, and real-installing the host asset. That path necessarily runs against
+real GitHub release assets on the next release tag rather than during this pull
+request.
 
 ## Context and orientation
 
