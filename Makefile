@@ -1,4 +1,4 @@
-.PHONY: help all clean test build release release-archive lint fmt check-fmt markdownlint nixie typecheck
+.PHONY: help all clean test test-loom build release release-archive lint fmt check-fmt markdownlint nixie typecheck
 
 APP ?= pg_embedded_setup_unpriv
 CARGO ?= cargo
@@ -42,6 +42,9 @@ clean: ## Remove build artifacts
 test: ## Run tests with warnings treated as errors
 	RUSTFLAGS="-D warnings" $(CARGO) nextest run --all-targets --all-features $(BUILD_JOBS)
 	RUSTFLAGS="-D warnings" $(CARGO) nextest run --tests --workspace --no-default-features --features dev-worker $(BUILD_JOBS)
+
+test-loom: ## Run Loom concurrency tests
+	$(CARGO) test --features "loom-tests" --lib -- --ignored
 
 release-archive: ## Package release binaries for cargo-binstall
 	@test -n "$(TARGET)" || (echo "TARGET is required" >&2; exit 1)

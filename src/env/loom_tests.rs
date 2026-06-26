@@ -58,6 +58,9 @@ where
     F: Fn() + Send + Sync + 'static,
 {
     let mut builder = loom::model::Builder::new();
+    // These bounds keep the scheduler search tractable enough for routine CI.
+    // Increasing the preemption bound in particular needs a matching runtime
+    // budget review; see the developer guide for details.
     builder.max_threads = 3;
     builder.max_branches = 64;
     builder.preemption_bound = Some(3);
