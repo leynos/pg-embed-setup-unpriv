@@ -6,12 +6,11 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::error::{BootstrapError, BootstrapResult};
+use crate::{ClusterHandle, TestCluster};
+
 use super::fixtures::ensure_worker_env;
-use crate::{
-    ClusterHandle,
-    TestCluster,
-    error::{BootstrapError, BootstrapResult},
-};
+use super::shared_singleton_core::{SharedInitState, get_or_try_init_shared};
 
 // ============================================================================
 // Shared cluster handle singleton
@@ -26,17 +25,7 @@ use crate::{
 /// The handle is leaked to obtain a `'static` reference for the entire
 /// process lifetime.
 static SHARED_CLUSTER_HANDLE: OnceLock<Mutex<SharedHandleState>> = OnceLock::new();
-
-/// State machine for lazy cluster handle initialisation.
-enum SharedHandleState {
-    /// Not yet initialised.
-    Uninitialised,
-    /// Successfully initialised with a leaked handle reference.
-    Initialised(&'static ClusterHandle),
-    /// Initialisation failed; stores the original error for reconstruction.
-    Failed(Arc<BootstrapError>),
-}
-
+type SharedHandleState = SharedInitState<&'static ClusterHandle, Arc<BootstrapError>>;
 /// Returns a reference to the shared cluster handle.
 ///
 /// The cluster is initialised lazily on first access using [`OnceLock`] for
@@ -76,65 +65,60 @@ enum SharedHandleState {
 /// # }
 /// ```
 pub fn shared_cluster_handle() -> BootstrapResult<&'static ClusterHandle> {
-    let mutex = SHARED_CLUSTER_HANDLE.get_or_init(|| Mutex::new(SharedHandleState::Uninitialised));
+    let mutex = SHARED_CLUSTER_HANDLE.get_or_init(|| Mutex::new(SharedInitState::Uninitialised));
     let mut guard = mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    get_or_try_init_shared(
+        &mut guard,
+        initialise_shared_cluster_handle,
+        cached_shared_handle_error,
+    )
+}
 
-    match &*guard {
-        SharedHandleState::Initialised(handle) => Ok(*handle),
-        SharedHandleState::Failed(original_err) => {
-            let report = color_eyre::eyre::eyre!(
-                "shared cluster initialisation previously failed: {:?}",
-                original_err
-            );
-            Err(BootstrapError::new(original_err.kind(), report))
+fn initialise_shared_cluster_handle()
+-> Result<&'static ClusterHandle, (Arc<BootstrapError>, BootstrapError)> {
+    let worker_guard = ensure_worker_env();
+    match TestCluster::new_split() {
+        Ok((handle, cluster_guard)) => {
+            // Attach worker guard to cluster guard, then leak it.
+            // The guard manages shutdown; leaking it means the cluster
+            // runs for the process lifetime.
+            let guarded = cluster_guard.with_worker_guard(worker_guard);
+
+            // Best-effort atexit registration. On Unix this sends SIGTERM to
+            // the postmaster on process exit. On other platforms it is a
+            // silent no-op. Failure is non-fatal: the cluster remains usable,
+            // but the postmaster may be orphaned when the process terminates.
+            best_effort_register_shutdown_hook_for_handle(&handle);
+
+            // Leak the guard so the cluster keeps running. This is intentional:
+            // shared clusters live for the entire process lifetime.
+            std::mem::forget(guarded);
+
+            // Leak the handle to get a 'static reference.
+            let leaked: &'static ClusterHandle = Box::leak(Box::new(handle));
+            Ok(leaked)
         }
-        SharedHandleState::Uninitialised => {
-            let worker_guard = ensure_worker_env();
-            match TestCluster::new_split() {
-                Ok((handle, cluster_guard)) => {
-                    // Attach worker guard to cluster guard, then leak it.
-                    // The guard manages shutdown; leaking it means the cluster
-                    // runs for the process lifetime.
-                    let guarded = cluster_guard.with_worker_guard(worker_guard);
-
-                    // Best-effort atexit registration. On Unix this sends
-                    // SIGTERM to the postmaster on process exit. On other
-                    // platforms it is a silent no-op. Failure is non-fatal:
-                    // the cluster remains usable, but the postmaster may be
-                    // orphaned when the process terminates.
-                    best_effort_register_shutdown_hook_for_handle(&handle);
-
-                    // Leak the guard so the cluster keeps running.
-                    // This is intentional: shared clusters live for the entire
-                    // process lifetime.
-                    std::mem::forget(guarded);
-
-                    // Leak the handle to get a 'static reference.
-                    let leaked: &'static ClusterHandle = Box::leak(Box::new(handle));
-                    *guard = SharedHandleState::Initialised(leaked);
-                    Ok(leaked)
-                }
-                Err(err) => {
-                    // Store error info for subsequent callers to retrieve.
-                    let stored = Arc::new(BootstrapError::new(
-                        err.kind(),
-                        color_eyre::eyre::eyre!("bootstrap failed: {:?}", err),
-                    ));
-                    *guard = SharedHandleState::Failed(stored);
-                    // Return the original error with full diagnostics.
-                    Err(err)
-                }
-            }
+        Err(err) => {
+            // Store error info for subsequent callers to retrieve.
+            let stored = Arc::new(BootstrapError::new(
+                err.kind(),
+                color_eyre::eyre::eyre!("bootstrap failed: {:?}", err),
+            ));
+            // Return the original error with full diagnostics.
+            Err((stored, err))
         }
     }
 }
 
-// ============================================================================
-// Shared shutdown hook helper
-// ============================================================================
-
+fn cached_shared_handle_error(original_err: &Arc<BootstrapError>) -> BootstrapError {
+    let report = color_eyre::eyre::eyre!(
+        "shared cluster initialisation previously failed: {:?}",
+        original_err
+    );
+    BootstrapError::new(original_err.kind(), report)
+}
 /// Best-effort atexit registration for a [`ClusterHandle`].
 ///
 /// Failure is non-fatal so that shared-handle initialisation succeeds on
