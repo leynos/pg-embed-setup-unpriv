@@ -12,6 +12,9 @@ consumer-facing guidance.
   `TestCluster` teardown, demonstrating that no orphaned processes remain.
 - Behavioural tests driven by `rstest-bdd` exercise both privilege branches to
   guard against regressions in ownership or permission handling.
+- Property tests exercise lifecycle invariants that do not depend on a
+  particular thread schedule, including repeated cleanup, partial setup
+  cleanup, cleanup-mode relationships, and pure bootstrap path preparation.
 - Behavioural suites coordinate via a shared lock file on Unix and an atomic
   lock directory on non-Unix platforms, so concurrent test binaries do not
   contend over PostgreSQL setup or cache directories. The non-Unix lock keeps a
@@ -82,39 +85,27 @@ Linux, macOS, and Windows using cargo-binstall 1.19.1. The release workflow
 audits published asset URLs with the same pinned cargo-binstall bootstrap
 before the draft release is published.
 
-## Windows shutdown hook
 
-Windows shared-cluster cleanup uses a platform-specific shutdown hook rather
-than the POSIX signal path. The hook prepares a kill-on-close Job Object for
-the validated postmaster process tree and keeps direct `TerminateProcess`
-traversal as the forceful fallback. The root PID from `postmaster.pid` is
-verified against the live postmaster identity before any action, and
-descendants are revalidated against the current root tree before job assignment
-or termination, so a reused PID is not treated as part of the original cluster.
+## Lifecycle verification
 
-Debug tracing records Job Object preparation, identity mismatches, descendant
-validation skips, assignment attempts, and termination attempts with PID and
-outcome fields. These logs are intentionally low-level because shutdown hooks
-run during process exit and cannot recover interactively.
+`proptest` cases run as part of the default unit suite and protect the
+schedule-independent lifecycle guarantees. These cover idempotent cleanup,
+cleanup after partial setup, dangerous cleanup path rejection, cleanup-mode
+relationships, and deterministic bootstrap path preparation.
 
-The process-tree tests are example-driven rather than property-generated: the
-tree collector is a finite closure over the snapshot entries, rejects cycles by
-bounding ancestor traversal to the snapshot length, and validates both
-termination and Job Object assignment decisions against a reused-descendant-PID
-case. The serial lock tests cover missing, partial, malformed, and stale owner
-states around the grace window.
-
-## Loom concurrency tests
-
-Loom-based checks for `ScopedEnv` are opt-in and only compile when the
-`loom-tests` feature is enabled. The Loom tests are marked `#[ignore]`, and
-`make test` keeps them dormant: the nextest run uses `--all-features`, while
-the follow-up `cargo nextest run` disables default features (enabling
-`dev-worker` only). Run the Loom suite locally with:
+Loom-based checks are opt-in and only compile when the `loom-tests` feature is
+enabled. The Loom tests are marked `#[ignore]`, and `make test` keeps them
+dormant: the nextest run uses `--all-features`, while the follow-up
+`cargo test` run disables default features (enabling `dev-worker` only). CI
+runs the ignored library Loom models explicitly. Run the same suite locally with:
 
 ```sh
 make test-loom
 ```
+
+The Loom models cover the schedule-sensitive lifecycle paths: scoped
+environment state, per-template database creation, shared singleton
+initialisation, and shutdown-hook registration.
 
 The scheduler budget in `src/env/loom_tests.rs` currently uses
 `max_threads = 3`, `max_branches = 64`, and `preemption_bound = Some(3)`. The
@@ -136,6 +127,27 @@ panic-path thread-local cleanup. Loom still cannot instrument the actual
 `std::env` syscalls used by production; the standard serial environment tests
 cover those OS-level mutations.
 
+## Windows shutdown hook
+
+Windows shared-cluster cleanup uses a platform-specific shutdown hook rather
+than the POSIX signal path. The hook prepares a kill-on-close Job Object for
+the validated postmaster process tree and keeps direct `TerminateProcess`
+traversal as the forceful fallback. The root PID from `postmaster.pid` is
+verified against the live postmaster identity before any action, and
+descendants are revalidated against the current root tree before job assignment
+or termination, so a reused PID is not treated as part of the original cluster.
+
+Debug tracing records Job Object preparation, identity mismatches, descendant
+validation skips, assignment attempts, and termination attempts with PID and
+outcome fields. These logs are intentionally low-level because shutdown hooks
+run during process exit and cannot recover interactively.
+
+The process-tree tests are example-driven rather than property-generated: the
+tree collector is a finite closure over the snapshot entries, rejects cycles by
+bounding ancestor traversal to the snapshot length, and validates both
+termination and Job Object assignment decisions against a reused-descendant-PID
+case. The serial lock tests cover missing, partial, malformed, and stale owner
+states around the grace window.
 ## Further reading
 
 - `tests/e2e_postgresql_embedded_diesel.rs` – example of combining the helper
