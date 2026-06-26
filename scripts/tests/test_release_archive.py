@@ -51,10 +51,12 @@ def assert_build_release_binaries_invokes_cargo(
     binaries: tuple[str, ...],
     expected_args: tuple[str, ...],
     build_jobs: str | None,
+    cargo: str = "cargo",
+    program: str = "cargo",
 ) -> None:
     """Assert the release binary build delegates to Cargo as expected."""
     with CmdMox() as mox:
-        mox.mock("cargo").with_args(*expected_args).returns()
+        mox.mock(program).with_args(*expected_args).returns()
         mox.replay()
 
         release_archive.build_release_binaries(
@@ -62,7 +64,7 @@ def assert_build_release_binaries_invokes_cargo(
                 repo=repo,
                 target="x86_64-unknown-linux-gnu",
                 binaries=binaries,
-                cargo="cargo",
+                cargo=cargo,
                 build_jobs=build_jobs,
             )
         )
@@ -139,6 +141,29 @@ def test_build_release_binaries_preserves_build_jobs_flags(tmp_path: Path) -> No
         binaries=binaries,
         expected_args=expected_args,
         build_jobs=build_jobs,
+    )
+
+
+def test_build_release_binaries_preserves_cargo_wrapper_args(tmp_path: Path) -> None:
+    binaries = ("pg_embedded_setup_unpriv",)
+    expected_args = (
+        "cargo",
+        "build",
+        "--release",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--bin",
+        binaries[0],
+    )
+    build_jobs = None
+
+    assert_build_release_binaries_invokes_cargo(
+        tmp_path,
+        binaries=binaries,
+        expected_args=expected_args,
+        build_jobs=build_jobs,
+        cargo="sccache cargo",
+        program="sccache",
     )
 
 

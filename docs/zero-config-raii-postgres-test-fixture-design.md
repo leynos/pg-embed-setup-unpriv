@@ -93,12 +93,15 @@ sequenceDiagram
   its original UID and GID throughout; the worker assumes the sandbox
   credentials before touching the filesystem or launching PostgreSQL.
 
-- **If running as a normal user or on non-Linux platforms:** no privilege
-  dropping is needed. The helper uses the `postgresql_embedded` crate in its
-  normal mode, which runs as the current user. On macOS, root execution fails
-  fast with an unsupported privilege-drop error; on Windows, privilege
-  detection always selects the unprivileged in-process path because Windows has
-  no Unix root UID.
+- **If running as a normal user:** no privilege dropping is needed. The helper
+  uses the `postgresql_embedded` crate in its normal mode, which runs as the
+  current user.
+- **If running as root on macOS:** the helper fails fast with an unsupported
+  privilege-drop error because no macOS privilege-dropping implementation is
+  supported.
+- **If running on Windows or other non-Linux, non-root platforms:** privilege
+  detection selects the unprivileged in-process path because those platforms do
+  not enter the embedded-postgres root privilege-dropping flow.
 
 This runtime detection makes the behaviour “fixed per environment” but
 **transparent to the developer** – your test code calls the same API in all
@@ -729,7 +732,7 @@ or the expected PG version).
 The worker-mediated privileged flow is supported on Linux and the other
 root-capable Unix targets guarded in the bootstrap code. On those targets,
 running tests as root triggers the privileged path, provisions directories for
-`nobody`, and delegates to the subprocess so PostgreSQL is initialised without
+`nobody`, and delegates to the subprocess, so PostgreSQL is initialized without
 changing the parent’s identity. On macOS, root execution fails fast because no
 privilege-dropping implementation is supported there. On Windows, privilege
 detection always selects the unprivileged path and lifecycle operations run

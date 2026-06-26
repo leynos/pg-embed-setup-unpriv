@@ -6,7 +6,6 @@ use rstest::rstest;
 
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
-#[cfg(unix)]
 use std::path::PathBuf;
 
 /// Guard that cleans up a staged directory when dropped.
@@ -108,7 +107,6 @@ fn staged_worker_is_world_executable_and_in_temp_dir() -> color_eyre::Result<()>
 }
 
 /// Asserts that `find_staging_directory` produces the expected results for a given profile.
-#[cfg(unix)]
 fn assert_staging_directory_for_profile(
     input_path: &str,
     expected_profile: &str,
@@ -142,7 +140,6 @@ fn assert_staging_directory_for_profile(
     );
 }
 
-#[cfg(unix)]
 #[rstest]
 #[case::debug(
     "/project/target/debug/deps/pg_worker-abc123",
@@ -160,6 +157,25 @@ fn find_staging_directory_detects_profile(
     #[case] expected_target_dir: &str,
 ) {
     assert_staging_directory_for_profile(source_path, expected_profile, expected_target_dir);
+}
+
+#[rstest]
+fn pointer_file_writer_records_staged_path_bytes() -> color_eyre::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let target_dir = dir.path().join("target").join("debug");
+    fs::create_dir_all(&target_dir)?;
+    let staged_path = dir.path().join("staged").join("pg_worker");
+
+    write_pointer_file(&target_dir, &staged_path)?;
+
+    let pointer_path = target_dir.join("pg_worker_staged.path");
+    let pointer_content = fs::read(&pointer_path)?;
+    ensure!(
+        pointer_content == staged_path.as_os_str().as_encoded_bytes(),
+        "pointer file should contain staged path bytes"
+    );
+
+    Ok(())
 }
 
 #[cfg(unix)]

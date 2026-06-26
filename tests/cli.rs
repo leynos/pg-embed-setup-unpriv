@@ -8,6 +8,7 @@ fn version_flag_prints_version_without_bootstrap() -> Result<()> {
     let output = Command::new(env!("CARGO_BIN_EXE_pg_embedded_setup_unpriv"))
         .arg("--version")
         .env("PG_VERSION_REQ", "not a valid semver requirement")
+        .env("PG_TEST_BACKEND", "definitely_unsupported_backend")
         .env_remove("GITHUB_TOKEN")
         .output()?;
 
@@ -26,6 +27,10 @@ fn version_flag_prints_version_without_bootstrap() -> Result<()> {
     ensure!(
         !stderr.contains("PG_VERSION_REQ invalid semver spec"),
         "--version must not parse bootstrap configuration; stderr: {stderr}"
+    );
+    ensure!(
+        !stderr.contains("SKIP-TEST-CLUSTER"),
+        "--version must not validate backend selection; stderr: {stderr}"
     );
 
     Ok(())

@@ -32,6 +32,9 @@ struct ProcessLock {
 }
 
 #[cfg(not(unix))]
+const PROCESS_LOCK_OWNER_GRACE: Duration = Duration::from_secs(2);
+
+#[cfg(not(unix))]
 impl Drop for ProcessLock {
     fn drop(&mut self) {
         let _unused = std::fs::remove_file(&self.owner_path);
@@ -248,12 +251,25 @@ fn process_lock_owner_contents() -> String {
 fn process_lock_is_stale(lock_path: &std::path::Path) -> bool {
     let owner_path = process_lock_owner_path(lock_path);
     let Ok(owner) = std::fs::read_to_string(&owner_path) else {
-        return true;
+        return !process_lock_is_within_owner_grace(lock_path);
     };
     let Some(pid) = parse_lock_owner_pid(&owner) else {
         return true;
     };
     !owner_process_is_running(pid)
+}
+
+#[cfg(not(unix))]
+fn process_lock_is_within_owner_grace(lock_path: &std::path::Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(lock_path) else {
+        return false;
+    };
+    let Ok(created_at) = metadata.created().or_else(|_| metadata.modified()) else {
+        return false;
+    };
+    created_at
+        .elapsed()
+        .is_ok_and(|age| age <= PROCESS_LOCK_OWNER_GRACE)
 }
 
 #[cfg(not(unix))]

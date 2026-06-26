@@ -94,6 +94,8 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
       - name: Build release archive
         shell: bash
         run: >-
@@ -132,11 +134,11 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_PORT: "8765"
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+        uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
       - name: Install cargo-binstall 1.19.1
         shell: bash
         run: |
@@ -366,11 +368,11 @@ jobs:
       CARGO_TERM_COLOR: always
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+        uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
       - name: Install cargo-binstall 1.19.1
         shell: bash
         run: |
