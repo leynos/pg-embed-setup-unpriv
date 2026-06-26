@@ -33,12 +33,25 @@ pg-embed-setup-unpriv = "0.5.1"
 rstest = "0.26"
 ```
 
-For the published CLI binaries on Linux `x86_64` and `aarch64`, install the
-release archive with:
+For the published CLI binaries, install the release archive with:
 
 ```sh
 cargo binstall pg-embed-setup-unpriv
 ```
+
+Published `cargo binstall` targets:
+
+| Operating system | Targets                                                 |
+| ---------------- | ------------------------------------------------------- |
+| Linux            | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` |
+| macOS            | `aarch64-apple-darwin`, `x86_64-apple-darwin`           |
+| Windows          | `x86_64-pc-windows-msvc`                                |
+
+Windows on ARM is not published because the upstream PostgreSQL binary archive
+does not provide `aarch64-pc-windows-msvc` binaries. On Windows, the helper
+creates directories with the current account's default access control lists
+(ACLs); the POSIX `0700`/`0755` file-mode privacy clamps used on Unix are
+skipped because Windows does not expose those modes.
 
 ### Basic usage
 

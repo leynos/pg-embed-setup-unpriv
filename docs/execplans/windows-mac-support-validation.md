@@ -817,6 +817,30 @@ implemented.
   observed with authenticated `gh` commands. Evidence:
   `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28215731121` and
   `/tmp/gh-watch-28215731121-windows-mac-support-validation.out`.
+- [x] (2026-06-26T04:00:05Z) Implemented the Milestone 5 documentation update.
+  `README.md` and `docs/users-guide.md` now list the published `cargo binstall`
+  target matrix, the Windows-on-ARM limitation, and the Windows ACL/file-mode
+  caveat. `docs/roadmap.md` now closes item `3.3.2` and records the macOS and
+  Windows validation scope. The design document records the Windows Job Object
+  cleanup decision, the `src/fs.rs` Unix-only POSIX mode application decision,
+  and the release target scope.
+- [x] (2026-06-26T05:15:12Z) Milestone 5 deterministic gates passed locally:
+  `make fmt`, `make check-fmt`, `make lint`, `make test`, `make markdownlint`,
+  `make nixie`, and `git diff --check`. The test gate ran `276` tests with `3`
+  skipped, then `152` `dev-worker` tests with `0` skipped. The first CodeRabbit
+  review attempt hit the free CLI rate limit; per the user instruction,
+  `vsleep "72m"` completed before retrying. The retry completed with
+  `status=review_completed` and `findings=0`, so there are no documentation
+  concerns to clear before committing. Evidence:
+  `/tmp/fmt-docs-final-windows-mac-support-validation.out`,
+  `/tmp/check-fmt-docs-final-windows-mac-support-validation.out`,
+  `/tmp/lint-docs-final-windows-mac-support-validation.out`,
+  `/tmp/test-docs-final-windows-mac-support-validation.out`,
+  `/tmp/mdlint-docs-final-windows-mac-support-validation.out`,
+  `/tmp/nixie-docs-final-windows-mac-support-validation.out`,
+  `/tmp/diff-check-docs-final-windows-mac-support-validation.out`,
+  `/tmp/coderabbit-docs-final-windows-mac-support-validation.out`, and
+  `/tmp/coderabbit-docs-final-retry-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -832,7 +856,7 @@ implemented.
   time. The pull-request-time real install-and-run is complete as of CI run
   `28215731121`; the release-time asset audit is implemented and will execute
   against real assets on the next release tag.
-- [ ] Milestone 5: update README, users' guide, roadmap appendix (and close
+- [x] Milestone 5: update README, users' guide, roadmap appendix (and close
   item 3.3.2), and the design doc; run all commit gateways; finalise.
 
 ## Surprises & discoveries
