@@ -94,11 +94,11 @@ sequenceDiagram
   credentials before touching the filesystem or launching PostgreSQL.
 
 - **If running as a normal user or on non-Linux platforms:** no privilege
-  dropping is needed. The helper will simply use the `postgresql_embedded`
-  crate in its normal mode (which runs as the current user). On macOS/BSD, we
-  treat the helper as a **no-op pass-through** to `postgresql_embedded`
-  (privileged setup is only targeted on Linux) – meaning the library will just
-  use the embedded Postgres defaults without special permission handling.
+  dropping is needed. The helper uses the `postgresql_embedded` crate in its
+  normal mode, which runs as the current user. On macOS, root execution fails
+  fast with an unsupported privilege-drop error; on Windows, privilege
+  detection always selects the unprivileged in-process path because Windows has
+  no Unix root UID.
 
 This runtime detection makes the behaviour “fixed per environment” but
 **transparent to the developer** – your test code calls the same API in all
@@ -338,6 +338,35 @@ essentially one line in the test setup.
   exercised in automated runs.
 - Behavioural suites now coordinate across binaries with a shared lock file,
   so concurrent PostgreSQL setup or download tasks do not race in CI.
+
+
+### Implementation update (2026-06-26): Windows and macOS validation
+
+- CI now includes required macOS and Windows unprivileged test legs. These legs
+  build both binaries, run the setup binary's `--version` smoke test, cache the
+  PostgreSQL binary download by OS and architecture, and execute the
+  `cluster-unit-tests,async-api` feature set without running Linux-only
+  privileged tests.
+- The release and pull-request packaging paths now build `cargo binstall`
+  archives through the same release-archive script. Pull-request CI performs a
+  real local install-and-run on Linux x86-64, macOS Apple Silicon, and Windows
+  x86-64. The release workflow builds and audits five published targets:
+  `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+  `x86_64-pc-windows-msvc`, `aarch64-apple-darwin`, and `x86_64-apple-darwin`.
+- Windows on ARM is deliberately out of scope. The upstream PostgreSQL binary
+  archive does not provide `aarch64-pc-windows-msvc` binaries, so no release
+  archive or CI target is published for that triple.
+- Filesystem mode application is now target-gated in `src/fs.rs`: Unix targets
+  apply the requested POSIX modes, while Windows logs that POSIX permission
+  changes were skipped. This keeps the cross-platform code path compiling
+  without pretending that Windows ACLs match Unix `0700`/`0755` privacy
+  semantics.
+- Shared cluster process-exit cleanup remains POSIX `atexit`-based on macOS.
+  On Windows, the postmaster process tree is assigned to a kill-on-close Job
+  Object and direct process-tree termination remains as a fallback. The Windows
+  cleanup path verifies the live process image name and creation time parsed
+  from `postmaster.pid` before assigning or terminating a tree, reducing the
+  risk from PID reuse.
 
 #### Class diagram (2025-12-10)
 
@@ -697,24 +726,23 @@ or the expected PG version).
 
 ## Platform support and limitations
 
-Initially, our focus is **Linux** for the worker-mediated privileged flow. On
-Linux, running tests as root will trigger the privileged path, provisioning
-directories for `nobody` and delegating to the subprocess so PostgreSQL is
-initialised without ever changing the parent’s identity. On other Unix-like
-OSes (macOS, FreeBSD), we do not attempt any worker delegation because tests
-usually run as an unprivileged user. If someone does run as root on macOS, we
-either error out or treat the execution as unprivileged. The embedded Postgres
-crate itself supports Mac/Windows, but those environments rely on the normal
-in-process bootstrap – effectively the fixture calls `PostgreSQL::setup()` and
-`start()` directly on those platforms.
+The worker-mediated privileged flow is supported on Linux and the other
+root-capable Unix targets guarded in the bootstrap code. On those targets,
+running tests as root triggers the privileged path, provisions directories for
+`nobody`, and delegates to the subprocess so PostgreSQL is initialised without
+changing the parent’s identity. On macOS, root execution fails fast because no
+privilege-dropping implementation is supported there. On Windows, privilege
+detection always selects the unprivileged path and lifecycle operations run
+in-process.
 
 We are **leveraging the `postgresql-embedded` crate** as the core engine for
 cross-platform support (see postgresql-embedded README), so all OS-specific
 nuances of downloading and running PostgreSQL are handled by that library. Our
 layer is an orchestration on top to handle permission and configuration in a
 test-friendly way. This means as `postgresql-embedded` gains features or
-support, our fixture inherits them. (For example, Windows support is
-out-of-scope for now, but could be considered in the future through that crate.)
+support, our fixture inherits them. Windows x86-64 and macOS unprivileged
+support are now validated in CI. Windows on ARM remains unsupported until the
+upstream PostgreSQL binary archive publishes `aarch64-pc-windows-msvc` binaries.
 
 ## Summary: developer experience
 
