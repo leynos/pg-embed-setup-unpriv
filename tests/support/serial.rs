@@ -10,6 +10,8 @@ use rstest::fixture;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
+#[cfg(all(not(unix), windows))]
+use std::ffi::c_void;
 #[cfg(unix)]
 use std::fs::OpenOptions;
 #[cfg(unix)]
@@ -26,13 +28,28 @@ type ProcessLock = std::fs::File;
 #[derive(Debug)]
 struct ProcessLock {
     path: PathBuf,
+    owner_path: PathBuf,
 }
 
 #[cfg(not(unix))]
 impl Drop for ProcessLock {
     fn drop(&mut self) {
+        let _unused = std::fs::remove_file(&self.owner_path);
         let _unused = std::fs::remove_dir(&self.path);
     }
+}
+
+#[cfg(all(not(unix), windows))]
+const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+#[cfg(all(not(unix), windows))]
+const STILL_ACTIVE: u32 = 259;
+
+#[cfg(all(not(unix), windows))]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
+    fn GetExitCodeProcess(process: *mut c_void, exit_code: *mut u32) -> i32;
+    fn CloseHandle(handle: *mut c_void) -> i32;
 }
 
 #[derive(Debug)]
@@ -176,8 +193,14 @@ fn acquire_process_lock() -> ProcessLock {
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         match std::fs::create_dir(&lock_path) {
-            Ok(()) => return ProcessLock { path: lock_path },
+            Ok(()) => {
+                return write_process_lock_owner(&lock_path);
+            }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                if process_lock_is_stale(&lock_path) {
+                    let _unused = std::fs::remove_dir_all(&lock_path);
+                    continue;
+                }
                 assert!(
                     Instant::now() < deadline,
                     "timed out waiting to acquire scenario lock at {}",
@@ -195,11 +218,84 @@ fn acquire_process_lock() -> ProcessLock {
     }
 }
 
+#[cfg(not(unix))]
+fn write_process_lock_owner(lock_path: &std::path::Path) -> ProcessLock {
+    let owner_path = process_lock_owner_path(lock_path);
+    std::fs::write(&owner_path, process_lock_owner_contents()).unwrap_or_else(|err| {
+        let _unused = std::fs::remove_dir(lock_path);
+        panic!(
+            "failed to record scenario lock owner at {}: {err}",
+            owner_path.display()
+        );
+    });
+    ProcessLock {
+        path: lock_path.to_path_buf(),
+        owner_path,
+    }
+}
+
+#[cfg(not(unix))]
+fn process_lock_owner_path(lock_path: &std::path::Path) -> PathBuf {
+    lock_path.join("owner")
+}
+
+#[cfg(not(unix))]
+fn process_lock_owner_contents() -> String {
+    format!("pid={}\n", std::process::id())
+}
+
+#[cfg(not(unix))]
+fn process_lock_is_stale(lock_path: &std::path::Path) -> bool {
+    let owner_path = process_lock_owner_path(lock_path);
+    let Ok(owner) = std::fs::read_to_string(&owner_path) else {
+        return true;
+    };
+    let Some(pid) = parse_lock_owner_pid(&owner) else {
+        return true;
+    };
+    !owner_process_is_running(pid)
+}
+
+#[cfg(not(unix))]
+fn parse_lock_owner_pid(owner: &str) -> Option<u32> {
+    owner.trim().strip_prefix("pid=")?.parse().ok()
+}
+
+#[cfg(all(not(unix), windows))]
+fn owner_process_is_running(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+
+    // SAFETY: `OpenProcess` receives a concrete process id from the lock owner
+    // file. Handle inheritance is disabled, and a null return is treated as an
+    // inactive owner.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return false;
+    }
+
+    let mut exit_code = 0_u32;
+    // SAFETY: `handle` is a non-null process handle owned by this function,
+    // and `exit_code` is valid writable storage for the duration of the call.
+    let is_running = unsafe { GetExitCodeProcess(handle, std::ptr::addr_of_mut!(exit_code)) } != 0
+        && exit_code == STILL_ACTIVE;
+    // SAFETY: `handle` is owned by this function and is closed exactly once.
+    unsafe {
+        CloseHandle(handle);
+    }
+    is_running
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn owner_process_is_running(_pid: u32) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     //! Unit tests for scenario serialization guards.
 
-    #[cfg(unix)]
     use rstest::rstest;
 
     use super::*;
@@ -255,6 +351,45 @@ mod tests {
         );
 
         // Best-effort cleanup; errors are non-fatal in test teardown.
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[cfg(not(unix))]
+    #[rstest]
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort cleanup where errors are intentionally ignored"
+    )]
+    fn acquire_process_lock_places_lockdir_in_cargo_target_dir(serial_guard: ScenarioSerialGuard) {
+        use std::ffi::OsString;
+        use std::{env, fs};
+
+        use pg_embedded_setup_unpriv::test_support::scoped_env;
+
+        let _guard = serial_guard;
+
+        let tmp_dir = env::temp_dir().join("pg_scenario_lockdir_test");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir)
+            .expect("failed to create temporary CARGO_TARGET_DIR for acquire_process_lock test");
+
+        let _env_guard = scoped_env(vec![(
+            OsString::from("CARGO_TARGET_DIR"),
+            Some(tmp_dir.clone().into_os_string()),
+        )]);
+        {
+            let _lock = acquire_process_lock();
+            let lock_path = tmp_dir.join("pg-embed-setup-unpriv.serial.lockdir");
+            assert!(
+                lock_path.is_dir(),
+                "expected acquire_process_lock to create lockdir at {lock_path:?}"
+            );
+            assert!(
+                process_lock_owner_path(&lock_path).is_file(),
+                "expected acquire_process_lock to record a lock owner in {lock_path:?}"
+            );
+        }
+
         let _ = fs::remove_dir_all(&tmp_dir);
     }
 }

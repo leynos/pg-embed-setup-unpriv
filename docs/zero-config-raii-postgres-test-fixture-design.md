@@ -735,14 +735,14 @@ privilege-dropping implementation is supported there. On Windows, privilege
 detection always selects the unprivileged path and lifecycle operations run
 in-process.
 
-We are **leveraging the `postgresql-embedded` crate** as the core engine for
-cross-platform support (see postgresql-embedded README), so all OS-specific
-nuances of downloading and running PostgreSQL are handled by that library. Our
-layer is an orchestration on top to handle permission and configuration in a
-test-friendly way. This means as `postgresql-embedded` gains features or
-support, our fixture inherits them. Windows x86-64 and macOS unprivileged
-support are now validated in CI. Windows on ARM remains unsupported until the
-upstream PostgreSQL binary archive publishes `aarch64-pc-windows-msvc` binaries.
+The **`postgresql_embedded` crate** provides the core engine for cross-platform
+support (see the `postgresql_embedded` README), so OS-specific nuances of
+downloading and running PostgreSQL are handled by that library. This layer adds
+orchestration for permission and configuration handling in a test-friendly
+form. As `postgresql_embedded` gains features or platform support, the fixture
+inherits them. Windows x86-64 and macOS unprivileged support are now validated
+in CI. Windows on ARM remains unsupported until the upstream PostgreSQL binary
+archive publishes `aarch64-pc-windows-msvc` binaries.
 
 ## Summary: developer experience
 

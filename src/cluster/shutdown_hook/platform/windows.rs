@@ -5,10 +5,10 @@ use std::{ffi::c_void, ptr::NonNull};
 mod identity;
 mod job;
 
-use self::identity::process_matches_postmaster;
 pub(in crate::cluster::shutdown_hook) use self::identity::{
     PostmasterProcess, parse_postmaster_process,
 };
+use self::identity::{image_file_name_is_postgres, process_matches_postmaster};
 use self::job::JobHandle;
 
 /// Platform-specific process identifier stored in `postmaster.pid`.
@@ -177,6 +177,10 @@ impl ProcessHandle {
         self.is_active() && process_matches_postmaster(self.raw(), expected)
     }
 
+    fn is_active_postgres(&self) -> bool {
+        self.is_active() && image_file_name_is_postgres(self.raw())
+    }
+
     fn terminate(&self) {
         // SAFETY:
         // - `self.0` is a non-null process handle opened with
@@ -258,7 +262,10 @@ impl Drop for SnapshotHandle {
 }
 
 fn terminate_process_tree(process: PostmasterProcess) {
-    if !postmaster_process_is_running(process) {
+    let Some(root_process) = ProcessHandle::open_terminate(process.pid()) else {
+        return;
+    };
+    if !root_process.matches_postmaster(process) {
         return;
     }
 
@@ -266,7 +273,11 @@ fn terminate_process_tree(process: PostmasterProcess) {
     tree.reverse();
 
     for process_id in tree {
-        terminate_process(process_id);
+        if process_id == process.pid() {
+            root_process.terminate();
+        } else {
+            terminate_process(process_id);
+        }
     }
 }
 
@@ -296,7 +307,9 @@ fn collect_process_tree(root: PostmasterPid, entries: &[ProcessEntry]) -> Vec<Po
 
 fn terminate_process(pid: PostmasterPid) {
     if let Some(process) = ProcessHandle::open_terminate(pid) {
-        process.terminate();
+        if process.is_active_postgres() {
+            process.terminate();
+        }
     }
 }
 

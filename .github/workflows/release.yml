@@ -372,7 +372,25 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
       - name: Install cargo-binstall 1.19.1
-        run: cargo binstall -y --force cargo-binstall@1.19.1
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          requested_binstall_dir="$RUNNER_TEMP/cargo-binstall-1.19.1"
+          mkdir -p "$requested_binstall_dir"
+          cargo binstall -y \
+            --install-path "$requested_binstall_dir" \
+            --force \
+            cargo-binstall@1.19.1
+
+          export PATH="$requested_binstall_dir:$PATH"
+          echo "$requested_binstall_dir" >> "$GITHUB_PATH"
+          binstall_version="$(cargo binstall -V)"
+          echo "$binstall_version"
+          if [[ "$binstall_version" != *"1.19.1"* ]]; then
+            echo "expected cargo-binstall 1.19.1, got $binstall_version" >&2
+            exit 1
+          fi
       - name: Dry-run published release asset URLs
         run: |
           set -euo pipefail

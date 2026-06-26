@@ -1,9 +1,11 @@
 //! Tests for worker binary staging logic.
 
 use super::*;
-use color_eyre::eyre::{ensure, eyre};
+use color_eyre::eyre::ensure;
 use rstest::rstest;
 
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::path::PathBuf;
 
@@ -72,7 +74,7 @@ fn staged_worker_is_world_executable_and_in_temp_dir() -> color_eyre::Result<()>
 
     // Verify path follows expected pattern {temp_dir}/pg-worker-{profile}-{hash}/
     let parent = staged_path.parent().ok_or_else(|| {
-        eyre!(
+        color_eyre::eyre::eyre!(
             "staged worker path missing parent: {}",
             staged_path.display()
         )
@@ -216,12 +218,10 @@ fn pointer_file_written_to_target_dir() -> color_eyre::Result<()> {
     );
 
     // Verify pointer file contains the staged path
-    let pointer_content = fs::read_to_string(&pointer_path)?;
-    let staged_path_text = staged_path
-        .to_str()
-        .ok_or_else(|| eyre!("staged worker path is not UTF-8"))?;
+    let pointer_content = fs::read(&pointer_path)?;
+    let staged_path_bytes = staged_path.as_os_str().as_bytes();
     ensure!(
-        pointer_content == staged_path_text,
+        pointer_content == staged_path_bytes,
         "pointer file should contain staged path"
     );
 

@@ -48,7 +48,13 @@ const POST_SIGKILL_GRACE: Duration = Duration::from_millis(100);
 /// Platform-specific process identifier stored in `postmaster.pid`.
 // Test-support re-exports document this helper under docsrs, but only
 // feature-gated integration tests call it.
-#[cfg_attr(docsrs, allow(dead_code))]
+#[cfg_attr(
+    docsrs,
+    expect(
+        dead_code,
+        reason = "docsrs documents test-support exports used by feature-gated integration tests"
+    )
+)]
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub type PostmasterPid = platform::PostmasterPid;
 
@@ -190,7 +196,13 @@ fn wait_for_exit(process: platform::PostmasterProcess, timeout: Duration) -> boo
 #[must_use]
 // Test-support re-exports document this helper under docsrs, but only
 // feature-gated integration tests call it.
-#[cfg_attr(docsrs, allow(dead_code))]
+#[cfg_attr(
+    docsrs,
+    expect(
+        dead_code,
+        reason = "docsrs documents test-support exports used by feature-gated integration tests"
+    )
+)]
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub fn read_postmaster_pid(data_dir: &Path) -> Option<PostmasterPid> {
     let pid_file = data_dir.join("postmaster.pid");
@@ -211,7 +223,13 @@ fn read_postmaster_process(data_dir: &Path) -> Option<platform::PostmasterProces
 #[must_use]
 // Test-support re-exports document this helper under docsrs, but only
 // feature-gated integration tests call it.
-#[cfg_attr(docsrs, allow(dead_code))]
+#[cfg_attr(
+    docsrs,
+    expect(
+        dead_code,
+        reason = "docsrs documents test-support exports used by feature-gated integration tests"
+    )
+)]
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub fn process_is_running(pid: PostmasterPid) -> bool {
     platform::process_is_running_for_platform(pid)

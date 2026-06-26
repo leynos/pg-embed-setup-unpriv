@@ -65,6 +65,10 @@ fn execute_root_operation(
         }
     }
 
+    if !root_privilege_drop_supported() {
+        return Err(unsupported_root_privilege_drop_error());
+    }
+
     match bootstrap.execution_mode {
         ExecutionMode::InProcess => Err(BootstrapError::from(eyre!(concat!(
             "ExecutionMode::InProcess is unsafe for root because process-wide ",
