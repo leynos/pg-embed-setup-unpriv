@@ -786,8 +786,8 @@ implemented.
   that exits before bootstrap rather than giving the packaging job more network
   credentials. The red test `cargo test --test cli` now invokes the real binary
   with an invalid `PG_VERSION_REQ`; it fails because the current binary ignores
-  `--version` and parses bootstrap configuration. The green implementation
-  adds Clap parsing in `src/main.rs` and a regression test in `tests/cli.rs`;
+  `--version` and parses bootstrap configuration. The green implementation adds
+  Clap parsing in `src/main.rs` and a regression test in `tests/cli.rs`;
   `--version` now exits before bootstrap and prints the package version. Local
   gates passed before CodeRabbit review: focused red/green CLI tests,
   `make check-fmt`, `make lint`, `make test`, `make markdownlint`,
@@ -806,6 +806,17 @@ implemented.
   `status=review_completed` and `findings=0`, so there are no CodeRabbit
   concerns to clear before committing Approach 1. Evidence:
   `/tmp/coderabbit-cli-version-windows-mac-support-validation.out`.
+- [x] (2026-06-26T03:55:05Z) Pushed commit `5f19e2f` and observed CI run
+  `28215731121` to green. Linux root, Linux unprivileged, macOS tests, Windows
+  tests, Linux `binstall`, Windows `binstall`, and macOS `binstall` all passed.
+  The earlier Linux `binstall` failure mode is resolved: the installed
+  `pg_embedded_setup_unpriv --version` now exits through Clap before bootstrap
+  and no longer downloads PostgreSQL binaries or queries
+  `theseus-rs/postgresql-binaries`. The GitHub MCP workflow-run tool was
+  retried for this commit and still returned `token_expired`, so the CI run was
+  observed with authenticated `gh` commands. Evidence:
+  `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28215731121` and
+  `/tmp/gh-watch-28215731121-windows-mac-support-validation.out`.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -819,8 +830,8 @@ implemented.
 - [ ] Milestone 4: validate `binstall` with a real install-and-run per OS at
   pull-request time and an end-to-end check against real assets at release
   time. The pull-request-time real install-and-run is complete as of CI run
-  `28214611615`; the release-time asset audit is implemented and will execute
-  on the next release tag.
+  `28215731121`; the release-time asset audit is implemented and will execute
+  against real assets on the next release tag.
 - [ ] Milestone 5: update README, users' guide, roadmap appendix (and close
   item 3.3.2), and the design doc; run all commit gateways; finalise.
 
