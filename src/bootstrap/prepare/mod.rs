@@ -114,10 +114,9 @@ fn resolve_settings_paths_for_uid(
 #[cfg(all(unix, privileged_unix_platform))]
 fn resolve_settings_paths_for_current_user(
     settings: &mut Settings,
-    cfg: &PgEnvCfg,
+    _cfg: &PgEnvCfg,
 ) -> BootstrapResult<SettingsPaths> {
-    let uid = geteuid();
-    resolve_settings_paths_for_uid(settings, cfg, uid)
+    settings_paths_from_settings(settings, false, false)
 }
 
 #[cfg(not(all(unix, privileged_unix_platform)))]
@@ -251,6 +250,7 @@ fn sorted_configuration_keys(settings: &Settings) -> Vec<&str> {
     keys.sort_unstable();
     keys
 }
+mod property_tests;
 
 #[cfg(test)]
 mod tests;
