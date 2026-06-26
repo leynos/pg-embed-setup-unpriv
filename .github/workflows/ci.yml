@@ -49,6 +49,11 @@ jobs:
           format: lcov
           features: dev-worker
           with-default-features: "false"
+      - name: Loom Concurrency Tests (non-blocking)
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        run: make test-loom
+        timeout-minutes: 1
+        continue-on-error: true
       - name: Install cargo-nextest and test (root)
         if: ${{ matrix.privilege == 'root' }}
         run: |
