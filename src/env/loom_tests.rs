@@ -3,9 +3,9 @@
 use std::{cell::RefCell, ffi::OsString};
 
 use loom::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+    sync::{,
+    Arc,
+    atomic::{AtomicUsize, Ordering},
     },
     thread,
 };
@@ -23,7 +23,7 @@ loom::lazy_static! {
 struct LoomEnvLock;
 
 impl EnvLockOps for LoomEnvLock {
-    type Guard = loom::sync::MutexGuard<'static, ()>;
+    type Guard = loom::sync::MutexGuard<'static, FakeEnv>;
 
     /// Acquires the modelled environment mutex for a scoped environment guard.
     fn lock_env_mutex() -> Self::Guard {
@@ -34,6 +34,20 @@ impl EnvLockOps for LoomEnvLock {
 
     /// Leaves poisoning recovery to Loom's modelled mutex implementation.
     fn ensure_lock_is_clean() {}
+
+    fn var_os(guard: &Self::Guard, key: &OsString) -> Option<OsString> {
+        guard.get(key).cloned().flatten()
+    }
+
+    fn set_var(guard: &mut Self::Guard, key: &OsString, value: OsString) {
+        FAKE_ENV_MUTATIONS.fetch_add(1, Ordering::SeqCst);
+        guard.insert(key.clone(), Some(value));
+    }
+
+    fn remove_var(guard: &mut Self::Guard, key: &OsString) {
+        FAKE_ENV_MUTATIONS.fetch_add(1, Ordering::SeqCst);
+        guard.insert(key.clone(), None);
+    }
 }
 
 loom::thread_local! {
@@ -66,6 +80,65 @@ fn apply_loom(vars: &[(String, Option<String>)]) -> ScopedEnv {
     ScopedEnv::apply_owned_with_state(owned, enter_scope_loom, exit_scope_loom)
 }
 
+fn vars(input: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
+    input
+        .iter()
+        .map(|(key, value)| ((*key).to_owned(), value.map(str::to_owned)))
+        .collect()
+}
+
+fn snapshot_from_map(map: &FakeEnv) -> Snapshot {
+    map.iter()
+        .map(|(key, value)| {
+            (
+                key.to_string_lossy().into_owned(),
+                value
+                    .as_ref()
+                    .map(|stored| stored.to_string_lossy().into_owned()),
+            )
+        })
+        .collect()
+}
+
+fn snapshot_fake_env() -> Snapshot {
+    let guard = LoomEnvLock::lock_env_mutex();
+    snapshot_from_map(&guard)
+}
+
+fn snapshot_current_scope() -> Snapshot {
+    LOOM_THREAD_STATE.with(|cell| {
+        cell.borrow()
+            .with_lock_guard(|guard| snapshot_from_map(guard))
+    })
+}
+
+fn current_thread_depth() -> usize {
+    LOOM_THREAD_STATE.with(|cell| cell.borrow().depth())
+}
+
+fn current_thread_state_is_reset() -> bool {
+    LOOM_THREAD_STATE.with(|cell| {
+        let state = cell.borrow();
+        state.depth() == 0 && state.is_stack_empty() && !state.has_lock()
+    })
+}
+
+fn seed_fake_env(input: &[(&str, Option<&str>)]) {
+    let mut guard = LoomEnvLock::lock_env_mutex();
+    guard.clear();
+    for (key, value) in input {
+        guard.insert(OsString::from(key), value.map(OsString::from));
+    }
+    FAKE_ENV_MUTATIONS.store(0, Ordering::SeqCst);
+}
+
+fn assert_fake_env(expected: &[(&str, Option<&str>)]) {
+    assert_eq!(snapshot_fake_env(), vars(expected));
+}
+
+fn assert_current_scope_env(expected: &[(&str, Option<&str>)]) {
+    assert_eq!(snapshot_current_scope(), vars(expected));
+}
 /// Runs a bounded Loom model for the scoped environment lock scenarios.
 fn run_loom_model<F>(f: F)
 where
@@ -139,3 +212,165 @@ fn scoped_env_allows_reentrant_scopes_on_one_thread() {
         assert_eq!(active_counter.load(Ordering::SeqCst), 0);
     });
 }
+
+fn scoped_env_exercises_backup_restore_bookkeeping() {
+    run_loom_model(|| {
+        let baseline = &[
+            ("PGDATA", Some("/var/lib/postgresql/base")),
+            ("PGHOST", None),
+            ("TZDIR", Some("/usr/share/zoneinfo")),
+        ];
+        seed_fake_env(baseline);
+
+        {
+            let overrides = vars(&[
+                ("PGDATA", Some("/tmp/model-data")),
+                ("PGHOST", Some("/tmp/model-socket")),
+                ("TZDIR", None),
+            ]);
+            let _guard = apply_loom(&overrides);
+
+            assert_current_scope_env(&[
+                ("PGDATA", Some("/tmp/model-data")),
+                ("PGHOST", Some("/tmp/model-socket")),
+                ("TZDIR", None),
+            ]);
+        }
+
+        assert_fake_env(baseline);
+    });
+}
+
+fn scoped_env_handles_spawn_while_holding_scope() {
+    run_loom_model(|| {
+        let baseline = &[("PGDATA", Some("base")), ("PGHOST", None)];
+        seed_fake_env(baseline);
+
+        let helper_entered = Arc::new(AtomicUsize::new(0));
+        let outer_released = Arc::new(AtomicUsize::new(0));
+        let outer = apply_loom(&vars(&[("PGDATA", Some("outer"))]));
+        assert_current_scope_env(&[("PGDATA", Some("outer")), ("PGHOST", None)]);
+
+        let entered_clone = Arc::clone(&helper_entered);
+        let released_clone = Arc::clone(&outer_released);
+        let helper = thread::spawn(move || {
+            let _guard = apply_loom(&vars(&[("PGHOST", Some("helper"))]));
+            assert_eq!(
+                released_clone.load(Ordering::SeqCst),
+                1,
+                "helper scope must acquire only after the outer scope releases"
+            );
+            assert_current_scope_env(&[("PGDATA", Some("base")), ("PGHOST", Some("helper"))]);
+            entered_clone.store(1, Ordering::SeqCst);
+        });
+
+        thread::yield_now();
+        outer_released.store(1, Ordering::SeqCst);
+        drop(outer);
+
+        helper.join().expect("helper thread should join cleanly");
+        assert_eq!(helper_entered.load(Ordering::SeqCst), 1);
+        assert_fake_env(baseline);
+    });
+}
+
+fn scoped_env_restores_on_panic_unwind() {
+    run_loom_model(|| {
+        let baseline = &[("PGDATA", Some("base")), ("TZDIR", None)];
+        seed_fake_env(baseline);
+
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            let _guard = apply_loom(&vars(&[
+                ("PGDATA", Some("panic-data")),
+                ("TZDIR", Some("panic-tz")),
+            ]));
+            assert_current_scope_env(&[
+                ("PGDATA", Some("panic-data")),
+                ("TZDIR", Some("panic-tz")),
+            ]);
+            panic!("intentional scoped env unwind");
+        }));
+
+        let panic_payload = result.expect_err("scope should panic inside catch_unwind");
+        assert_eq!(
+            panic_payload.downcast_ref::<&'static str>(),
+            Some(&"intentional scoped env unwind")
+        );
+        assert_eq!(
+            FAKE_ENV_MUTATIONS.load(Ordering::SeqCst),
+            4,
+            "panic path should apply two overrides and restore both values"
+        );
+        assert!(
+            current_thread_state_is_reset(),
+            "panic path should clear thread-local scope state"
+        );
+    });
+}
+
+fn scoped_env_handles_asymmetric_scope_lifetimes() {
+    run_loom_model(|| {
+        let baseline = &[("PGDATA", Some("base")), ("PGHOST", None), ("TZDIR", None)];
+        seed_fake_env(baseline);
+        let active_counter = Arc::new(AtomicUsize::new(0));
+
+        let long_counter = Arc::clone(&active_counter);
+        let long = thread::spawn(move || {
+            let _guard = apply_loom(&vars(&[
+                ("PGDATA", Some("long")),
+                ("PGHOST", Some("long-host")),
+            ]));
+            assert_eq!(long_counter.fetch_add(1, Ordering::SeqCst), 0);
+            thread::yield_now();
+            assert_eq!(long_counter.fetch_sub(1, Ordering::SeqCst), 1);
+        });
+
+        let quick_counter = Arc::clone(&active_counter);
+        let quick = thread::spawn(move || {
+            let _guard = apply_loom(&vars(&[("TZDIR", Some("quick"))]));
+            assert_eq!(
+                quick_counter.fetch_add(1, Ordering::SeqCst),
+                0,
+                "quick scope must not overlap the longer scope"
+            );
+            assert_eq!(quick_counter.fetch_sub(1, Ordering::SeqCst), 1);
+        });
+
+        long.join().expect("long thread should join cleanly");
+        quick.join().expect("quick thread should join cleanly");
+        assert_eq!(active_counter.load(Ordering::SeqCst), 0);
+        assert_fake_env(baseline);
+    });
+}
+
+fn scoped_env_tracks_per_thread_depth_correctly() {
+    run_loom_model(|| {
+        let baseline = &[("PGDATA", Some("base")), ("PGHOST", None), ("TZDIR", None)];
+        seed_fake_env(baseline);
+
+        let first = thread::spawn(move || {
+            let guard = apply_loom(&vars(&[("PGDATA", Some("thread-a"))]));
+            assert_eq!(current_thread_depth(), 1);
+            thread::yield_now();
+            drop(guard);
+            assert_eq!(current_thread_depth(), 0);
+        });
+
+        let second = thread::spawn(move || {
+            let outer = apply_loom(&vars(&[("PGHOST", Some("thread-b"))]));
+            assert_eq!(current_thread_depth(), 1);
+            let inner = apply_loom(&vars(&[("TZDIR", Some("thread-b-inner"))]));
+            assert_eq!(current_thread_depth(), 2);
+            drop(inner);
+            assert_eq!(current_thread_depth(), 1);
+            drop(outer);
+            assert_eq!(current_thread_depth(), 0);
+        });
+
+        first.join().expect("first thread should join cleanly");
+        second.join().expect("second thread should join cleanly");
+        assert_fake_env(baseline);
+    });
+}
+type FakeEnv = BTreeMap<OsString, Option<OsString>>;
+type Snapshot = Vec<(String, Option<String>)>;
