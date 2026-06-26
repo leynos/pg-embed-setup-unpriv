@@ -162,6 +162,24 @@ jobs:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+      - name: Install cargo-binstall 1.19.1
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          binstall_dir="$RUNNER_TEMP/cargo-binstall-1.19.1"
+          mkdir -p "$binstall_dir"
+          cargo binstall -y \
+            --install-path "$binstall_dir" \
+            --force \
+            cargo-binstall@1.19.1
+          echo "$binstall_dir" >> "$GITHUB_PATH"
+
+          binstall_bin="$binstall_dir/cargo-binstall"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            binstall_bin="${binstall_bin}.exe"
+          fi
+          "$binstall_bin" -V
       - name: Build cargo-binstall archive
         shell: bash
         run: >-
@@ -186,8 +204,12 @@ jobs:
           openssl req -newkey rsa:2048 -nodes \
             -keyout "$cert_dir/server.key" \
             -out "$cert_dir/server.csr" \
-            -subj "/CN=127.0.0.1" \
-            -addext "subjectAltName=IP:127.0.0.1"
+            -subj "/CN=127.0.0.1"
+          printf '%s\n' \
+            "subjectAltName = IP:127.0.0.1" \
+            "extendedKeyUsage = serverAuth" \
+            "keyUsage = critical,digitalSignature,keyEncipherment" \
+            > "$cert_dir/server-ext.cnf"
           openssl x509 -req \
             -in "$cert_dir/server.csr" \
             -CA "$cert_dir/ca.pem" \
@@ -195,7 +217,7 @@ jobs:
             -CAcreateserial \
             -days 1 \
             -out "$cert_dir/server.pem" \
-            -copy_extensions copy
+            -extfile "$cert_dir/server-ext.cnf"
 
           if command -v python3 >/dev/null 2>&1; then
             python_bin=python3
