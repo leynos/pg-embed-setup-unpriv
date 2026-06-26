@@ -328,6 +328,9 @@ fn sorted_configuration_keys(settings: &Settings) -> Vec<&str> {
     keys
 }
 
+#[cfg(test)]
+mod property_tests;
+
 #[cfg(unix)]
 fn ensure_install_dir_for_user(path: &Utf8PathBuf, user: &User) -> BootstrapResult<()> {
     ensure_dir_for_user(path, user, 0o755)?;
