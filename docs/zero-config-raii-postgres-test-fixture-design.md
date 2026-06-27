@@ -125,7 +125,7 @@ all setup/teardown details:
 - **On drop:** `TestCluster` will implement `Drop` to automatically **stop the
   database and clean up**. Upon going out of scope (e.g. end of a test), it
   will call `postgresql_embedded.stop()` to shut down the Postgres subprocess
-  gracefully (see postgresql-embedded README). This ensures no orphan processes
+  gracefully (see postgresql_embedded README). This ensures no orphan processes
   or locks remain, giving true RAII semantics.
 
 - **Connection info and utilities:** `TestCluster` can hold the connection
@@ -564,7 +564,7 @@ To allow the same tests to run concurrently (especially under `nextest`, which
 runs tests in parallel), our fixture should avoid fixed resources like static
 ports. We will configure the cluster to use **ephemeral ports by default**,
 unless a specific `PG_PORT` is given. The `postgresql_embedded` crate supports
-running on ephemeral ports (see postgresql-embedded README), so by setting the
+running on ephemeral ports (see postgresql_embedded README), so by setting the
 port to 0 in the settings (or leaving it unspecified and letting the crate
 choose), each `TestCluster` will get a free port assigned at runtime. The
 chosen port can be obtained from the returned settings or directly via the
@@ -589,7 +589,7 @@ Rust tests:
 
 - **Synchronous tests (`cargo test`):** We can enable the
   `postgresql_embedded` crate’s `"blocking"` feature to use its blocking API
-  (see postgresql-embedded README). This allows calling `PostgreSQL::setup()`
+  (see postgresql_embedded README). This allows calling `PostgreSQL::setup()`
   and `start()` in a normal
   #[test] function without needing an async runtime. For example,
   `TestCluster::start()` can internally call the blocking setup/start and
@@ -796,5 +796,5 @@ effortless as using an in-memory database, but with full PostgreSQL fidelity.
   Postgres)
 
 - theseus-rs/postgresql_embedded – *README (features and
-  examples)* (see postgresql-embedded README) (capabilities of the underlying
+  examples)* (see postgresql_embedded README) (capabilities of the underlying
   embedded Postgres crate, async vs blocking API, ephemeral ports support)
