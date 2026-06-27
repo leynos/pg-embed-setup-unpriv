@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shlex
 import sys
 import tarfile
 from pathlib import Path
@@ -46,28 +47,17 @@ def archive_members(archive: Path) -> list[str]:
 
 
 def assert_build_release_binaries_invokes_cargo(
-    repo: Path,
+    spec: release_archive.ReleaseBuildSpec,
     *,
-    binaries: tuple[str, ...],
     expected_args: tuple[str, ...],
-    build_jobs: str | None,
-    cargo: str = "cargo",
-    program: str = "cargo",
 ) -> None:
     """Assert the release binary build delegates to Cargo as expected."""
+    program = shlex.split(spec.cargo)[0]
     with CmdMox() as mox:
         mox.mock(program).with_args(*expected_args).returns()
         mox.replay()
 
-        release_archive.build_release_binaries(
-            release_archive.ReleaseBuildSpec(
-                repo=repo,
-                target="x86_64-unknown-linux-gnu",
-                binaries=binaries,
-                cargo=cargo,
-                build_jobs=build_jobs,
-            )
-        )
+        release_archive.build_release_binaries(spec)
 
 
 def test_windows_targets_use_exe_suffix() -> None:
@@ -113,12 +103,17 @@ def test_build_release_binaries_invokes_cargo_with_all_bins(tmp_path: Path) -> N
         binaries[1],
     )
     build_jobs = None
+    spec = release_archive.ReleaseBuildSpec(
+        repo=tmp_path,
+        target="x86_64-unknown-linux-gnu",
+        binaries=binaries,
+        cargo="cargo",
+        build_jobs=build_jobs,
+    )
 
     assert_build_release_binaries_invokes_cargo(
-        tmp_path,
-        binaries=binaries,
+        spec,
         expected_args=expected_args,
-        build_jobs=build_jobs,
     )
 
 
@@ -135,12 +130,17 @@ def test_build_release_binaries_preserves_build_jobs_flags(tmp_path: Path) -> No
         binaries[0],
     )
     build_jobs = "--jobs 2"
+    spec = release_archive.ReleaseBuildSpec(
+        repo=tmp_path,
+        target="x86_64-unknown-linux-gnu",
+        binaries=binaries,
+        cargo="cargo",
+        build_jobs=build_jobs,
+    )
 
     assert_build_release_binaries_invokes_cargo(
-        tmp_path,
-        binaries=binaries,
+        spec,
         expected_args=expected_args,
-        build_jobs=build_jobs,
     )
 
 
@@ -156,14 +156,17 @@ def test_build_release_binaries_preserves_cargo_wrapper_args(tmp_path: Path) -> 
         binaries[0],
     )
     build_jobs = None
+    spec = release_archive.ReleaseBuildSpec(
+        repo=tmp_path,
+        target="x86_64-unknown-linux-gnu",
+        binaries=binaries,
+        cargo="sccache cargo",
+        build_jobs=build_jobs,
+    )
 
     assert_build_release_binaries_invokes_cargo(
-        tmp_path,
-        binaries=binaries,
+        spec,
         expected_args=expected_args,
-        build_jobs=build_jobs,
-        cargo="sccache cargo",
-        program="sccache",
     )
 
 
