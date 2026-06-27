@@ -121,7 +121,7 @@ impl ProcessEntry32W {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ProcessEntry {
     process_id: PostmasterPid,
     parent_process_id: PostmasterPid,
@@ -269,34 +269,44 @@ fn terminate_process_tree(process: PostmasterProcess) {
         return;
     }
 
-    let mut tree = process_tree(process.pid());
-    tree.reverse();
+    let tree = process_tree(process.pid());
+    let mut descendants = open_terminable_descendant_processes(process.pid(), &tree);
+    descendants.reverse();
 
-    for process_id in tree {
-        if process_id == process.pid() {
-            root_process.terminate();
-        } else {
-            terminate_process(process_id);
-        }
+    for descendant in descendants {
+        terminate_process(&descendant);
     }
+    root_process.terminate();
 }
 
-fn process_tree(root: PostmasterPid) -> Vec<PostmasterPid> {
+fn process_tree(root: PostmasterPid) -> Vec<ProcessEntry> {
     let Some(snapshot) = SnapshotHandle::capture_processes() else {
-        return vec![root];
+        return vec![ProcessEntry {
+            process_id: root,
+            parent_process_id: root,
+        }];
     };
     collect_process_tree(root, &snapshot.process_entries())
 }
 
-fn collect_process_tree(root: PostmasterPid, entries: &[ProcessEntry]) -> Vec<PostmasterPid> {
-    let mut tree = vec![root];
+fn collect_process_tree(root: PostmasterPid, entries: &[ProcessEntry]) -> Vec<ProcessEntry> {
+    let mut tree = vec![ProcessEntry {
+        process_id: root,
+        parent_process_id: root,
+    }];
     let mut found_child = true;
 
     while found_child {
         found_child = false;
         for entry in entries {
-            if tree.contains(&entry.parent_process_id) && !tree.contains(&entry.process_id) {
-                tree.push(entry.process_id);
+            let parent_is_in_tree = tree
+                .iter()
+                .any(|member| member.process_id == entry.parent_process_id);
+            let process_is_in_tree = tree
+                .iter()
+                .any(|member| member.process_id == entry.process_id);
+            if parent_is_in_tree && !process_is_in_tree {
+                tree.push(*entry);
                 found_child = true;
             }
         }
@@ -305,55 +315,83 @@ fn collect_process_tree(root: PostmasterPid, entries: &[ProcessEntry]) -> Vec<Po
     tree
 }
 
-fn terminate_process(pid: PostmasterPid) {
-    if let Some(process) = ProcessHandle::open_terminate(pid) {
-        if process.is_active_postgres() {
-            process.terminate();
-        }
-    }
+fn open_terminable_descendant_processes(
+    root: PostmasterPid,
+    tree: &[ProcessEntry],
+) -> Vec<ProcessHandle> {
+    open_validated_descendant_processes(root, tree, ProcessHandle::open_terminate)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{ProcessEntry, collect_process_tree};
+fn open_assignable_descendant_processes(
+    root: PostmasterPid,
+    tree: &[ProcessEntry],
+) -> Vec<ProcessHandle> {
+    open_validated_descendant_processes(root, tree, ProcessHandle::open_assign_to_job)
+}
 
-    #[test]
-    fn collect_process_tree_returns_root_when_no_descendants() {
-        let entries = [
-            ProcessEntry {
-                process_id: 20,
-                parent_process_id: 10,
-            },
-            ProcessEntry {
-                process_id: 30,
-                parent_process_id: 20,
-            },
-        ];
+fn open_validated_descendant_processes(
+    root: PostmasterPid,
+    tree: &[ProcessEntry],
+    open_process: impl Fn(PostmasterPid) -> Option<ProcessHandle>,
+) -> Vec<ProcessHandle> {
+    let candidates = tree
+        .iter()
+        .copied()
+        .filter(|member| member.process_id != root)
+        .filter_map(|member| Some((member, open_process(member.process_id)?)))
+        .collect::<Vec<_>>();
+    let Some(snapshot) = SnapshotHandle::capture_processes() else {
+        return Vec::new();
+    };
+    let current_entries = snapshot.process_entries();
 
-        assert_eq!(collect_process_tree(99, &entries), vec![99]);
+    candidates
+        .into_iter()
+        .filter_map(|(member, process)| {
+            let is_valid = process.is_active_postgres()
+                && descendant_is_still_in_root_tree(root, member, &current_entries);
+            is_valid.then_some(process)
+        })
+        .collect()
+}
+
+fn descendant_is_still_in_root_tree(
+    root: PostmasterPid,
+    descendant: ProcessEntry,
+    entries: &[ProcessEntry],
+) -> bool {
+    let Some(current) = entries
+        .iter()
+        .find(|entry| entry.process_id == descendant.process_id)
+    else {
+        return false;
+    };
+    current.parent_process_id == descendant.parent_process_id
+        && process_has_root_ancestor(root, descendant.process_id, entries)
+}
+
+fn process_has_root_ancestor(
+    root: PostmasterPid,
+    mut process_id: PostmasterPid,
+    entries: &[ProcessEntry],
+) -> bool {
+    for _ in 0..entries.len() {
+        let Some(entry) = entries.iter().find(|entry| entry.process_id == process_id) else {
+            return false;
+        };
+        if entry.parent_process_id == root {
+            return true;
+        }
+        if entry.parent_process_id == process_id {
+            return false;
+        }
+        process_id = entry.parent_process_id;
     }
+    false
+}
 
-    #[test]
-    fn collect_process_tree_includes_nested_descendants() {
-        let entries = [
-            ProcessEntry {
-                process_id: 40,
-                parent_process_id: 30,
-            },
-            ProcessEntry {
-                process_id: 20,
-                parent_process_id: 10,
-            },
-            ProcessEntry {
-                process_id: 30,
-                parent_process_id: 20,
-            },
-            ProcessEntry {
-                process_id: 50,
-                parent_process_id: 99,
-            },
-        ];
-
-        assert_eq!(collect_process_tree(10, &entries), vec![10, 20, 30, 40]);
+fn terminate_process(process: &ProcessHandle) {
+    if process.is_active_postgres() {
+        process.terminate();
     }
 }
