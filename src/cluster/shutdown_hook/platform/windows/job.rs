@@ -2,7 +2,10 @@
 
 use std::{ffi::c_void, ptr::NonNull};
 
-use super::{PostmasterPid, PostmasterProcess, ProcessHandle, process_tree};
+use super::{
+    PostmasterPid, PostmasterProcess, ProcessHandle, open_assignable_descendant_processes,
+    process_tree,
+};
 
 const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
@@ -75,11 +78,9 @@ impl JobHandle {
     fn assign_process_tree(&self, root: PostmasterPid, root_process: &ProcessHandle) -> bool {
         let mut assigned_any = self.assign_process_handle(root_process);
 
-        for process_id in process_tree(root) {
-            if process_id == root {
-                continue;
-            }
-            if self.assign_process(process_id) {
+        let tree = process_tree(root);
+        for process in open_assignable_descendant_processes(root, &tree) {
+            if self.assign_process(&process) {
                 assigned_any = true;
             }
         }
@@ -87,14 +88,11 @@ impl JobHandle {
         assigned_any
     }
 
-    fn assign_process(&self, pid: PostmasterPid) -> bool {
-        let Some(process) = ProcessHandle::open_assign_to_job(pid) else {
-            return false;
-        };
+    fn assign_process(&self, process: &ProcessHandle) -> bool {
         if !process.is_active_postgres() {
             return false;
         }
-        self.assign_process_handle(&process)
+        self.assign_process_handle(process)
     }
 
     fn assign_process_handle(&self, process: &ProcessHandle) -> bool {
@@ -176,5 +174,64 @@ impl JobObjectExtendedLimitInformation {
             peak_process_memory_used: 0,
             peak_job_memory_used: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{
+        ProcessEntry, collect_process_tree, descendant_is_still_in_root_tree,
+        process_has_root_ancestor,
+    };
+
+    fn entry(process_id: u32, parent_process_id: u32) -> ProcessEntry {
+        ProcessEntry {
+            process_id,
+            parent_process_id,
+        }
+    }
+
+    fn process_ids(entries: &[ProcessEntry]) -> Vec<u32> {
+        entries.iter().map(|entry| entry.process_id).collect()
+    }
+
+    #[test]
+    fn collect_process_tree_returns_root_when_no_descendants() {
+        let entries = [entry(20, 10), entry(30, 20)];
+
+        assert_eq!(process_ids(&collect_process_tree(99, &entries)), vec![99]);
+    }
+
+    #[test]
+    fn collect_process_tree_includes_nested_descendants() {
+        let entries = [entry(40, 30), entry(20, 10), entry(30, 20), entry(50, 99)];
+
+        assert_eq!(
+            process_ids(&collect_process_tree(10, &entries)),
+            vec![10, 20, 30, 40]
+        );
+    }
+
+    #[test]
+    fn termination_validation_rejects_reused_descendant_pid_from_different_tree() {
+        let descendant = entry(20, 10);
+        let entries = [entry(20, 99), entry(99, 99)];
+
+        assert!(!descendant_is_still_in_root_tree(10, descendant, &entries));
+    }
+
+    #[test]
+    fn job_assignment_validation_rejects_reused_descendant_pid_from_different_tree() {
+        let descendant = entry(20, 10);
+        let entries = [entry(20, 99), entry(99, 99)];
+
+        assert!(!descendant_is_still_in_root_tree(10, descendant, &entries));
+    }
+
+    #[test]
+    fn descendant_validation_rejects_parent_cycles() {
+        let entries = [entry(20, 30), entry(30, 20)];
+
+        assert!(!process_has_root_ancestor(10, 20, &entries));
     }
 }
