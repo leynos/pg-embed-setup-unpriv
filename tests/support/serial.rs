@@ -274,7 +274,7 @@ fn process_lock_is_stale(lock_path: &std::path::Path) -> bool {
         return !process_lock_is_within_owner_grace(lock_path);
     };
     let Some(pid) = parse_lock_owner_pid(&owner) else {
-        return true;
+        return !process_lock_is_within_owner_grace(lock_path);
     };
     !owner_process_is_running(pid)
 }
@@ -425,6 +425,33 @@ mod tests {
                 "expected acquire_process_lock to record a lock owner in {lock_path:?}"
             );
         }
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[cfg(not(unix))]
+    #[rstest]
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort cleanup where errors are intentionally ignored"
+    )]
+    fn malformed_process_lock_owner_respects_owner_grace(serial_guard: ScenarioSerialGuard) {
+        use std::{env, fs};
+
+        let _guard = serial_guard;
+
+        let tmp_dir = env::temp_dir().join("pg_scenario_malformed_lock_owner_test");
+        let lock_path = tmp_dir.join("pg-embed-setup-unpriv.serial.lockdir");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&lock_path)
+            .expect("failed to create lock directory for malformed owner test");
+        fs::write(process_lock_owner_path(&lock_path), "pid=")
+            .expect("failed to write malformed process lock owner");
+
+        assert!(
+            !process_lock_is_stale(&lock_path),
+            "malformed process lock owners inside the grace window must remain active"
+        );
 
         let _ = fs::remove_dir_all(&tmp_dir);
     }
