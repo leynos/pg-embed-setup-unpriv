@@ -60,6 +60,8 @@ Troubleshooting guidance:
 
 Tagged releases publish both CLI binaries in `cargo binstall` archives for:
 
+_Table 1: Host release targets for tagged `cargo binstall` archives._
+
 | Operating system | Targets                                                 |
 | ---------------- | ------------------------------------------------------- |
 | Linux            | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` |

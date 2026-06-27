@@ -10,8 +10,21 @@
 use clap::{CommandFactory, Parser};
 use std::io::Write;
 
+const CONFIGURATION_HELP: &str = concat!(
+    "Configuration is read from environment variables:\n",
+    "  PG_VERSION_REQ          PostgreSQL semver requirement.\n",
+    "  PG_PORT                 PostgreSQL port.\n",
+    "  PG_SUPERUSER            Administrative PostgreSQL user.\n",
+    "  PG_PASSWORD             Administrative PostgreSQL password.\n",
+    "  PG_DATA_DIR             PostgreSQL data directory.\n",
+    "  PG_RUNTIME_DIR          PostgreSQL binary installation directory.\n",
+    "  PG_LOCALE               initdb locale.\n",
+    "  PG_ENCODING             initdb encoding.\n",
+    "  PG_BINARY_CACHE_DIR     Shared PostgreSQL binary cache directory."
+);
+
 #[derive(Debug, Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, after_help = CONFIGURATION_HELP)]
 struct Cli;
 
 fn main() -> color_eyre::eyre::Result<()> {

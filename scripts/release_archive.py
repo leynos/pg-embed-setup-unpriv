@@ -90,8 +90,7 @@ def release_binary_path(repo: Path, target: str, binary: str) -> Path:
 
 def build_release_binaries(spec: ReleaseBuildSpec) -> None:
     """Build the selected release binaries for `spec.target`."""
-    cargo_command = shlex.split(spec.cargo)
-    program, *program_args = cargo_command
+    program, program_args = cargo_program_and_args(spec.cargo)
     args = [*program_args, "build", "--release", "--target", spec.target]
     args.extend(cargo_build_job_args(spec.build_jobs))
     for binary in spec.binaries:
@@ -105,6 +104,33 @@ def build_release_binaries(spec: ReleaseBuildSpec) -> None:
     )
     if result.exit_code != 0:
         raise SystemExit(result.exit_code)
+
+
+def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
+    """Return the executable and wrapper arguments represented by `cargo`."""
+    stripped_cargo = cargo.strip()
+    if not stripped_cargo:
+        raise SystemExit("cargo executable cannot be empty")
+    if looks_like_executable_path(stripped_cargo):
+        return strip_matching_quotes(stripped_cargo), []
+    cargo_command = shlex.split(stripped_cargo)
+    if not cargo_command:
+        raise SystemExit("cargo executable cannot be empty")
+    program, *program_args = cargo_command
+    return program, program_args
+
+
+def looks_like_executable_path(cargo: str) -> bool:
+    """Return whether `cargo` names a path instead of a wrapper argv string."""
+    executable = strip_matching_quotes(cargo)
+    return "/" in executable or "\\" in executable
+
+
+def strip_matching_quotes(value: str) -> str:
+    """Strip one matching shell-quote pair around an executable path."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
 
 
 def cargo_build_job_args(build_jobs: str | None) -> list[str]:
