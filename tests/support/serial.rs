@@ -183,6 +183,18 @@ fn acquire_process_lock() -> ProcessLock {
 
 #[cfg(not(unix))]
 fn acquire_process_lock() -> ProcessLock {
+    let lock_path = scenario_lock_path();
+    let deadline = Instant::now() + Duration::from_secs(120);
+
+    loop {
+        if let Some(lock) = try_acquire_process_lock_once(&lock_path, deadline) {
+            return lock;
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn scenario_lock_path() -> PathBuf {
     let target_dir =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| PathBuf::from("target"), PathBuf::from);
     std::fs::create_dir_all(&target_dir).unwrap_or_else(|err| {
@@ -191,34 +203,42 @@ fn acquire_process_lock() -> ProcessLock {
             target_dir.display()
         );
     });
+    target_dir.join("pg-embed-setup-unpriv.serial.lockdir")
+}
 
-    let lock_path = target_dir.join("pg-embed-setup-unpriv.serial.lockdir");
-    let deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        match std::fs::create_dir(&lock_path) {
-            Ok(()) => {
-                return write_process_lock_owner(&lock_path);
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                if process_lock_is_stale(&lock_path) {
-                    let _unused = std::fs::remove_dir_all(&lock_path);
-                    continue;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "timed out waiting to acquire scenario lock at {}",
-                    lock_path.display()
-                );
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(err) => {
-                panic!(
-                    "failed to acquire scenario lock at {}: {err}",
-                    lock_path.display()
-                );
-            }
+#[cfg(not(unix))]
+fn try_acquire_process_lock_once(
+    lock_path: &std::path::Path,
+    deadline: Instant,
+) -> Option<ProcessLock> {
+    match std::fs::create_dir(lock_path) {
+        Ok(()) => Some(write_process_lock_owner(lock_path)),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            handle_contended_process_lock(lock_path, deadline);
+            None
+        }
+        Err(err) => {
+            panic!(
+                "failed to acquire scenario lock at {}: {err}",
+                lock_path.display()
+            );
         }
     }
+}
+
+#[cfg(not(unix))]
+fn handle_contended_process_lock(lock_path: &std::path::Path, deadline: Instant) {
+    if process_lock_is_stale(lock_path) {
+        let _unused = std::fs::remove_dir_all(lock_path);
+        return;
+    }
+
+    assert!(
+        Instant::now() < deadline,
+        "timed out waiting to acquire scenario lock at {}",
+        lock_path.display()
+    );
+    std::thread::sleep(Duration::from_millis(50));
 }
 
 #[cfg(not(unix))]
