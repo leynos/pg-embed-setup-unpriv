@@ -42,6 +42,32 @@ CATALOGUE = ProgramCatalogue(
 
 app = App(help=__doc__)
 
+_TargetArg = Annotated[str, Parameter(help="Rust target triple to package.")]
+_ReleaseVersionArg = Annotated[
+    str | None,
+    Parameter(
+        name="--release-version",
+        help="Release version without the leading v.",
+    ),
+]
+_DistDirArg = Annotated[
+    Path,
+    Parameter(help="Directory where the .tgz archive is written."),
+]
+_ManifestPathArg = Annotated[Path, Parameter(help="Path to Cargo.toml.")]
+_CargoArg = Annotated[str, Parameter(help="Cargo executable to invoke.")]
+_BuildJobsArg = Annotated[
+    str | None,
+    Parameter(help="Optional Cargo job count or build-job flags."),
+]
+_BinaryArg = Annotated[
+    list[str] | None,
+    Parameter(
+        name=("--binary", "--bin"),
+        help="Binary to include; repeat to override the default production binary set.",
+    ),
+]
+
 
 @dataclass(frozen=True)
 class ReleaseBuildSpec:
@@ -63,6 +89,19 @@ class ReleaseArchiveSpec:
     version: str
     dist_dir: Path
     binaries: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _ReleaseCliSpec:
+    """Inputs supplied through the release archive CLI."""
+
+    target: str
+    release_version: str | None
+    dist_dir: Path
+    manifest_path: Path
+    cargo: str
+    build_jobs: str | None
+    binary: list[str] | None
 
 
 @dataclass(frozen=True)
@@ -577,37 +616,46 @@ def copy_release_binaries(
         shutil.copy2(source, staging_root / source.name)
 
 
+def _selected_release_version(manifest_path: Path, release_version: str | None) -> str:
+    """Return the requested release version after matching the manifest."""
+    try:
+        expected_version = manifest_version(manifest_path)
+    except ManifestVersionError as err:
+        raise SystemExit(str(err)) from err
+    selected_version = release_version or expected_version
+    if selected_version != expected_version:
+        message = (
+            f"VERSION ({selected_version}) must match Cargo.toml package version "
+            f"({expected_version})"
+        )
+        raise SystemExit(message)
+    return selected_version
+
+
+def _run_release_archive(spec: _ReleaseCliSpec) -> None:
+    """Build, stage, and print the release archive path."""
+    repo = spec.manifest_path.resolve().parent
+    selected_version = _selected_release_version(spec.manifest_path, spec.release_version)
+    binaries = tuple(spec.binary or DEFAULT_BINARIES)
+    build_release_binaries(
+        ReleaseBuildSpec(repo, spec.target, binaries, spec.cargo, spec.build_jobs)
+    )
+    archive_path = stage_archive(
+        ReleaseArchiveSpec(repo, spec.target, selected_version, repo / spec.dist_dir, binaries)
+    )
+    print(archive_path)
+
+
 @app.default
 def main(
-    target: Annotated[str, Parameter(help="Rust target triple to package.")],
+    target: _TargetArg,
     *,
-    release_version: Annotated[
-        str | None,
-        Parameter(
-            name="--release-version",
-            help="Release version without the leading v.",
-        ),
-    ] = None,
-    dist_dir: Annotated[
-        Path,
-        Parameter(help="Directory where the .tgz archive is written."),
-    ] = Path("dist"),
-    manifest_path: Annotated[
-        Path,
-        Parameter(help="Path to Cargo.toml."),
-    ] = Path("Cargo.toml"),
-    cargo: Annotated[str, Parameter(help="Cargo executable to invoke.")] = "cargo",
-    build_jobs: Annotated[
-        str | None,
-        Parameter(help="Optional Cargo job count or build-job flags."),
-    ] = None,
-    binary: Annotated[
-        list[str] | None,
-        Parameter(
-            name=("--binary", "--bin"),
-            help="Binary to include; repeat to override the default production binary set.",
-        ),
-    ] = None,
+    release_version: _ReleaseVersionArg = None,
+    dist_dir: _DistDirArg = Path("dist"),
+    manifest_path: _ManifestPathArg = Path("Cargo.toml"),
+    cargo: _CargoArg = "cargo",
+    build_jobs: _BuildJobsArg = None,
+    binary: _BinaryArg = None,
 ) -> None:
     """Build and package the cargo-binstall release archive.
 
@@ -637,39 +685,17 @@ def main(
     --------
     >>> main("x86_64-unknown-linux-gnu", release_version="0.5.1")  # doctest: +SKIP
     """
-    repo = manifest_path.resolve().parent
-    try:
-        expected_version = manifest_version(manifest_path)
-    except ManifestVersionError as err:
-        raise SystemExit(str(err)) from err
-    selected_version = release_version or expected_version
-    if selected_version != expected_version:
-        message = (
-            f"VERSION ({selected_version}) must match Cargo.toml package version "
-            f"({expected_version})"
-        )
-        raise SystemExit(message)
-
-    binaries = tuple(binary or DEFAULT_BINARIES)
-    build_release_binaries(
-        ReleaseBuildSpec(
-            repo=repo,
+    _run_release_archive(
+        _ReleaseCliSpec(
             target=target,
-            binaries=binaries,
+            release_version=release_version,
+            dist_dir=dist_dir,
+            manifest_path=manifest_path,
             cargo=cargo,
             build_jobs=build_jobs,
+            binary=binary,
         )
     )
-    archive_path = stage_archive(
-        ReleaseArchiveSpec(
-            repo=repo,
-            target=target,
-            version=selected_version,
-            dist_dir=repo / dist_dir,
-            binaries=binaries,
-        )
-    )
-    print(archive_path)
 
 
 if __name__ == "__main__":
