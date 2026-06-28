@@ -103,14 +103,14 @@ def manifest_version(manifest_path: Path) -> str:
 
 def archive_stem(target: str, version: str) -> str:
     """Return the cargo-binstall archive root directory name."""
-    validate_path_component(target, "target")
+    _validate_path_component(target, "target")
     return f"{PACKAGE_NAME}-{target}-v{version}"
 
 
 def release_binary_path(repo: Path, target: str, binary: str) -> Path:
     """Return Cargo's release output path for `binary` and `target`."""
-    validate_path_component(target, "target")
-    validate_path_component(binary, "binary")
+    _validate_path_component(target, "target")
+    _validate_path_component(binary, "binary")
     return repo / "target" / target / "release" / f"{binary}{binary_extension(target)}"
 
 
@@ -152,41 +152,41 @@ def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
 
 def validate_release_spec_components(target: str, binaries: tuple[str, ...]) -> None:
     """Reject release identifiers that could escape Cargo's output tree."""
-    validate_path_component(target, "target")
+    _validate_path_component(target, "target")
     for binary in binaries:
-        validate_path_component(binary, "binary")
+        _validate_path_component(binary, "binary")
 
 
-def validate_path_component(value: str, kind: str) -> None:
+def _validate_path_component(value: str, kind: str) -> None:
     """Reject path-like values accepted only as release identifiers."""
-    if message := path_component_violation(value, kind):
+    if message := _path_component_violation(value, kind):
         raise SystemExit(message)
 
 
-def path_component_violation(value: str, kind: str) -> str | None:
+def _path_component_violation(value: str, kind: str) -> str | None:
     """Return the first validation error for a release path component."""
     return (
-        empty_path_component_violation(value, kind)
-        or parent_dir_path_component_violation(value, kind)
-        or separator_path_component_violation(value, kind)
+        _empty_path_component_violation(value, kind)
+        or _parent_dir_path_component_violation(value, kind)
+        or _separator_path_component_violation(value, kind)
     )
 
 
-def empty_path_component_violation(value: str, kind: str) -> str | None:
+def _empty_path_component_violation(value: str, kind: str) -> str | None:
     """Return the validation error for an empty release path component."""
     if not value:
         return f"{kind} cannot be empty"
     return None
 
 
-def parent_dir_path_component_violation(value: str, kind: str) -> str | None:
+def _parent_dir_path_component_violation(value: str, kind: str) -> str | None:
     """Return the validation error for a parent-directory path component."""
     if value in {".", ".."} or ".." in value:
         return f"{kind} cannot contain '..': {value}"
     return None
 
 
-def separator_path_component_violation(value: str, kind: str) -> str | None:
+def _separator_path_component_violation(value: str, kind: str) -> str | None:
     """Return the validation error for path separators in a release component."""
     if any(separator in value for separator in PATH_SEPARATORS):
         return f"{kind} cannot contain path separators: {value}"
