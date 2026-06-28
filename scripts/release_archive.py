@@ -135,12 +135,38 @@ def validate_release_spec_components(target: str, binaries: tuple[str, ...]) -> 
 
 def validate_path_component(value: str, kind: str) -> None:
     """Reject path-like values accepted only as release identifiers."""
+    if message := path_component_violation(value, kind):
+        raise SystemExit(message)
+
+
+def path_component_violation(value: str, kind: str) -> str | None:
+    """Return the first validation error for a release path component."""
+    return (
+        empty_path_component_violation(value, kind)
+        or parent_dir_path_component_violation(value, kind)
+        or separator_path_component_violation(value, kind)
+    )
+
+
+def empty_path_component_violation(value: str, kind: str) -> str | None:
+    """Return the validation error for an empty release path component."""
     if not value:
-        raise SystemExit(f"{kind} cannot be empty")
+        return f"{kind} cannot be empty"
+    return None
+
+
+def parent_dir_path_component_violation(value: str, kind: str) -> str | None:
+    """Return the validation error for a parent-directory path component."""
     if value in {".", ".."} or ".." in value:
-        raise SystemExit(f"{kind} cannot contain '..': {value}")
+        return f"{kind} cannot contain '..': {value}"
+    return None
+
+
+def separator_path_component_violation(value: str, kind: str) -> str | None:
+    """Return the validation error for path separators in a release component."""
     if any(separator in value for separator in PATH_SEPARATORS):
-        raise SystemExit(f"{kind} cannot contain path separators: {value}")
+        return f"{kind} cannot contain path separators: {value}"
+    return None
 
 
 def looks_like_executable_path(cargo: str) -> bool:
