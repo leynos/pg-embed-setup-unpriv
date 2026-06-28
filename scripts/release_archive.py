@@ -64,6 +64,17 @@ class ReleaseArchiveSpec:
     binaries: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ManifestVersionError(Exception):
+    """Typed failure raised when Cargo manifest version discovery fails."""
+
+    manifest_path: Path
+    reason: str
+
+    def __str__(self) -> str:
+        return f"failed to read package version from {self.manifest_path}: {self.reason}"
+
+
 def binary_extension(target: str) -> str:
     """Return the executable suffix used by `target`.
 
@@ -75,9 +86,19 @@ def binary_extension(target: str) -> str:
 
 def manifest_version(manifest_path: Path) -> str:
     """Read the package version from `manifest_path`."""
-    with manifest_path.open("rb") as manifest:
-        data = tomllib.load(manifest)
-    return str(data["package"]["version"])
+    try:
+        with manifest_path.open("rb") as manifest:
+            data = tomllib.load(manifest)
+        version = data["package"]["version"]
+    except OSError as err:
+        raise ManifestVersionError(manifest_path, str(err)) from err
+    except tomllib.TOMLDecodeError as err:
+        raise ManifestVersionError(manifest_path, f"invalid TOML: {err}") from err
+    except KeyError as err:
+        raise ManifestVersionError(manifest_path, f"missing key: {err}") from err
+    if not isinstance(version, str):
+        raise ManifestVersionError(manifest_path, "package.version must be a string")
+    return version
 
 
 def archive_stem(target: str, version: str) -> str:
@@ -286,7 +307,10 @@ def main(
 ) -> None:
     """Build and package the cargo-binstall release archive."""
     repo = manifest_path.resolve().parent
-    expected_version = manifest_version(manifest_path)
+    try:
+        expected_version = manifest_version(manifest_path)
+    except ManifestVersionError as err:
+        raise SystemExit(str(err)) from err
     selected_version = release_version or expected_version
     if selected_version != expected_version:
         message = (

@@ -65,6 +65,44 @@ def test_windows_targets_use_exe_suffix() -> None:
     assert release_archive.binary_extension("aarch64-apple-darwin") == ""
 
 
+def test_manifest_version_reports_missing_manifest(tmp_path: Path) -> None:
+    manifest = tmp_path / "Cargo.toml"
+
+    try:
+        release_archive.manifest_version(manifest)
+    except release_archive.ManifestVersionError as err:
+        assert err.manifest_path == manifest
+        assert "No such file" in err.reason
+    else:
+        raise AssertionError("expected missing manifest to raise a typed error")
+
+
+def test_manifest_version_reports_invalid_toml(tmp_path: Path) -> None:
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text("[package\n")
+
+    try:
+        release_archive.manifest_version(manifest)
+    except release_archive.ManifestVersionError as err:
+        assert err.manifest_path == manifest
+        assert err.reason.startswith("invalid TOML:")
+    else:
+        raise AssertionError("expected invalid TOML to raise a typed error")
+
+
+def test_manifest_version_requires_string_package_version(tmp_path: Path) -> None:
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('[package]\nname = "pg-embed-setup-unpriv"\nversion = 1\n')
+
+    try:
+        release_archive.manifest_version(manifest)
+    except release_archive.ManifestVersionError as err:
+        assert err.manifest_path == manifest
+        assert err.reason == "package.version must be a string"
+    else:
+        raise AssertionError("expected non-string version to raise a typed error")
+
+
 def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) -> None:
     target = "x86_64-pc-windows-msvc"
     binaries = ("pg_embedded_setup_unpriv", "pg_worker")

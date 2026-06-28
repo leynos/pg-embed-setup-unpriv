@@ -444,7 +444,7 @@ implemented.
   the parent observed postmaster PID `2908` still running after the child
   exited and waited `30s`; runner cleanup then terminated orphaned `postgres`
   processes `2908` and `4584`.
-- [ ] (2026-06-25T19:29:13Z) User approved continuing past the original
+- [x] (2026-06-25T19:29:13Z) User approved continuing past the original
   two-attempt Windows cleanup tolerance with up to four further approaches.
   Approach 3 is a Windows Job Object failsafe: assign the postmaster process
   tree to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job when the shutdown hook is
@@ -1919,3 +1919,31 @@ Validation recorded for this pass: `make check-fmt`, `make lint`, and
 `make test` passed locally. After pushing the import-gating fix, GitHub Actions
 run `28313449771` passed on Linux, macOS, Windows, and all binstall jobs; the
 workflow self-test run `28313449776` also passed.
+
+Revision 7 (2026-06-28), after final architecture-check validation. What
+changed and why:
+
+- Verified the remaining Unit Architecture and Developer Documentation findings
+  against the current branch. The manifest-version error-surfacing finding, the
+  non-Unix serial-lock clock-coupling finding, and the stale unchecked progress
+  item were still valid.
+- Added a typed `ManifestVersionError` boundary in `scripts/release_archive.py`
+  so manifest I/O, TOML parsing, missing keys, and invalid version types are
+  reported through one explicit error that `main()` converts to the existing
+  CLI abort path.
+- Changed the non-Unix serial-lock owner grace calculation to take an explicit
+  `SystemTime` in the state helper, preserving production behaviour while
+  making stale-versus-pending decisions deterministic in tests.
+- Marked the previously-unchecked "continue past the original tolerance"
+  progress item complete so the ExecPlan status no longer conflicts with stale
+  progress metadata.
+- Evaluated the property-test and compile-time/UI warnings as broad follow-up
+  recommendations rather than narrow correctness findings for this pass. The
+  existing hosted macOS/Windows/Linux matrix remains the compile-time
+  cross-platform gate for this PR, and adding new verification dependencies is
+  deferred until a dedicated test-strategy change can size the scope.
+
+Validation recorded for this pass: release archive pytest via `uv`,
+`make check-fmt`, `make lint`, `make test`, `make markdownlint`, `make nixie`,
+`git diff --check`, and `coderabbit review --agent` with zero findings after
+retrying a silent first invocation.
