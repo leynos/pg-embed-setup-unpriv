@@ -1874,3 +1874,32 @@ Validation recorded for this pass: `make check-fmt`, `make markdownlint`,
 `make nixie`, `make lint`, `make test`, release archive pytest with the script
 dependencies provisioned by `uv`, Windows and macOS narrow cross-target checks,
 `git diff --check`, and `coderabbit review --agent` with zero findings.
+
+Revision 5 (2026-06-28), after the latest review-finding validation. What
+changed and why:
+
+- Verified the new inline and outside-diff comments against the current branch.
+  The synchronous-test documentation fragment, Cargo wrapper parsing,
+  Windows Job Object root-assignment gating, non-Unix serial-lock module
+  structure, and CLI argument pre-scan findings were still valid and were fixed.
+- Updated `scripts/release_archive.py` so wrapper-style Cargo commands are
+  tokenized before path classification, preserving absolute wrapper paths and
+  retaining the existing unquoted Windows executable-path behaviour.
+- Split the non-Unix serial lockdir owner-state and liveness implementation into
+  `tests/support/serial/non_unix.rs`, leaving the shared serial fixture API in
+  `tests/support/serial.rs`.
+- After CodeRabbit review, changed non-Unix owner-file writes to use exclusive
+  `create_new` semantics and made stale-lock deletion failures fall through the
+  normal retry/deadline path.
+- Changed Windows Job Object setup so descendant assignment remains best-effort
+  but a root assignment failure prevents the failsafe from being armed.
+- Replaced the manual `args_os()` help/version scan in `src/main.rs` with
+  normal Clap parsing so help and version rendering come from the command
+  definition.
+
+Validation recorded for this pass: release archive pytest via `uv`, targeted
+CLI tests, `make check-fmt`, `make markdownlint`, `make nixie`, `make lint`,
+`make test`, `git diff --check`, and `coderabbit review --agent` with zero
+findings. A local `cargo check --target x86_64-pc-windows-msvc` was attempted
+but blocked before project code by missing Windows-target OpenSSL/vcpkg
+configuration on the Linux host; GitHub CI remains the Windows validation path.

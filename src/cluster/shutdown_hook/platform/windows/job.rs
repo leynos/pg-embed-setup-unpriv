@@ -85,16 +85,21 @@ impl JobHandle {
     }
 
     fn assign_process_tree(&self, root: PostmasterPid, root_process: &ProcessHandle) -> bool {
-        let mut assigned_any = self.assign_process_handle(root_process);
+        let assigned_root = self.assign_process_handle(root_process);
+        if !assigned_root {
+            tracing::debug!(
+                pid = root,
+                "skipping Windows Job Object descendant assignment because root assignment failed"
+            );
+            return false;
+        }
 
         let tree = process_tree(root);
         for process in open_assignable_descendant_processes(root, &tree) {
-            if self.assign_process(&process) {
-                assigned_any = true;
-            }
+            self.assign_process(&process);
         }
 
-        assigned_any
+        true
     }
 
     fn assign_process(&self, process: &ProcessHandle) -> bool {
