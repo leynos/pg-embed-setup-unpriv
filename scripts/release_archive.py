@@ -117,11 +117,14 @@ def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
     stripped_cargo = cargo.strip()
     if not stripped_cargo:
         raise SystemExit("cargo executable cannot be empty")
-    if looks_like_executable_path(stripped_cargo):
-        return strip_matching_quotes(stripped_cargo), []
     cargo_command = shlex.split(stripped_cargo)
     if not cargo_command:
         raise SystemExit("cargo executable cannot be empty")
+    if len(cargo_command) > 1 and looks_like_executable_path(cargo_command[0]):
+        program, *program_args = cargo_command
+        return strip_matching_quotes(program), program_args
+    if looks_like_executable_path(stripped_cargo):
+        return strip_matching_quotes(stripped_cargo), []
     program, *program_args = cargo_command
     return program, program_args
 

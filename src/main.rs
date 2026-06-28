@@ -7,8 +7,7 @@
 //! [`OrthoConfig`](https://github.com/leynos/ortho-config). The binary exits
 //! with status code `0` on success and `1` on error.
 
-use clap::{CommandFactory, Parser};
-use std::io::Write;
+use clap::Parser;
 
 const CONFIGURATION_HELP: &str = concat!(
     "Configuration is read from environment variables:\n",
@@ -28,15 +27,7 @@ const CONFIGURATION_HELP: &str = concat!(
 struct Cli;
 
 fn main() -> color_eyre::eyre::Result<()> {
-    if std::env::args_os().any(|arg| arg == "--help" || arg == "-h") {
-        Cli::command().print_help()?;
-        std::io::stdout().write_all(b"\n")?;
-        return Ok(());
-    }
-    if std::env::args_os().any(|arg| arg == "--version" || arg == "-V") {
-        writeln!(std::io::stdout(), "{}", Cli::command().render_version())?;
-        return Ok(());
-    }
+    let _cli = Cli::parse();
     pg_embedded_setup_unpriv::run().map_err(|err| color_eyre::eyre::eyre!(err))?;
     Ok(())
 }

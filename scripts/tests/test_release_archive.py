@@ -204,6 +204,15 @@ def test_build_release_binaries_preserves_cargo_wrapper_args(tmp_path: Path) -> 
     )
 
 
+def test_cargo_program_and_args_preserves_absolute_wrapper_args() -> None:
+    cargo = "/usr/bin/sccache cargo"
+
+    program, program_args = release_archive.cargo_program_and_args(cargo)
+
+    assert program == "/usr/bin/sccache"
+    assert program_args == ["cargo"]
+
+
 def test_build_release_binaries_treats_cargo_path_with_spaces_as_executable(
 ) -> None:
     cargo = r"C:\Program Files\Rust\cargo.exe"
