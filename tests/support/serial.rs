@@ -329,10 +329,10 @@ fn process_lock_is_within_owner_grace(lock_path: &std::path::Path) -> bool {
     let Ok(metadata) = std::fs::metadata(lock_path) else {
         return false;
     };
-    let Ok(created_at) = metadata.created().or_else(|_| metadata.modified()) else {
+    let Ok(modified_at) = metadata.modified() else {
         return false;
     };
-    created_at
+    modified_at
         .elapsed()
         .is_ok_and(|age| age <= PROCESS_LOCK_OWNER_GRACE)
 }
