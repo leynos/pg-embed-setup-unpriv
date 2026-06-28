@@ -66,47 +66,40 @@ def test_windows_targets_use_exe_suffix() -> None:
     assert release_archive.binary_extension("aarch64-apple-darwin") == ""
 
 
-def test_manifest_version_reports_missing_manifest(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("manifest_content", "expected_reason", "match_kind"),
+    [
+        pytest.param(None, "No such file", "contains", id="missing-manifest"),
+        pytest.param("[package\n", "invalid TOML:", "startswith", id="invalid-toml"),
+        pytest.param('package = 1\n', "package must be a table", "exact", id="package-table"),
+        pytest.param(
+            '[package]\nname = "pg-embed-setup-unpriv"\nversion = 1\n',
+            "package.version must be a string",
+            "exact",
+            id="string-version",
+        ),
+    ],
+)
+def test_manifest_version_reports_manifest_errors(
+    tmp_path: Path,
+    manifest_content: str | None,
+    expected_reason: str,
+    match_kind: str,
+) -> None:
     manifest = tmp_path / "Cargo.toml"
+    if manifest_content is not None:
+        manifest.write_text(manifest_content)
 
     with pytest.raises(release_archive.ManifestVersionError) as exc_info:
         release_archive.manifest_version(manifest)
 
     assert exc_info.value.manifest_path == manifest
-    assert "No such file" in exc_info.value.reason
-
-
-def test_manifest_version_reports_invalid_toml(tmp_path: Path) -> None:
-    manifest = tmp_path / "Cargo.toml"
-    manifest.write_text("[package\n")
-
-    with pytest.raises(release_archive.ManifestVersionError) as exc_info:
-        release_archive.manifest_version(manifest)
-
-    assert exc_info.value.manifest_path == manifest
-    assert exc_info.value.reason.startswith("invalid TOML:")
-
-
-def test_manifest_version_requires_package_table(tmp_path: Path) -> None:
-    manifest = tmp_path / "Cargo.toml"
-    manifest.write_text('package = 1\n')
-
-    with pytest.raises(release_archive.ManifestVersionError) as exc_info:
-        release_archive.manifest_version(manifest)
-
-    assert exc_info.value.manifest_path == manifest
-    assert exc_info.value.reason == "package must be a table"
-
-
-def test_manifest_version_requires_string_package_version(tmp_path: Path) -> None:
-    manifest = tmp_path / "Cargo.toml"
-    manifest.write_text('[package]\nname = "pg-embed-setup-unpriv"\nversion = 1\n')
-
-    with pytest.raises(release_archive.ManifestVersionError) as exc_info:
-        release_archive.manifest_version(manifest)
-
-    assert exc_info.value.manifest_path == manifest
-    assert exc_info.value.reason == "package.version must be a string"
+    if match_kind == "contains":
+        assert expected_reason in exc_info.value.reason
+    elif match_kind == "startswith":
+        assert exc_info.value.reason.startswith(expected_reason)
+    else:
+        assert exc_info.value.reason == expected_reason
 
 
 def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) -> None:

@@ -86,7 +86,30 @@ def binary_extension(target: str) -> str:
 
 
 def manifest_version(manifest_path: Path) -> str:
-    """Read the package version from `manifest_path`."""
+    """Read the package version from a Cargo manifest.
+
+    Parameters
+    ----------
+    manifest_path
+        Path to the `Cargo.toml` manifest to inspect.
+
+    Returns
+    -------
+    str
+        The string value from `package.version`.
+
+    Raises
+    ------
+    ManifestVersionError
+        Raised when the manifest cannot be read, cannot be parsed as TOML, is
+        missing `package.version`, or stores `package.version` as a non-string
+        value.
+
+    Examples
+    --------
+    >>> manifest_version(Path("Cargo.toml"))  # doctest: +SKIP
+    '0.5.1'
+    """
     data = _load_manifest_data(manifest_path)
     return _package_version_from_manifest_data(manifest_path, data)
 
