@@ -2048,3 +2048,15 @@ Validation recorded for this pass: release archive pytest via `uv`,
 attempts failed before executing tests because the shared machine could not
 spawn nextest binaries (`Resource temporarily unavailable`, OS error 11); after
 the lody cgroup PID pressure dropped, the single-threaded full gate passed.
+
+Follow-up after the pushed review pass: CodeRabbit passed, but CodeScene failed
+the commit on `scripts/release_archive.py::main` with a `Large Method`
+diagnostic. The cause was the expanded public CLI docstring combined with the
+inline Cyclopts `Annotated` metadata and orchestration body. The fix keeps the
+public CLI behaviour intact, moves CLI metadata into private type aliases, and
+delegates the release workflow to a private `_ReleaseCliSpec` plus
+`_run_release_archive` helper so `main` remains a narrow entry point.
+Validation for the follow-up fix: release archive pytest via `uv`,
+`python -m py_compile scripts/release_archive.py`, `make check-fmt`,
+`make lint`, `make markdownlint`, `git diff --check`, and
+`CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`.
