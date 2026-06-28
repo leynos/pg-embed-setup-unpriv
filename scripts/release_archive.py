@@ -181,17 +181,31 @@ def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
     cargo_command = shlex.split(stripped_cargo)
     if not cargo_command:
         raise SystemExit("cargo executable cannot be empty")
-    windows_command = shlex.split(stripped_cargo, posix=False)
-    windows_program = strip_matching_quotes(windows_command[0])
-    if len(windows_command) > 1 and windows_program.lower().endswith(".exe"):
-        return windows_program, windows_command[1:]
-    if len(cargo_command) > 1 and looks_like_executable_path(cargo_command[0]):
-        program, *program_args = cargo_command
-        return strip_matching_quotes(program), program_args
+    if windows_wrapper := _windows_wrapper_program_and_args(stripped_cargo):
+        return windows_wrapper
+    if path_wrapper := _path_wrapper_program_and_args(cargo_command):
+        return path_wrapper
     if looks_like_executable_path(stripped_cargo):
         return strip_matching_quotes(stripped_cargo), []
     program, *program_args = cargo_command
     return program, program_args
+
+
+def _windows_wrapper_program_and_args(cargo: str) -> tuple[str, list[str]] | None:
+    """Return a Windows `.exe` wrapper command when `cargo` includes arguments."""
+    windows_command = shlex.split(cargo, posix=False)
+    windows_program = strip_matching_quotes(windows_command[0])
+    if len(windows_command) > 1 and windows_program.lower().endswith(".exe"):
+        return windows_program, windows_command[1:]
+    return None
+
+
+def _path_wrapper_program_and_args(cargo_command: list[str]) -> tuple[str, list[str]] | None:
+    """Return a path-like wrapper command when `cargo` was split as argv."""
+    if len(cargo_command) > 1 and looks_like_executable_path(cargo_command[0]):
+        program, *program_args = cargo_command
+        return strip_matching_quotes(program), program_args
+    return None
 
 
 def validate_release_spec_components(target: str, binaries: tuple[str, ...]) -> None:
