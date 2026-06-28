@@ -47,9 +47,9 @@ make test-loom
 
 The scheduler budget in `src/env/loom_tests.rs` currently uses
 `max_threads = 3`, `max_branches = 64`, and `preemption_bound = Some(3)`. The
-preemption bound is the main reason the suite stays tractable. Increasing it
-requires justification, and will likely need matching adjustments to the other
-bounds and the CI timeout.
+three bounds jointly constrain the search space so the suite stays tractable.
+Changing any of them requires justification, and may need matching CI timeout
+adjustments.
 
 ## Further reading
 

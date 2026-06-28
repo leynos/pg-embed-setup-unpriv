@@ -50,7 +50,7 @@ jobs:
           features: dev-worker
           with-default-features: "false"
       - name: Loom Concurrency Tests (non-blocking)
-        if: ${{ matrix.privilege == 'unprivileged' }}
+        if: ${{ always() && matrix.privilege == 'unprivileged' }}
         run: make test-loom
         timeout-minutes: 1
         continue-on-error: true
