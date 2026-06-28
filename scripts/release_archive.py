@@ -87,17 +87,30 @@ def binary_extension(target: str) -> str:
 
 def manifest_version(manifest_path: Path) -> str:
     """Read the package version from `manifest_path`."""
+    data = _load_manifest_data(manifest_path)
+    return _package_version_from_manifest_data(manifest_path, data)
+
+
+def _load_manifest_data(manifest_path: Path) -> object:
+    """Load TOML data from `manifest_path`."""
     try:
         with manifest_path.open("rb") as manifest:
-            data = tomllib.load(manifest)
-        package = data["package"]
-        if not isinstance(package, Mapping):
-            raise ManifestVersionError(manifest_path, "package must be a table")
-        version = package["version"]
+            return tomllib.load(manifest)
     except OSError as err:
         raise ManifestVersionError(manifest_path, str(err)) from err
     except tomllib.TOMLDecodeError as err:
         raise ManifestVersionError(manifest_path, f"invalid TOML: {err}") from err
+
+
+def _package_version_from_manifest_data(manifest_path: Path, data: object) -> str:
+    """Extract the package version from parsed manifest data."""
+    if not isinstance(data, Mapping):
+        raise ManifestVersionError(manifest_path, "manifest must be a table")
+    try:
+        package = data["package"]
+        if not isinstance(package, Mapping):
+            raise ManifestVersionError(manifest_path, "package must be a table")
+        version = package["version"]
     except KeyError as err:
         raise ManifestVersionError(manifest_path, f"missing key: {err}") from err
     if not isinstance(version, str):
