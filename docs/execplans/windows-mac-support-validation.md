@@ -2000,3 +2000,18 @@ What changed and why:
 
 Validation recorded for this pass: `make check-fmt`, `make lint`, and
 `make test`.
+
+Revision 11 (2026-06-29), after inspecting the second hosted Windows test
+failure. What changed and why:
+
+- The Windows `Test unprivileged surface` job reached the CLI snapshot test and
+  failed only because Clap renders the binary name as
+  `pg_embedded_setup_unpriv.exe` on Windows while the stable help text snapshot
+  was recorded without the platform executable suffix.
+- Normalized the Windows `.exe` suffix before the snapshot assertion, while
+  keeping the semantic assertions against the real command output. This keeps
+  the snapshot stable across Linux, macOS, and Windows without hiding the
+  environment-variable help content that the test was added to cover.
+
+Validation recorded for this pass: `make check-fmt`, `make lint`, and
+`make test`.

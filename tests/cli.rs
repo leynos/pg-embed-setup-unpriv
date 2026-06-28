@@ -60,7 +60,11 @@ fn help_flag_prints_configuration_surface_without_bootstrap() -> Result<()> {
         stdout.contains("PG_BINARY_CACHE_DIR"),
         "expected stdout to document PG_BINARY_CACHE_DIR; stdout: {stdout}"
     );
-    insta::assert_snapshot!(stdout.as_ref(), @r"
+    let normalized_stdout = stdout.replace(
+        "Usage: pg_embedded_setup_unpriv.exe",
+        "Usage: pg_embedded_setup_unpriv",
+    );
+    insta::assert_snapshot!(normalized_stdout.as_str(), @r"
 Initialises postgresql_embedded clusters as root while handing off filesystem work to nobody
 
 Usage: pg_embedded_setup_unpriv
