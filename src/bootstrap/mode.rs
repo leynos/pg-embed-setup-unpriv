@@ -77,36 +77,36 @@ pub(crate) fn unsupported_root_privilege_drop_error() -> BootstrapError {
     ))
 }
 
+#[cfg(unix)]
 pub(super) fn determine_execution_mode(
     privileges: ExecutionPrivileges,
     worker_binary: Option<&Utf8PathBuf>,
 ) -> BootstrapResult<ExecutionMode> {
-    #[cfg(unix)]
-    {
-        match privileges {
-            ExecutionPrivileges::Root => {
-                if !root_privilege_drop_supported() {
-                    return Err(unsupported_root_privilege_drop_error());
-                }
-                if worker_binary.is_none() {
-                    Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                        "PG_EMBEDDED_WORKER must be set when running with root privileges"
-                    )))
-                } else {
-                    Ok(ExecutionMode::Subprocess)
-                }
+    match privileges {
+        ExecutionPrivileges::Root => {
+            if !root_privilege_drop_supported() {
+                return Err(unsupported_root_privilege_drop_error());
             }
-            ExecutionPrivileges::Unprivileged => Ok(ExecutionMode::InProcess),
+            if worker_binary.is_none() {
+                Err(BootstrapError::from(color_eyre::eyre::eyre!(
+                    "PG_EMBEDDED_WORKER must be set when running with root privileges"
+                )))
+            } else {
+                Ok(ExecutionMode::Subprocess)
+            }
         }
+        ExecutionPrivileges::Unprivileged => Ok(ExecutionMode::InProcess),
     }
+}
 
-    #[cfg(not(unix))]
-    {
-        let _ = worker_binary;
-        match privileges {
-            ExecutionPrivileges::Root => Err(unsupported_root_privilege_drop_error()),
-            ExecutionPrivileges::Unprivileged => Ok(ExecutionMode::InProcess),
-        }
+#[cfg(not(unix))]
+pub(super) fn determine_execution_mode(
+    privileges: ExecutionPrivileges,
+    _worker_binary: Option<&Utf8PathBuf>,
+) -> BootstrapResult<ExecutionMode> {
+    match privileges {
+        ExecutionPrivileges::Root => Err(unsupported_root_privilege_drop_error()),
+        ExecutionPrivileges::Unprivileged => Ok(ExecutionMode::InProcess),
     }
 }
 

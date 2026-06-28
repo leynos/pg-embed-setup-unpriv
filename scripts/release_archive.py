@@ -26,6 +26,7 @@ from cyclopts import App, Parameter
 PACKAGE_NAME = "pg-embed-setup-unpriv"
 DEFAULT_BINARIES = ("pg_embedded_setup_unpriv", "pg_worker")
 SHELL_QUOTES = frozenset({"'", '"'})
+PATH_SEPARATORS = frozenset({"/", "\\"})
 CARGO = Program("cargo")
 CATALOGUE = ProgramCatalogue(
     projects=[
@@ -81,16 +82,20 @@ def manifest_version(manifest_path: Path) -> str:
 
 def archive_stem(target: str, version: str) -> str:
     """Return the cargo-binstall archive root directory name."""
+    validate_path_component(target, "target")
     return f"{PACKAGE_NAME}-{target}-v{version}"
 
 
 def release_binary_path(repo: Path, target: str, binary: str) -> Path:
     """Return Cargo's release output path for `binary` and `target`."""
+    validate_path_component(target, "target")
+    validate_path_component(binary, "binary")
     return repo / "target" / target / "release" / f"{binary}{binary_extension(target)}"
 
 
 def build_release_binaries(spec: ReleaseBuildSpec) -> None:
     """Build the selected release binaries for `spec.target`."""
+    validate_release_spec_components(spec.target, spec.binaries)
     program, program_args = cargo_program_and_args(spec.cargo)
     args = [*program_args, "build", "--release", "--target", spec.target]
     args.extend(cargo_build_job_args(spec.build_jobs))
@@ -119,6 +124,23 @@ def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
         raise SystemExit("cargo executable cannot be empty")
     program, *program_args = cargo_command
     return program, program_args
+
+
+def validate_release_spec_components(target: str, binaries: tuple[str, ...]) -> None:
+    """Reject release identifiers that could escape Cargo's output tree."""
+    validate_path_component(target, "target")
+    for binary in binaries:
+        validate_path_component(binary, "binary")
+
+
+def validate_path_component(value: str, kind: str) -> None:
+    """Reject path-like values accepted only as release identifiers."""
+    if not value:
+        raise SystemExit(f"{kind} cannot be empty")
+    if value in {".", ".."} or ".." in value:
+        raise SystemExit(f"{kind} cannot contain '..': {value}")
+    if any(separator in value for separator in PATH_SEPARATORS):
+        raise SystemExit(f"{kind} cannot contain path separators: {value}")
 
 
 def looks_like_executable_path(cargo: str) -> bool:
@@ -171,6 +193,7 @@ def catalogue_for(cargo: str) -> ProgramCatalogue:
 
 def stage_archive(spec: ReleaseArchiveSpec) -> Path:
     """Stage release binaries and return the produced `.tgz` path."""
+    validate_release_spec_components(spec.target, spec.binaries)
     spec.dist_dir.mkdir(parents=True, exist_ok=True)
     stem = archive_stem(spec.target, spec.version)
     archive_path = spec.dist_dir / f"{stem}.tgz"

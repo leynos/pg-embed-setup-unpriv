@@ -33,12 +33,21 @@ impl JobHandle {
     pub(super) fn create_for_process_tree(root: PostmasterProcess) -> Option<Self> {
         let root_process = ProcessHandle::open_assign_to_job(root.pid())?;
         if !root_process.matches_postmaster(root) {
+            tracing::debug!(
+                pid = root.pid(),
+                "skipping Windows Job Object failsafe because root identity changed"
+            );
             return None;
         }
 
         let job = Self::create_kill_on_close()?;
-        job.assign_process_tree(root.pid(), &root_process)
-            .then_some(job)
+        let assigned = job.assign_process_tree(root.pid(), &root_process);
+        tracing::debug!(
+            pid = root.pid(),
+            assigned,
+            "prepared Windows Job Object failsafe"
+        );
+        assigned.then_some(job)
     }
 
     fn create_kill_on_close() -> Option<Self> {
@@ -90,6 +99,10 @@ impl JobHandle {
 
     fn assign_process(&self, process: &ProcessHandle) -> bool {
         if !process.is_active_postgres() {
+            tracing::debug!(
+                pid = process.pid(),
+                "skipping Windows Job Object assignment because process is no longer active postgres"
+            );
             return false;
         }
         self.assign_process_handle(process)
@@ -100,7 +113,13 @@ impl JobHandle {
         // - `self.0` is a valid job handle configured before assignment.
         // - `process` owns a process handle opened with the rights required by
         //   `AssignProcessToJobObject`.
-        unsafe { AssignProcessToJobObject(self.0.as_ptr(), process.raw()) != 0 }
+        let assigned = unsafe { AssignProcessToJobObject(self.0.as_ptr(), process.raw()) != 0 };
+        tracing::debug!(
+            pid = process.pid(),
+            assigned,
+            "attempted Windows Job Object process assignment"
+        );
+        assigned
     }
 }
 
