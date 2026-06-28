@@ -2030,3 +2030,21 @@ failure. What changed and why:
 
 Validation recorded for this pass: `make check-fmt`, `make lint`, and
 `make test`.
+
+Revision 13 (2026-06-29), after verifying the release-archive docstring review
+comment. What changed and why:
+
+- Verified that `manifest_version` already used a full structured NumPy-style
+  docstring, but other public functions in `scripts/release_archive.py` still
+  had summary-only docstrings.
+- Expanded the public function documentation in `scripts/release_archive.py` with
+  `Parameters`, `Returns`, `Raises`, and `Examples` sections where applicable,
+  while leaving private helpers as single-line summaries.
+
+Validation recorded for this pass: release archive pytest via `uv`,
+`python -m py_compile scripts/release_archive.py`, `make check-fmt`,
+`make lint`, `make markdownlint`, `git diff --check`, and
+`CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`. Earlier full-test
+attempts failed before executing tests because the shared machine could not
+spawn nextest binaries (`Resource temporarily unavailable`, OS error 11); after
+the lody cgroup PID pressure dropped, the single-threaded full gate passed.
