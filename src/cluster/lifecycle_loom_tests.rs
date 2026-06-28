@@ -116,38 +116,38 @@ where
     builder.check(f);
 }
 
-#[test]
-#[ignore = "requires Loom model checking"]
-fn same_template_setup_runs_once_under_race() {
-    run_loom_model(|| {
+fn assert_two_template_setups(
+    first_template: &'static str,
+    second_template: &'static str,
+    expected_created_count: usize,
+    expected_setup_count: usize,
+) {
+    run_loom_model(move || {
         let harness = TemplateHarness::new();
         let first = harness.clone();
         let second = harness.clone();
 
-        let first_thread = thread::spawn(move || first.ensure_template("template"));
-        let second_thread = thread::spawn(move || second.ensure_template("template"));
+        let first_thread = thread::spawn(move || first.ensure_template(first_template));
+        let second_thread = thread::spawn(move || second.ensure_template(second_template));
 
         assert!(first_thread.join().is_ok(), "first thread should join");
         assert!(second_thread.join().is_ok(), "second thread should join");
-        assert_eq!(harness.created_count(), 1);
-        assert_eq!(harness.setup_count.load(Ordering::SeqCst), 1);
+        assert_eq!(harness.created_count(), expected_created_count);
+        assert_eq!(
+            harness.setup_count.load(Ordering::SeqCst),
+            expected_setup_count
+        );
     });
 }
 
 #[test]
 #[ignore = "requires Loom model checking"]
+fn same_template_setup_runs_once_under_race() {
+    assert_two_template_setups("template", "template", 1, 1);
+}
+
+#[test]
+#[ignore = "requires Loom model checking"]
 fn different_template_setups_do_not_deadlock() {
-    run_loom_model(|| {
-        let harness = TemplateHarness::new();
-        let first = harness.clone();
-        let second = harness.clone();
-
-        let first_thread = thread::spawn(move || first.ensure_template("template_a"));
-        let second_thread = thread::spawn(move || second.ensure_template("template_b"));
-
-        assert!(first_thread.join().is_ok(), "first thread should join");
-        assert!(second_thread.join().is_ok(), "second thread should join");
-        assert_eq!(harness.created_count(), 2);
-        assert_eq!(harness.setup_count.load(Ordering::SeqCst), 2);
-    });
+    assert_two_template_setups("template_a", "template_b", 2, 2);
 }
