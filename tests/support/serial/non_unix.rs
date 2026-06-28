@@ -1,7 +1,7 @@
 //! Non-Unix process-lock implementation for behavioural test serialization.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use std::{fs::OpenOptions, io::Write};
 
 #[cfg(windows)]
@@ -149,21 +149,26 @@ fn process_lock_owner_contents() -> String {
 }
 
 fn process_lock_state(lock_path: &Path) -> ProcessLockState {
+    process_lock_state_at(lock_path, SystemTime::now())
+}
+
+fn process_lock_state_at(lock_path: &Path, now: SystemTime) -> ProcessLockState {
     let owner_path = process_lock_owner_path(lock_path);
     let owner = match std::fs::read_to_string(&owner_path) {
         Ok(owner) => owner,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return process_lock_pending_or_stale(lock_path, ProcessLockOwnerIssue::Missing);
+            return process_lock_pending_or_stale(lock_path, now, ProcessLockOwnerIssue::Missing);
         }
         Err(err) => {
             return process_lock_pending_or_stale(
                 lock_path,
+                now,
                 ProcessLockOwnerIssue::Unreadable(err.kind()),
             );
         }
     };
     let Some(pid) = parse_lock_owner_pid(&owner) else {
-        return process_lock_pending_or_stale(lock_path, ProcessLockOwnerIssue::Malformed);
+        return process_lock_pending_or_stale(lock_path, now, ProcessLockOwnerIssue::Malformed);
     };
     if owner_process_is_running(pid) {
         ProcessLockState::Active
@@ -174,24 +179,24 @@ fn process_lock_state(lock_path: &Path) -> ProcessLockState {
 
 fn process_lock_pending_or_stale(
     lock_path: &Path,
+    now: SystemTime,
     reason: ProcessLockOwnerIssue,
 ) -> ProcessLockState {
-    if process_lock_is_within_owner_grace(lock_path) {
+    if process_lock_is_within_owner_grace(lock_path, now) {
         ProcessLockState::PendingOwner(reason)
     } else {
         ProcessLockState::Stale(reason)
     }
 }
 
-fn process_lock_is_within_owner_grace(lock_path: &Path) -> bool {
+fn process_lock_is_within_owner_grace(lock_path: &Path, now: SystemTime) -> bool {
     let Ok(metadata) = std::fs::metadata(lock_path) else {
         return false;
     };
     let Ok(modified_at) = metadata.modified() else {
         return false;
     };
-    modified_at
-        .elapsed()
+    now.duration_since(modified_at)
         .is_ok_and(|age| age <= PROCESS_LOCK_OWNER_GRACE)
 }
 
@@ -315,7 +320,6 @@ mod tests {
         serial_guard: ScenarioSerialGuard,
         #[case] owner: &str,
     ) {
-        use std::time::{Duration, SystemTime};
         use std::{env, fs};
 
         let _guard = serial_guard;
@@ -327,13 +331,10 @@ mod tests {
             .expect("failed to create lock directory for stale owner test");
         fs::write(process_lock_owner_path(&lock_path), owner)
             .expect("failed to write malformed process lock owner");
-        let stale_time = SystemTime::now() - PROCESS_LOCK_OWNER_GRACE - Duration::from_secs(1);
-        let stale_file_time = filetime::FileTime::from_system_time(stale_time);
-        filetime::set_file_mtime(&lock_path, stale_file_time)
-            .expect("failed to set stale lock directory mtime");
+        let after_grace = SystemTime::now() + PROCESS_LOCK_OWNER_GRACE + Duration::from_secs(1);
 
         assert_eq!(
-            process_lock_state(&lock_path),
+            process_lock_state_at(&lock_path, after_grace),
             ProcessLockState::Stale(ProcessLockOwnerIssue::Malformed)
         );
 
