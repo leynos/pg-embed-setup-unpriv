@@ -293,8 +293,8 @@ it automatically adds a [`Default`] implementation that leaves all slots empty.
 **Do not** also derive or implement `Default`: Rust will report a
 duplicate-implementation error because the macro already provides it. When you
 need custom initialization, plan to use the future
-`#[scenario_state(no_default)]` flag (or equivalent) to opt out of the
-generated `Default` and supply your own logic.
+`#[scenario_state(no_default)]` flag (or equivalent) to opt out of the generated
+`Default` and supply your own logic.
 
 ```rust
 use rstest::fixture;
@@ -464,11 +464,11 @@ one may filter or run them in parallel as usual.
 
 Steps or hooks may call `rstest_bdd::skip!` to stop executing the remaining
 steps. The macro records a `Skipped` outcome and short-circuits the scenario so
-the generated test returns before evaluating the annotated function body.
-Invoke `skip!()` with no arguments to record a skipped outcome without a
-message. Pass an optional string to describe the reason, and use the standard
-`format!` syntax to interpolate values when needed. Set the
-`RSTEST_BDD_FAIL_ON_SKIPPED` environment variable to `1`, or call
+the generated test returns before evaluating the annotated function body. Invoke
+`skip!()` with no arguments to record a skipped outcome without a message.
+Pass an optional string to describe the reason, and use the standard `format!`
+syntax to interpolate values when needed. Set the `RSTEST_BDD_FAIL_ON_SKIPPED`
+environment variable to `1`, or call
 `rstest_bdd::config::set_fail_on_skipped(true)`, to escalate skipped scenarios
 into test failures unless the feature or scenario carries an `@allow_skipped`
 tag. (Example-level tags are not yet evaluated.)
@@ -556,14 +556,14 @@ To enable validation pin a feature in your `dev-dependencies`:
 
 ```toml
 [dev-dependencies]
-rstest-bdd-macros = { version = "0.1.0", features = ["compile-time-validation"] }
+rstest-bdd-macros = { version = "0.5.0", features = ["compile-time-validation"] }
 ```
 
 For strict checking use:
 
 ```toml
 [dev-dependencies]
-rstest-bdd-macros = { version = "0.1.0", features = ["strict-compile-time-validation"] }
+rstest-bdd-macros = { version = "0.5.0", features = ["strict-compile-time-validation"] }
 ```
 
 Steps are only validated when one of these features is enabled.
@@ -593,18 +593,17 @@ Best practices for writing effective scenarios include:
   (for example, `1e3`, `-1E-9`), and the special values `NaN`, `inf`, and
   `Infinity` (matched case-insensitively). Matching is anchored: the entire
   step text must match the pattern; partial matches do not succeed. Escape
-  literal braces with `{{` and `}}`. Use
-  `\` to match a single backslash. A trailing `\` or any other backslash escape
-  is treated literally, so `\d` matches the two-character sequence `\d`. Nested
-  braces inside placeholders are not supported. Placeholders follow
-  `{name[:type]}`; `name` must start with a letter or underscore and may
-  contain letters, digits, or underscores (`[A-Za-z_][A-Za-z0-9_]*`).
-  Whitespace within the type hint is ignored (for example, `{count: u32}` and
-  `{count:u32}` are both accepted), but whitespace is not allowed between the
-  name and the colon. Prefer the compact form `{count:u32}` in new code. When a
-  pattern contains no placeholders, the step text must match exactly. Unknown
-  type hints are treated as generic placeholders and capture any non-newline
-  text greedily.
+  literal braces with `{{` and `}}`. Use `\` to match a single backslash. A
+  trailing `\` or any other backslash escape is treated literally, so `\d`
+  matches the two-character sequence `\d`. Nested braces inside placeholders
+  are not supported. Placeholders follow `{name[:type]}`; `name` must start
+  with a letter or underscore and may contain letters, digits, or underscores
+  (`[A-Za-z_][A-Za-z0-9_]*`). Whitespace within the type hint is ignored (for
+  example, `{count: u32}` and `{count:u32}` are both accepted), but whitespace
+  is not allowed between the name and the colon. Prefer the compact form
+  `{count:u32}` in new code. When a pattern contains no placeholders, the step
+  text must match exactly. Unknown type hints are treated as generic
+  placeholders and capture any non-newline text greedily.
 
 ## Data tables and Docstrings
 
@@ -932,7 +931,7 @@ Localization tooling can be added to `Cargo.toml` as follows:
 
 ```toml
 [dependencies]
-rstest-bdd = "0.1.0"
+rstest-bdd = "0.5.0"
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
 unic-langid = "0.9"
 ```
@@ -1012,8 +1011,8 @@ rstest_bdd::reporting::json::write_snapshot(&mut buffer)?;
 ```
 
 The companion `rstest_bdd::reporting::junit` module renders the same snapshot
-as JUnit XML. Each skipped scenario emits a `<skipped>` element with an
-optional `message` attribute so CI servers surface the reason:
+as JUnit XML. Each skipped scenario emits a `<skipped>` element with an optional
+`message` attribute so CI servers surface the reason:
 
 ```rust
 let mut xml = String::new();

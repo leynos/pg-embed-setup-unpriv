@@ -23,7 +23,7 @@ code.
 
 - Preserve existing public APIs and CLI behaviour unless a change is required
   by the roadmap task. Any public API change requires escalation.
-- Use `rstest-bdd` v0.3.2 for behavioural tests and keep unit tests alongside
+- Use `rstest-bdd` v0.5.0 for behavioural tests and keep unit tests alongside
   the relevant modules.
 - Keep documentation wrapped at 80 columns and follow en-GB-oxendict spelling
   rules.
@@ -40,7 +40,7 @@ code.
 - Scope: if changes require more than 8 files or more than 300 net lines of
   code, stop and escalate.
 - Interface: if any public API signature must change, stop and escalate.
-- Dependencies: if a new dependency (beyond confirming `rstest-bdd` v0.3.2) is
+- Dependencies: if a new dependency (beyond confirming `rstest-bdd` v0.5.0) is
   required, stop and escalate.
 - Tests: if tests still fail after 2 targeted fixes, stop and escalate.
 - Time: if any single milestone exceeds 3 hours, stop and escalate.
@@ -134,7 +134,7 @@ what gaps exist for CI observability. If multiple CI approaches are viable
 choice in the Decision log.
 
 Stage B: Add or adjust unit and behavioural tests to explicitly confirm the
-root and unprivileged paths. Use `rstest-bdd` v0.3.2 for behavioural coverage
+root and unprivileged paths. Use `rstest-bdd` v0.5.0 for behavioural coverage
 and ensure scenarios include both happy and unhappy paths (for example, root
 path success and a failure when privilege changes are unavailable). Keep tests
 aligned with existing fixtures and scoped environment helpers to avoid global
@@ -168,7 +168,7 @@ Each stage ends by running the relevant validation steps before proceeding.
 
 3. Implement or adjust tests (unit + behavioural) and feature files. Add any
    new `.feature` files under `tests/features/` and reference them with
-   `#[scenario]` so `rstest-bdd` v0.3.2 drives them.
+   `#[scenario]` so `rstest-bdd` v0.5.0 drives them.
 
 4. Update `.github/workflows/ci.yml` to add the Linux matrix and any required
    environment setup (e.g., root execution via container or `sudo`). Keep the
@@ -233,7 +233,7 @@ notable CI error messages in the Decision log for future reference.
 
 ## Interfaces and dependencies
 
-- `rstest-bdd` must remain at v0.3.2 in `Cargo.toml` and should be used for all
+- `rstest-bdd` must remain at v0.5.0 in `Cargo.toml` and should be used for all
   new behavioural scenarios in this change.
 - CI configuration changes are limited to `.github/workflows/ci.yml` unless a
   new workflow file is explicitly required.

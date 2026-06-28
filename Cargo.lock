@@ -260,7 +260,7 @@ dependencies = [
  "maybe-owned",
  "rustix",
  "rustix-linux-procfs",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
  "winx",
 ]
 
@@ -703,7 +703,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -783,7 +783,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -1959,7 +1959,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -2873,9 +2873,9 @@ dependencies = [
 
 [[package]]
 name = "rstest-bdd"
-version = "0.3.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7451d147800bd8b0b8621116a2c553b13408f2b7914a5b818eccaa37240ed9a"
+checksum = "138d8e4f97e16906ebeb0bfb12d2c94f0b05913a96fc522111bec62ca8328522"
 dependencies = [
  "ctor",
  "derive_more",
@@ -2885,9 +2885,9 @@ dependencies = [
  "i18n-embed",
  "inventory",
  "log",
- "once_cell",
  "regex",
  "rstest-bdd-patterns",
+ "rstest-bdd-policy",
  "rust-embed",
  "serde",
  "serde_json",
@@ -2897,9 +2897,9 @@ dependencies = [
 
 [[package]]
 name = "rstest-bdd-macros"
-version = "0.3.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c58aca0e441b276f7e52a6fe1b9bb8c341004110f610e7dfda112578c0c18837"
+checksum = "fe104196f61dc8911a8da1b10005e9401e7c2e14ad9302e2de6688311c0beec7"
 dependencies = [
  "camino",
  "cap-std 3.4.5",
@@ -2907,27 +2907,34 @@ dependencies = [
  "convert_case 0.6.0",
  "gherkin",
  "newt-hype",
- "once_cell",
  "proc-macro-crate",
  "proc-macro-error",
  "proc-macro2",
  "quote",
  "regex",
  "rstest-bdd-patterns",
+ "rstest-bdd-policy",
  "syn 2.0.106",
+ "thiserror 1.0.69",
  "walkdir",
 ]
 
 [[package]]
 name = "rstest-bdd-patterns"
-version = "0.3.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59a52766aaee3793eec30ff351a5ebddba34dddab8500b18891cddece364a66d"
+checksum = "39abaa69316cdbbad0512dc0f37b704b09e4cdb5018d80f197cbdb77a2269d06"
 dependencies = [
  "gherkin",
  "regex",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "rstest-bdd-policy"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88f2ca584f7d9d359a09f616900be015302c959d58c2c2da6c075573352dfa0d"
 
 [[package]]
 name = "rstest_macros"
@@ -3012,7 +3019,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -3640,7 +3647,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -4516,7 +4523,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
