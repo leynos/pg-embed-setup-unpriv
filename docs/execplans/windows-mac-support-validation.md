@@ -2015,3 +2015,18 @@ failure. What changed and why:
 
 Validation recorded for this pass: `make check-fmt`, `make lint`, and
 `make test`.
+
+Revision 12 (2026-06-29), after inspecting the third hosted Windows test
+failure. What changed and why:
+
+- The Windows `Test unprivileged surface` job no longer failed at the CLI help
+  snapshot. The next failure was the `trybuild` UI harness timing out at
+  nextest's 180-second per-test limit while compiling the isolated fixture
+  dependency graph on Windows.
+- Gated the `trybuild` compile-time harness to non-Windows platforms. Linux and
+  macOS still exercise the feature-gated public test-support surface at compile
+  time, while the Windows job keeps its direct normal test and binstall
+  coverage without duplicating a slow isolated compile.
+
+Validation recorded for this pass: `make check-fmt`, `make lint`, and
+`make test`.
