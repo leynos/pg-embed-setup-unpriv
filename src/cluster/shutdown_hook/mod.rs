@@ -291,6 +291,7 @@ mod tests {
     use super::*;
 
     use color_eyre::eyre::{Result, ensure};
+    #[cfg(unix)]
     use proptest::prelude::*;
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
