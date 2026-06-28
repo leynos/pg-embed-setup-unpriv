@@ -25,6 +25,7 @@ from cyclopts import App, Parameter
 
 PACKAGE_NAME = "pg-embed-setup-unpriv"
 DEFAULT_BINARIES = ("pg_embedded_setup_unpriv", "pg_worker")
+SHELL_QUOTES = frozenset({"'", '"'})
 CARGO = Program("cargo")
 CATALOGUE = ProgramCatalogue(
     projects=[
@@ -128,9 +129,18 @@ def looks_like_executable_path(cargo: str) -> bool:
 
 def strip_matching_quotes(value: str) -> str:
     """Strip one matching shell-quote pair around an executable path."""
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+    if has_matching_outer_quotes(value):
         return value[1:-1]
     return value
+
+
+def has_matching_outer_quotes(value: str) -> bool:
+    """Return whether `value` is enclosed in one matching shell quote pair."""
+    if len(value) < 2:
+        return False
+    first = value[0]
+    last = value[-1]
+    return first == last and first in SHELL_QUOTES
 
 
 def cargo_build_job_args(build_jobs: str | None) -> list[str]:
