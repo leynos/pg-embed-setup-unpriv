@@ -8,6 +8,7 @@ import sys
 import tarfile
 from pathlib import Path
 
+import pytest
 from cmd_mox import CmdMox
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "release_archive.py"
@@ -68,39 +69,44 @@ def test_windows_targets_use_exe_suffix() -> None:
 def test_manifest_version_reports_missing_manifest(tmp_path: Path) -> None:
     manifest = tmp_path / "Cargo.toml"
 
-    try:
+    with pytest.raises(release_archive.ManifestVersionError) as exc_info:
         release_archive.manifest_version(manifest)
-    except release_archive.ManifestVersionError as err:
-        assert err.manifest_path == manifest
-        assert "No such file" in err.reason
-    else:
-        raise AssertionError("expected missing manifest to raise a typed error")
+
+    assert exc_info.value.manifest_path == manifest
+    assert "No such file" in exc_info.value.reason
 
 
 def test_manifest_version_reports_invalid_toml(tmp_path: Path) -> None:
     manifest = tmp_path / "Cargo.toml"
     manifest.write_text("[package\n")
 
-    try:
+    with pytest.raises(release_archive.ManifestVersionError) as exc_info:
         release_archive.manifest_version(manifest)
-    except release_archive.ManifestVersionError as err:
-        assert err.manifest_path == manifest
-        assert err.reason.startswith("invalid TOML:")
-    else:
-        raise AssertionError("expected invalid TOML to raise a typed error")
+
+    assert exc_info.value.manifest_path == manifest
+    assert exc_info.value.reason.startswith("invalid TOML:")
+
+
+def test_manifest_version_requires_package_table(tmp_path: Path) -> None:
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('package = 1\n')
+
+    with pytest.raises(release_archive.ManifestVersionError) as exc_info:
+        release_archive.manifest_version(manifest)
+
+    assert exc_info.value.manifest_path == manifest
+    assert exc_info.value.reason == "package must be a table"
 
 
 def test_manifest_version_requires_string_package_version(tmp_path: Path) -> None:
     manifest = tmp_path / "Cargo.toml"
     manifest.write_text('[package]\nname = "pg-embed-setup-unpriv"\nversion = 1\n')
 
-    try:
+    with pytest.raises(release_archive.ManifestVersionError) as exc_info:
         release_archive.manifest_version(manifest)
-    except release_archive.ManifestVersionError as err:
-        assert err.manifest_path == manifest
-        assert err.reason == "package.version must be a string"
-    else:
-        raise AssertionError("expected non-string version to raise a typed error")
+
+    assert exc_info.value.manifest_path == manifest
+    assert exc_info.value.reason == "package.version must be a string"
 
 
 def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) -> None:

@@ -14,6 +14,7 @@ import shutil
 import shlex
 import tarfile
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -89,7 +90,10 @@ def manifest_version(manifest_path: Path) -> str:
     try:
         with manifest_path.open("rb") as manifest:
             data = tomllib.load(manifest)
-        version = data["package"]["version"]
+        package = data["package"]
+        if not isinstance(package, Mapping):
+            raise ManifestVersionError(manifest_path, "package must be a table")
+        version = package["version"]
     except OSError as err:
         raise ManifestVersionError(manifest_path, str(err)) from err
     except tomllib.TOMLDecodeError as err:
