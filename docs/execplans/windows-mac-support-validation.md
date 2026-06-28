@@ -1988,3 +1988,15 @@ changed and why:
 
 Validation recorded for this pass: release archive pytest via `uv`,
 `make check-fmt`, `make lint`, and `make test`.
+
+Revision 10 (2026-06-29), after inspecting the hosted Windows test failure.
+What changed and why:
+
+- The Windows `Test unprivileged surface` job failed during test compilation
+  because `proptest::prelude::*` was imported unconditionally while every
+  property test using it is Unix-gated.
+- Narrowed the `proptest` test import behind `#[cfg(unix)]`, preserving the
+  Unix property coverage and removing the Windows unused-import failure.
+
+Validation recorded for this pass: `make check-fmt`, `make lint`, and
+`make test`.
