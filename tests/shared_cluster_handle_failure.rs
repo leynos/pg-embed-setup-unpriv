@@ -13,15 +13,6 @@ use pg_embedded_setup_unpriv::test_support::shared_cluster_handle;
 use pg_embedded_setup_unpriv::{BootstrapError, BootstrapErrorKind, ClusterHandle};
 use tracing::warn;
 
-#[expect(dead_code, reason = "required by env_isolation module")]
-#[path = "support/env.rs"]
-mod env;
-#[expect(dead_code, reason = "only set_env_var and remove_env_var are used")]
-#[path = "support/env_isolation.rs"]
-mod env_isolation;
-
-use env_isolation::{remove_env_var, set_env_var};
-
 /// Sets up the environment to force bootstrap failure.
 ///
 /// # Safety
@@ -41,6 +32,16 @@ unsafe fn setup_failing_environment() {
         // Also clear TZ to ensure the bootstrap tries to read from TZDIR
         remove_env_var("TZ");
     }
+}
+
+unsafe fn set_env_var(key: &str, value: &str) {
+    // SAFETY: callers ensure this single-test binary serialises environment mutation.
+    unsafe { std::env::set_var(key, value) };
+}
+
+unsafe fn remove_env_var(key: &str) {
+    // SAFETY: callers ensure this single-test binary serialises environment mutation.
+    unsafe { std::env::remove_var(key) };
 }
 
 /// Extracts the error from a result, or returns None if it succeeded.

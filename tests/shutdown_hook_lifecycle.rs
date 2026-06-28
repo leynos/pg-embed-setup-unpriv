@@ -152,7 +152,7 @@ fn shutdown_hook_lifecycle_child_entry() -> Result<()> {
         .context("register shutdown hook")?;
 
     // Write postmaster PID to the temp file for the parent to verify.
-    let pid = read_postmaster_pid(&handle.settings().data_dir)
+    let pid = read_postmaster_pid(&handle.settings().data_dir)?
         .ok_or_else(|| eyre!("postmaster.pid not found after cluster start"))?;
     fs::write(&pid_file_path, pid.to_string()).context("write PID file")?;
 

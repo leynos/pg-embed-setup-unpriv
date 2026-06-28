@@ -60,6 +60,26 @@ fn help_flag_prints_configuration_surface_without_bootstrap() -> Result<()> {
         stdout.contains("PG_BINARY_CACHE_DIR"),
         "expected stdout to document PG_BINARY_CACHE_DIR; stdout: {stdout}"
     );
+    insta::assert_snapshot!(stdout.as_ref(), @r"
+Initialises postgresql_embedded clusters as root while handing off filesystem work to nobody
+
+Usage: pg_embedded_setup_unpriv
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+Configuration is read from environment variables:
+  PG_VERSION_REQ          PostgreSQL semver requirement.
+  PG_PORT                 PostgreSQL port.
+  PG_SUPERUSER            Administrative PostgreSQL user.
+  PG_PASSWORD             Administrative PostgreSQL password.
+  PG_DATA_DIR             PostgreSQL data directory.
+  PG_RUNTIME_DIR          PostgreSQL binary installation directory.
+  PG_LOCALE               initdb locale.
+  PG_ENCODING             initdb encoding.
+  PG_BINARY_CACHE_DIR     Shared PostgreSQL binary cache directory.
+");
     ensure!(
         !stderr.contains("PG_VERSION_REQ invalid semver spec"),
         "--help must not parse bootstrap configuration; stderr: {stderr}"
