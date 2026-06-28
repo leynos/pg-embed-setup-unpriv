@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shlex
 import sys
 import tarfile
 from pathlib import Path
@@ -51,7 +52,7 @@ def assert_build_release_binaries_invokes_cargo(
     expected_args: tuple[str, ...],
 ) -> None:
     """Assert the release binary build delegates to Cargo as expected."""
-    program = release_archive.cargo_program_and_args(spec.cargo)[0]
+    program = shlex.split(spec.cargo)[0]
     with CmdMox() as mox:
         mox.mock(program).with_args(*expected_args).returns()
         mox.replay()
