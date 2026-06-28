@@ -250,7 +250,7 @@ fn handle_contended_process_lock(lock_path: &std::path::Path, deadline: Instant)
             let _unused = std::fs::remove_dir_all(lock_path);
             return;
         }
-        ProcessLockState::Active | ProcessLockState::PendingOwner(_reason) => {}
+        ProcessLockState::Active | ProcessLockState::PendingOwner(_) => {}
     }
 
     assert!(
