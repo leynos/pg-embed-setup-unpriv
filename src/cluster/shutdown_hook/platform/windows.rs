@@ -52,6 +52,12 @@ pub(in crate::cluster::shutdown_hook) struct ProcessExitFailsafe {
 pub(in crate::cluster::shutdown_hook) fn prepare_process_exit_failsafe(
     process: Option<PostmasterProcess>,
 ) -> ProcessExitFailsafe {
+    if let Some(process) = process {
+        tracing::debug!(
+            pid = process.pid(),
+            "preparing Windows process-exit Job Object failsafe"
+        );
+    }
     let job = process.and_then(JobHandle::create_for_process_tree);
     ProcessExitFailsafe { _job: job }
 }
@@ -62,11 +68,19 @@ pub(in crate::cluster::shutdown_hook) fn prepare_process_exit_failsafe(
 /// exit hook. Terminate the process tree immediately so a deliberately leaked
 /// test cluster cannot survive the exiting test binary.
 pub(in crate::cluster::shutdown_hook) fn request_shutdown(process: PostmasterProcess) {
+    tracing::debug!(
+        pid = process.pid(),
+        "requesting Windows process-tree termination"
+    );
     terminate_process_tree(process);
 }
 
 /// Forces `PostgreSQL` shutdown after the graceful timeout.
 pub(in crate::cluster::shutdown_hook) fn force_shutdown(process: PostmasterProcess) {
+    tracing::debug!(
+        pid = process.pid(),
+        "forcing Windows process-tree termination"
+    );
     terminate_process_tree(process);
 }
 
@@ -127,7 +141,10 @@ struct ProcessEntry {
     parent_process_id: PostmasterPid,
 }
 
-struct ProcessHandle(NonNull<c_void>);
+struct ProcessHandle {
+    raw: NonNull<c_void>,
+    pid: PostmasterPid,
+}
 
 impl ProcessHandle {
     fn open_query(pid: PostmasterPid) -> Option<Self> {
@@ -135,7 +152,7 @@ impl ProcessHandle {
         // inheritance disabled, and a concrete process id read from
         // `postmaster.pid`. A null return is handled as absence.
         let raw_handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        NonNull::new(raw_handle).map(Self)
+        NonNull::new(raw_handle).map(|raw| Self { raw, pid })
     }
 
     fn open_terminate(pid: PostmasterPid) -> Option<Self> {
@@ -155,11 +172,15 @@ impl ProcessHandle {
         // - handle inheritance is disabled.
         // - a null return is handled as failure and no handle is retained.
         let raw_handle = unsafe { OpenProcess(access, 0, pid) };
-        NonNull::new(raw_handle).map(Self)
+        NonNull::new(raw_handle).map(|raw| Self { raw, pid })
     }
 
     fn raw(&self) -> *mut c_void {
-        self.0.as_ptr()
+        self.raw.as_ptr()
+    }
+
+    fn pid(&self) -> PostmasterPid {
+        self.pid
     }
 
     fn is_active(&self) -> bool {
@@ -181,16 +202,22 @@ impl ProcessHandle {
         self.is_active() && image_file_name_is_postgres(self.raw())
     }
 
-    fn terminate(&self) {
+    fn terminate(&self) -> bool {
         // SAFETY:
         // - `self.0` is a non-null process handle opened with
         //   `PROCESS_TERMINATE | SYNCHRONIZE`.
         // - the callee does not retain pointers and no Rust references cross
         //   the FFI boundary.
-        unsafe {
-            TerminateProcess(self.raw(), TERMINATE_EXIT_CODE);
-            WaitForSingleObject(self.raw(), TERMINATION_WAIT_MS);
-        }
+        let terminated = unsafe { TerminateProcess(self.raw(), TERMINATE_EXIT_CODE) != 0 };
+        // SAFETY: same handle invariant as the termination call above.
+        let wait_result = unsafe { WaitForSingleObject(self.raw(), TERMINATION_WAIT_MS) };
+        tracing::debug!(
+            pid = self.pid,
+            terminated,
+            wait_result,
+            "attempted Windows process termination"
+        );
+        terminated
     }
 }
 
@@ -263,9 +290,17 @@ impl Drop for SnapshotHandle {
 
 fn terminate_process_tree(process: PostmasterProcess) {
     let Some(root_process) = ProcessHandle::open_terminate(process.pid()) else {
+        tracing::debug!(
+            pid = process.pid(),
+            "skipping Windows process-tree termination because root process could not be opened"
+        );
         return;
     };
     if !root_process.matches_postmaster(process) {
+        tracing::debug!(
+            pid = process.pid(),
+            "skipping Windows process-tree termination because root identity changed"
+        );
         return;
     }
 
@@ -350,6 +385,14 @@ fn open_validated_descendant_processes(
         .filter_map(|(member, process)| {
             let is_valid = process.is_active_postgres()
                 && descendant_is_still_in_root_tree(root, member, &current_entries);
+            if !is_valid {
+                tracing::debug!(
+                    pid = member.process_id,
+                    parent_pid = member.parent_process_id,
+                    root_pid = root,
+                    "skipping Windows descendant because it is no longer in the validated postmaster tree"
+                );
+            }
             is_valid.then_some(process)
         })
         .collect()
@@ -393,5 +436,10 @@ fn process_has_root_ancestor(
 fn terminate_process(process: &ProcessHandle) {
     if process.is_active_postgres() {
         process.terminate();
+    } else {
+        tracing::debug!(
+            pid = process.pid(),
+            "skipping Windows process termination because process is no longer active postgres"
+        );
     }
 }

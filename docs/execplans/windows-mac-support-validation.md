@@ -851,6 +851,14 @@ implemented.
   Evidence:
   `https://github.com/leynos/pg-embed-setup-unpriv/actions/runs/28218770776` and
   `/tmp/gh-watch-28218770776-retry-windows-mac-support-validation.out`.
+- [x] (2026-06-28T02:02:00Z) Began the post-green review follow-up for the
+  failed quality report. Confirmed the `--help` CLI test, Windows cargo-path
+  parser test, and Windows descendant PID-reuse validation tests already exist.
+  Implemented the still-valid gaps: release archive target/binary path
+  validation, cfg-specific Rust signatures instead of fake unused-parameter
+  reads, explicit non-Unix serial lock owner states with grace-window tests,
+  Windows shutdown debug tracing, and developer-guide coverage for the
+  cross-platform release/shutdown design.
 - [x] Milestone 1: make the library and both binaries compile on Windows and
   macOS (`fs.rs` mode gating; `nix` target-gating; `tests/` `nix` import
   gating; remove the dead `xdg` dependency; resolve `openssl-sys`), AND resolve
@@ -1845,9 +1853,9 @@ code changes begin.
 Revision 4 (2026-06-26), after review-finding validation. What changed and why:
 
 - Verified the latest inline and outside-diff findings against the current
-  branch. All listed items except the already-documented
-  `read_postmaster_pid` helper still had a current-code manifestation and were
-  addressed with narrow changes.
+  branch. All listed items except the already-documented `read_postmaster_pid`
+  helper still had a current-code manifestation and were addressed with narrow
+  changes.
 - Added explicit `uv` setup to the release workflow before invoking
   `scripts/release_archive.py`, keeping `uv run --script` as the Python 3.13
   provisioning boundary.

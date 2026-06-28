@@ -89,6 +89,40 @@ def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) ->
     ]
 
 
+def test_stage_archive_rejects_path_like_target(tmp_path: Path) -> None:
+    spec = release_archive.ReleaseArchiveSpec(
+        repo=tmp_path,
+        target="../x86_64-unknown-linux-gnu",
+        version="0.5.1",
+        dist_dir=tmp_path / "dist",
+        binaries=("pg_embedded_setup_unpriv",),
+    )
+
+    try:
+        release_archive.stage_archive(spec)
+    except SystemExit as err:
+        assert "target cannot contain '..'" in str(err)
+    else:
+        raise AssertionError("expected path-like target to abort")
+
+
+def test_stage_archive_rejects_path_like_binary(tmp_path: Path) -> None:
+    spec = release_archive.ReleaseArchiveSpec(
+        repo=tmp_path,
+        target="x86_64-unknown-linux-gnu",
+        version="0.5.1",
+        dist_dir=tmp_path / "dist",
+        binaries=("../pg_worker",),
+    )
+
+    try:
+        release_archive.stage_archive(spec)
+    except SystemExit as err:
+        assert "binary cannot contain '..'" in str(err)
+    else:
+        raise AssertionError("expected path-like binary to abort")
+
+
 def test_build_release_binaries_invokes_cargo_with_all_bins(tmp_path: Path) -> None:
     binaries = ("pg_embedded_setup_unpriv", "pg_worker")
     expected_args = (

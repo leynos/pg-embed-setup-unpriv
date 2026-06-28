@@ -35,6 +35,23 @@ struct ProcessLock {
 const PROCESS_LOCK_OWNER_GRACE: Duration = Duration::from_secs(2);
 
 #[cfg(not(unix))]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ProcessLockState {
+    Active,
+    PendingOwner(ProcessLockOwnerIssue),
+    Stale(ProcessLockOwnerIssue),
+}
+
+#[cfg(not(unix))]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ProcessLockOwnerIssue {
+    Missing,
+    Unreadable(std::io::ErrorKind),
+    Malformed,
+    Exited(u32),
+}
+
+#[cfg(not(unix))]
 impl Drop for ProcessLock {
     fn drop(&mut self) {
         let _unused = std::fs::remove_file(&self.owner_path);
@@ -228,9 +245,12 @@ fn try_acquire_process_lock_once(
 
 #[cfg(not(unix))]
 fn handle_contended_process_lock(lock_path: &std::path::Path, deadline: Instant) {
-    if process_lock_is_stale(lock_path) {
-        let _unused = std::fs::remove_dir_all(lock_path);
-        return;
+    match process_lock_state(lock_path) {
+        ProcessLockState::Stale(_reason) => {
+            let _unused = std::fs::remove_dir_all(lock_path);
+            return;
+        }
+        ProcessLockState::Active | ProcessLockState::PendingOwner(_reason) => {}
     }
 
     assert!(
@@ -268,15 +288,40 @@ fn process_lock_owner_contents() -> String {
 }
 
 #[cfg(not(unix))]
-fn process_lock_is_stale(lock_path: &std::path::Path) -> bool {
+fn process_lock_state(lock_path: &std::path::Path) -> ProcessLockState {
     let owner_path = process_lock_owner_path(lock_path);
-    let Ok(owner) = std::fs::read_to_string(&owner_path) else {
-        return !process_lock_is_within_owner_grace(lock_path);
+    let owner = match std::fs::read_to_string(&owner_path) {
+        Ok(owner) => owner,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return process_lock_pending_or_stale(lock_path, ProcessLockOwnerIssue::Missing);
+        }
+        Err(err) => {
+            return process_lock_pending_or_stale(
+                lock_path,
+                ProcessLockOwnerIssue::Unreadable(err.kind()),
+            );
+        }
     };
     let Some(pid) = parse_lock_owner_pid(&owner) else {
-        return !process_lock_is_within_owner_grace(lock_path);
+        return process_lock_pending_or_stale(lock_path, ProcessLockOwnerIssue::Malformed);
     };
-    !owner_process_is_running(pid)
+    if owner_process_is_running(pid) {
+        ProcessLockState::Active
+    } else {
+        ProcessLockState::Stale(ProcessLockOwnerIssue::Exited(pid))
+    }
+}
+
+#[cfg(not(unix))]
+fn process_lock_pending_or_stale(
+    lock_path: &std::path::Path,
+    reason: ProcessLockOwnerIssue,
+) -> ProcessLockState {
+    if process_lock_is_within_owner_grace(lock_path) {
+        ProcessLockState::PendingOwner(reason)
+    } else {
+        ProcessLockState::Stale(reason)
+    }
 }
 
 #[cfg(not(unix))]
@@ -435,12 +480,12 @@ mod tests {
         clippy::let_underscore_must_use,
         reason = "best-effort cleanup where errors are intentionally ignored"
     )]
-    fn malformed_process_lock_owner_respects_owner_grace(serial_guard: ScenarioSerialGuard) {
+    fn partial_process_lock_owner_respects_owner_grace(serial_guard: ScenarioSerialGuard) {
         use std::{env, fs};
 
         let _guard = serial_guard;
 
-        let tmp_dir = env::temp_dir().join("pg_scenario_malformed_lock_owner_test");
+        let tmp_dir = env::temp_dir().join("pg_scenario_partial_lock_owner_test");
         let lock_path = tmp_dir.join("pg-embed-setup-unpriv.serial.lockdir");
         let _ = fs::remove_dir_all(&tmp_dir);
         fs::create_dir_all(&lock_path)
@@ -448,9 +493,47 @@ mod tests {
         fs::write(process_lock_owner_path(&lock_path), "pid=")
             .expect("failed to write malformed process lock owner");
 
-        assert!(
-            !process_lock_is_stale(&lock_path),
-            "malformed process lock owners inside the grace window must remain active"
+        assert_eq!(
+            process_lock_state(&lock_path),
+            ProcessLockState::PendingOwner(ProcessLockOwnerIssue::Malformed),
+            "partial process lock owners inside the grace window must remain pending"
+        );
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[cfg(not(unix))]
+    #[rstest]
+    #[case("")]
+    #[case("pid=")]
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort cleanup where errors are intentionally ignored"
+    )]
+    fn malformed_process_lock_owner_becomes_stale_after_grace(
+        serial_guard: ScenarioSerialGuard,
+        #[case] owner: &str,
+    ) {
+        use std::time::{Duration, SystemTime};
+        use std::{env, fs};
+
+        let _guard = serial_guard;
+
+        let tmp_dir = env::temp_dir().join("pg_scenario_stale_lock_owner_test");
+        let lock_path = tmp_dir.join("pg-embed-setup-unpriv.serial.lockdir");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&lock_path)
+            .expect("failed to create lock directory for stale owner test");
+        fs::write(process_lock_owner_path(&lock_path), owner)
+            .expect("failed to write malformed process lock owner");
+        let stale_time = SystemTime::now() - PROCESS_LOCK_OWNER_GRACE - Duration::from_secs(1);
+        let stale_file_time = filetime::FileTime::from_system_time(stale_time);
+        filetime::set_file_mtime(&lock_path, stale_file_time)
+            .expect("failed to set stale lock directory mtime");
+
+        assert_eq!(
+            process_lock_state(&lock_path),
+            ProcessLockState::Stale(ProcessLockOwnerIssue::Malformed)
         );
 
         let _ = fs::remove_dir_all(&tmp_dir);

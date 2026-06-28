@@ -1,20 +1,28 @@
-//! Dispatches `PostgreSQL` lifecycle operations either in-process or via the privileged worker
-//! binary.
+//! Dispatches `PostgreSQL` lifecycle operations either in-process or via the privileged worker binary.
 use std::future::Future;
 
 use color_eyre::eyre::{Context, eyre};
 use tokio::runtime::Runtime;
-use tracing::{error, info, info_span};
 
-use super::{WorkerOperation, panic_utils::nested_runtime_thread_panic};
-use crate::{
-    ExecutionMode,
-    ExecutionPrivileges,
-    TestBootstrapSettings,
-    error::{BootstrapError, BootstrapResult},
-    observability::LOG_TARGET,
-    worker_process::{self, WorkerRequest, WorkerRequestArgs},
-};
+use crate::bootstrap::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
+use crate::error::{BootstrapError, BootstrapResult};
+use crate::observability::LOG_TARGET;
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
+use crate::worker_process::{self, WorkerRequest, WorkerRequestArgs};
+use crate::{ExecutionMode, ExecutionPrivileges, TestBootstrapSettings};
+
+use super::WorkerOperation;
+use super::panic_utils::nested_runtime_thread_panic;
+use tracing::{error, info, info_span};
 
 // ============================================================================
 // Shared helper functions
@@ -82,63 +90,59 @@ fn execute_root_operation(
 /// Spawns the worker subprocess to execute a privileged operation.
 ///
 /// This is the shared implementation for worker spawning, used by both sync and
-/// async code paths. Contains platform-specific guards for privilege dropping.
+/// async code paths.
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 fn spawn_worker_inner(
     bootstrap: &TestBootstrapSettings,
     env_vars: &[(String, Option<String>)],
     operation: WorkerOperation,
 ) -> BootstrapResult<()> {
-    #[cfg(not(all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "dragonfly",
-        ),
-    )))]
-    {
-        let _ = (bootstrap, env_vars);
-        return Err(BootstrapError::from(eyre!(
-            "privilege drop not supported on this target; refusing to run as root: {}",
-            operation.error_context()
-        )));
-    }
+    let worker = bootstrap.worker_binary.as_ref().ok_or_else(|| {
+        BootstrapError::from(eyre!(concat!(
+            "pg_worker binary not found. Install it with 'cargo install --path . --bin pg_worker' ",
+            "and ensure it is in PATH, or set PG_EMBEDDED_WORKER to its absolute path"
+        )))
+    })?;
 
-    #[cfg(all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "dragonfly",
-        ),
-    ))]
-    {
-        let worker = bootstrap.worker_binary.as_ref().ok_or_else(|| {
-            BootstrapError::from(eyre!(concat!(
-                "pg_worker binary not found. Install it with 'cargo install --path . --bin \
-                 pg_worker' ",
-                "and ensure it is in PATH, or set PG_EMBEDDED_WORKER to its absolute path"
-            )))
-        })?;
+    let args = WorkerRequestArgs {
+        worker,
+        settings: &bootstrap.settings,
+        env_vars,
+        operation,
+        timeout: operation.timeout(bootstrap),
+    };
+    let request = WorkerRequest::new(args);
+    worker_process::run(&request)
+}
 
-        let args = WorkerRequestArgs {
-            worker,
-            settings: &bootstrap.settings,
-            env_vars,
-            operation,
-            timeout: operation.timeout(bootstrap),
-        };
-        let request = WorkerRequest::new(args);
-        return worker_process::run(&request);
-    }
-
-    #[expect(unreachable_code, reason = "cfg guard ensures all targets handled")]
+/// Rejects privileged worker dispatch on targets without privilege dropping.
+#[cfg(not(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+)))]
+fn spawn_worker_inner(
+    _bootstrap: &TestBootstrapSettings,
+    _env_vars: &[(String, Option<String>)],
+    operation: WorkerOperation,
+) -> BootstrapResult<()> {
     Err(BootstrapError::from(eyre!(
-        "privilege drop support unexpectedly unavailable"
+        "privilege drop not supported on this target; refusing to run as root: {}",
+        operation.error_context()
     )))
 }
 
