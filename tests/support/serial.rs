@@ -7,13 +7,14 @@
 //! multiple suites mutate process-wide state.
 
 use rstest::fixture;
-use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 #[cfg(unix)]
 use std::fs::OpenOptions;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 #[cfg(not(unix))]
 #[path = "serial/non_unix.rs"]
@@ -162,9 +163,9 @@ fn acquire_process_lock() -> ProcessLock {
 mod tests {
     //! Unit tests for scenario serialization guards.
 
-    use rstest::rstest;
-
     use super::*;
+    #[cfg(unix)]
+    use rstest::rstest;
 
     #[test]
     fn serial_guard_is_not_reentrant() {

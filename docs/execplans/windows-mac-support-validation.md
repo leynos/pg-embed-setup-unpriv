@@ -1903,3 +1903,18 @@ CLI tests, `make check-fmt`, `make markdownlint`, `make nixie`, `make lint`,
 findings. A local `cargo check --target x86_64-pc-windows-msvc` was attempted
 but blocked before project code by missing Windows-target OpenSSL/vcpkg
 configuration on the Linux host; GitHub CI remains the Windows validation path.
+
+Revision 6 (2026-06-28), after observing CI for commit
+`6fc01814335310fb4f71bf4270ee7ae4bda1bba8`. What changed and why:
+
+- Observed the GitHub Actions matrix after pushing Revision 5. Linux root,
+  Linux unprivileged, and macOS test jobs passed; the Windows test job failed
+  during the unprivileged-surface test build because `tests/support/serial.rs`
+  exposed Unix-only imports (`PathBuf` and the `rstest` attribute macro import)
+  to the non-Unix target.
+- Narrowed those imports with `#[cfg(unix)]`, keeping the shared serial fixture
+  API unchanged and leaving the extracted non-Unix lock implementation intact.
+
+Validation recorded for this pass: `make check-fmt`, `make lint`, and
+`make test` passed locally. The next required external validation is the GitHub
+Actions Windows matrix after this import-gating fix is pushed.
