@@ -81,6 +81,21 @@ def binary_extension(target: str) -> str:
 
     Windows Rust targets emit `.exe` files; all current Unix targets used by
     this project emit extensionless binaries.
+
+    Parameters
+    ----------
+    target : str
+        Rust target triple to inspect.
+
+    Returns
+    -------
+    str
+        `.exe` for Windows targets, otherwise an empty string.
+
+    Examples
+    --------
+    >>> binary_extension("x86_64-pc-windows-msvc")
+    '.exe'
     """
     return ".exe" if "windows" in target else ""
 
@@ -142,20 +157,85 @@ def _package_version_from_manifest_data(manifest_path: Path, data: object) -> st
 
 
 def archive_stem(target: str, version: str) -> str:
-    """Return the cargo-binstall archive root directory name."""
+    """Return the cargo-binstall archive root directory name.
+
+    Parameters
+    ----------
+    target : str
+        Rust target triple to include in the archive name.
+    version : str
+        Package version without the leading `v`.
+
+    Returns
+    -------
+    str
+        Archive root directory stem.
+
+    Raises
+    ------
+    SystemExit
+        Raised when `target` is path-like or empty.
+
+    Examples
+    --------
+    >>> archive_stem("x86_64-unknown-linux-gnu", "0.5.1")
+    'pg-embed-setup-unpriv-x86_64-unknown-linux-gnu-v0.5.1'
+    """
     _validate_path_component(target, "target")
     return f"{PACKAGE_NAME}-{target}-v{version}"
 
 
 def release_binary_path(repo: Path, target: str, binary: str) -> Path:
-    """Return Cargo's release output path for `binary` and `target`."""
+    """Return Cargo's release output path for `binary` and `target`.
+
+    Parameters
+    ----------
+    repo : Path
+        Repository root containing the Cargo `target` directory.
+    target : str
+        Rust target triple to locate.
+    binary : str
+        Binary target name to locate.
+
+    Returns
+    -------
+    Path
+        Expected release binary path.
+
+    Raises
+    ------
+    SystemExit
+        Raised when `target` or `binary` is path-like or empty.
+
+    Examples
+    --------
+    >>> release_binary_path(Path("."), "x86_64-unknown-linux-gnu", "pg_worker")
+    PosixPath('target/x86_64-unknown-linux-gnu/release/pg_worker')
+    """
     _validate_path_component(target, "target")
     _validate_path_component(binary, "binary")
     return repo / "target" / target / "release" / f"{binary}{binary_extension(target)}"
 
 
 def build_release_binaries(spec: ReleaseBuildSpec) -> None:
-    """Build the selected release binaries for `spec.target`."""
+    """Build the selected release binaries for `spec.target`.
+
+    Parameters
+    ----------
+    spec : ReleaseBuildSpec
+        Build configuration for Cargo invocation.
+
+    Raises
+    ------
+    SystemExit
+        Raised when validation fails or Cargo exits unsuccessfully.
+
+    Examples
+    --------
+    >>> build_release_binaries(  # doctest: +SKIP
+    ...     ReleaseBuildSpec(Path("."), "x86_64-unknown-linux-gnu", ("pg_worker",), "cargo")
+    ... )
+    """
     validate_release_spec_components(spec.target, spec.binaries)
     program, program_args = cargo_program_and_args(spec.cargo)
     args = [*program_args, "build", "--release", "--target", spec.target]
@@ -174,7 +254,28 @@ def build_release_binaries(spec: ReleaseBuildSpec) -> None:
 
 
 def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
-    """Return the executable and wrapper arguments represented by `cargo`."""
+    """Return the executable and wrapper arguments represented by `cargo`.
+
+    Parameters
+    ----------
+    cargo : str
+        Cargo executable path or wrapper command.
+
+    Returns
+    -------
+    tuple[str, list[str]]
+        Executable name and wrapper arguments that precede Cargo subcommands.
+
+    Raises
+    ------
+    SystemExit
+        Raised when `cargo` is empty.
+
+    Examples
+    --------
+    >>> cargo_program_and_args("sccache cargo")
+    ('sccache', ['cargo'])
+    """
     stripped_cargo = cargo.strip()
     if not stripped_cargo:
         raise SystemExit("cargo executable cannot be empty")
@@ -209,7 +310,24 @@ def _path_wrapper_program_and_args(cargo_command: list[str]) -> tuple[str, list[
 
 
 def validate_release_spec_components(target: str, binaries: tuple[str, ...]) -> None:
-    """Reject release identifiers that could escape Cargo's output tree."""
+    """Reject release identifiers that could escape Cargo's output tree.
+
+    Parameters
+    ----------
+    target : str
+        Rust target triple used to locate Cargo build outputs.
+    binaries : tuple[str, ...]
+        Binary target names used to locate Cargo build outputs.
+
+    Raises
+    ------
+    SystemExit
+        Raised when `target` or any binary name is path-like or empty.
+
+    Examples
+    --------
+    >>> validate_release_spec_components("x86_64-unknown-linux-gnu", ("pg_worker",))
+    """
     _validate_path_component(target, "target")
     for binary in binaries:
         _validate_path_component(binary, "binary")
@@ -252,20 +370,68 @@ def _separator_path_component_violation(value: str, kind: str) -> str | None:
 
 
 def looks_like_executable_path(cargo: str) -> bool:
-    """Return whether `cargo` names a path instead of a wrapper argv string."""
+    """Return whether `cargo` names a path instead of a wrapper argv string.
+
+    Parameters
+    ----------
+    cargo : str
+        Cargo executable or wrapper string to inspect.
+
+    Returns
+    -------
+    bool
+        Whether the value looks path-like.
+
+    Examples
+    --------
+    >>> looks_like_executable_path(r"C:\\tools\\cargo.exe")
+    True
+    """
     executable = strip_matching_quotes(cargo)
     return "/" in executable or "\\" in executable or executable.lower().endswith(".exe")
 
 
 def strip_matching_quotes(value: str) -> str:
-    """Strip one matching shell-quote pair around an executable path."""
+    """Strip one matching shell-quote pair around an executable path.
+
+    Parameters
+    ----------
+    value : str
+        Value that may be enclosed in matching quotes.
+
+    Returns
+    -------
+    str
+        Unquoted value, or the original value when no matching pair exists.
+
+    Examples
+    --------
+    >>> strip_matching_quotes('"cargo"')
+    'cargo'
+    """
     if has_matching_outer_quotes(value):
         return value[1:-1]
     return value
 
 
 def has_matching_outer_quotes(value: str) -> bool:
-    """Return whether `value` is enclosed in one matching shell quote pair."""
+    """Return whether `value` is enclosed in one matching shell quote pair.
+
+    Parameters
+    ----------
+    value : str
+        Value to inspect.
+
+    Returns
+    -------
+    bool
+        Whether the first and last characters are the same shell quote.
+
+    Examples
+    --------
+    >>> has_matching_outer_quotes("'cargo'")
+    True
+    """
     if len(value) < 2:
         return False
     first = value[0]
@@ -274,7 +440,23 @@ def has_matching_outer_quotes(value: str) -> bool:
 
 
 def cargo_build_job_args(build_jobs: str | None) -> list[str]:
-    """Return Cargo arguments represented by the Makefile `BUILD_JOBS` value."""
+    """Return Cargo arguments represented by the Makefile `BUILD_JOBS` value.
+
+    Parameters
+    ----------
+    build_jobs : str | None
+        Optional Makefile build-job value.
+
+    Returns
+    -------
+    list[str]
+        Cargo build job arguments.
+
+    Examples
+    --------
+    >>> cargo_build_job_args("4")
+    ['--jobs', '4']
+    """
     if not build_jobs:
         return []
     parts = shlex.split(build_jobs)
@@ -284,7 +466,23 @@ def cargo_build_job_args(build_jobs: str | None) -> list[str]:
 
 
 def catalogue_for(cargo: str) -> ProgramCatalogue:
-    """Return a command catalogue that permits the configured Cargo binary."""
+    """Return a command catalogue that permits the configured Cargo binary.
+
+    Parameters
+    ----------
+    cargo : str
+        Cargo executable passed to `cuprum`.
+
+    Returns
+    -------
+    ProgramCatalogue
+        Default catalogue for `cargo`, or a catalogue for the configured binary.
+
+    Examples
+    --------
+    >>> catalogue_for("cargo") is CATALOGUE
+    True
+    """
     if cargo == str(CARGO):
         return CATALOGUE
     return ProgramCatalogue(
@@ -300,7 +498,32 @@ def catalogue_for(cargo: str) -> ProgramCatalogue:
 
 
 def stage_archive(spec: ReleaseArchiveSpec) -> Path:
-    """Stage release binaries and return the produced `.tgz` path."""
+    """Stage release binaries and return the produced `.tgz` path.
+
+    Parameters
+    ----------
+    spec : ReleaseArchiveSpec
+        Archive staging configuration.
+
+    Returns
+    -------
+    Path
+        Path to the produced archive.
+
+    Raises
+    ------
+    FileNotFoundError
+        Raised when an expected release binary is missing.
+    SystemExit
+        Raised when target or binary validation fails.
+
+    Examples
+    --------
+    >>> stage_archive(  # doctest: +SKIP
+    ...     ReleaseArchiveSpec(Path("."), "x86_64-unknown-linux-gnu", "0.5.1", Path("dist"), ("pg_worker",))
+    ... )
+    PosixPath('dist/pg-embed-setup-unpriv-x86_64-unknown-linux-gnu-v0.5.1.tgz')
+    """
     validate_release_spec_components(spec.target, spec.binaries)
     spec.dist_dir.mkdir(parents=True, exist_ok=True)
     stem = archive_stem(spec.target, spec.version)
@@ -323,7 +546,30 @@ def copy_release_binaries(
     binaries: tuple[str, ...],
     staging_root: Path,
 ) -> None:
-    """Copy Cargo release binaries into the archive staging directory."""
+    """Copy Cargo release binaries into the archive staging directory.
+
+    Parameters
+    ----------
+    repo : Path
+        Repository root containing Cargo build outputs.
+    target : str
+        Rust target triple to copy from.
+    binaries : tuple[str, ...]
+        Binary target names to copy.
+    staging_root : Path
+        Existing archive root directory where binaries are copied.
+
+    Raises
+    ------
+    FileNotFoundError
+        Raised when an expected release binary is missing.
+    SystemExit
+        Raised when target or binary validation fails.
+
+    Examples
+    --------
+    >>> copy_release_binaries(Path("."), "x86_64-unknown-linux-gnu", ("pg_worker",), Path("stage"))  # doctest: +SKIP
+    """
     for binary in binaries:
         source = release_binary_path(repo, target, binary)
         if not source.is_file():
@@ -363,7 +609,34 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """Build and package the cargo-binstall release archive."""
+    """Build and package the cargo-binstall release archive.
+
+    Parameters
+    ----------
+    target : str
+        Rust target triple to package.
+    release_version : str | None, optional
+        Release version without the leading `v`.
+    dist_dir : Path, optional
+        Directory where the `.tgz` archive is written.
+    manifest_path : Path, optional
+        Path to `Cargo.toml`.
+    cargo : str, optional
+        Cargo executable or wrapper command.
+    build_jobs : str | None, optional
+        Optional Cargo job count or build-job flags.
+    binary : list[str] | None, optional
+        Binary target names to include.
+
+    Raises
+    ------
+    SystemExit
+        Raised when version discovery, validation, or Cargo execution fails.
+
+    Examples
+    --------
+    >>> main("x86_64-unknown-linux-gnu", release_version="0.5.1")  # doctest: +SKIP
+    """
     repo = manifest_path.resolve().parent
     try:
         expected_version = manifest_version(manifest_path)
