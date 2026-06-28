@@ -161,9 +161,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
     {
-        let Some(guard) = self.lock.as_mut() else {
-            panic!("ScopedEnv must hold the mutex before mutating the environment");
-        };
+        let guard = self.guard_mut("ScopedEnv must hold the mutex before mutating the environment");
         let mut saved = Vec::new();
         for (key, new_value) in vars {
             Self::validate_env_key(&key);
@@ -248,11 +246,9 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
                 self.stack.push(guard_state);
                 break;
             }
-            let Some(guard) = self.lock.as_mut() else {
-                panic!(
-                    "ScopedEnv must hold the mutex before restoring finished environment scopes"
-                );
-            };
+            let guard = self.guard_mut(
+                "ScopedEnv must hold the mutex before restoring finished environment scopes",
+            );
             restore_saved::<L>(guard, guard_state.saved);
         }
     }
@@ -311,9 +307,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
         self.ensure_lock_for_restore();
         while let Some(state) = self.stack.pop() {
-            let Some(guard) = self.lock.as_mut() else {
-                panic!("ScopedEnv must hold the mutex before restoring all scopes");
-            };
+            let guard = self.guard_mut("ScopedEnv must hold the mutex before restoring all scopes");
             restore_saved::<L>(guard, state.saved);
         }
     }
@@ -323,6 +317,13 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         if let Some(guard) = self.lock.take() {
             drop(guard);
         }
+    }
+
+    fn guard_mut(&mut self, context: &str) -> &mut L::Guard {
+        let Some(guard) = self.lock.as_mut() else {
+            panic!("{context}");
+        };
+        guard
     }
 }
 

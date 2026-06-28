@@ -68,32 +68,32 @@ command, observe deterministic pass/fail results, and still have the normal
 
 ## Progress
 
-    - [x] (2026-01-12 00:00Z) Drafted ExecPlan for roadmap item 3.2.1.
-    - [x] (2026-01-12 18:05Z) Reviewed `ScopedEnv` implementation and env tests
-      for concurrency assumptions.
-    - [x] (2026-01-12 18:05Z) Chose to gate Loom tests behind the
-      `loom-tests` feature and mark them `#[ignore]` by default.
-    - [x] (2026-01-12 20:10Z) Implemented a `ScopedEnv` state accessor hook so
-      Loom tests can use a Loom-specific lock without touching `ENV_LOCK`.
-    - [x] (2026-01-12 20:15Z) Added Loom-backed concurrency tests under the
-      feature flag and marked them `#[ignore]`.
-    - [x] (2026-01-12 20:20Z) Updated design notes, developer guidance, and the
-      roadmap entry; recorded that behavioural tests are not applicable.
-    - [x] (2026-01-12 22:15Z) Ran `make check-fmt`, `make lint`, `make test`,
-      and Loom tests with `cargo test --features "loom-tests" --lib -- --ignored`.
-    - [x] (2026-06-26 12:07Z) Replaced the Loom test lock payload with an
-      in-memory fake environment map and routed env access through `EnvLockOps`
-      so production still calls `std::env` directly.
-    - [x] (2026-06-26 12:07Z) Added Loom scenarios for non-empty
-      backup/restore bookkeeping, spawn-while-held acquisition, panic-path
-      cleanup, asymmetric lifetimes, and per-thread depth tracking.
-    - [x] (2026-06-26 12:07Z) Ran
-      `cargo test --features "loom-tests" --lib -- --ignored`; all seven Loom
-      tests passed and the model run completed in 0.01s after compilation.
-    - [x] (2026-06-26 12:13Z) Ran `make check-fmt`, `make lint`,
-      `make test`, `make markdownlint`, and `make nixie`; all gates passed.
-    - [x] (2026-06-26 13:23Z) Ran `coderabbit review --agent`; CodeRabbit
-      completed the review with zero findings after the rate-limit backoff.
+- [x] (2026-01-12 00:00Z) Drafted ExecPlan for roadmap item 3.2.1.
+- [x] (2026-01-12 18:05Z) Reviewed `ScopedEnv` implementation and env tests
+  for concurrency assumptions.
+- [x] (2026-01-12 18:05Z) Chose to gate Loom tests behind the
+  `loom-tests` feature and mark them `#[ignore]` by default.
+- [x] (2026-01-12 20:10Z) Implemented a `ScopedEnv` state accessor hook so
+  Loom tests can use a Loom-specific lock without touching `ENV_LOCK`.
+- [x] (2026-01-12 20:15Z) Added Loom-backed concurrency tests under the
+  feature flag and marked them `#[ignore]`.
+- [x] (2026-01-12 20:20Z) Updated design notes, developer guidance, and the
+  roadmap entry; recorded that behavioural tests are not applicable.
+- [x] (2026-01-12 22:15Z) Ran `make check-fmt`, `make lint`, `make test`,
+  and Loom tests with `cargo test --features "loom-tests" --lib -- --ignored`.
+- [x] (2026-06-26 12:07Z) Replaced the Loom test lock payload with an
+  in-memory fake environment map and routed env access through `EnvLockOps`
+  so production still calls `std::env` directly.
+- [x] (2026-06-26 12:07Z) Added Loom scenarios for non-empty
+  backup/restore bookkeeping, spawn-while-held acquisition, panic-path
+  cleanup, asymmetric lifetimes, and per-thread depth tracking.
+- [x] (2026-06-26 12:07Z) Ran
+  `cargo test --features "loom-tests" --lib -- --ignored`; all seven Loom
+  tests passed and the model run completed in 0.01s after compilation.
+- [x] (2026-06-26 12:13Z) Ran `make check-fmt`, `make lint`,
+  `make test`, `make markdownlint`, and `make nixie`; all gates passed.
+- [x] (2026-06-26 13:23Z) Ran `coderabbit review --agent`; CodeRabbit
+  completed the review with zero findings after the rate-limit backoff.
 
 ## Surprises & Discoveries
 

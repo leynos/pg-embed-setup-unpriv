@@ -47,7 +47,7 @@ cargo test --features "loom-tests" --lib -- --ignored
 
 The suite uses a Loom-backed in-memory environment map rather than mutating the
 real process environment. This lets the model checker validate `ScopedEnv`
-serialisation, re-entrant depth tracking, non-empty backup/restore
+serialization, re-entrant depth tracking, non-empty backup/restore
 bookkeeping, spawn-while-held acquisition, asymmetric scope lifetimes, and
 panic-path thread-local cleanup. Loom still cannot instrument the actual
 `std::env` syscalls used by production; the standard serial environment tests
