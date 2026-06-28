@@ -1975,3 +1975,16 @@ Validation recorded for this pass: release archive pytest via `uv`,
 `coderabbit review --agent`. The CodeRabbit CLI connected and began analysis but
 then produced no output for several minutes, so only that stuck review process
 was terminated after the deterministic gates had passed.
+
+Revision 9 (2026-06-29), after observing the hosted CodeScene follow-up. What
+changed and why:
+
+- The first pushed Revision 8 commit passed the workflow self-test locally and
+  on GitHub, but hosted CodeScene reported a remaining Complex Method finding in
+  `scripts/release_archive.py::cargo_program_and_args`.
+- Extracted the Windows `.exe` wrapper probe and path-like wrapper probe into
+  private helpers, preserving the command parsing behaviour while reducing the
+  public parser's branching.
+
+Validation recorded for this pass: release archive pytest via `uv`,
+`make check-fmt`, `make lint`, and `make test`.
