@@ -1916,5 +1916,6 @@ Revision 6 (2026-06-28), after observing CI for commit
   API unchanged and leaving the extracted non-Unix lock implementation intact.
 
 Validation recorded for this pass: `make check-fmt`, `make lint`, and
-`make test` passed locally. The next required external validation is the GitHub
-Actions Windows matrix after this import-gating fix is pushed.
+`make test` passed locally. After pushing the import-gating fix, GitHub Actions
+run `28313449771` passed on Linux, macOS, Windows, and all binstall jobs; the
+workflow self-test run `28313449776` also passed.
