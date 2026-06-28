@@ -90,7 +90,7 @@ def manifest_version(manifest_path: Path) -> str:
 
     Parameters
     ----------
-    manifest_path
+    manifest_path : Path
         Path to the `Cargo.toml` manifest to inspect.
 
     Returns
@@ -181,6 +181,10 @@ def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
     cargo_command = shlex.split(stripped_cargo)
     if not cargo_command:
         raise SystemExit("cargo executable cannot be empty")
+    windows_command = shlex.split(stripped_cargo, posix=False)
+    windows_program = strip_matching_quotes(windows_command[0])
+    if len(windows_command) > 1 and windows_program.lower().endswith(".exe"):
+        return windows_program, windows_command[1:]
     if len(cargo_command) > 1 and looks_like_executable_path(cargo_command[0]):
         program, *program_args = cargo_command
         return strip_matching_quotes(program), program_args
@@ -236,7 +240,7 @@ def _separator_path_component_violation(value: str, kind: str) -> str | None:
 def looks_like_executable_path(cargo: str) -> bool:
     """Return whether `cargo` names a path instead of a wrapper argv string."""
     executable = strip_matching_quotes(cargo)
-    return "/" in executable or "\\" in executable
+    return "/" in executable or "\\" in executable or executable.lower().endswith(".exe")
 
 
 def strip_matching_quotes(value: str) -> str:

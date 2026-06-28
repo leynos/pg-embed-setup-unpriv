@@ -161,6 +161,36 @@ def test_stage_archive_rejects_path_like_binary(tmp_path: Path) -> None:
         raise AssertionError("expected path-like binary to abort")
 
 
+@pytest.mark.parametrize(
+    ("target", "binaries", "expected_message"),
+    [
+        pytest.param("", ("pg_embedded_setup_unpriv",), "target cannot be empty", id="empty-target"),
+        pytest.param("..", ("pg_embedded_setup_unpriv",), "target cannot contain '..'", id="parent-target"),
+        pytest.param(
+            "x86_64/linux",
+            ("pg_embedded_setup_unpriv",),
+            "target cannot contain path separators",
+            id="separator-target",
+        ),
+        pytest.param("x86_64-unknown-linux-gnu", ("",), "binary cannot be empty", id="empty-binary"),
+        pytest.param("x86_64-unknown-linux-gnu", ("..",), "binary cannot contain '..'", id="parent-binary"),
+        pytest.param(
+            "x86_64-unknown-linux-gnu",
+            ("bin/pg",),
+            "binary cannot contain path separators",
+            id="separator-binary",
+        ),
+    ],
+)
+def test_validate_release_spec_components_rejects_path_like_values(
+    target: str,
+    binaries: tuple[str, ...],
+    expected_message: str,
+) -> None:
+    with pytest.raises(SystemExit, match=expected_message):
+        release_archive.validate_release_spec_components(target, binaries)
+
+
 def test_build_release_binaries_invokes_cargo_with_all_bins(tmp_path: Path) -> None:
     binaries = ("pg_embedded_setup_unpriv", "pg_worker")
     expected_args = (
@@ -250,6 +280,15 @@ def test_cargo_program_and_args_preserves_absolute_wrapper_args() -> None:
     assert program_args == ["cargo"]
 
 
+def test_cargo_program_and_args_preserves_windows_wrapper_args() -> None:
+    cargo = r"C:\Tools\sccache.exe cargo"
+
+    program, program_args = release_archive.cargo_program_and_args(cargo)
+
+    assert program == r"C:\Tools\sccache.exe"
+    assert program_args == ["cargo"]
+
+
 def test_build_release_binaries_treats_cargo_path_with_spaces_as_executable(
 ) -> None:
     cargo = r"C:\Program Files\Rust\cargo.exe"
@@ -263,13 +302,9 @@ def test_build_release_binaries_treats_cargo_path_with_spaces_as_executable(
 def test_main_rejects_version_mismatch_before_build(tmp_path: Path) -> None:
     manifest = write_manifest(tmp_path, version="0.5.1")
 
-    try:
+    with pytest.raises(SystemExit, match="must match Cargo.toml package version"):
         release_archive.main(
             "x86_64-unknown-linux-gnu",
             release_version="0.5.2",
             manifest_path=manifest,
         )
-    except SystemExit as err:
-        assert "must match Cargo.toml package version" in str(err)
-    else:
-        raise AssertionError("expected version mismatch to abort")

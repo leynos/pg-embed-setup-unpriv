@@ -1947,3 +1947,31 @@ Validation recorded for this pass: release archive pytest via `uv`,
 `make check-fmt`, `make lint`, `make test`, `make markdownlint`, `make nixie`,
 `git diff --check`, and `coderabbit review --agent` with zero findings after
 retrying a silent first invocation.
+
+Revision 8 (2026-06-29), after validating the remaining PR #153 failed-check
+comments. What changed and why:
+
+- Verified the release-archive docstring, Cargo wrapper parsing, and
+  version-mismatch test comments against the current branch and applied the
+  narrow fixes that still matched the code.
+- Hardened workflow-dispatch release tags to the exact `vMAJOR.MINOR.PATCH`
+  shape and passed the resolved release version through a quoted shell
+  environment variable instead of interpolating it directly into the build
+  command.
+- Changed shutdown-hook postmaster readers to return explicit
+  `BootstrapResult<Option<_>>` values, so missing PID files remain absence while
+  file I/O and malformed PID data are logged as failures.
+- Refactored the shutdown callback to clone the shutdown work item and release
+  the global mutex before process lookup, shutdown requests, polling, forceful
+  cleanup, and data-directory cleanup.
+- Removed lint-appeasement anchors/suppressions in the touched shutdown-hook
+  and test-support paths, replacing them with cfg-gating or behavioural tests.
+- Added in-scope property, compile-time, and snapshot-style coverage for release
+  path validation, postmaster PID parsing, test-support export compilation, and
+  stable CLI help output.
+
+Validation recorded for this pass: release archive pytest via `uv`,
+`make check-fmt`, `make lint`, `make test`, `git diff --check`, and an attempted
+`coderabbit review --agent`. The CodeRabbit CLI connected and began analysis but
+then produced no output for several minutes, so only that stuck review process
+was terminated after the deterministic gates had passed.
