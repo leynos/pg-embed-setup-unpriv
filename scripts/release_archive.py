@@ -276,13 +276,13 @@ def build_release_binaries(spec: ReleaseBuildSpec) -> None:
     ... )
     """
     validate_release_spec_components(spec.target, spec.binaries)
-    program, program_args = cargo_program_and_args(spec.cargo)
+    program, program_args = _cargo_program_and_args(spec.cargo)
     args = [*program_args, "build", "--release", "--target", spec.target]
-    args.extend(cargo_build_job_args(spec.build_jobs))
+    args.extend(_cargo_build_job_args(spec.build_jobs))
     for binary in spec.binaries:
         args.extend(["--bin", binary])
 
-    command = cuprum_sh.make(Program(program), catalogue=catalogue_for(program))
+    command = cuprum_sh.make(Program(program), catalogue=_catalogue_for(program))
     result = command(*args).run_sync(
         capture=False,
         echo=True,
@@ -292,29 +292,8 @@ def build_release_binaries(spec: ReleaseBuildSpec) -> None:
         raise SystemExit(result.exit_code)
 
 
-def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
-    """Return the executable and wrapper arguments represented by `cargo`.
-
-    Parameters
-    ----------
-    cargo : str
-        Cargo executable path or wrapper command.
-
-    Returns
-    -------
-    tuple[str, list[str]]
-        Executable name and wrapper arguments that precede Cargo subcommands.
-
-    Raises
-    ------
-    SystemExit
-        Raised when `cargo` is empty.
-
-    Examples
-    --------
-    >>> cargo_program_and_args("sccache cargo")
-    ('sccache', ['cargo'])
-    """
+def _cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
+    """Return the executable and wrapper arguments represented by `cargo`."""
     stripped_cargo = cargo.strip()
     if not stripped_cargo:
         raise SystemExit("cargo executable cannot be empty")
@@ -325,8 +304,8 @@ def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
         return windows_wrapper
     if path_wrapper := _path_wrapper_program_and_args(cargo_command):
         return path_wrapper
-    if looks_like_executable_path(stripped_cargo):
-        return strip_matching_quotes(stripped_cargo), []
+    if _looks_like_executable_path(stripped_cargo):
+        return _strip_matching_quotes(stripped_cargo), []
     program, *program_args = cargo_command
     return program, program_args
 
@@ -334,7 +313,7 @@ def cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
 def _windows_wrapper_program_and_args(cargo: str) -> tuple[str, list[str]] | None:
     """Return a Windows `.exe` wrapper command when `cargo` includes arguments."""
     windows_command = shlex.split(cargo, posix=False)
-    windows_program = strip_matching_quotes(windows_command[0])
+    windows_program = _strip_matching_quotes(windows_command[0])
     if len(windows_command) > 1 and windows_program.lower().endswith(".exe"):
         return windows_program, windows_command[1:]
     return None
@@ -342,9 +321,9 @@ def _windows_wrapper_program_and_args(cargo: str) -> tuple[str, list[str]] | Non
 
 def _path_wrapper_program_and_args(cargo_command: list[str]) -> tuple[str, list[str]] | None:
     """Return a path-like wrapper command when `cargo` was split as argv."""
-    if len(cargo_command) > 1 and looks_like_executable_path(cargo_command[0]):
+    if len(cargo_command) > 1 and _looks_like_executable_path(cargo_command[0]):
         program, *program_args = cargo_command
-        return strip_matching_quotes(program), program_args
+        return _strip_matching_quotes(program), program_args
     return None
 
 
@@ -408,69 +387,21 @@ def _separator_path_component_violation(value: str, kind: str) -> str | None:
     return None
 
 
-def looks_like_executable_path(cargo: str) -> bool:
-    """Return whether `cargo` names a path instead of a wrapper argv string.
-
-    Parameters
-    ----------
-    cargo : str
-        Cargo executable or wrapper string to inspect.
-
-    Returns
-    -------
-    bool
-        Whether the value looks path-like.
-
-    Examples
-    --------
-    >>> looks_like_executable_path(r"C:\\tools\\cargo.exe")
-    True
-    """
-    executable = strip_matching_quotes(cargo)
+def _looks_like_executable_path(cargo: str) -> bool:
+    """Return whether `cargo` names a path instead of a wrapper argv string."""
+    executable = _strip_matching_quotes(cargo)
     return "/" in executable or "\\" in executable or executable.lower().endswith(".exe")
 
 
-def strip_matching_quotes(value: str) -> str:
-    """Strip one matching shell-quote pair around an executable path.
-
-    Parameters
-    ----------
-    value : str
-        Value that may be enclosed in matching quotes.
-
-    Returns
-    -------
-    str
-        Unquoted value, or the original value when no matching pair exists.
-
-    Examples
-    --------
-    >>> strip_matching_quotes('"cargo"')
-    'cargo'
-    """
-    if has_matching_outer_quotes(value):
+def _strip_matching_quotes(value: str) -> str:
+    """Strip one matching shell-quote pair around an executable path."""
+    if _has_matching_outer_quotes(value):
         return value[1:-1]
     return value
 
 
-def has_matching_outer_quotes(value: str) -> bool:
-    """Return whether `value` is enclosed in one matching shell quote pair.
-
-    Parameters
-    ----------
-    value : str
-        Value to inspect.
-
-    Returns
-    -------
-    bool
-        Whether the first and last characters are the same shell quote.
-
-    Examples
-    --------
-    >>> has_matching_outer_quotes("'cargo'")
-    True
-    """
+def _has_matching_outer_quotes(value: str) -> bool:
+    """Return whether `value` is enclosed in one matching shell quote pair."""
     if len(value) < 2:
         return False
     first = value[0]
@@ -478,24 +409,8 @@ def has_matching_outer_quotes(value: str) -> bool:
     return first == last and first in SHELL_QUOTES
 
 
-def cargo_build_job_args(build_jobs: str | None) -> list[str]:
-    """Return Cargo arguments represented by the Makefile `BUILD_JOBS` value.
-
-    Parameters
-    ----------
-    build_jobs : str | None
-        Optional Makefile build-job value.
-
-    Returns
-    -------
-    list[str]
-        Cargo build job arguments.
-
-    Examples
-    --------
-    >>> cargo_build_job_args("4")
-    ['--jobs', '4']
-    """
+def _cargo_build_job_args(build_jobs: str | None) -> list[str]:
+    """Return Cargo arguments represented by the Makefile `BUILD_JOBS` value."""
     if not build_jobs:
         return []
     parts = shlex.split(build_jobs)
@@ -504,24 +419,8 @@ def cargo_build_job_args(build_jobs: str | None) -> list[str]:
     return parts
 
 
-def catalogue_for(cargo: str) -> ProgramCatalogue:
-    """Return a command catalogue that permits the configured Cargo binary.
-
-    Parameters
-    ----------
-    cargo : str
-        Cargo executable passed to `cuprum`.
-
-    Returns
-    -------
-    ProgramCatalogue
-        Default catalogue for `cargo`, or a catalogue for the configured binary.
-
-    Examples
-    --------
-    >>> catalogue_for("cargo") is CATALOGUE
-    True
-    """
+def _catalogue_for(cargo: str) -> ProgramCatalogue:
+    """Return a command catalogue that permits the configured Cargo binary."""
     if cargo == str(CARGO):
         return CATALOGUE
     return ProgramCatalogue(

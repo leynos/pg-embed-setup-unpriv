@@ -65,7 +65,7 @@ fn help_flag_prints_configuration_surface_without_bootstrap() -> Result<()> {
         "Usage: pg_embedded_setup_unpriv",
     );
     insta::assert_snapshot!(normalized_stdout.as_str(), @r"
-Initialises postgresql_embedded clusters as root while handing off filesystem work to nobody
+Initialises postgresql_embedded clusters with platform-appropriate setup
 
 Usage: pg_embedded_setup_unpriv
 
