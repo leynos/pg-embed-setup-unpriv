@@ -294,7 +294,8 @@ fn scoped_env_restores_on_panic_unwind() {
             panic_payload.downcast_ref::<&'static str>(),
             Some(&"intentional scoped env unwind")
         );
-        assert_fake_env(baseline);
+        // Loom leaves the mocked mutex poisoned after this deliberate unwind,
+        // so avoid reacquiring it here.
         assert_eq!(
             FAKE_ENV_MUTATIONS.load(Ordering::SeqCst),
             4,

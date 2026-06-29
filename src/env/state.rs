@@ -113,8 +113,8 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
     {
-        let vars: Vec<_> = vars.into_iter().collect();
-        for (key, _) in &vars {
+        let env_vars: Vec<_> = vars.into_iter().collect();
+        for (key, _) in &env_vars {
             Self::validate_env_key(key);
         }
 
@@ -122,7 +122,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
 
         self.depth += 1;
 
-        let saved = self.apply_env_vars(vars);
+        let saved = self.apply_env_vars(env_vars);
 
         let index = self.stack.len();
         self.stack.push(GuardState {

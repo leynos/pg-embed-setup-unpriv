@@ -45,26 +45,20 @@ command, observe deterministic pass/fail results, and still have the normal
 
 ## Risks
 
-    - Risk: Loom cannot safely model `ScopedEnv` because it mutates the real
-      process environment across repeated model runs.
-      Severity: high
-      Likelihood: medium
-      Mitigation: design Loom tests to use empty env change sets and/or inject
-      a test-only environment store so no real env state leaks across runs.
+- Risk: Loom cannot safely model `ScopedEnv` because it mutates the real
+  process environment across repeated model runs. Severity: high Likelihood:
+  medium Mitigation: design Loom tests to use empty env change sets and/or
+  inject a test-only environment store so no real env state leaks across runs.
 
-    - Risk: `loom::sync::Mutex` does not provide a `const fn new`, forcing a
-      change in how `ENV_LOCK` is initialized.
-      Severity: medium
-      Likelihood: low
-      Mitigation: be prepared to introduce a small sync abstraction module or
-      `OnceLock` initializer that works for both std and Loom builds.
+- Risk: `loom::sync::Mutex` does not provide a `const fn new`, forcing a
+  change in how `ENV_LOCK` is initialized. Severity: medium Likelihood: low
+  Mitigation: be prepared to introduce a small sync abstraction module or
+  `OnceLock` initializer that works for both std and Loom builds.
 
-    - Risk: `make test` with `--all-features` unexpectedly runs Loom tests and
-      becomes slow or flaky.
-      Severity: medium
-      Likelihood: medium
-      Mitigation: mark Loom tests `#[ignore]` and require an explicit
-      `-- --ignored` run command so standard runs remain fast.
+- Risk: `make test` with `--all-features` unexpectedly runs Loom tests and
+  becomes slow or flaky. Severity: medium Likelihood: medium Mitigation: mark
+  Loom tests `#[ignore]` and require an explicit `-- --ignored` run command so
+  standard runs remain fast.
 
 ## Progress
 
@@ -82,14 +76,14 @@ command, observe deterministic pass/fail results, and still have the normal
 - [x] (2026-01-12 22:15Z) Ran `make check-fmt`, `make lint`, `make test`,
   and Loom tests with `cargo test --features "loom-tests" --lib -- --ignored`.
 - [x] (2026-06-26 12:07Z) Replaced the Loom test lock payload with an
-  in-memory fake environment map and routed env access through `EnvLockOps`
-  so production still calls `std::env` directly.
+  in-memory fake environment map and routed env access through `EnvLockOps` so
+  production still calls `std::env` directly.
 - [x] (2026-06-26 12:07Z) Added Loom scenarios for non-empty
-  backup/restore bookkeeping, spawn-while-held acquisition, panic-path
-  cleanup, asymmetric lifetimes, and per-thread depth tracking.
+  backup/restore bookkeeping, spawn-while-held acquisition, panic-path cleanup,
+  asymmetric lifetimes, and per-thread depth tracking.
 - [x] (2026-06-26 12:07Z) Ran
-  `cargo test --features "loom-tests" --lib -- --ignored`; all seven Loom
-  tests passed and the model run completed in 0.01s after compilation.
+  `cargo test --features "loom-tests" --lib -- --ignored`; all seven Loom tests
+  passed and the model run completed in 0.01s after compilation.
 - [x] (2026-06-26 12:13Z) Ran `make check-fmt`, `make lint`,
   `make test`, `make markdownlint`, and `make nixie`; all gates passed.
 - [x] (2026-06-26 13:23Z) Ran `coderabbit review --agent`; CodeRabbit
@@ -97,65 +91,56 @@ command, observe deterministic pass/fail results, and still have the normal
 
 ## Surprises & Discoveries
 
-    - Observation: `RUSTFLAGS="--cfg loom"` disables `tokio::net` behind
-      `cfg(not(loom))`, causing `hyper-util` builds to fail.
-      Evidence: /tmp/loom.log shows `tokio::net` missing when compiling
-      `hyper-util` under `cfg(loom)`.
-      Impact: switch to feature-only Loom gating and mark Loom tests
-      `#[ignore]` to avoid global `cfg(loom)`.
+- Observation: `RUSTFLAGS="--cfg loom"` disables `tokio::net` behind
+  `cfg(not(loom))`, causing `hyper-util` builds to fail. Evidence:
+  /tmp/loom.log shows `tokio::net` missing when compiling `hyper-util` under
+  `cfg(loom)`. Impact: switch to feature-only Loom gating and mark Loom tests
+  `#[ignore]` to avoid global `cfg(loom)`.
 
-    - Observation: Loom sync primitives panic when used outside the
-      `loom::model` scheduler.
-      Evidence: running `cargo test --features loom-tests` without `loom::model`
-      triggered panics in `loom::sync` types.
-      Impact: keep standard primitives in production and provide Loom-specific
-      state only inside the Loom test module.
+- Observation: Loom sync primitives panic when used outside the
+  `loom::model` scheduler. Evidence: running `cargo test --features loom-tests`
+  without `loom::model` triggered panics in `loom::sync` types. Impact: keep
+  standard primitives in production and provide Loom-specific state only inside
+  the Loom test module.
 
-    - Observation: `cargo test --features loom-tests -- --ignored` still
-      compiles integration tests.
-      Evidence: build errors in `tests/` when `loom-tests` is the only feature
-      enabled.
-      Impact: document `cargo test --features "loom-tests" --lib -- --ignored`
-      to target library tests only.
+- Observation: `cargo test --features loom-tests -- --ignored` still
+  compiles integration tests. Evidence: build errors in `tests/` when
+  `loom-tests` is the only feature enabled. Impact: document
+  `cargo test --features "loom-tests" --lib -- --ignored` to target library
+  tests only.
 
-    - Observation: `loom::sync::Mutex` wraps a `std::sync::Mutex` and unwraps
-      poison internally before returning its `LockResult`.
-      Evidence: the first panic-path model test restored during unwind, then a
-      subsequent fake-env snapshot panicked at `LOOM_ENV_LOCK.lock()` because
-      the inner mutex was poisoned.
-      Impact: the Loom panic test now asserts the restore mutations occurred
-      and the thread-local scope state reset, without reacquiring the fake
-      Loom mutex after the deliberate unwind. Production poison recovery
-      remains covered by the standard `recovers_from_poisoned_lock` test.
+- Observation: `loom::sync::Mutex` wraps a `std::sync::Mutex` and unwraps
+  poison internally before returning its `LockResult`. Evidence: the first
+  panic-path model test restored during unwind, then a subsequent fake-env
+  snapshot panicked at `LOOM_ENV_LOCK.lock()` because the inner mutex was
+  poisoned. Impact: the Loom panic test now asserts the restore mutations
+  occurred and the thread-local scope state reset, without reacquiring the fake
+  Loom mutex after the deliberate unwind. Production poison recovery remains
+  covered by the standard `recovers_from_poisoned_lock` test.
 
 ## Decision Log
 
-    - Decision: Gate Loom tests behind the `loom-tests` feature and mark
-      them `#[ignore]` so `make test` does not automatically run the
-      model-checking suite.
-      Rationale: avoids `cfg(loom)` disabling Tokio networking while keeping
-      Loom checks opt-in for focused runs.
-      Date/Author: 2026-01-12 / Codex
+- Decision: Gate Loom tests behind the `loom-tests` feature and mark
+  them `#[ignore]` so `make test` does not automatically run the model-checking
+  suite. Rationale: avoids `cfg(loom)` disabling Tokio networking while keeping
+  Loom checks opt-in for focused runs. Date/Author: 2026-01-12 / Codex
 
-    - Decision: Keep `ENV_LOCK` on `std::sync::Mutex` and keep `ScopedEnv`
-      concrete, exposing a private state accessor hook so Loom tests can use
-      their own lock and thread-local state.
-      Rationale: Loom primitives must only run under `loom::model` and should
-      not leak into production or standard test builds.
-      Date/Author: 2026-01-12 / Codex
+- Decision: Keep `ENV_LOCK` on `std::sync::Mutex` and keep `ScopedEnv`
+  concrete, exposing a private state accessor hook so Loom tests can use their
+  own lock and thread-local state. Rationale: Loom primitives must only run
+  under `loom::model` and should not leak into production or standard test
+  builds. Date/Author: 2026-01-12 / Codex
 
-    - Decision: Route env reads and writes through `EnvLockOps` while passing
-      the held guard into each operation.
-      Rationale: production behaviour remains direct `std::env` access under
-      `ENV_LOCK`, while Loom can model backup and restore bookkeeping against
-      an in-memory map without touching the real process environment.
-      Date/Author: 2026-06-26 / Codex
+- Decision: Route env reads and writes through `EnvLockOps` while passing
+  the held guard into each operation. Rationale: production behaviour remains
+  direct `std::env` access under `ENV_LOCK`, while Loom can model backup and
+  restore bookkeeping against an in-memory map without touching the real
+  process environment. Date/Author: 2026-06-26 / Codex
 
-    - Decision: Keep the global Loom bounds at `max_threads = 3`,
-      `max_branches = 64`, and `preemption_bound = Some(3)`.
-      Rationale: the expanded scenarios pass within the existing compact state
-      space, preserving the fast opt-in model run.
-      Date/Author: 2026-06-26 / Codex
+- Decision: Keep the global Loom bounds at `max_threads = 3`,
+  `max_branches = 64`, and `preemption_bound = Some(3)`. Rationale: the
+  expanded scenarios pass within the existing compact state space, preserving
+  the fast opt-in model run. Date/Author: 2026-06-26 / Codex
 
 ## Outcomes & Retrospective
 
