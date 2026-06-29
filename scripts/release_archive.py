@@ -294,17 +294,39 @@ def build_release_binaries(spec: ReleaseBuildSpec) -> None:
 
 def _cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
     """Return the executable and wrapper arguments represented by `cargo`."""
+    stripped_cargo = _normalise_cargo_command(cargo)
+    if windows_wrapper := _windows_wrapper_program_and_args(stripped_cargo):
+        return windows_wrapper
+    return _resolve_cargo_program_and_args(
+        stripped_cargo,
+        _split_cargo_command(stripped_cargo),
+    )
+
+
+def _normalise_cargo_command(cargo: str) -> str:
+    """Return a stripped, non-empty Cargo command string."""
     stripped_cargo = cargo.strip()
     if not stripped_cargo:
         raise SystemExit("cargo executable cannot be empty")
+    return stripped_cargo
+
+
+def _split_cargo_command(cargo: str, *, posix: bool = True) -> list[str]:
+    """Split a Cargo command string into argv words."""
     try:
-        if windows_wrapper := _windows_wrapper_program_and_args(stripped_cargo):
-            return windows_wrapper
-        cargo_command = shlex.split(stripped_cargo)
+        cargo_command = shlex.split(cargo, posix=posix)
     except ValueError as err:
         raise SystemExit(f"invalid cargo executable command: {err}") from err
     if not cargo_command:
         raise SystemExit("cargo executable cannot be empty")
+    return cargo_command
+
+
+def _resolve_cargo_program_and_args(
+    stripped_cargo: str,
+    cargo_command: list[str],
+) -> tuple[str, list[str]]:
+    """Resolve a parsed Cargo command into a program and wrapper arguments."""
     if path_wrapper := _path_wrapper_program_and_args(cargo_command):
         return path_wrapper
     if _looks_like_executable_path(stripped_cargo):
@@ -315,7 +337,7 @@ def _cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
 
 def _windows_wrapper_program_and_args(cargo: str) -> tuple[str, list[str]] | None:
     """Return a Windows `.exe` wrapper command when `cargo` includes arguments."""
-    windows_command = shlex.split(cargo, posix=False)
+    windows_command = _split_cargo_command(cargo, posix=False)
     windows_program = _strip_matching_quotes(windows_command[0])
     if len(windows_command) > 1 and windows_program.lower().endswith(".exe"):
         return windows_program, windows_command[1:]
