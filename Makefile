@@ -26,6 +26,8 @@ CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
 MDLINT ?= markdownlint-cli2
 NIXIE ?= nixie
+INTERROGATE ?= interrogate
+PY_DOCSTRING_COVERAGE ?= 100
 
 build: ## Build debug binary
 	$(CARGO) build $(BUILD_JOBS) --bin "$(APP)"
@@ -60,6 +62,7 @@ release-archive: ## Package release binaries for cargo-binstall
 	rm -rf "$(RELEASE_ARCHIVE_DIR)"
 
 lint: ## Run Clippy with warnings denied
+	$(INTERROGATE) --fail-under $(PY_DOCSTRING_COVERAGE) .
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)
 	$(CARGO) clippy $(CLIPPY_FLAGS)
 

@@ -32,6 +32,11 @@ jobs:
             **/*.md
             !**/target/**
             !**/dist/**
+      - name: Install interrogate
+        run: |
+          python -m pip install --user uv
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/uv" tool install interrogate
       - name: Lint
         run: make lint
       - name: Install cargo-nextest
