@@ -113,6 +113,11 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
     {
+        let vars: Vec<_> = vars.into_iter().collect();
+        for (key, _) in &vars {
+            Self::validate_env_key(key);
+        }
+
         self.acquire_lock_if_needed();
 
         self.depth += 1;
@@ -164,7 +169,6 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         let guard = self.guard_mut("ScopedEnv must hold the mutex before mutating the environment");
         let mut saved = Vec::new();
         for (key, new_value) in vars {
-            Self::validate_env_key(&key);
             let previous = Self::apply_single_var(guard, &key, new_value);
             saved.push((key, previous));
         }

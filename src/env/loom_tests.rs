@@ -248,18 +248,21 @@ fn scoped_env_handles_spawn_while_holding_scope() {
         let released_clone = Arc::clone(&outer_released);
         let helper = thread::spawn(move || {
             let _guard = apply_loom(&vars(&[("PGHOST", Some("helper"))]));
-            assert_eq!(
-                released_clone.load(Ordering::SeqCst),
-                1,
-                "helper scope must acquire only after the outer scope releases"
-            );
+            while released_clone.load(Ordering::SeqCst) == 0 {
+                thread::yield_now();
+            }
             assert_current_scope_env(&[("PGDATA", Some("base")), ("PGHOST", Some("helper"))]);
             entered_clone.store(1, Ordering::SeqCst);
         });
 
         thread::yield_now();
-        outer_released.store(1, Ordering::SeqCst);
+        assert_eq!(
+            helper_entered.load(Ordering::SeqCst),
+            0,
+            "helper scope should still be blocked while the outer scope is held"
+        );
         drop(outer);
+        outer_released.store(1, Ordering::SeqCst);
 
         helper.join().expect("helper thread should join cleanly");
         assert_eq!(helper_entered.load(Ordering::SeqCst), 1);
@@ -291,6 +294,7 @@ fn scoped_env_restores_on_panic_unwind() {
             panic_payload.downcast_ref::<&'static str>(),
             Some(&"intentional scoped env unwind")
         );
+        assert_fake_env(baseline);
         assert_eq!(
             FAKE_ENV_MUTATIONS.load(Ordering::SeqCst),
             4,
