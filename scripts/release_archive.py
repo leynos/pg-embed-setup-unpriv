@@ -297,11 +297,11 @@ def _cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
     stripped_cargo = cargo.strip()
     if not stripped_cargo:
         raise SystemExit("cargo executable cannot be empty")
+    if windows_wrapper := _windows_wrapper_program_and_args(stripped_cargo):
+        return windows_wrapper
     cargo_command = shlex.split(stripped_cargo)
     if not cargo_command:
         raise SystemExit("cargo executable cannot be empty")
-    if windows_wrapper := _windows_wrapper_program_and_args(stripped_cargo):
-        return windows_wrapper
     if path_wrapper := _path_wrapper_program_and_args(cargo_command):
         return path_wrapper
     if _looks_like_executable_path(stripped_cargo):
