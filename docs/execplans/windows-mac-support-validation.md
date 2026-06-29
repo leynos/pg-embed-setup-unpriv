@@ -2087,3 +2087,20 @@ scripts/release_archive.py`, release archive pytest via `uv`,
 `cargo test --test cli help_flag_prints_configuration_surface_without_bootstrap`,
 `make check-fmt`, `make lint`, `make markdownlint`, `git diff --check`, and
 `CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`.
+
+Revision 15 (2026-06-29), after verifying duplicate release-archive review
+comments. What changed and why:
+
+- Confirmed that `manifest_version` already documents `manifest_path : Path` in
+  its NumPy-style public docstring, so that comment was stale.
+- Confirmed that the version-mismatch test already uses scoped
+  `pytest.raises(SystemExit, match=re.escape(...))`, so that duplicate comment
+  was stale.
+- Moved the Windows wrapper command parser ahead of POSIX `shlex.split()` so
+  Windows `.exe` wrapper commands with arguments are recognized before
+  backslashes can be interpreted by POSIX tokenisation, while preserving the
+  existing Unix wrapper and whole-path fallback ordering.
+
+Validation recorded for this pass: `python -m py_compile
+scripts/release_archive.py`, release archive pytest via `uv`, and
+`git diff --check`.
