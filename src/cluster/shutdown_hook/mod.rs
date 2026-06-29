@@ -72,19 +72,9 @@ pub(super) fn register_shutdown_hook(
         return Ok(());
     }
 
+    let postmaster_process = read_postmaster_process(&settings.data_dir)?;
     register_atexit()?;
-    let exit_failsafe = prepare_process_exit_failsafe(
-        read_postmaster_process(&settings.data_dir)
-            .inspect_err(|err| {
-                tracing::warn!(
-                    target: crate::observability::LOG_TARGET,
-                    %err,
-                    "failed to read postmaster process for shutdown failsafe"
-                );
-            })
-            .ok()
-            .flatten(),
-    );
+    let exit_failsafe = prepare_process_exit_failsafe(postmaster_process);
 
     // Store state only AFTER atexit succeeds, so a failed registration
     // does not poison the slot for future attempts.
@@ -150,7 +140,6 @@ extern "C" fn shutdown_callback() {
                 %err,
                 "failed to read postmaster process during shutdown callback"
             );
-            best_effort_cleanup(&work);
             return;
         }
     };
@@ -300,7 +289,6 @@ mod tests {
     use super::*;
 
     use color_eyre::eyre::{Result, ensure};
-    #[cfg(unix)]
     use proptest::prelude::*;
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
@@ -377,14 +365,15 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(unix)]
     proptest! {
         #[test]
-        fn parse_pid_accepts_only_positive_values(pid in 1_i32..=i32::MAX) {
+        fn parse_pid_accepts_only_positive_values(pid in 1_u32..=i32::MAX as u32) {
+            let expected = PostmasterPid::try_from(pid).expect("positive PID should fit");
             let parsed = platform::parse_pid(&pid.to_string());
-            prop_assert_eq!(parsed, Some(pid));
+            prop_assert_eq!(parsed, Some(expected));
         }
 
+        #[cfg(unix)]
         #[test]
         fn parse_pid_rejects_non_positive_values(pid in i32::MIN..=0) {
             let parsed = platform::parse_pid(&pid.to_string());

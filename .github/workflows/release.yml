@@ -97,9 +97,10 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          TARGET: ${{ matrix.target }}
         run: >-
           uv run --script scripts/release_archive.py
-          ${{ matrix.target }}
+          "$TARGET"
           --release-version "$RELEASE_VERSION"
       - name: Upload release archive
         shell: bash
