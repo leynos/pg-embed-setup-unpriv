@@ -14,6 +14,7 @@ loom::lazy_static! {
     static ref LOOM_ENV_LOCK: loom::sync::Mutex<FakeEnv> =
         loom::sync::Mutex::new(BTreeMap::new());
     static ref FAKE_ENV_MUTATIONS: AtomicUsize = AtomicUsize::new(0);
+    static ref USE_THREAD_LOCAL_SNAPSHOT: AtomicUsize = AtomicUsize::new(0);
 }
 
 type FakeEnv = BTreeMap<OsString, Option<OsString>>;
@@ -39,17 +40,20 @@ impl EnvLockOps for LoomEnvLock {
     fn set_var(guard: &mut Self::Guard, key: &OsString, value: OsString) {
         FAKE_ENV_MUTATIONS.fetch_add(1, Ordering::SeqCst);
         guard.insert(key.clone(), Some(value));
+        record_thread_local_snapshot(guard);
     }
 
     fn remove_var(guard: &mut Self::Guard, key: &OsString) {
         FAKE_ENV_MUTATIONS.fetch_add(1, Ordering::SeqCst);
         guard.insert(key.clone(), None);
+        record_thread_local_snapshot(guard);
     }
 }
 
 loom::thread_local! {
     static LOOM_THREAD_STATE: RefCell<ThreadStateInner<LoomEnvLock>> =
         RefCell::new(ThreadStateInner::new());
+    static LAST_FAKE_ENV_SNAPSHOT: RefCell<Snapshot> = RefCell::new(Vec::new());
 }
 
 fn enter_scope_loom(vars: Vec<(OsString, Option<OsString>)>) -> usize {
@@ -94,46 +98,48 @@ fn snapshot_from_map(map: &FakeEnv) -> Snapshot {
         .collect()
 }
 
+fn record_thread_local_snapshot(map: &FakeEnv) {
+    let snapshot = snapshot_from_map(map);
+    LAST_FAKE_ENV_SNAPSHOT.with(|cell| *cell.borrow_mut() = snapshot);
+}
 fn snapshot_fake_env() -> Snapshot {
+    if USE_THREAD_LOCAL_SNAPSHOT.load(Ordering::SeqCst) != 0 {
+        return LAST_FAKE_ENV_SNAPSHOT.with(|cell| cell.borrow().clone());
+    }
     let guard = LoomEnvLock::lock_env_mutex();
     snapshot_from_map(&guard)
 }
-
 fn snapshot_current_scope() -> Snapshot {
     LOOM_THREAD_STATE.with(|cell| {
         cell.borrow()
             .with_lock_guard(|guard| snapshot_from_map(guard))
     })
 }
-
 fn current_thread_depth() -> usize {
     LOOM_THREAD_STATE.with(|cell| cell.borrow().depth())
 }
-
 fn current_thread_state_is_reset() -> bool {
     LOOM_THREAD_STATE.with(|cell| {
         let state = cell.borrow();
         state.depth() == 0 && state.is_stack_empty() && !state.has_lock()
     })
 }
-
 fn seed_fake_env(input: &[(&str, Option<&str>)]) {
     let mut guard = LoomEnvLock::lock_env_mutex();
     guard.clear();
     for (key, value) in input {
         guard.insert(OsString::from(key), value.map(OsString::from));
     }
+    record_thread_local_snapshot(&guard);
     FAKE_ENV_MUTATIONS.store(0, Ordering::SeqCst);
+    USE_THREAD_LOCAL_SNAPSHOT.store(0, Ordering::SeqCst);
 }
-
 fn assert_fake_env(expected: &[(&str, Option<&str>)]) {
     assert_eq!(snapshot_fake_env(), vars(expected));
 }
-
 fn assert_current_scope_env(expected: &[(&str, Option<&str>)]) {
     assert_eq!(snapshot_current_scope(), vars(expected));
 }
-
 fn run_loom_model<F>(f: F)
 where
     F: Fn() + Send + Sync + 'static,
@@ -239,33 +245,43 @@ fn scoped_env_handles_spawn_while_holding_scope() {
         let baseline = &[("PGDATA", Some("base")), ("PGHOST", None)];
         seed_fake_env(baseline);
 
-        let helper_entered = Arc::new(AtomicUsize::new(0));
+        let helper_started = Arc::new(AtomicUsize::new(0));
+        let helper_acquired = Arc::new(AtomicUsize::new(0));
         let outer_released = Arc::new(AtomicUsize::new(0));
         let outer = apply_loom(&vars(&[("PGDATA", Some("outer"))]));
         assert_current_scope_env(&[("PGDATA", Some("outer")), ("PGHOST", None)]);
 
-        let entered_clone = Arc::clone(&helper_entered);
+        let started_clone = Arc::clone(&helper_started);
+        let acquired_clone = Arc::clone(&helper_acquired);
         let released_clone = Arc::clone(&outer_released);
         let helper = thread::spawn(move || {
+            started_clone.store(1, Ordering::SeqCst);
             let _guard = apply_loom(&vars(&[("PGHOST", Some("helper"))]));
+            acquired_clone.store(1, Ordering::SeqCst);
             while released_clone.load(Ordering::SeqCst) == 0 {
                 thread::yield_now();
             }
             assert_current_scope_env(&[("PGDATA", Some("base")), ("PGHOST", Some("helper"))]);
-            entered_clone.store(1, Ordering::SeqCst);
         });
 
+        while helper_started.load(Ordering::SeqCst) == 0 {
+            thread::yield_now();
+        }
         thread::yield_now();
-        assert_eq!(
-            helper_entered.load(Ordering::SeqCst),
-            0,
-            "helper scope should still be blocked while the outer scope is held"
-        );
+        let was_blocked = helper_acquired.load(Ordering::SeqCst) == 0;
         drop(outer);
         outer_released.store(1, Ordering::SeqCst);
-
         helper.join().expect("helper thread should join cleanly");
-        assert_eq!(helper_entered.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            helper_acquired.load(Ordering::SeqCst),
+            1,
+            "helper scope should acquire after the outer scope is released"
+        );
+        assert!(
+            was_blocked,
+            "helper scope should still be blocked while the outer scope is held"
+        );
+
         assert_fake_env(baseline);
     });
 }
@@ -294,8 +310,10 @@ fn scoped_env_restores_on_panic_unwind() {
             panic_payload.downcast_ref::<&'static str>(),
             Some(&"intentional scoped env unwind")
         );
-        // Loom leaves the mocked mutex poisoned after this deliberate unwind,
-        // so avoid reacquiring it here.
+        // Loom poisons the mocked mutex during unwind, so assert via the last
+        // mutation snapshot rather than reacquiring the fake environment lock.
+        USE_THREAD_LOCAL_SNAPSHOT.store(1, Ordering::SeqCst);
+        assert_fake_env(baseline);
         assert_eq!(
             FAKE_ENV_MUTATIONS.load(Ordering::SeqCst),
             4,
