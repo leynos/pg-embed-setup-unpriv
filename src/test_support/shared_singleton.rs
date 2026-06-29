@@ -87,20 +87,11 @@ fn initialise_shared_cluster_handle()
             // The guard manages shutdown; leaking it means the cluster
             // runs for the process lifetime.
             let guarded = cluster_guard.with_worker_guard(worker_guard);
-
-            // Best-effort atexit registration. On Unix this sends SIGTERM to
-            // the postmaster on process exit. On other platforms it is a
-            // silent no-op. Failure is non-fatal: the cluster remains usable,
-            // but the postmaster may be orphaned when the process terminates.
-            best_effort_register_shutdown_hook_for_handle(&handle);
-
-            // Leak the guard so the cluster keeps running. This is intentional:
-            // shared clusters live for the entire process lifetime.
-            std::mem::forget(guarded);
-
-            // Leak the handle to get a 'static reference.
-            let leaked: &'static ClusterHandle = Box::leak(Box::new(handle));
-            Ok(leaked)
+            leak_shared_handle_after_shutdown_hook(
+                handle,
+                guarded,
+                ClusterHandle::register_shutdown_on_exit,
+            )
         }
         Err(err) => {
             // Store error info for subsequent callers to retrieve.
@@ -122,24 +113,32 @@ fn cached_shared_handle_error(original_err: &Arc<BootstrapError>) -> BootstrapEr
     BootstrapError::new(original_err.kind(), report)
 }
 
+fn leak_shared_handle_after_shutdown_hook<Guard, Register>(
+    handle: ClusterHandle,
+    guarded: Guard,
+    register_shutdown_hook: Register,
+) -> Result<&'static ClusterHandle, (Arc<BootstrapError>, BootstrapError)>
+where
+    Register: FnOnce(&ClusterHandle) -> BootstrapResult<()>,
+{
+    if let Err(err) = register_shutdown_hook(&handle) {
+        let stored = Arc::new(BootstrapError::new(
+            err.kind(),
+            color_eyre::eyre::eyre!("shutdown hook registration failed: {:?}", err),
+        ));
+        return Err((stored, err));
+    }
+
+    // Leak the guard only after the process-exit hook is armed. If hook
+    // registration fails, `guarded` drops here and stops the cluster.
+    std::mem::forget(guarded);
+
+    Ok(Box::leak(Box::new(handle)))
+}
+
 // ============================================================================
 // Shared shutdown hook helper
 // ============================================================================
-
-/// Best-effort atexit registration for a [`ClusterHandle`].
-///
-/// Failure is non-fatal so that shared-handle initialisation succeeds on
-/// platforms where the hook cannot be registered (non-Unix) and on the
-/// rare occasion that `libc::atexit` fails on Unix.
-fn best_effort_register_shutdown_hook_for_handle(handle: &ClusterHandle) {
-    if let Err(err) = handle.register_shutdown_on_exit() {
-        tracing::debug!(
-            target: crate::observability::LOG_TARGET,
-            error = %err,
-            "shutdown hook registration failed; postmaster may be orphaned on exit"
-        );
-    }
-}
 
 /// Best-effort atexit registration for a leaked `TestCluster`.
 ///
@@ -280,5 +279,46 @@ pub fn shared_cluster() -> BootstrapResult<&'static TestCluster> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for shared singleton lifecycle helpers.
+
+    use super::*;
+    use crate::ExecutionPrivileges;
+    use crate::test_support::dummy_settings;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct DropProbe(Arc<AtomicBool>);
+
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn registration_failure_drops_guard_instead_of_leaking_shared_handle() {
+        let was_dropped = Arc::new(AtomicBool::new(false));
+        let handle = ClusterHandle::from(dummy_settings(ExecutionPrivileges::Unprivileged));
+        let guarded = DropProbe(Arc::clone(&was_dropped));
+
+        let result = leak_shared_handle_after_shutdown_hook(handle, guarded, |_| {
+            Err(BootstrapError::from(color_eyre::eyre::eyre!(
+                "injected shutdown hook failure"
+            )))
+        });
+
+        assert!(
+            result.is_err(),
+            "shared-handle initialisation should fail when shutdown hook registration fails"
+        );
+        assert!(
+            was_dropped.load(Ordering::SeqCst),
+            "guard must drop on registration failure so postmaster.pid is removed and no orphaned PostgreSQL process remains"
+        );
     }
 }

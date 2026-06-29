@@ -77,11 +77,17 @@ fn directory_entry_state_strategy() -> impl Strategy<Value = DirectoryEntryState
 }
 
 fn path_for_case(path_case: PathCase) -> PathBuf {
+    let temp_dir = std::env::temp_dir();
+    let temp_root = temp_dir
+        .ancestors()
+        .last()
+        .map_or_else(|| temp_dir.clone(), Path::to_path_buf);
+
     match path_case {
         PathCase::Empty => PathBuf::new(),
-        PathCase::Root => PathBuf::from("/"),
+        PathCase::Root => temp_root,
         PathCase::RelativeNested => PathBuf::from("relative/nested"),
-        PathCase::AbsoluteNested => PathBuf::from("/tmp/pg-embed-safe-nested"),
+        PathCase::AbsoluteNested => temp_dir.join("pg-embed-safe-nested"),
         PathCase::CurrentDirNested => PathBuf::from("./relative/nested"),
     }
 }

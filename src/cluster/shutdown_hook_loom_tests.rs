@@ -1,6 +1,6 @@
 //! Loom checks for shutdown-hook registration state.
 
-use super::{ShutdownRegistration, ShutdownState, register_shutdown_hook_with_state};
+use super::{ShutdownState, register_shutdown_hook_with_state};
 use crate::CleanupMode;
 use loom::sync::atomic::{AtomicUsize, Ordering};
 use loom::sync::{Arc, Mutex};
@@ -28,7 +28,7 @@ impl LoomShutdownHook {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = register_shutdown_hook_with_state(
             &mut state,
-            ShutdownRegistration {
+            ShutdownState {
                 settings: Settings::default(),
                 shutdown_timeout: Duration::from_secs(1),
                 cleanup_mode: CleanupMode::None,

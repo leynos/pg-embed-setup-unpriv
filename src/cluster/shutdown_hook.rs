@@ -58,7 +58,7 @@ pub(super) fn register_shutdown_hook(
 
     let registered = register_shutdown_hook_with_state(
         &mut guard,
-        ShutdownRegistration {
+        ShutdownState {
             settings,
             shutdown_timeout,
             cleanup_mode,
@@ -73,15 +73,9 @@ pub(super) fn register_shutdown_hook(
     Ok(())
 }
 
-struct ShutdownRegistration {
-    settings: Settings,
-    shutdown_timeout: Duration,
-    cleanup_mode: CleanupMode,
-}
-
 fn register_shutdown_hook_with_state<F>(
     guard: &mut Option<ShutdownState>,
-    registration: ShutdownRegistration,
+    state: ShutdownState,
     register: F,
 ) -> BootstrapResult<bool>
 where
@@ -94,11 +88,7 @@ where
 
     // Store state only AFTER atexit succeeds, so a failed registration
     // does not poison the slot for future attempts.
-    *guard = Some(ShutdownState {
-        settings: registration.settings,
-        shutdown_timeout: registration.shutdown_timeout,
-        cleanup_mode: registration.cleanup_mode,
-    });
+    *guard = Some(state);
     Ok(true)
 }
 
