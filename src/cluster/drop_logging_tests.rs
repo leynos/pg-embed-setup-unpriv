@@ -1,9 +1,9 @@
 //! Tests for drop-time warning logs.
 
-use crate::test_support::capture_warn_logs;
 use rstest::rstest;
 
 use super::shutdown;
+use crate::test_support::capture_warn_logs;
 
 #[rstest]
 #[case::timeout(

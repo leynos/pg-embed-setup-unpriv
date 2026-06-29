@@ -1,7 +1,6 @@
 //! Shared helpers for creating partial `PostgreSQL` data directories in tests.
 
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 /// Creates a partial data directory structure that simulates an interrupted `initdb`.
 ///
@@ -21,6 +20,7 @@ use std::path::Path;
 ///
 /// ```
 /// use std::path::Path;
+///
 /// use pg_embedded_setup_unpriv::test_support::create_partial_data_dir;
 ///
 /// let temp = tempfile::tempdir().unwrap();
@@ -40,8 +40,9 @@ pub fn create_partial_data_dir(data_dir: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn creates_expected_structure() {

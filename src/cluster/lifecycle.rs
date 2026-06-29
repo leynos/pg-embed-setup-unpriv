@@ -9,8 +9,10 @@ use color_eyre::eyre::WrapErr;
 use dashmap::DashMap;
 use tracing::info_span;
 
-use super::connection::{TestClusterConnection, escape_identifier};
-use super::temporary_database::TemporaryDatabase;
+use super::{
+    connection::{TestClusterConnection, escape_identifier},
+    temporary_database::TemporaryDatabase,
+};
 use crate::error::BootstrapResult;
 
 /// A strongly-typed database name for use with lifecycle operations.
@@ -38,33 +40,23 @@ pub struct DatabaseName(String);
 impl DatabaseName {
     /// Creates a new `DatabaseName` from a string.
     #[must_use]
-    pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into())
-    }
+    pub fn new(name: impl Into<String>) -> Self { Self(name.into()) }
 
     /// Returns the database name as a string slice.
     #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+    pub fn as_str(&self) -> &str { &self.0 }
 }
 
 impl AsRef<str> for DatabaseName {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
+    fn as_ref(&self) -> &str { &self.0 }
 }
 
 impl From<&str> for DatabaseName {
-    fn from(s: &str) -> Self {
-        Self(s.to_owned())
-    }
+    fn from(s: &str) -> Self { Self(s.to_owned()) }
 }
 
 impl From<String> for DatabaseName {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
+    fn from(s: String) -> Self { Self(s) }
 }
 
 /// Global per-template locks to prevent concurrent template creation.
@@ -152,7 +144,9 @@ impl TestClusterConnection {
     /// // ... run migrations on my_template ...
     ///
     /// // Clone the template for a test
-    /// cluster.connection().create_database_from_template("test_db", "my_template")?;
+    /// cluster
+    ///     .connection()
+    ///     .create_database_from_template("test_db", "my_template")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -258,14 +252,18 @@ impl TestClusterConnection {
     /// let cluster = TestCluster::new()?;
     ///
     /// // Ensure template exists, running migrations if needed
-    /// cluster.connection().ensure_template_exists("my_template", |db_name| {
-    ///     // Run migrations on the newly created template database
-    ///     // e.g., diesel::migration::run(&mut conn)?;
-    ///     Ok(())
-    /// })?;
+    /// cluster
+    ///     .connection()
+    ///     .ensure_template_exists("my_template", |db_name| {
+    ///         // Run migrations on the newly created template database
+    ///         // e.g., diesel::migration::run(&mut conn)?;
+    ///         Ok(())
+    ///     })?;
     ///
     /// // Clone the template for each test
-    /// cluster.connection().create_database_from_template("test_db_1", "my_template")?;
+    /// cluster
+    ///     .connection()
+    ///     .create_database_from_template("test_db_1", "my_template")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -357,7 +355,8 @@ impl TestClusterConnection {
     /// cluster.ensure_template_exists("migrated_template", |_| Ok(()))?;
     ///
     /// // Each test gets its own database cloned from the template
-    /// let temp_db = cluster.connection()
+    /// let temp_db = cluster
+    ///     .connection()
     ///     .temporary_database_from_template("test_db", "migrated_template")?;
     ///
     /// // Database is dropped automatically when temp_db goes out of scope

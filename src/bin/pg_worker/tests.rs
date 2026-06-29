@@ -1,21 +1,21 @@
 //! Unit tests for `pg_worker` data directory recovery and argument parsing.
 
-use super::*;
-use pg_embedded_setup_unpriv::test_support::create_partial_data_dir;
-use rstest::{fixture, rstest};
 use std::{
     ffi::{OsStr, OsString},
     fs,
     os::unix::ffi::OsStrExt,
 };
+
+use pg_embedded_setup_unpriv::test_support::create_partial_data_dir;
+use rstest::{fixture, rstest};
 use tempfile::{TempDir, tempdir};
+
+use super::*;
 
 type R<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type TempDataDirResult = R<(TempDir, Utf8PathBuf)>;
 
-fn ensure(is_valid: bool, msg: &str) -> R {
-    if is_valid { Ok(()) } else { Err(msg.into()) }
-}
+fn ensure(is_valid: bool, msg: &str) -> R { if is_valid { Ok(()) } else { Err(msg.into()) } }
 
 #[fixture]
 fn temp_data_dir() -> TempDataDirResult {
@@ -81,7 +81,8 @@ fn reset_removes_partial(temp_data_dir: TempDataDirResult) -> R {
 
 #[rstest]
 fn reset_ok_for_missing(temp_data_dir: TempDataDirResult) -> R {
-    reset_data_dir(&temp_data_dir?.1)
+    let (_temp_dir, data_dir) = temp_data_dir?;
+    reset_data_dir(&data_dir)
 }
 
 #[test]

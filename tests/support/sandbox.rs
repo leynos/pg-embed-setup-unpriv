@@ -4,12 +4,16 @@ use std::ffi::OsString;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use color_eyre::eyre::{Context, Result, eyre};
+use pg_embedded_setup_unpriv::{
+    ExecutionPrivileges,
+    detect_execution_privileges,
+    test_support::CapabilityTempDir,
+};
 
-use pg_embedded_setup_unpriv::test_support::CapabilityTempDir;
-use pg_embedded_setup_unpriv::{ExecutionPrivileges, detect_execution_privileges};
-
-use super::cap_fs::{remove_tree, set_permissions};
-use super::env::{ScopedEnvVars, build_env, with_scoped_env};
+use super::{
+    cap_fs::{remove_tree, set_permissions},
+    env::{ScopedEnvVars, build_env, with_scoped_env},
+};
 
 /// Provides a capability-backed directory tree for behavioural `PostgreSQL`
 /// tests. Each sandbox supplies dedicated installation and data directories so
@@ -91,9 +95,7 @@ impl TestSandbox {
     /// # }
     /// # docs().expect("install_dir example should succeed");
     /// ```
-    pub fn install_dir(&self) -> &Utf8Path {
-        &self.install_dir
-    }
+    pub fn install_dir(&self) -> &Utf8Path { &self.install_dir }
 
     /// Returns the `PostgreSQL` data directory assigned to the sandbox.
     ///
@@ -111,9 +113,7 @@ impl TestSandbox {
     /// # }
     /// # docs().expect("data_dir example should succeed");
     /// ```
-    pub fn data_dir(&self) -> &Utf8Path {
-        &self.data_dir
-    }
+    pub fn data_dir(&self) -> &Utf8Path { &self.data_dir }
 
     /// Provides the base environment variables required for `PostgreSQL` to run
     /// within the sandbox.
@@ -127,7 +127,9 @@ impl TestSandbox {
     /// # fn docs() -> Result<()> {
     /// let sandbox = TestSandbox::new("example-base-env")?;
     /// let vars = sandbox.base_env();
-    /// let has_runtime = vars.iter().any(|(key, _)| key == OsStr::new("PG_RUNTIME_DIR"));
+    /// let has_runtime = vars
+    ///     .iter()
+    ///     .any(|(key, _)| key == OsStr::new("PG_RUNTIME_DIR"));
     /// assert!(has_runtime, "runtime directory should be present");
     /// sandbox.reset()?;
     /// # Ok(())
@@ -155,9 +157,16 @@ impl TestSandbox {
     /// # fn docs() -> Result<()> {
     /// let sandbox = TestSandbox::new("example-without-tz")?;
     /// let vars = sandbox.env_without_timezone();
-    /// let tz_missing = vars.iter().any(|(key, value)| key == OsStr::new("TZ") && value.is_none());
-    /// let tzdir_missing = vars.iter().any(|(key, value)| key == OsStr::new("TZDIR") && value.is_none());
-    /// assert!(tz_missing && tzdir_missing, "time zone variables should be cleared");
+    /// let tz_missing = vars
+    ///     .iter()
+    ///     .any(|(key, value)| key == OsStr::new("TZ") && value.is_none());
+    /// let tzdir_missing = vars
+    ///     .iter()
+    ///     .any(|(key, value)| key == OsStr::new("TZDIR") && value.is_none());
+    /// assert!(
+    ///     tz_missing && tzdir_missing,
+    ///     "time zone variables should be cleared"
+    /// );
     /// sandbox.reset()?;
     /// # Ok(())
     /// # }
@@ -278,9 +287,9 @@ fn base_dir_mode() -> u32 {
 mod tests {
     //! Tests for sandbox environment helpers.
 
-    use super::*;
-
     use color_eyre::eyre::Result;
+
+    use super::*;
 
     #[test]
     fn env_with_timezone_override_sets_tzdir() -> Result<()> {

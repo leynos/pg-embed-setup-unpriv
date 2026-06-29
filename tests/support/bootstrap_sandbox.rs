@@ -1,22 +1,24 @@
 //! Sandbox environment for bootstrap privilege tests.
 
-use std::cell::RefCell;
-use std::ffi::OsString;
-use std::io::ErrorKind;
+use std::{cell::RefCell, ffi::OsString, io::ErrorKind};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::fs::MetadataExt;
 use color_eyre::eyre::{Context, Result, ensure, eyre};
 use nix::unistd::Uid;
-use pg_embedded_setup_unpriv::ExecutionPrivileges;
 #[cfg(feature = "privileged-tests")]
 use pg_embedded_setup_unpriv::nobody_uid;
-use pg_embedded_setup_unpriv::test_support::{CapabilityTempDir, metadata};
+use pg_embedded_setup_unpriv::{
+    ExecutionPrivileges,
+    test_support::{CapabilityTempDir, metadata},
+};
 use rstest::fixture;
 
-use super::cap_fs_bootstrap::{remove_tree, set_permissions};
-use super::env::{build_env, with_scoped_env};
-use super::skip::skip_message;
+use super::{
+    cap_fs_bootstrap::{remove_tree, set_permissions},
+    env::{build_env, with_scoped_env},
+    skip::skip_message,
+};
 
 /// Test sandbox for bootstrap privilege scenarios.
 #[derive(Debug)]
@@ -107,9 +109,7 @@ impl BootstrapSandbox {
         Ok(())
     }
 
-    fn remove_if_present(path: &Utf8Path) -> Result<()> {
-        remove_tree(path)
-    }
+    fn remove_if_present(path: &Utf8Path) -> Result<()> { remove_tree(path) }
 
     /// Records the detected execution privileges.
     pub const fn record_privileges(&mut self, privileges: ExecutionPrivileges) {
@@ -117,9 +117,7 @@ impl BootstrapSandbox {
     }
 
     /// Sets the expected owner UID for directory ownership checks.
-    pub const fn set_expected_owner(&mut self, uid: Uid) {
-        self.expected_owner = Some(uid);
-    }
+    pub const fn set_expected_owner(&mut self, uid: Uid) { self.expected_owner = Some(uid); }
 
     /// Records an error message from a failed bootstrap attempt.
     pub fn record_error(&mut self, error: impl Into<String>) {
@@ -134,14 +132,10 @@ impl BootstrapSandbox {
     }
 
     /// Returns whether this scenario has been marked as skipped.
-    pub const fn is_skipped(&self) -> bool {
-        self.skip_reason.is_some()
-    }
+    pub const fn is_skipped(&self) -> bool { self.skip_reason.is_some() }
 
     /// Returns the last recorded error message.
-    pub fn last_error(&self) -> Option<&str> {
-        self.last_error.as_deref()
-    }
+    pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
 
     /// Asserts that the detected privileges match the expected value.
     pub fn assert_detected(&self, expected: ExecutionPrivileges) -> Result<()> {
@@ -256,5 +250,6 @@ pub fn borrow_sandbox(sandbox: &BootstrapSandboxFixture) -> Result<&RefCell<Boot
 /// Fixture that provides a bootstrap sandbox for testing.
 #[fixture]
 pub fn sandbox() -> BootstrapSandboxFixture {
-    Ok(RefCell::new(BootstrapSandbox::new()?))
+    let sandbox = BootstrapSandbox::new()?;
+    Ok(RefCell::new(sandbox))
 }

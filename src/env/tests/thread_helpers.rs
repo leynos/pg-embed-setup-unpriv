@@ -3,11 +3,14 @@
 //! Provides the drop guards and spawn routines used by
 //! `serialises_env_across_threads` to exercise cross-thread ordering.
 
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    sync::{Arc, Barrier, mpsc},
+    thread,
+};
+
 use super::{ENV_LOCK, ScopedEnv, remove_env_var_unlocked, set_env_var_unlocked};
-use std::env;
-use std::ffi::{OsStr, OsString};
-use std::sync::{Arc, Barrier, mpsc};
-use std::thread;
 
 /// Sends a unit on drop via `mpsc::Sender` and ignores send errors.
 pub(super) struct ReleaseOnDrop {
@@ -115,10 +118,8 @@ pub(super) fn spawn_inner_guard_thread(
 /// - `channels`: `ThreadAChannels` containing the coordination primitives:
 ///   - `barrier`: `Arc<Barrier>` used to co-ordinate with other threads.
 ///   - `ready_tx`: `mpsc::Sender<()>` used to signal readiness after applying.
-///   - `release_rx`: `mpsc::Receiver<()>` used to wait for release before
-///     dropping the guard.
-///   - `done_tx`: `mpsc::Sender<()>` used to signal completion after the guard
-///     is dropped.
+///   - `release_rx`: `mpsc::Receiver<()>` used to wait for release before dropping the guard.
+///   - `done_tx`: `mpsc::Sender<()>` used to signal completion after the guard is dropped.
 ///
 /// # Behaviour
 ///

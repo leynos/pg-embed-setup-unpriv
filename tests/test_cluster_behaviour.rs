@@ -59,9 +59,7 @@ impl ClusterWorld {
         self.skip_reason = Some(message);
     }
 
-    const fn is_skipped(&self) -> bool {
-        self.skip_reason.is_some()
-    }
+    const fn is_skipped(&self) -> bool { self.skip_reason.is_some() }
 
     fn ensure_not_skipped(&self) -> Result<()> {
         if self.is_skipped() {
@@ -137,9 +135,7 @@ impl ClusterWorld {
 }
 
 impl Drop for ClusterWorld {
-    fn drop(&mut self) {
-        drop(self.cluster.take());
-    }
+    fn drop(&mut self) { drop(self.cluster.take()); }
 }
 
 type ClusterWorldFixture = Result<RefCell<ClusterWorld>>;
@@ -152,7 +148,8 @@ fn borrow_world(world: &ClusterWorldFixture) -> Result<&RefCell<ClusterWorld>> {
 
 #[fixture]
 fn world() -> ClusterWorldFixture {
-    Ok(RefCell::new(ClusterWorld::new()?))
+    let world = ClusterWorld::new()?;
+    Ok(RefCell::new(world))
 }
 
 #[given("a cluster sandbox for tests")]

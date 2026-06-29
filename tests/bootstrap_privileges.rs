@@ -20,7 +20,10 @@ mod serial;
 mod skip;
 
 use bootstrap_sandbox::{
-    BootstrapSandboxFixture, borrow_sandbox, run_bootstrap_with_temp_drop, sandbox,
+    BootstrapSandboxFixture,
+    borrow_sandbox,
+    run_bootstrap_with_temp_drop,
+    sandbox,
 };
 use scenario::expect_fixture;
 use serial::{ScenarioSerialGuard, serial_guard};

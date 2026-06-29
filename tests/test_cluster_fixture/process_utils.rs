@@ -1,8 +1,10 @@
 //! Helpers for fixture process management in cluster tests.
 
-use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    thread,
+    time::Duration,
+};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Result, eyre};

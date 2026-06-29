@@ -32,6 +32,10 @@ jobs:
             **/*.md
             !**/target/**
             !**/dist/**
+      - name: Setup uv
+        uses: astral-sh/setup-uv@12d13f90bc3a5a1971bebad4beb09a4dfa962e91
+      - name: Install interrogate
+        run: uv tool install interrogate
       - name: Lint
         run: make lint
       - name: Install cargo-nextest

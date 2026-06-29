@@ -5,9 +5,7 @@
 //! applied to items with doc comments. This keeps Whitaker's
 //! `function_attrs_follow_docs` lint happy while preserving documentation.
 
-use crate::ClusterHandle;
-use crate::TestCluster;
-use crate::test_support::fixtures as runtime_fixtures;
+use crate::{ClusterHandle, TestCluster, test_support::fixtures as runtime_fixtures};
 
 /// `rstest` fixture that yields a running [`TestCluster`].
 ///
@@ -17,8 +15,7 @@ use crate::test_support::fixtures as runtime_fixtures;
 ///
 /// # Examples
 /// ```no_run
-/// use pg_embedded_setup_unpriv::TestCluster;
-/// use pg_embedded_setup_unpriv::test_support::test_cluster;
+/// use pg_embedded_setup_unpriv::{TestCluster, test_support::test_cluster};
 /// use rstest::rstest;
 ///
 /// #[rstest]
@@ -28,9 +25,7 @@ use crate::test_support::fixtures as runtime_fixtures;
 /// }
 /// ```
 #[must_use]
-pub fn test_cluster() -> TestCluster {
-    runtime_fixtures::test_cluster()
-}
+pub fn test_cluster() -> TestCluster { runtime_fixtures::test_cluster() }
 
 /// `rstest` fixture that yields a reference to the shared [`TestCluster`].
 ///
@@ -47,8 +42,7 @@ pub fn test_cluster() -> TestCluster {
 /// # Examples
 ///
 /// ```no_run
-/// use pg_embedded_setup_unpriv::TestCluster;
-/// use pg_embedded_setup_unpriv::test_support::shared_test_cluster;
+/// use pg_embedded_setup_unpriv::{TestCluster, test_support::shared_test_cluster};
 /// use rstest::rstest;
 ///
 /// #[rstest]
@@ -58,9 +52,7 @@ pub fn test_cluster() -> TestCluster {
 /// }
 /// ```
 #[must_use]
-pub fn shared_test_cluster() -> &'static TestCluster {
-    runtime_fixtures::shared_test_cluster()
-}
+pub fn shared_test_cluster() -> &'static TestCluster { runtime_fixtures::shared_test_cluster() }
 
 /// `rstest` fixture that yields a reference to the shared [`ClusterHandle`].
 ///
@@ -78,15 +70,16 @@ pub fn shared_test_cluster() -> &'static TestCluster {
 /// # Examples
 ///
 /// ```no_run
-/// use pg_embedded_setup_unpriv::ClusterHandle;
-/// use pg_embedded_setup_unpriv::test_support::shared_test_cluster_handle;
+/// use pg_embedded_setup_unpriv::{ClusterHandle, test_support::shared_test_cluster_handle};
 /// use rstest::rstest;
 ///
 /// #[rstest]
 /// fn uses_shared_handle(shared_test_cluster_handle: &'static ClusterHandle) {
-///     assert!(shared_test_cluster_handle
-///         .database_exists("postgres")
-///         .expect("expected 'postgres' database to exist in shared_test_cluster_handle"));
+///     assert!(
+///         shared_test_cluster_handle
+///             .database_exists("postgres")
+///             .expect("expected 'postgres' database to exist in shared_test_cluster_handle")
+///     );
 /// }
 /// ```
 #[must_use]

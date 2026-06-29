@@ -1,8 +1,7 @@
 //! Behavioural coverage for database lifecycle methods on `TestClusterConnection`.
 #![cfg(unix)]
 
-use std::cell::RefCell;
-use std::sync::atomic::Ordering;
+use std::{cell::RefCell, sync::atomic::Ordering};
 
 use color_eyre::eyre::{Context, Result, ensure};
 use postgres::NoTls;
@@ -27,8 +26,15 @@ mod serial;
 mod skip;
 
 use database_lifecycle_helpers::{
-    DatabaseWorld, DatabaseWorldFixture, SETUP_CALL_COUNT, borrow_world, check_db_exists,
-    check_db_exists_via_delegation, execute_db_op, setup_sandboxed_cluster, verify_error,
+    DatabaseWorld,
+    DatabaseWorldFixture,
+    SETUP_CALL_COUNT,
+    borrow_world,
+    check_db_exists,
+    check_db_exists_via_delegation,
+    execute_db_op,
+    setup_sandboxed_cluster,
+    verify_error,
 };
 use scenario::expect_fixture;
 use serial::{ScenarioSerialGuard, serial_guard};
@@ -40,7 +46,8 @@ const CLONED_DB_NAME: &str = "cloned_from_template_db";
 
 #[fixture]
 fn world() -> DatabaseWorldFixture {
-    Ok(RefCell::new(DatabaseWorld::new()?))
+    let world = DatabaseWorld::new()?;
+    Ok(RefCell::new(world))
 }
 
 #[given("a sandboxed TestCluster is running")]
@@ -244,8 +251,8 @@ fn when_template_created_and_populated(world: &DatabaseWorldFixture) -> Result<(
         postgres::Client::connect(&url, NoTls).context("connect to template database")?;
     client
         .batch_execute(
-            "CREATE TABLE test_table (id SERIAL PRIMARY KEY, value TEXT); \
-             INSERT INTO test_table (value) VALUES ('template_data');",
+            "CREATE TABLE test_table (id SERIAL PRIMARY KEY, value TEXT); INSERT INTO test_table \
+             (value) VALUES ('template_data');",
         )
         .context("create test table and insert data")?;
     Ok(())

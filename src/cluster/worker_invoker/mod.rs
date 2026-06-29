@@ -1,17 +1,20 @@
-//! Dispatches `PostgreSQL` lifecycle operations either in-process or via the privileged worker binary.
+//! Dispatches `PostgreSQL` lifecycle operations either in-process or via the privileged worker
+//! binary.
 use std::future::Future;
 
 use color_eyre::eyre::{Context, eyre};
 use tokio::runtime::Runtime;
-
-use crate::error::{BootstrapError, BootstrapResult};
-use crate::observability::LOG_TARGET;
-use crate::worker_process::{self, WorkerRequest, WorkerRequestArgs};
-use crate::{ExecutionMode, ExecutionPrivileges, TestBootstrapSettings};
-
-use super::WorkerOperation;
-use super::panic_utils::nested_runtime_thread_panic;
 use tracing::{error, info, info_span};
+
+use super::{WorkerOperation, panic_utils::nested_runtime_thread_panic};
+use crate::{
+    ExecutionMode,
+    ExecutionPrivileges,
+    TestBootstrapSettings,
+    error::{BootstrapError, BootstrapResult},
+    observability::LOG_TARGET,
+    worker_process::{self, WorkerRequest, WorkerRequestArgs},
+};
 
 // ============================================================================
 // Shared helper functions
@@ -111,7 +114,8 @@ fn spawn_worker_inner(
     {
         let worker = bootstrap.worker_binary.as_ref().ok_or_else(|| {
             BootstrapError::from(eyre!(concat!(
-                "pg_worker binary not found. Install it with 'cargo install --path . --bin pg_worker' ",
+                "pg_worker binary not found. Install it with 'cargo install --path . --bin \
+                 pg_worker' ",
                 "and ensure it is in PATH, or set PG_EMBEDDED_WORKER to its absolute path"
             )))
         })?;

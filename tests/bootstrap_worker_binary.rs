@@ -1,17 +1,16 @@
 //! Integration tests for the `pg_worker` binary.
 //!
 //! This module covers:
-//! - Bootstrap failure paths when the worker binary is misconfigured, ensuring
-//!   the bootstrapper validates helper paths eagerly so privileged orchestration
-//!   does not defer errors to runtime.
-//! - Binary invocation tests validating argument parsing, error messages, and
-//!   output formatting.
+//! - Bootstrap failure paths when the worker binary is misconfigured, ensuring the bootstrapper
+//!   validates helper paths eagerly so privileged orchestration does not defer errors to runtime.
+//! - Binary invocation tests validating argument parsing, error messages, and output formatting.
 #![cfg(unix)]
 
-use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::os::unix::ffi::OsStringExt;
-use std::os::unix::fs::PermissionsExt;
+use std::{
+    ffi::{OsStr, OsString},
+    fs,
+    os::unix::{ffi::OsStringExt, fs::PermissionsExt},
+};
 
 use color_eyre::eyre::{Result, ensure, eyre};
 use nix::unistd::geteuid;

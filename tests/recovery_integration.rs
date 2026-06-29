@@ -4,8 +4,7 @@
 //! from partial data directories (missing `global/pg_filenode.map`).
 #![cfg(unix)]
 
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 use color_eyre::eyre::{Result, ensure, eyre};
 use pg_embedded_setup_unpriv::test_support::create_partial_data_dir;
@@ -81,8 +80,8 @@ fn stderr_indicates_missing_postgres(stderr: &str) -> bool {
 /// This test creates a partial data directory with `PG_VERSION` but without
 /// the marker file, runs `pg_worker` with setup operation, and verifies:
 /// 1. The partial data directory is removed by recovery
-/// 2. If the binary fails, it's due to missing `PostgreSQL` installation
-///    (not due to recovery failure or other unexpected reasons)
+/// 2. If the binary fails, it's due to missing `PostgreSQL` installation (not due to recovery
+///    failure or other unexpected reasons)
 ///
 /// Note: The setup may succeed if `PostgreSQL` binaries are cached, or fail
 /// if no real installation is available. Either outcome is acceptable as
