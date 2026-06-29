@@ -9,6 +9,7 @@ pub fn verify_surface() {
     let _runner: fn(PostmasterPid) -> bool = process_is_running;
 }
 
+#[cfg(not(windows))]
 fn main() {
     verify_surface();
 }
