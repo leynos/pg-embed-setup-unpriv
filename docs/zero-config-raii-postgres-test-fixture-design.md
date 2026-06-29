@@ -339,7 +339,6 @@ essentially one line in the test setup.
 - Behavioural suites now coordinate across binaries with a shared lock file,
   so concurrent PostgreSQL setup or download tasks do not race in CI.
 
-
 ### Implementation update (2026-06-26)
 
 - Added property-based lifecycle tests for schedule-independent guarantees:
