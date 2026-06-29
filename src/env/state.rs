@@ -114,8 +114,9 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
     {
         let env_vars: Vec<_> = vars.into_iter().collect();
-        for (key, _) in &env_vars {
+        for (key, value) in &env_vars {
             Self::validate_env_key(key);
+            Self::validate_env_value(value.as_ref());
         }
 
         self.acquire_lock_if_needed();
@@ -181,9 +182,22 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
             "ScopedEnv received an empty environment variable name"
         );
         assert!(
+            !Self::contains_nul(key),
+            "ScopedEnv received an environment variable name containing NUL"
+        );
+        assert!(
             !Self::contains_equals(key),
             "ScopedEnv received an environment variable name containing '='"
         );
+    }
+
+    fn validate_env_value(value: Option<&OsString>) {
+        if let Some(env_value) = value {
+            assert!(
+                !Self::contains_nul(env_value),
+                "ScopedEnv received an environment variable value containing NUL"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -207,14 +221,39 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         key.to_string_lossy().contains('=')
     }
 
+    #[cfg(unix)]
+    fn contains_nul(value: &OsString) -> bool {
+        use std::os::unix::ffi::OsStrExt;
+
+        value.as_os_str().as_bytes().contains(&b'\0')
+    }
+
+    #[cfg(windows)]
+    fn contains_nul(value: &OsString) -> bool {
+        use std::os::windows::ffi::OsStrExt;
+
+        value.as_os_str().encode_wide().any(|unit| unit == 0)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn contains_nul(value: &OsString) -> bool {
+        value.to_string_lossy().contains('\0')
+    }
+
     fn apply_single_var(
         guard: &mut L::Guard,
         key: &OsString,
         new_value: Option<OsString>,
     ) -> Option<OsString> {
         debug_assert!(
-            !key.is_empty() && !Self::contains_equals(key),
+            !key.is_empty() && !Self::contains_nul(key) && !Self::contains_equals(key),
             "invalid env var name: {key:?}"
+        );
+        debug_assert!(
+            new_value
+                .as_ref()
+                .is_none_or(|value| !Self::contains_nul(value)),
+            "invalid env var value for {key:?}"
         );
         let previous = L::var_os(guard, key);
         match new_value {
