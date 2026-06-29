@@ -2104,3 +2104,28 @@ comments. What changed and why:
 Validation recorded for this pass: `python -m py_compile
 scripts/release_archive.py`, release archive pytest via `uv`, and
 `git diff --check`.
+
+Revision 16 (2026-06-29), after verifying the latest review batch. What changed
+and why:
+
+- Routed the release archive workflow target through a `TARGET` environment
+  variable so the shell command no longer interpolates `matrix.target`
+  directly.
+- Confirmed the Windows cargo-wrapper ordering was already addressed, then
+  added the remaining malformed-quote handling so bad `--cargo` values exit
+  through a user-facing `SystemExit` path rather than a traceback.
+- Updated shutdown hook registration to return `read_postmaster_process` errors
+  before installing the atexit hook, and updated the atexit callback to skip
+  best-effort cleanup when postmaster identity cannot be validated.
+- Split the `parse_pid` proptest gating so positive and non-numeric parser
+  properties run on Windows as well as Unix, while the non-positive signed PID
+  property remains Unix-only.
+- Replaced the Windows UI-test exclusion with a Windows smoke path that compiles
+  the same `shutdown_hook_test_support.rs` imports/signature bindings without
+  running the slow isolated trybuild compile on Windows.
+
+Validation recorded for this pass: `python -m py_compile
+scripts/release_archive.py`, release archive pytest via `uv`,
+`cargo test --features dev-worker --test ui`, `make check-fmt`, `make lint`,
+`make markdownlint`, `git diff --check`, and
+`CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`.

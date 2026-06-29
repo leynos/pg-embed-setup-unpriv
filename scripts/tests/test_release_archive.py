@@ -300,6 +300,14 @@ def test_build_release_binaries_treats_cargo_path_with_spaces_as_executable(
     assert program_args == []
 
 
+def test_cargo_program_and_args_rejects_malformed_quoting() -> None:
+    with pytest.raises(
+        SystemExit,
+        match=re.escape("invalid cargo executable command: No closing quotation"),
+    ):
+        release_archive._cargo_program_and_args("'unterminated cargo")
+
+
 def test_main_rejects_version_mismatch_before_build(tmp_path: Path) -> None:
     manifest = write_manifest(tmp_path, version="0.5.1")
 
