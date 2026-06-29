@@ -1,11 +1,7 @@
 //! Helper binary that deliberately stalls to exercise worker timeouts.
 #![cfg(unix)]
 
-use std::env;
-use std::fs;
-use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
+use std::{env, fs, path::PathBuf, thread, time::Duration};
 
 use color_eyre::eyre::{Context, Report, Result};
 use pg_embedded_setup_unpriv::worker::WorkerPayload;

@@ -1,6 +1,5 @@
 //! Validates that worker settings snapshots faithfully round-trip `PostgreSQL` settings.
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use color_eyre::eyre::{Result, WrapErr, ensure};
 use pg_embedded_setup_unpriv::worker::{SettingsSnapshot, WorkerPayload};

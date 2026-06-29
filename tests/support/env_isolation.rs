@@ -1,7 +1,9 @@
 //! Environment helpers for isolating test scenarios.
 
-use std::collections::HashSet;
-use std::ffi::{OsStr, OsString};
+use std::{
+    collections::HashSet,
+    ffi::{OsStr, OsString},
+};
 
 use camino::Utf8Path;
 

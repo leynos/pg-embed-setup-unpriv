@@ -34,10 +34,7 @@ pub(crate) mod worker_process;
 pub mod worker_process_test_api {
     //! Integration test shims for worker process orchestration.
 
-    pub use crate::cluster::WorkerOperation;
     use crate::worker_process;
-    pub use crate::worker_process::WorkerRequestArgs;
-
     #[cfg(all(
         unix,
         any(
@@ -50,6 +47,7 @@ pub mod worker_process_test_api {
         any(test, doc, feature = "privileged-tests"),
     ))]
     use crate::worker_process::PrivilegeDropGuard as InnerPrivilegeDropGuard;
+    pub use crate::{cluster::WorkerOperation, worker_process::WorkerRequestArgs};
 
     /// Test-visible wrapper around the internal worker request.
     ///
@@ -89,9 +87,7 @@ pub mod worker_process_test_api {
         }
 
         /// Returns a reference to the wrapped worker request.
-        pub(crate) const fn inner(&self) -> &worker_process::WorkerRequest<'a> {
-            &self.0
-        }
+        pub(crate) const fn inner(&self) -> &worker_process::WorkerRequest<'a> { &self.0 }
     }
 
     /// Executes a worker request whilst returning crate-level errors.
@@ -145,47 +141,20 @@ pub mod worker_process_test_api {
     }
 }
 
-/// Resolves a path to an ambient directory handle paired with the relative path component.
-///
-/// This function provides capability-based filesystem access by opening paths relative to
-/// ambient authority. Absolute paths are opened relative to their parent directory; relative
-/// paths reuse the current working directory.
-///
-/// # Returns
-///
-/// Returns a tuple containing:
-/// - A [`cap_std::fs::Dir`] handle for the parent directory
-/// - A [`camino::Utf8PathBuf`] with the relative component
-///
-/// For absolute paths like `/foo/bar`, returns `(Dir("/foo"), "bar")`.
-/// For relative paths like `baz/qux`, returns `(Dir("."), "baz/qux")`.
-/// For root paths like `/`, returns `(Dir("/"), "")` with an empty relative component.
-///
-/// # Errors
-///
-/// Returns an error if the path cannot be opened as a directory or if path operations fail.
-///
-/// # Examples
-///
-/// ```no_run
-/// use pg_embedded_setup_unpriv::ambient_dir_and_path;
-/// use camino::Utf8Path;
-///
-/// # fn main() -> color_eyre::Result<()> {
-/// let (dir, relative) = ambient_dir_and_path(Utf8Path::new("./data"))?;
-/// // Use dir handle for capability-based operations on relative path
-/// # Ok(())
-/// # }
-/// ```
-pub use crate::fs::ambient_dir_and_path;
+use std::ffi::OsString;
 
-#[doc(hidden)]
-pub use crate::env::ScopedEnv;
 pub use bootstrap::{
-    CleanupMode, ExecutionMode, ExecutionPrivileges, TestBootstrapEnvironment,
-    TestBootstrapSettings, bootstrap_for_tests, detect_execution_privileges, find_timezone_dir,
+    CleanupMode,
+    ExecutionMode,
+    ExecutionPrivileges,
+    TestBootstrapEnvironment,
+    TestBootstrapSettings,
+    bootstrap_for_tests,
+    detect_execution_privileges,
+    find_timezone_dir,
     run,
 };
+use camino::Utf8PathBuf;
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 #[doc(hidden)]
 pub use cluster::WorkerInvoker;
@@ -193,15 +162,28 @@ pub use cluster::WorkerInvoker;
 #[doc(hidden)]
 pub use cluster::WorkerOperation;
 pub use cluster::{
-    ClusterGuard, ClusterHandle, ConnectionMetadata, DatabaseName, TemporaryDatabase, TestCluster,
+    ClusterGuard,
+    ClusterHandle,
+    ConnectionMetadata,
+    DatabaseName,
+    TemporaryDatabase,
+    TestCluster,
     TestClusterConnection,
 };
+use color_eyre::eyre::{Context, eyre};
 #[doc(hidden)]
 pub use error::BootstrapResult;
-pub use error::PgEmbeddedError as Error;
 pub use error::{
-    BootstrapError, BootstrapErrorKind, PgEmbeddedError, PrivilegeError, PrivilegeResult, Result,
+    BootstrapError,
+    BootstrapErrorKind,
+    PgEmbeddedError as Error,
+    PgEmbeddedError,
+    PrivilegeError,
+    PrivilegeResult,
+    Result,
 };
+use ortho_config::OrthoConfig;
+use postgresql_embedded::{Settings, VersionReq};
 #[cfg(feature = "privileged-tests")]
 #[cfg(all(
     unix,
@@ -229,15 +211,44 @@ pub use privileges::with_temp_euid;
     ),
 ))]
 pub use privileges::{default_paths_for, make_data_dir_private, make_dir_accessible, nobody_uid};
-
-use color_eyre::eyre::{Context, eyre};
-use ortho_config::OrthoConfig;
-use postgresql_embedded::{Settings, VersionReq};
 use serde::{Deserialize, Serialize};
 
+#[doc(hidden)]
+pub use crate::env::ScopedEnv;
 use crate::error::{ConfigError, ConfigResult};
-use camino::Utf8PathBuf;
-use std::ffi::OsString;
+/// Resolves a path to an ambient directory handle paired with the relative path component.
+///
+/// This function provides capability-based filesystem access by opening paths relative to
+/// ambient authority. Absolute paths are opened relative to their parent directory; relative
+/// paths reuse the current working directory.
+///
+/// # Returns
+///
+/// Returns a tuple containing:
+/// - A [`cap_std::fs::Dir`] handle for the parent directory
+/// - A [`camino::Utf8PathBuf`] with the relative component
+///
+/// For absolute paths like `/foo/bar`, returns `(Dir("/foo"), "bar")`.
+/// For relative paths like `baz/qux`, returns `(Dir("."), "baz/qux")`.
+/// For root paths like `/`, returns `(Dir("/"), "")` with an empty relative component.
+///
+/// # Errors
+///
+/// Returns an error if the path cannot be opened as a directory or if path operations fail.
+///
+/// # Examples
+///
+/// ```no_run
+/// use camino::Utf8Path;
+/// use pg_embedded_setup_unpriv::ambient_dir_and_path;
+///
+/// # fn main() -> color_eyre::Result<()> {
+/// let (dir, relative) = ambient_dir_and_path(Utf8Path::new("./data"))?;
+/// // Use dir handle for capability-based operations on relative path
+/// # Ok(())
+/// # }
+/// ```
+pub use crate::fs::ambient_dir_and_path;
 
 /// Captures `PostgreSQL` settings supplied via environment variables.
 #[derive(Debug, Clone, Serialize, Deserialize, OrthoConfig, Default)]
@@ -311,9 +322,7 @@ impl PgEnvCfg {
     ///
     /// # Errors
     /// Returns an error when the semantic version requirement cannot be parsed.
-    pub fn to_settings(&self) -> Result<Settings> {
-        self.to_settings_with_context(false)
-    }
+    pub fn to_settings(&self) -> Result<Settings> { self.to_settings_with_context(false) }
 
     /// Converts the configuration into `Settings`, applying test-only worker limits.
     ///
@@ -330,9 +339,7 @@ impl PgEnvCfg {
     ///
     /// # Errors
     /// Returns an error when the semantic version requirement cannot be parsed.
-    pub fn to_settings_for_tests(&self) -> Result<Settings> {
-        self.to_settings_with_context(true)
-    }
+    pub fn to_settings_for_tests(&self) -> Result<Settings> { self.to_settings_with_context(true) }
 
     /// Converts the configuration into `Settings`, optionally applying test limits.
     ///

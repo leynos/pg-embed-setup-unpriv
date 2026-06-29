@@ -8,10 +8,9 @@
 //! # Architecture
 //!
 //! The guard holds:
-//! - **Environment guards**: `ScopedEnv` instances that restore environment
-//!   variables when dropped
-//! - **Shutdown resources**: Runtime, `PostgreSQL` instance, and configuration
-//!   needed to cleanly stop the cluster
+//! - **Environment guards**: `ScopedEnv` instances that restore environment variables when dropped
+//! - **Shutdown resources**: Runtime, `PostgreSQL` instance, and configuration needed to cleanly
+//!   stop the cluster
 //! - **Tracing span**: Keeps the cluster's observability span alive
 //!
 //! # Drop Behaviour
@@ -31,20 +30,18 @@
 //! `ClusterGuard`'s shutdown and environment-restoration behaviour is tested
 //! in `tests/cluster_split_constructors.rs`:
 //!
-//! - `new_split_creates_working_handle_and_guard`: Verifies that dropping the
-//!   guard stops the `PostgreSQL` cluster (`postmaster.pid` is removed) and
-//!   restores environment variables to their pre-cluster state.
+//! - `new_split_creates_working_handle_and_guard`: Verifies that dropping the guard stops the
+//!   `PostgreSQL` cluster (`postmaster.pid` is removed) and restores environment variables to their
+//!   pre-cluster state.
 //!
-//! - `start_async_split_creates_working_handle_and_guard`: Tests the async
-//!   variant with the same shutdown and restoration assertions.
+//! - `start_async_split_creates_working_handle_and_guard`: Tests the async variant with the same
+//!   shutdown and restoration assertions.
 
-use super::runtime_mode::ClusterRuntime;
-use super::shutdown;
-use crate::env::ScopedEnv;
-use crate::observability::LOG_TARGET;
-use crate::{CleanupMode, TestBootstrapSettings};
 use postgresql_embedded::PostgreSQL;
 use tracing::{info, warn};
+
+use super::{runtime_mode::ClusterRuntime, shutdown};
+use crate::{CleanupMode, TestBootstrapSettings, env::ScopedEnv, observability::LOG_TARGET};
 
 /// Lifecycle guard for a running `PostgreSQL` cluster.
 ///
@@ -77,15 +74,16 @@ use tracing::{info, warn};
 ///
 /// ```no_run
 /// use std::sync::OnceLock;
+///
 /// use pg_embedded_setup_unpriv::{ClusterHandle, TestCluster};
 ///
 /// static SHARED: OnceLock<ClusterHandle> = OnceLock::new();
 ///
 /// fn shared_handle() -> &'static ClusterHandle {
 ///     SHARED.get_or_init(|| {
-///         let (handle, guard) = TestCluster::new_split()
-///             .expect("cluster bootstrap failed");
-///         handle.register_shutdown_on_exit()
+///         let (handle, guard) = TestCluster::new_split().expect("cluster bootstrap failed");
+///         handle
+///             .register_shutdown_on_exit()
 ///             .expect("shutdown hook registration failed");
 ///         std::mem::forget(guard);
 ///         handle

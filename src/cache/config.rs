@@ -3,8 +3,9 @@
 //! Resolves the cache directory from environment variables with XDG-compliant
 //! fallback paths.
 
-use camino::Utf8PathBuf;
 use std::path::PathBuf;
+
+use camino::Utf8PathBuf;
 
 /// Subdirectory path within the XDG cache home.
 const CACHE_SUBDIR: &str = "pg-embedded/binaries";
@@ -27,15 +28,11 @@ impl BinaryCacheConfig {
 
     /// Creates a cache configuration with a custom directory.
     #[must_use]
-    pub const fn with_dir(cache_dir: Utf8PathBuf) -> Self {
-        Self { cache_dir }
-    }
+    pub const fn with_dir(cache_dir: Utf8PathBuf) -> Self { Self { cache_dir } }
 }
 
 impl Default for BinaryCacheConfig {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 /// Resolves the binary cache directory from environment and XDG conventions.
@@ -110,10 +107,12 @@ fn resolve_from_home() -> Option<Utf8PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+
+    use rstest::rstest;
+
     use super::*;
     use crate::test_support::scoped_env;
-    use rstest::rstest;
-    use std::ffi::OsString;
 
     /// Consolidated test for `resolve_cache_dir` with various environment configurations.
     #[rstest]

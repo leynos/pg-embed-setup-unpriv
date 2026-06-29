@@ -4,12 +4,14 @@
 //! parallel test runners. On Unix systems, uses `flock(2)` for advisory locking.
 //! On non-Unix platforms, locking is a no-op.
 
-use camino::Utf8Path;
-use std::fs::{File, OpenOptions};
-use std::io;
-
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
+use std::{
+    fs::{File, OpenOptions},
+    io,
+};
+
+use camino::Utf8Path;
 
 /// Subdirectory within the cache for lock files.
 const LOCKS_SUBDIR: &str = ".locks";
@@ -163,9 +165,10 @@ fn validate_version(version: &str) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
+
+    use super::*;
 
     /// Fixture providing a temporary cache directory as a UTF-8 path.
     #[fixture]

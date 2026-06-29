@@ -8,7 +8,8 @@ use pg_embedded_setup_unpriv::test_support::panic_payload_to_string;
 use rstest::fixture;
 
 use super::{
-    TestCluster, cap_fs,
+    TestCluster,
+    cap_fs,
     cluster_skip::cluster_skip_message,
     env::ScopedEnvVars,
     env_isolation::{override_env_os, override_env_path},
@@ -53,9 +54,7 @@ impl FixtureWorld {
         self.skip_reason = Some(message);
     }
 
-    pub(super) const fn is_skipped(&self) -> bool {
-        self.skip_reason.is_some()
-    }
+    pub(super) const fn is_skipped(&self) -> bool { self.skip_reason.is_some() }
 
     pub(super) fn ensure_not_skipped(&self) -> Result<()> {
         if self.is_skipped() {
@@ -97,9 +96,7 @@ impl FixtureWorld {
 }
 
 impl Drop for FixtureWorld {
-    fn drop(&mut self) {
-        drop(self.cluster.take());
-    }
+    fn drop(&mut self) { drop(self.cluster.take()); }
 }
 
 pub(super) type FixtureWorldFixture = Result<RefCell<FixtureWorld>>;
@@ -112,7 +109,8 @@ pub(super) fn borrow_world(world: &FixtureWorldFixture) -> Result<&RefCell<Fixtu
 
 #[fixture]
 pub(super) fn world() -> FixtureWorldFixture {
-    Ok(RefCell::new(FixtureWorld::new()?))
+    let world = FixtureWorld::new()?;
+    Ok(RefCell::new(world))
 }
 
 pub(super) fn env_for_profile(

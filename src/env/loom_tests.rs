@@ -1,12 +1,19 @@
 //! Loom-backed concurrency checks for `ScopedEnv`.
 
-use super::ScopedEnv;
-use super::state::{EnvLockOps, ThreadStateInner};
-use loom::sync::Arc;
-use loom::sync::atomic::{AtomicUsize, Ordering};
-use loom::thread;
-use std::cell::RefCell;
-use std::ffi::OsString;
+use std::{cell::RefCell, ffi::OsString};
+
+use loom::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
+};
+
+use super::{
+    ScopedEnv,
+    state::{EnvLockOps, ThreadStateInner},
+};
 
 loom::lazy_static! {
     static ref LOOM_ENV_LOCK: loom::sync::Mutex<()> = loom::sync::Mutex::new(());

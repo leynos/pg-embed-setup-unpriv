@@ -6,10 +6,12 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::error::{BootstrapError, BootstrapResult};
-use crate::{ClusterHandle, TestCluster};
-
 use super::fixtures::ensure_worker_env;
+use crate::{
+    ClusterHandle,
+    TestCluster,
+    error::{BootstrapError, BootstrapResult},
+};
 
 // ============================================================================
 // Shared cluster handle singleton
@@ -188,15 +190,14 @@ enum SharedClusterState {
 /// `PhantomData<Rc<()>>`). The pointer is safe to share across threads because:
 /// 1. The cluster is only initialised once and never moved.
 /// 2. All access goes through immutable references.
-/// 3. The cluster's public API is thread-safe (database operations use
-///    independent connections).
+/// 3. The cluster's public API is thread-safe (database operations use independent connections).
 struct SharedClusterPtr(*const TestCluster);
 
 // SAFETY: SharedClusterPtr upholds the following invariants:
 // 1. The pointer targets a `Box::leak`ed allocation that outlives all references.
 // 2. No mutable access occurs through this pointer; all usage is via `&TestCluster`.
-// 3. `TestCluster` methods internally handle synchronisation (each database
-//    operation creates an independent connection).
+// 3. `TestCluster` methods internally handle synchronisation (each database operation creates an
+//    independent connection).
 unsafe impl Send for SharedClusterPtr {}
 unsafe impl Sync for SharedClusterPtr {}
 

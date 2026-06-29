@@ -1,10 +1,10 @@
 //! Helpers for constructing Tokio runtimes used by `TestCluster`.
 
-use crate::error::{BootstrapError, BootstrapResult};
 use color_eyre::eyre::Context;
 use tokio::runtime::{Builder, Runtime};
 
 use super::panic_utils::nested_runtime_thread_panic;
+use crate::error::{BootstrapError, BootstrapResult};
 
 /// Constructs a current-thread Tokio runtime for `TestCluster` lifecycle work.
 ///

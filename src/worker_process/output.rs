@@ -1,10 +1,10 @@
 //! Output truncation and error rendering helpers for worker processes.
 
-use crate::error::BootstrapError;
+use std::{borrow::Cow, fmt::Write as FmtWrite, process::Output};
+
 use color_eyre::eyre::eyre;
-use std::borrow::Cow;
-use std::fmt::Write as FmtWrite;
-use std::process::Output;
+
+use crate::error::BootstrapError;
 
 pub(super) const OUTPUT_CHAR_LIMIT: usize = 2_048;
 pub(super) const TRUNCATION_SUFFIX: &str = "… [truncated]";

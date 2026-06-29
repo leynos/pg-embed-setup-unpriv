@@ -1,10 +1,12 @@
 //! Tests for setup-only startup orchestration.
 
-use std::ffi::OsString;
-use std::fs;
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    ffi::OsString,
+    fs,
+    panic::{AssertUnwindSafe, catch_unwind},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use color_eyre::eyre::{Result, ensure, eyre};
@@ -15,7 +17,10 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::test_support::{
-    dummy_settings, install_run_root_operation_hook, scoped_env, test_runtime,
+    dummy_settings,
+    install_run_root_operation_hook,
+    scoped_env,
+    test_runtime,
 };
 
 const TEST_POSTGRES_VERSION: &str = "17.4.0";
@@ -214,7 +219,8 @@ fn setup_postgres_only_resolves_cache_before_scoped_env_and_runs_setup_only(
     let observed_xdg_cache_home = std::env::var("XDG_CACHE_HOME").ok();
     ensure!(
         observed_xdg_cache_home.as_deref() == Some(operations_hook.host_cache_home.as_str()),
-        "expected host XDG_CACHE_HOME to be set for cache resolution (observed: {observed_xdg_cache_home:?})",
+        "expected host XDG_CACHE_HOME to be set for cache resolution (observed: \
+         {observed_xdg_cache_home:?})",
     );
 
     create_complete_cache_entry(&operations_hook.host_cache_home, TEST_POSTGRES_VERSION)?;
@@ -225,7 +231,8 @@ fn setup_postgres_only_resolves_cache_before_scoped_env_and_runs_setup_only(
         .join("binaries");
     ensure!(
         resolved_cache_dir == expected_cache_dir,
-        "cache config should resolve from host env before ScopedEnv (expected: {expected_cache_dir}, observed: {resolved_cache_dir})",
+        "cache config should resolve from host env before ScopedEnv (expected: \
+         {expected_cache_dir}, observed: {resolved_cache_dir})",
     );
     let expected_install_dir = utf8_path(
         root_bootstrap.settings.installation_dir.clone(),

@@ -22,13 +22,11 @@
 //! depth so callers can compose helpers without deadlocking. Different threads
 //! are still serialized.
 
-use crate::observability::LOG_TARGET;
-use std::cell::RefCell;
-use std::ffi::OsString;
-use std::marker::PhantomData;
-use std::rc::Rc;
-use std::thread_local;
+use std::{cell::RefCell, ffi::OsString, marker::PhantomData, rc::Rc, thread_local};
+
 use tracing::{info, info_span};
+
+use crate::observability::LOG_TARGET;
 
 #[cfg(all(test, feature = "loom-tests"))]
 mod loom_tests;
@@ -61,9 +59,7 @@ fn enter_scope_std(vars: Vec<(OsString, Option<OsString>)>) -> usize {
     with_state(|state| state.enter_scope(vars))
 }
 
-fn exit_scope_std(index: usize) {
-    with_state(|state| state.exit_scope(index));
-}
+fn exit_scope_std(index: usize) { with_state(|state| state.exit_scope(index)); }
 
 /// Restores the process environment when dropped, reverting to prior values.
 #[derive(Debug)]

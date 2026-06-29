@@ -7,8 +7,7 @@ use color_eyre::eyre::WrapErr;
 use tracing::info_span;
 
 use super::connection::{connect_admin, escape_identifier};
-use crate::error::BootstrapResult;
-use crate::observability::LOG_TARGET;
+use crate::{error::BootstrapResult, observability::LOG_TARGET};
 
 /// RAII guard that drops a database when it goes out of scope.
 ///
@@ -58,15 +57,11 @@ impl TemporaryDatabase {
 
     /// Returns the database name.
     #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
+    pub fn name(&self) -> &str { &self.name }
 
     /// Returns the connection URL for this database.
     #[must_use]
-    pub fn url(&self) -> &str {
-        &self.database_url
-    }
+    pub fn url(&self) -> &str { &self.database_url }
 
     /// Drops the database, failing if connections exist.
     ///
@@ -94,9 +89,7 @@ impl TemporaryDatabase {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn drop_database(self) -> BootstrapResult<()> {
-        self.try_drop()
-    }
+    pub fn drop_database(self) -> BootstrapResult<()> { self.try_drop() }
 
     /// Drops the database, terminating any active connections first.
     ///
@@ -132,9 +125,8 @@ impl TemporaryDatabase {
         // Terminate active connections using parameterized query
         client
             .execute(
-                "SELECT pg_terminate_backend(pid) \
-                 FROM pg_stat_activity \
-                 WHERE datname = $1 AND pid <> pg_backend_pid()",
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND \
+                 pid <> pg_backend_pid()",
                 &[&self.name],
             )
             .wrap_err(format!(

@@ -1,16 +1,16 @@
 //! Helper functions for database lifecycle behavioural tests.
 
-use std::cell::RefCell;
-use std::ffi::{OsStr, OsString};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::{
+    cell::RefCell,
+    ffi::{OsStr, OsString},
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Duration,
+};
 
 use color_eyre::eyre::{Context, Result, ensure, eyre};
 use pg_embedded_setup_unpriv::{TemporaryDatabase, TestCluster, find_timezone_dir};
 
-use super::cluster_skip::cluster_skip_message;
-use super::env::ScopedEnvVars;
-use super::sandbox::TestSandbox;
+use super::{cluster_skip::cluster_skip_message, env::ScopedEnvVars, sandbox::TestSandbox};
 
 const BOOTSTRAP_RETRY_ATTEMPTS: usize = 3;
 const BOOTSTRAP_RETRY_DELAY: Duration = Duration::from_millis(250);
@@ -84,9 +84,7 @@ impl DatabaseWorld {
 
     /// Returns whether the scenario is skipped.
     #[must_use]
-    pub const fn is_skipped(&self) -> bool {
-        self.skip_reason.is_some()
-    }
+    pub const fn is_skipped(&self) -> bool { self.skip_reason.is_some() }
 
     /// Returns an error if the scenario is skipped.
     ///

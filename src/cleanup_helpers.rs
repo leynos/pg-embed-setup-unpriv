@@ -1,7 +1,9 @@
 //! Shared directory removal helpers with safety guards.
 
-use std::io::ErrorKind;
-use std::path::{Component, Path};
+use std::{
+    io::ErrorKind,
+    path::{Component, Path},
+};
 
 /// Records the outcome of a guarded directory removal attempt.
 ///

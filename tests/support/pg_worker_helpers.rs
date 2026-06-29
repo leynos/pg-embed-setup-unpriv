@@ -8,9 +8,7 @@ use color_eyre::eyre::Result;
 ///
 /// Returns `None` when `CARGO_BIN_EXE_pg_worker` is not set, which can occur
 /// when running tests without building the binary target.
-pub const fn pg_worker_binary() -> Option<&'static str> {
-    option_env!("CARGO_BIN_EXE_pg_worker")
-}
+pub const fn pg_worker_binary() -> Option<&'static str> { option_env!("CARGO_BIN_EXE_pg_worker") }
 
 /// Runs the `pg_worker` binary with the given arguments.
 ///

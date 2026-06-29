@@ -1,28 +1,44 @@
 //! Tests for environment scoping and logging.
 
-use super::ScopedEnv;
-use super::THREAD_STATE;
-use super::state::{ENV_LOCK, ThreadState};
-#[cfg(feature = "cluster-unit-tests")]
-use crate::test_support::capture_info_logs;
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    panic,
+    sync::{Arc, Barrier, TryLockError, mpsc},
+    thread,
+    time::{Duration, Instant},
+};
+
 use rstest::rstest;
 use serial_test::serial;
-use std::env;
-use std::ffi::{OsStr, OsString};
-use std::panic;
-use std::sync::{Arc, Barrier, TryLockError, mpsc};
-use std::thread;
-use std::time::{Duration, Instant};
+
+use super::{
+    ScopedEnv,
+    THREAD_STATE,
+    state::{ENV_LOCK, ThreadState},
+};
+#[cfg(feature = "cluster-unit-tests")]
+use crate::test_support::capture_info_logs;
 
 mod corruption;
 mod thread_helpers;
 
 use corruption::{
-    CorruptionCase, apply_invalid_scope_exit, drop_guards_in_order, drop_guards_out_of_order,
-    no_corruption, run_scoped_env_corruption_test, setup_nested_guards, setup_single_guard,
+    CorruptionCase,
+    apply_invalid_scope_exit,
+    drop_guards_in_order,
+    drop_guards_out_of_order,
+    no_corruption,
+    run_scoped_env_corruption_test,
+    setup_nested_guards,
+    setup_single_guard,
 };
 use thread_helpers::{
-    ReleaseOnDrop, RestoreEnv, ThreadAChannels, ThreadBChannels, spawn_inner_guard_thread,
+    ReleaseOnDrop,
+    RestoreEnv,
+    ThreadAChannels,
+    ThreadBChannels,
+    spawn_inner_guard_thread,
     spawn_outer_guard_thread,
 };
 

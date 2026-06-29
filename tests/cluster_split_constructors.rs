@@ -255,6 +255,7 @@ async fn wait_for_postmaster_shutdown_async(
     data_dir: &Utf8PathBuf,
 ) -> std::result::Result<(), color_eyre::Report> {
     use std::time::Instant;
+
     use tokio::time::sleep;
 
     let pid = data_dir.join("postmaster.pid");

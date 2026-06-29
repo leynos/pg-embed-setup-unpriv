@@ -4,11 +4,14 @@
 //! contexts through the `ClusterHandle` type.
 #![cfg(unix)]
 
-use std::sync::OnceLock;
-use std::thread;
+use std::{sync::OnceLock, thread};
 
-use pg_embedded_setup_unpriv::test_support::dummy_settings;
-use pg_embedded_setup_unpriv::{ClusterGuard, ClusterHandle, ExecutionPrivileges};
+use pg_embedded_setup_unpriv::{
+    ClusterGuard,
+    ClusterHandle,
+    ExecutionPrivileges,
+    test_support::dummy_settings,
+};
 use rstest::{fixture, rstest};
 
 // ============================================================================
@@ -175,15 +178,14 @@ fn cluster_guard_is_not_send_documented() {
 // **Explicit caching tests exist in separate test binaries** (Cargo compiles
 // each `tests/*.rs` as its own binary, providing natural `OnceLock` isolation):
 //
-// - `tests/shared_cluster_handle_success.rs`: Verifies that successful
-//   initialisation is cached. Calls `shared_cluster_handle()` three times
-//   and asserts pointer equality (`std::ptr::eq`) on returned handles.
+// - `tests/shared_cluster_handle_success.rs`: Verifies that successful initialisation is cached.
+//   Calls `shared_cluster_handle()` three times and asserts pointer equality (`std::ptr::eq`) on
+//   returned handles.
 //
-// - `tests/shared_cluster_handle_failure.rs`: Verifies that failed
-//   initialisation is cached. Injects failure by setting `TZDIR` to a
-//   non-existent path, then calls `shared_cluster_handle()` three times
-//   and asserts that returned errors have identical `BootstrapErrorKind`
-//   and contain "previously failed" in the message.
+// - `tests/shared_cluster_handle_failure.rs`: Verifies that failed initialisation is cached.
+//   Injects failure by setting `TZDIR` to a non-existent path, then calls `shared_cluster_handle()`
+//   three times and asserts that returned errors have identical `BootstrapErrorKind` and contain
+//   "previously failed" in the message.
 //
 // This file focuses on compile-time trait verification and thread-safety
 // patterns that don't require `OnceLock` state manipulation.

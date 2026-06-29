@@ -3,12 +3,12 @@
 //! The helper enforces that payload files are owned by the target unprivileged
 //! account before execing the worker binary with the downgraded identity.
 
-use crate::error::BootstrapResult;
-use crate::observability::LOG_TARGET;
+use std::{path::Path, process::Command};
+
 use color_eyre::eyre::{Context, eyre};
-use std::path::Path;
-use std::process::Command;
 use tracing::{info, info_span};
+
+use crate::{error::BootstrapResult, observability::LOG_TARGET};
 
 macro_rules! cfg_privilege_drop {
     ($($item:item)*) => {
@@ -240,9 +240,7 @@ cfg_privilege_drop! {
         target_os = "dragonfly",
     ),
 )))]
-const fn skip_privilege_drop_for_tests() -> bool {
-    false
-}
+const fn skip_privilege_drop_for_tests() -> bool { false }
 
 #[cfg(all(
     test,
@@ -257,10 +255,12 @@ const fn skip_privilege_drop_for_tests() -> bool {
     feature = "cluster-unit-tests"
 ))]
 mod tests {
+    use std::process::Command;
+
+    use tempfile::NamedTempFile;
+
     use super::*;
     use crate::test_support::capture_info_logs;
-    use std::process::Command;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn skip_guard_logs_observability() {

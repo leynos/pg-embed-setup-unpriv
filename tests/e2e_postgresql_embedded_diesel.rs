@@ -3,17 +3,17 @@
 //! downgrading to the `nobody` user for database operations.
 #![cfg(all(unix, feature = "privileged-tests"))]
 
-use std::io::Write;
-use std::time::Duration;
+use std::{io::Write, time::Duration};
 
 use camino::Utf8PathBuf;
 use cap_std::fs::{OpenOptions, PermissionsExt};
 use color_eyre::eyre::{Context, Result, ensure, eyre};
-use diesel::prelude::*;
-use diesel::sql_types::{Int4, Text};
+use diesel::{
+    prelude::*,
+    sql_types::{Int4, Text},
+};
 use nix::unistd::{User, fchown, geteuid};
-use pg_embedded_setup_unpriv::PgEnvCfg;
-use pg_embedded_setup_unpriv::worker_process_test_api::WorkerOperation;
+use pg_embedded_setup_unpriv::{PgEnvCfg, worker_process_test_api::WorkerOperation};
 use postgresql_embedded::PostgreSQL;
 use tokio::runtime::{Builder, Runtime};
 
@@ -26,7 +26,11 @@ mod env;
 
 use cap_fs::{ensure_dir, open_dir, remove_tree};
 use diesel_e2e_helpers::{
-    PostgresHandle, WorkerHandle, ensure_database_exists, run_worker_operation, worker_from_env,
+    PostgresHandle,
+    WorkerHandle,
+    ensure_database_exists,
+    run_worker_operation,
+    worker_from_env,
 };
 use env::{ScopedEnvVars, build_env, with_scoped_env};
 
@@ -85,25 +89,15 @@ impl TestConfig {
         }
     }
 
-    const fn base_dir(&self) -> &Utf8PathBuf {
-        &self.base_dir
-    }
+    const fn base_dir(&self) -> &Utf8PathBuf { &self.base_dir }
 
-    const fn install_dir(&self) -> &Utf8PathBuf {
-        &self.install_dir
-    }
+    const fn install_dir(&self) -> &Utf8PathBuf { &self.install_dir }
 
-    fn cache_dir(&self) -> Utf8PathBuf {
-        self.install_dir.join("cache")
-    }
+    fn cache_dir(&self) -> Utf8PathBuf { self.install_dir.join("cache") }
 
-    fn runtime_dir(&self) -> Utf8PathBuf {
-        self.install_dir.join("run")
-    }
+    fn runtime_dir(&self) -> Utf8PathBuf { self.install_dir.join("run") }
 
-    fn password_file(&self) -> Utf8PathBuf {
-        self.install_dir.join(".pgpass")
-    }
+    fn password_file(&self) -> Utf8PathBuf { self.install_dir.join(".pgpass") }
 
     fn bootstrap_env(&self) -> ScopedEnvVars {
         let port = self.port.to_string();

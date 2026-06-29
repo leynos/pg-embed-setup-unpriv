@@ -21,7 +21,5 @@ pub(super) enum ClusterRuntime {
 
 impl ClusterRuntime {
     /// Returns `true` if this is async mode.
-    pub(super) const fn is_async(&self) -> bool {
-        matches!(self, Self::Async)
-    }
+    pub(super) const fn is_async(&self) -> bool { matches!(self, Self::Async) }
 }

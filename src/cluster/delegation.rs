@@ -4,11 +4,13 @@
 //! `TestCluster`, eliminating the need for callers to explicitly call `.connection()`
 //! before invoking methods like `create_database` or `drop_database`.
 
-use super::lifecycle::DatabaseName;
-use super::temporary_database::TemporaryDatabase;
-use super::{ClusterHandle, TestCluster};
-use crate::CleanupMode;
-use crate::error::BootstrapResult;
+use super::{
+    ClusterHandle,
+    TestCluster,
+    lifecycle::DatabaseName,
+    temporary_database::TemporaryDatabase,
+};
+use crate::{CleanupMode, error::BootstrapResult};
 
 /// Generates delegation methods on `TestCluster` that forward to `TestClusterConnection`.
 ///

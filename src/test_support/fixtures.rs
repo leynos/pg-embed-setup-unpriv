@@ -1,20 +1,26 @@
 //! Shared fixtures for tests that need bootstrap scaffolding.
 
-use super::scoped_env::scoped_env;
+use std::{ffi::OsString, time::Duration};
+
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Result, eyre};
+use postgresql_embedded::Settings;
 #[cfg(not(doc))]
 use rstest::fixture;
-use std::ffi::OsString;
-use std::time::Duration;
 use tokio::runtime::{Builder, Runtime};
 
-use super::worker_env;
+use super::{scoped_env::scoped_env, worker_env};
 use crate::{
-    CleanupMode, ClusterHandle, ExecutionMode, ExecutionPrivileges, TestBootstrapEnvironment,
-    TestBootstrapSettings, TestCluster, detect_execution_privileges, env::ScopedEnv,
+    CleanupMode,
+    ClusterHandle,
+    ExecutionMode,
+    ExecutionPrivileges,
+    TestBootstrapEnvironment,
+    TestBootstrapSettings,
+    TestCluster,
+    detect_execution_privileges,
+    env::ScopedEnv,
 };
-use postgresql_embedded::Settings;
 
 /// Builds a single-threaded Tokio runtime for synchronous tests.
 ///
@@ -61,8 +67,7 @@ pub fn dummy_environment() -> TestBootstrapEnvironment {
 ///
 /// # Examples
 /// ```rust
-/// use pg_embedded_setup_unpriv::test_support::dummy_settings;
-/// use pg_embedded_setup_unpriv::ExecutionPrivileges;
+/// use pg_embedded_setup_unpriv::{ExecutionPrivileges, test_support::dummy_settings};
 ///
 /// let settings = dummy_settings(ExecutionPrivileges::Unprivileged);
 /// assert_eq!(settings.privileges, ExecutionPrivileges::Unprivileged);
@@ -207,15 +212,17 @@ pub fn shared_test_cluster_handle() -> &'static ClusterHandle {
     match shared_cluster_handle() {
         Ok(handle) => handle,
         Err(err) => panic!(
-            "SKIP-TEST-CLUSTER: shared_test_cluster_handle fixture failed to start PostgreSQL: {err:?}"
+            "SKIP-TEST-CLUSTER: shared_test_cluster_handle fixture failed to start PostgreSQL: \
+             {err:?}"
         ),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use rstest::rstest;
+
+    use super::*;
 
     /// Unprivileged users should not require the worker binary, regardless of
     /// whether it exists or whether `PG_EMBEDDED_WORKER` is set.

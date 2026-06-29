@@ -5,21 +5,26 @@
 //! The [`setup_postgres_only`] entry point drives download + `initdb` without
 //! starting the server, used by the CLI binary.
 
-use crate::cache::BinaryCacheConfig;
-use crate::env::ScopedEnv;
-use crate::error::BootstrapResult;
-use crate::observability::LOG_TARGET;
-use crate::{ExecutionPrivileges, TestBootstrapSettings};
 use postgresql_embedded::PostgreSQL;
 use tokio::runtime::Runtime;
 use tracing::info;
 
-use super::cache_integration;
-use super::installation;
 #[cfg(feature = "async-api")]
 use super::worker_invoker::AsyncInvoker;
-use super::worker_invoker::WorkerInvoker as ClusterWorkerInvoker;
-use super::worker_operation;
+use super::{
+    cache_integration,
+    installation,
+    worker_invoker::WorkerInvoker as ClusterWorkerInvoker,
+    worker_operation,
+};
+use crate::{
+    ExecutionPrivileges,
+    TestBootstrapSettings,
+    cache::BinaryCacheConfig,
+    env::ScopedEnv,
+    error::BootstrapResult,
+    observability::LOG_TARGET,
+};
 
 #[derive(Clone, Copy)]
 enum LifecycleStep {

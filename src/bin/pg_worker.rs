@@ -77,16 +77,15 @@ impl Operation {
             "cleanup" => Ok(Self::Cleanup),
             "cleanup-full" => Ok(Self::CleanupFull),
             other => Err(WorkerError::InvalidArgs(format!(
-                "unknown operation '{other}'; expected setup, start, stop, cleanup, or cleanup-full"
+                "unknown operation '{other}'; expected setup, start, stop, cleanup, or \
+                 cleanup-full"
             ))),
         }
     }
 }
 
 #[cfg(unix)]
-fn main() -> Result<(), BoxError> {
-    run_worker(env::args_os()).map_err(Into::into)
-}
+fn main() -> Result<(), BoxError> { run_worker(env::args_os()).map_err(Into::into) }
 
 #[cfg(unix)]
 fn run_worker(args: impl Iterator<Item = OsString>) -> Result<(), WorkerError> {

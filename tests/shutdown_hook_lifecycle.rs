@@ -13,9 +13,7 @@ mod cluster_skip;
 #[path = "support/skip.rs"]
 mod skip;
 
-use std::path::Path;
-use std::time::Duration;
-use std::{env, fs, thread};
+use std::{env, fs, path::Path, thread, time::Duration};
 
 use cluster_skip::cluster_skip_message;
 use color_eyre::eyre::{Context, Result, eyre};
