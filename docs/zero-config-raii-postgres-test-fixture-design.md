@@ -344,7 +344,6 @@ essentially one line in the test setup.
 - Behavioural suites now coordinate across binaries with a shared lock file,
   so concurrent PostgreSQL setup or download tasks do not race in CI.
 
-
 ### Implementation update (2026-06-26): Windows and macOS validation
 
 - CI now includes required macOS and Windows unprivileged test legs. These legs
