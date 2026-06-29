@@ -17,6 +17,7 @@ def run_act(
     *,
     artifact_dir: Path,
 ) -> tuple[int, Path, str]:
+    """Run a workflow job through `act` and return its exit code and logs."""
     if shutil.which("act") is None:
         pytest.skip("act CLI not installed")
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -52,6 +53,7 @@ def run_act(
 
 
 def test_workflow_produces_expected_artefact_and_logs(tmp_path: Path) -> None:
+    """Verify the self-test workflow writes its artefact and greeting logs."""
     artifact_dir = tmp_path / "act-artifacts"
     code, artdir, logs = run_act(artifact_dir=artifact_dir)
     assert code == 0, f"act failed:\n{logs}"
