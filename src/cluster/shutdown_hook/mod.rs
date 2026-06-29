@@ -11,7 +11,7 @@
 //! escalates to forceful termination if the timeout elapses.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, TryLockError};
 use std::time::Duration;
 
 use crate::CleanupMode;
@@ -166,10 +166,19 @@ extern "C" fn shutdown_callback() {
 
 /// Returns callback work without holding the global shutdown-state mutex.
 fn shutdown_work() -> Option<ShutdownWork> {
-    let Ok(guard) = SHUTDOWN_STATE.try_lock() else {
-        // Mutex is poisoned or held by another thread — bail to avoid
-        // blocking (or deadlocking) inside an atexit handler.
-        return None;
+    let guard = match SHUTDOWN_STATE.try_lock() {
+        Ok(guard) => guard,
+        Err(TryLockError::Poisoned(poisoned)) => {
+            tracing::warn!(
+                target: crate::observability::LOG_TARGET,
+                "shutdown state mutex was poisoned; continuing shutdown cleanup"
+            );
+            poisoned.into_inner()
+        }
+        Err(TryLockError::WouldBlock) => {
+            // Avoid blocking (or deadlocking) inside an atexit handler.
+            return None;
+        }
     };
 
     let state = guard.as_ref()?;

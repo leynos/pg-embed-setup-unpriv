@@ -1,5 +1,5 @@
 //! Downloads the specified `PostgreSQL` distribution, initialises the data
-//! directory via `initdb`, and prepares the filesystem for unprivileged use.
+//! directory via `initdb`, and prepares a platform-appropriate test cluster.
 //!
 //! The server is **not** started — the installation is left ready for
 //! subsequent use by [`TestCluster`](pg_embedded_setup_unpriv::TestCluster) or
@@ -8,6 +8,8 @@
 //! with status code `0` on success and `1` on error.
 
 use clap::Parser;
+
+const CLI_ABOUT: &str = "Initialises postgresql_embedded clusters with platform-appropriate setup";
 
 const CONFIGURATION_HELP: &str = concat!(
     "Configuration is read from environment variables:\n",
@@ -23,7 +25,7 @@ const CONFIGURATION_HELP: &str = concat!(
 );
 
 #[derive(Debug, Parser)]
-#[command(version, about, long_about = None, after_help = CONFIGURATION_HELP)]
+#[command(version, about = CLI_ABOUT, long_about = None, after_help = CONFIGURATION_HELP)]
 struct Cli;
 
 fn main() -> color_eyre::eyre::Result<()> {

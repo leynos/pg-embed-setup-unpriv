@@ -9,39 +9,24 @@
 //! verification.
 #![cfg(unix)]
 
-use pg_embedded_setup_unpriv::test_support::shared_cluster_handle;
+use pg_embedded_setup_unpriv::ScopedEnv;
+use pg_embedded_setup_unpriv::test_support::{scoped_env, shared_cluster_handle};
 use pg_embedded_setup_unpriv::{BootstrapError, BootstrapErrorKind, ClusterHandle};
+use std::ffi::OsString;
 use tracing::warn;
 
 /// Sets up the environment to force bootstrap failure.
-///
-/// # Safety
-///
-/// This function modifies environment variables, which is unsafe in
-/// multi-threaded contexts. This test runs in its own process (separate
-/// test binary) and is the only test in this file, so there are no other
-/// threads that could be reading environment variables concurrently.
-unsafe fn setup_failing_environment() {
-    // SAFETY: This test runs in isolation (separate test binary with only
-    // one test), so no concurrent threads are reading environment variables.
-    unsafe {
-        set_env_var(
-            "TZDIR",
-            "/nonexistent/timezone/directory/that/does/not/exist",
-        );
-        // Also clear TZ to ensure the bootstrap tries to read from TZDIR
-        remove_env_var("TZ");
-    }
-}
-
-unsafe fn set_env_var(key: &str, value: &str) {
-    // SAFETY: callers ensure this single-test binary serialises environment mutation.
-    unsafe { std::env::set_var(key, value) };
-}
-
-unsafe fn remove_env_var(key: &str) {
-    // SAFETY: callers ensure this single-test binary serialises environment mutation.
-    unsafe { std::env::remove_var(key) };
+fn setup_failing_environment() -> ScopedEnv {
+    scoped_env(vec![
+        (
+            OsString::from("TZDIR"),
+            Some(OsString::from(
+                "/nonexistent/timezone/directory/that/does/not/exist",
+            )),
+        ),
+        // Clear TZ to ensure the bootstrap tries to read from TZDIR.
+        (OsString::from("TZ"), None),
+    ])
 }
 
 /// Extracts the error from a result, or returns None if it succeeded.
@@ -89,10 +74,7 @@ fn verify_cached_error_message(error: &BootstrapError) {
 #[test]
 fn caches_failed_initialisation() {
     // Force bootstrap failure by pointing TZDIR to a non-existent directory.
-    // SAFETY: See `setup_failing_environment` documentation.
-    unsafe {
-        setup_failing_environment();
-    }
+    let _env_guard = setup_failing_environment();
 
     let err1 = shared_cluster_handle();
     let Some(first_error) = extract_error(err1, "first call") else {

@@ -2060,3 +2060,30 @@ Validation for the follow-up fix: release archive pytest via `uv`,
 `python -m py_compile scripts/release_archive.py`, `make check-fmt`,
 `make lint`, `make markdownlint`, `git diff --check`, and
 `CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`.
+
+Revision 14 (2026-06-29), after verifying the next review batch. What changed
+and why:
+
+- Made release-archive parser and command-construction helpers private because
+  they are implementation details rather than public script interfaces; tests
+  that intentionally cover wrapper parsing now reference the private helper
+  directly.
+- Escaped pytest `match=` patterns for path validation and Cargo version
+  mismatch assertions so regular-expression metacharacters cannot broaden the
+  expected failure.
+- Updated shutdown hook callback work extraction to recover poisoned
+  `SHUTDOWN_STATE` guards while still avoiding blocking when another thread
+  holds the mutex.
+- Reworded the package description and added an explicit CLI `about` string so
+  help output describes cross-platform setup rather than Linux-only root/nobody
+  privilege handling.
+- Replaced local unsafe environment mutation wrappers in the shared-cluster
+  failure test with the suite's scoped environment guard, and tightened the
+  trybuild test-support export check to bind `read_postmaster_pid` to its exact
+  public function signature.
+
+Validation recorded for this pass: `python -m py_compile
+scripts/release_archive.py`, release archive pytest via `uv`,
+`cargo test --test cli help_flag_prints_configuration_surface_without_bootstrap`,
+`make check-fmt`, `make lint`, `make markdownlint`, `git diff --check`, and
+`CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`.
