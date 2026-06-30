@@ -1,4 +1,10 @@
 //! Loom checks for shared singleton state transitions.
+//!
+//! These tests model `shared_singleton_core` under deterministic thread
+//! interleavings. They verify that concurrent callers initialise the shared
+//! singleton at most once, observe one cached success or failure, and never see
+//! a torn intermediate state while reusing the same core state-machine logic as
+//! `shared_singleton.rs`.
 
 use super::shared_singleton_core::{SharedInitState, get_or_try_init_shared};
 use loom::sync::atomic::{AtomicUsize, Ordering};
