@@ -294,7 +294,7 @@ essentially one line in the test setup.
 - Recorded this dependency uplift to keep the design doc aligned with the tool
   chain choices and to signpost downstream crates that they can rely on the
   0.5.0 APIs when authoring scenarios.
-- Added a Dutch `rstest-bdd` scenario (`tests/localized_diagnostics.rs`) that
+- Added a French `rstest-bdd` scenario (`tests/localized_diagnostics.rs`) that
   switches diagnostics to French via `select_localizations`. The test is part of
   `make test`, giving CI a deterministic signal that localization bundles ship
   correctly on every target platform.

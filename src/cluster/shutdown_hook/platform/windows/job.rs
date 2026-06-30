@@ -237,15 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn termination_validation_rejects_reused_descendant_pid_from_different_tree() {
-        let descendant = entry(20, 10);
-        let entries = [entry(20, 99), entry(99, 99)];
-
-        assert!(!descendant_is_still_in_root_tree(10, descendant, &entries));
-    }
-
-    #[test]
-    fn job_assignment_validation_rejects_reused_descendant_pid_from_different_tree() {
+    fn descendant_validation_rejects_reused_pid_from_different_tree() {
         let descendant = entry(20, 10);
         let entries = [entry(20, 99), entry(99, 99)];
 

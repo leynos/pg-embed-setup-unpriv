@@ -88,6 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
@@ -136,11 +137,14 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
       - name: Install cargo-binstall 1.19.1
         shell: bash
+        env:
+          RUNNER_OS: ${{ runner.os }}
         run: |
           set -euo pipefail
 
@@ -153,14 +157,14 @@ jobs:
 
           effective_binstall_dir="$requested_binstall_dir"
           binstall_bin="$requested_binstall_dir/cargo-binstall"
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
             binstall_bin="${binstall_bin}.exe"
           fi
 
           if [[ ! -x "$binstall_bin" ]]; then
             cargo_home_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
             fallback_binstall_bin="$cargo_home_bin/cargo-binstall"
-            if [[ "${{ runner.os }}" == "Windows" ]]; then
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
               fallback_binstall_bin="${fallback_binstall_bin}.exe"
             fi
             if [[ -x "$fallback_binstall_bin" ]]; then
@@ -197,6 +201,9 @@ jobs:
             --pattern "*.tgz"
       - name: Audit cargo-binstall assets
         shell: bash
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
 
@@ -327,7 +334,7 @@ jobs:
 
           cargo binstall -y \
             --manifest-path Cargo.toml \
-            --targets "${{ matrix.target }}" \
+            --targets "$TARGET" \
             --strategies crate-meta-data \
             --pkg-url "$pkg_url" \
             --root-certificates "$cert_dir/ca.pem" \
@@ -336,7 +343,7 @@ jobs:
             pg-embed-setup-unpriv
 
           binary_ext=""
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
             binary_ext=".exe"
           fi
 
@@ -370,6 +377,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2

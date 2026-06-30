@@ -13,6 +13,7 @@ import pytest
 from cmd_mox import CmdMox
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "release_archive.py"
+sys.path.insert(0, str(SCRIPT_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("release_archive", SCRIPT_PATH)
 assert SPEC is not None
 release_archive = importlib.util.module_from_spec(SPEC)
@@ -137,12 +138,8 @@ def test_stage_archive_rejects_path_like_target(tmp_path: Path) -> None:
         binaries=("pg_embedded_setup_unpriv",),
     )
 
-    try:
+    with pytest.raises(SystemExit, match=re.escape("target cannot contain '..'")):
         release_archive.stage_archive(spec)
-    except SystemExit as err:
-        assert "target cannot contain '..'" in str(err)
-    else:
-        raise AssertionError("expected path-like target to abort")
 
 
 def test_stage_archive_rejects_path_like_binary(tmp_path: Path) -> None:
@@ -154,12 +151,8 @@ def test_stage_archive_rejects_path_like_binary(tmp_path: Path) -> None:
         binaries=("../pg_worker",),
     )
 
-    try:
+    with pytest.raises(SystemExit, match=re.escape("binary cannot contain '..'")):
         release_archive.stage_archive(spec)
-    except SystemExit as err:
-        assert "binary cannot contain '..'" in str(err)
-    else:
-        raise AssertionError("expected path-like binary to abort")
 
 
 @pytest.mark.parametrize(
