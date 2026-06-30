@@ -12,17 +12,20 @@ loom::lazy_static! {
     static ref LOOM_ENV_LOCK: loom::sync::Mutex<()> = loom::sync::Mutex::new(());
 }
 
+/// Provides the Loom-backed environment lock used by these model checks.
 struct LoomEnvLock;
 
 impl EnvLockOps for LoomEnvLock {
     type Guard = loom::sync::MutexGuard<'static, ()>;
 
+    /// Acquires the modelled environment mutex for a scoped environment guard.
     fn lock_env_mutex() -> Self::Guard {
         LOOM_ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Leaves poisoning recovery to Loom's modelled mutex implementation.
     fn ensure_lock_is_clean() {}
 }
 
@@ -31,6 +34,7 @@ loom::thread_local! {
         RefCell::new(ThreadStateInner::new());
 }
 
+/// Enters a scoped environment frame using Loom thread-local state.
 fn enter_scope_loom(vars: Vec<(OsString, Option<OsString>)>) -> usize {
     LOOM_THREAD_STATE.with(|cell| {
         let mut state = cell.borrow_mut();
@@ -38,6 +42,7 @@ fn enter_scope_loom(vars: Vec<(OsString, Option<OsString>)>) -> usize {
     })
 }
 
+/// Exits a scoped environment frame from Loom thread-local state.
 fn exit_scope_loom(index: usize) {
     LOOM_THREAD_STATE.with(|cell| {
         let mut state = cell.borrow_mut();
@@ -45,6 +50,7 @@ fn exit_scope_loom(index: usize) {
     });
 }
 
+/// Applies test environment changes through the Loom state hooks.
 fn apply_loom(vars: &[(String, Option<String>)]) -> ScopedEnv {
     let owned: Vec<(OsString, Option<OsString>)> = vars
         .iter()
@@ -53,17 +59,22 @@ fn apply_loom(vars: &[(String, Option<String>)]) -> ScopedEnv {
     ScopedEnv::apply_owned_with_state(owned, enter_scope_loom, exit_scope_loom)
 }
 
+/// Runs a bounded Loom model for the scoped environment lock scenarios.
 fn run_loom_model<F>(f: F)
 where
     F: Fn() + Send + Sync + 'static,
 {
     let mut builder = loom::model::Builder::new();
+    // These bounds keep the scheduler search tractable enough for routine CI.
+    // Increasing the preemption bound in particular needs a matching runtime
+    // budget review; see the developer guide for details.
     builder.max_threads = 3;
     builder.max_branches = 64;
     builder.preemption_bound = Some(3);
     builder.check(f);
 }
 
+/// Verifies that concurrent scoped environments cannot overlap.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_serialises_concurrent_scopes() {
@@ -95,6 +106,7 @@ fn scoped_env_serialises_concurrent_scopes() {
     });
 }
 
+/// Verifies that nested scopes on one thread keep the lock reentrant.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_allows_reentrant_scopes_on_one_thread() {

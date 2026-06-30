@@ -32,6 +32,11 @@ jobs:
             **/*.md
             !**/target/**
             !**/dist/**
+      - name: Install interrogate
+        run: |
+          python -m pip install --user uv==0.11.19
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/uv" tool install interrogate==1.7.0
       - name: Lint
         run: make lint
       - name: Install cargo-nextest
@@ -49,6 +54,11 @@ jobs:
           format: lcov
           features: dev-worker
           with-default-features: "false"
+      - name: Loom Concurrency Tests (non-blocking)
+        if: ${{ always() && matrix.privilege == 'unprivileged' }}
+        run: make test-loom
+        timeout-minutes: 1
+        continue-on-error: true
       - name: Install cargo-nextest and test (root)
         if: ${{ matrix.privilege == 'root' }}
         run: |
