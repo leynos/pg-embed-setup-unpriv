@@ -34,9 +34,9 @@ jobs:
             !**/dist/**
       - name: Install interrogate
         run: |
-          python -m pip install --user uv
+          python -m pip install --user uv==0.11.19
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/uv" tool install interrogate
+          "$HOME/.local/bin/uv" tool install interrogate==1.7.0
       - name: Lint
         run: make lint
       - name: Install cargo-nextest

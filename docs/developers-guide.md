@@ -38,8 +38,8 @@ can install those published assets on Linux `x86_64` and `aarch64`.
 Loom-based checks for `ScopedEnv` are opt-in and only compile when the
 `loom-tests` feature is enabled. The Loom tests are marked `#[ignore]`, and
 `make test` keeps them dormant: the nextest run uses `--all-features`, while
-the follow-up `cargo test` run disables default features (enabling `dev-worker`
-only). Run the Loom suite locally with:
+the follow-up `cargo nextest run` disables default features (enabling
+`dev-worker` only). Run the Loom suite locally with:
 
 ```sh
 make test-loom
