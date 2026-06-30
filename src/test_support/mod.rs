@@ -30,14 +30,9 @@ pub use errors::{bootstrap_error, privilege_error};
 pub use filesystem::ambient_dir_and_path;
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub use filesystem::{CapabilityTempDir, ensure_dir_exists, metadata, set_permissions};
-pub use fixtures::{
-    dummy_environment,
-    dummy_settings,
-    ensure_worker_env,
-    shared_cluster,
-    shared_cluster_handle,
-    test_runtime,
-};
+pub use fixtures::{dummy_environment, dummy_settings, test_runtime};
+#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
+pub use fixtures::{ensure_worker_env, shared_cluster, shared_cluster_handle};
 #[cfg(not(doc))]
 pub use fixtures::{shared_test_cluster, shared_test_cluster_handle, test_cluster};
 #[cfg(doc)]
