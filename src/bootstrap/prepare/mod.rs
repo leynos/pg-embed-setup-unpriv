@@ -19,6 +19,8 @@ use crate::{
     observability::LOG_TARGET,
 };
 
+use self::unix_user::{ensure_install_dir_for_user, ensure_pgpass_for_user};
+
 const PGPASS_MODE: u32 = 0o600;
 
 #[cfg(all(unix, privileged_unix_platform))]
@@ -254,3 +256,4 @@ mod property_tests;
 
 #[cfg(test)]
 mod tests;
+mod unix_user;

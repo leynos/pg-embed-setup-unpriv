@@ -92,8 +92,8 @@ where
 {
     let mut should_rollback_on_panic = false;
     let unwind_result = catch_unwind(AssertUnwindSafe(|| {
-        should_rollback_on_panic = true;
         create_database()?;
+        should_rollback_on_panic = true;
         setup_template_or_rollback(setup_fn, drop_database)
     }));
 
@@ -298,6 +298,34 @@ mod tests {
         assert!(result.is_err(), "setup panic should be resumed");
         assert!(!created.get(), "panic path should remove the template");
         assert!(dropped.get(), "panic path should invoke rollback");
+    }
+
+    #[test]
+    fn create_panic_does_not_roll_back_uncreated_template() {
+        let locks = NoopLocks;
+        let dropped = Cell::new(false);
+
+        let result = catch_unwind(AssertUnwindSafe(|| match ensure_template_exists_with_lock(
+            &locks,
+            "template",
+            TemplateCreationOps {
+                database_exists: || Ok(false),
+                create_database: || panic!("create panic"),
+                drop_database: || {
+                    dropped.set(true);
+                    Ok(())
+                },
+                setup_fn: || Ok(()),
+            },
+        ) {
+            Ok(()) | Err(_) => {}
+        }));
+
+        assert!(result.is_err(), "create panic should be resumed");
+        assert!(
+            !dropped.get(),
+            "panic before successful creation should not invoke rollback"
+        );
     }
 
     #[test]

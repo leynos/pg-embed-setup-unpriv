@@ -1,4 +1,10 @@
 //! Shared singleton state-machine core.
+//!
+//! This module owns the fallible lazy-initialisation state machine shared by
+//! `shared_singleton.rs` and the Loom model tests. Keeping the transition logic
+//! here gives runtime callers and test-only concurrency models the same
+//! behaviour without coupling either side to the other's locking primitive or
+//! storage strategy.
 
 /// State machine for fallible lazy singleton initialisation.
 pub(super) enum SharedInitState<T, C> {
