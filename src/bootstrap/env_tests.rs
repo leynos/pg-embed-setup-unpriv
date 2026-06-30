@@ -7,13 +7,27 @@ use std::{
 
 
 #[test]
+use crate::bootstrap::mode::ExecutionPrivileges;
+use crate::env::ScopedEnv;
 fn discover_worker_returns_none_when_path_is_absent() {
     let result = discover_worker_from_path_value(None).expect("None PATH should not error");
     assert!(result.is_none(), "expected Ok(None) when PATH is absent");
 }
 
-#[test]
-#[cfg(all(unix, not(target_os = "macos")))]
+fn worker_binary_from_env_ignores_env_for_unprivileged_bootstrap() {
+    let _guard = ScopedEnv::apply(&[(
+        String::from("PG_EMBEDDED_WORKER"),
+        Some(String::from("/definitely/missing/pg_worker")),
+    )]);
+
+    let result = worker_binary_from_env(ExecutionPrivileges::Unprivileged)
+        .expect("unprivileged bootstrap should not validate PG_EMBEDDED_WORKER");
+
+    assert!(
+        result.is_none(),
+        "unprivileged bootstrap should not use PG_EMBEDDED_WORKER"
+    );
+}
 fn discover_worker_errors_on_non_utf8_path_entry() {
     let temp = tempfile::tempdir().expect("tempdir");
     let valid_dir = temp.path().join("valid");

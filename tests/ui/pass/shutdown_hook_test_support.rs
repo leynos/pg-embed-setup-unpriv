@@ -1,3 +1,5 @@
+//! Pins the shutdown-hook test-support API for trybuild and Windows smoke tests.
+
 use pg_embedded_setup_unpriv::BootstrapResult;
 use pg_embedded_setup_unpriv::test_support::{
     PostmasterPid, process_is_running, read_postmaster_pid,

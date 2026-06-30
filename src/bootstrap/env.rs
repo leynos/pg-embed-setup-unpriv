@@ -21,7 +21,7 @@ use crate::{
     fs::ambient_dir_and_path,
 };
 #[cfg(unix)]
-const WORKER_BINARY_NAME: &str = "pg_worker";
+const WORKER_BINARY_NAME: &str = "pg_worker.exe";
 #[cfg(windows)]
 const WORKER_BINARY_NAME: &str = "pg_worker.exe";
 pub(super) const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
@@ -154,6 +154,10 @@ pub(super) fn shutdown_timeout_from_env() -> BootstrapResult<Duration> {
 pub(super) fn worker_binary_from_env(
     privileges: ExecutionPrivileges,
 ) -> BootstrapResult<Option<Utf8PathBuf>> {
+    if privileges != ExecutionPrivileges::Root || !root_privilege_drop_supported() {
+        return Ok(None);
+    }
+
     if let Some(raw) = env::var_os("PG_EMBEDDED_WORKER") {
         let path = Utf8PathBuf::from_path_buf(PathBuf::from(&raw)).map_err(|_| {
             let invalid_value = raw.to_string_lossy().to_string();
@@ -169,17 +173,10 @@ pub(super) fn worker_binary_from_env(
 
     #[cfg(unix)]
     {
-        if privileges == ExecutionPrivileges::Root {
-            if let Some(worker) = discover_worker_from_path()? {
-                validate_worker_path(&worker)?;
-                return Ok(Some(worker));
-            }
+        if let Some(worker) = discover_worker_from_path()? {
+            validate_worker_path(&worker)?;
+            return Ok(Some(worker));
         }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = privileges;
     }
 
     Ok(None)
