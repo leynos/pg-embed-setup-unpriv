@@ -6,25 +6,16 @@
 mod output;
 mod privileges;
 
-pub(crate) use self::output::render_failure_for_tests;
-use self::output::{append_error_context, combine_errors, render_failure};
-use crate::cluster::WorkerOperation;
-use crate::error::{BootstrapError, BootstrapResult};
-use crate::observability::LOG_TARGET;
-use crate::worker::WorkerPayload;
+use std::{
+    io::{ErrorKind, Write as _},
+    path::Path,
+    process::{Child, Command, Output, Stdio},
+    time::Duration,
+};
+
 use camino::Utf8Path;
 use color_eyre::eyre::{Context, Report, eyre};
 use postgresql_embedded::Settings;
-use serde_json::to_writer;
-use std::io::ErrorKind;
-use std::io::Write as _;
-use std::path::Path;
-use std::process::{Child, Command, Output, Stdio};
-use std::time::Duration;
-use tempfile::{NamedTempFile, TempPath};
-use tracing::{info, info_span};
-use wait_timeout::ChildExt;
-
 #[cfg(all(
     unix,
     any(
@@ -37,6 +28,19 @@ use wait_timeout::ChildExt;
     any(test, doc, feature = "privileged-tests"),
 ))]
 pub(crate) use privileges::{PrivilegeDropGuard, disable_privilege_drop_for_tests};
+use serde_json::to_writer;
+use tempfile::{NamedTempFile, TempPath};
+use tracing::{info, info_span};
+use wait_timeout::ChildExt;
+
+pub(crate) use self::output::render_failure_for_tests;
+use self::output::{append_error_context, combine_errors, render_failure};
+use crate::{
+    cluster::WorkerOperation,
+    error::{BootstrapError, BootstrapResult},
+    observability::LOG_TARGET,
+    worker::WorkerPayload,
+};
 
 /// Captures inputs for launching a worker subprocess.
 ///
@@ -164,8 +168,7 @@ impl<'a> WorkerRequest<'a> {
 /// - the worker payload cannot be created, serialised, or flushed to disk;
 /// - the worker command cannot be spawned or its output cannot be collected;
 /// - the worker exceeds the configured timeout and must be terminated; or
-/// - the worker exits unsuccessfully, in which case the captured output is
-///   surfaced for context.
+/// - the worker exits unsuccessfully, in which case the captured output is surfaced for context.
 ///
 /// # Examples
 ///
@@ -207,9 +210,7 @@ struct WorkerProcess<'a> {
 }
 
 impl<'a> WorkerProcess<'a> {
-    const fn new(request: &'a WorkerRequest<'a>) -> Self {
-        Self { request }
-    }
+    const fn new(request: &'a WorkerRequest<'a>) -> Self { Self { request } }
 
     #[expect(
         clippy::cognitive_complexity,

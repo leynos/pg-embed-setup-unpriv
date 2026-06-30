@@ -22,15 +22,16 @@
 //!
 //! ```no_run
 //! use std::sync::OnceLock;
+//!
 //! use pg_embedded_setup_unpriv::{ClusterHandle, TestCluster};
 //!
 //! static SHARED: OnceLock<ClusterHandle> = OnceLock::new();
 //!
 //! fn shared_handle() -> &'static ClusterHandle {
 //!     SHARED.get_or_init(|| {
-//!         let (handle, guard) = TestCluster::new_split()
-//!             .expect("cluster bootstrap failed");
-//!         handle.register_shutdown_on_exit()
+//!         let (handle, guard) = TestCluster::new_split().expect("cluster bootstrap failed");
+//!         handle
+//!             .register_shutdown_on_exit()
 //!             .expect("shutdown hook registration failed");
 //!         std::mem::forget(guard);
 //!         handle
@@ -38,12 +39,14 @@
 //! }
 //! ```
 
-use super::connection::TestClusterConnection;
-use super::lifecycle::DatabaseName;
-use super::temporary_database::TemporaryDatabase;
-use crate::error::BootstrapResult;
-use crate::{TestBootstrapEnvironment, TestBootstrapSettings};
 use postgresql_embedded::Settings;
+
+use super::{
+    connection::TestClusterConnection,
+    lifecycle::DatabaseName,
+    temporary_database::TemporaryDatabase,
+};
+use crate::{TestBootstrapEnvironment, TestBootstrapSettings, error::BootstrapResult};
 
 /// Send-safe handle providing read-only access to a running `PostgreSQL` cluster.
 ///
@@ -83,16 +86,12 @@ const _: () = {
 };
 
 impl From<TestBootstrapSettings> for ClusterHandle {
-    fn from(bootstrap: TestBootstrapSettings) -> Self {
-        Self { bootstrap }
-    }
+    fn from(bootstrap: TestBootstrapSettings) -> Self { Self { bootstrap } }
 }
 
 impl ClusterHandle {
     /// Creates a new handle from bootstrap settings.
-    pub(super) const fn new(bootstrap: TestBootstrapSettings) -> Self {
-        Self { bootstrap }
-    }
+    pub(super) const fn new(bootstrap: TestBootstrapSettings) -> Self { Self { bootstrap } }
 
     /// Returns the prepared `PostgreSQL` settings for the running cluster.
     ///
@@ -106,9 +105,7 @@ impl ClusterHandle {
     /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
     /// ```
     #[must_use]
-    pub const fn settings(&self) -> &Settings {
-        &self.bootstrap.settings
-    }
+    pub const fn settings(&self) -> &Settings { &self.bootstrap.settings }
 
     /// Returns the environment required for clients to interact with the cluster.
     ///
@@ -122,9 +119,7 @@ impl ClusterHandle {
     /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
     /// ```
     #[must_use]
-    pub const fn environment(&self) -> &TestBootstrapEnvironment {
-        &self.bootstrap.environment
-    }
+    pub const fn environment(&self) -> &TestBootstrapEnvironment { &self.bootstrap.environment }
 
     /// Returns the bootstrap metadata captured when the cluster was started.
     ///
@@ -138,9 +133,7 @@ impl ClusterHandle {
     /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
     /// ```
     #[must_use]
-    pub const fn bootstrap(&self) -> &TestBootstrapSettings {
-        &self.bootstrap
-    }
+    pub const fn bootstrap(&self) -> &TestBootstrapSettings { &self.bootstrap }
 
     /// Returns helper methods for constructing connection artefacts.
     ///
@@ -294,15 +287,16 @@ impl ClusterHandle {
     ///
     /// ```no_run
     /// use std::sync::OnceLock;
+    ///
     /// use pg_embedded_setup_unpriv::{ClusterHandle, TestCluster};
     ///
     /// static SHARED: OnceLock<ClusterHandle> = OnceLock::new();
     ///
     /// fn shared_handle() -> &'static ClusterHandle {
     ///     SHARED.get_or_init(|| {
-    ///         let (handle, guard) = TestCluster::new_split()
-    ///             .expect("cluster bootstrap failed");
-    ///         handle.register_shutdown_on_exit()
+    ///         let (handle, guard) = TestCluster::new_split().expect("cluster bootstrap failed");
+    ///         handle
+    ///             .register_shutdown_on_exit()
     ///             .expect("shutdown hook registration failed");
     ///         std::mem::forget(guard);
     ///         handle

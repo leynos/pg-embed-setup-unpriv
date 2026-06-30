@@ -3,10 +3,10 @@
 use camino::Utf8Path;
 use cap_std::{ambient_authority, fs::Dir};
 use color_eyre::eyre::{Context, Result};
-
 pub use pg_embedded_setup_unpriv::test_support::ambient_dir_and_path;
 use pg_embedded_setup_unpriv::test_support::{
-    ensure_dir_exists as shared_ensure_dir_exists, set_permissions as shared_set_permissions,
+    ensure_dir_exists as shared_ensure_dir_exists,
+    set_permissions as shared_set_permissions,
 };
 
 /// Splits an absolute or relative path into a capability directory and the relative path.
@@ -54,8 +54,9 @@ fn is_not_found(err: &color_eyre::Report) -> bool {
 mod tests {
     //! Unit tests for capability-based filesystem helpers.
 
-    use super::*;
     use camino::Utf8PathBuf;
+
+    use super::*;
 
     fn temp_utf8_dir() -> Utf8PathBuf {
         let temp = std::env::temp_dir();

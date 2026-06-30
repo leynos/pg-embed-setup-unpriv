@@ -1,9 +1,12 @@
 //! Directory hashing utilities for template naming.
 
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+};
+
 use cap_std::{ambient_authority, fs::Dir};
 use sha2::{Digest, Sha256};
-use std::io::Read;
-use std::path::{Path, PathBuf};
 
 use crate::error::BootstrapResult;
 
@@ -136,9 +139,11 @@ fn join_path(base: &Path, relative: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn hash_directory_produces_consistent_results() {

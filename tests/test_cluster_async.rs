@@ -10,8 +10,7 @@
 #![cfg(all(unix, feature = "async-api"))]
 
 use color_eyre::eyre::{Result, ensure};
-use pg_embedded_setup_unpriv::test_support::scoped_env;
-use pg_embedded_setup_unpriv::{ScopedEnv, TestCluster};
+use pg_embedded_setup_unpriv::{ScopedEnv, TestCluster, test_support::scoped_env};
 use rstest::rstest;
 
 #[path = "support/cap_fs_bootstrap.rs"]

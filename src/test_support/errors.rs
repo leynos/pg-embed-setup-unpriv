@@ -24,9 +24,7 @@ use crate::error::{BootstrapError, PrivilegeError};
 /// ```
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 #[must_use]
-pub fn bootstrap_error(err: Report) -> Error {
-    Error::Bootstrap(BootstrapError::from(err))
-}
+pub fn bootstrap_error(err: Report) -> Error { Error::Bootstrap(BootstrapError::from(err)) }
 
 /// Converts a privilege-related report into the library's public [`Error`] type.
 /// This helper exists for test scaffolding and should not be used in published
@@ -43,6 +41,4 @@ pub fn bootstrap_error(err: Report) -> Error {
 /// ```
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 #[must_use]
-pub fn privilege_error(err: Report) -> Error {
-    Error::Privilege(PrivilegeError::from(err))
-}
+pub fn privilege_error(err: Report) -> Error { Error::Privilege(PrivilegeError::from(err)) }

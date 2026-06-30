@@ -1,14 +1,16 @@
 //! Shared filesystem helpers that operate within the capability sandbox.
 
-use crate::observability::LOG_TARGET;
+use std::io::ErrorKind;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::{
     ambient_authority,
     fs::{Dir, Metadata, Permissions, PermissionsExt},
 };
 use color_eyre::eyre::{Context, Result};
-use std::io::ErrorKind;
 use tracing::{error, info, info_span};
+
+use crate::observability::LOG_TARGET;
 
 /// Resolves a path to an ambient directory handle paired with the relative path component.
 ///
@@ -228,12 +230,13 @@ fn log_dir_metadata_error(path: &Utf8Path, err: std::io::Error) -> std::io::Erro
 mod tests {
     //! Unit tests for filesystem helpers.
 
-    use super::{ensure_dir_exists, ensure_existing_path_is_dir, find_existing_ancestor};
+    use std::{fs::File, io::ErrorKind};
+
     use camino::{Utf8Path, Utf8PathBuf};
     use rstest::rstest;
-    use std::fs::File;
-    use std::io::ErrorKind;
     use tempfile::tempdir;
+
+    use super::{ensure_dir_exists, ensure_existing_path_is_dir, find_existing_ancestor};
 
     /// Test-case container: `create_file` selects file vs directory, and
     /// `error_kind` records the expected `ErrorKind` outcome.

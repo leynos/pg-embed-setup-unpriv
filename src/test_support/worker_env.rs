@@ -1,18 +1,17 @@
 //! Resolves and stages worker binaries for privileged test runs.
 
-use std::ffi::OsString;
-use std::sync::OnceLock;
-
-#[cfg(unix)]
-use sha2::{Digest, Sha256};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
+use std::{ffi::OsString, sync::OnceLock};
 #[cfg(unix)]
 use std::{fs, io};
+
+#[cfg(unix)]
+use sha2::{Digest, Sha256};
 
 /// Returns the worker binary path staged for privileged test execution.
 ///
@@ -28,9 +27,7 @@ use std::{fs, io};
 /// # let _ = worker;
 /// ```
 #[must_use]
-pub fn worker_binary_for_tests() -> Option<OsString> {
-    worker_binary()
-}
+pub fn worker_binary_for_tests() -> Option<OsString> { worker_binary() }
 
 pub(super) fn worker_binary() -> Option<OsString> {
     static WORKER_PATH: OnceLock<Option<OsString>> = OnceLock::new();
@@ -99,8 +96,9 @@ fn try_stage_worker_binary(original: &OsString) -> io::Result<OsString> {
 /// 3. After creation, the directory is not a symlink and is owned by current user
 #[cfg(unix)]
 fn create_staging_directory_secure(staged_dir: &Path) -> io::Result<()> {
-    use nix::unistd::geteuid;
     use std::os::unix::fs::MetadataExt;
+
+    use nix::unistd::geteuid;
 
     let current_uid = geteuid().as_raw();
 
@@ -232,9 +230,7 @@ fn check_deps_parent_for_profile(
 /// This function is only called from `check_deps_parent_for_profile` after
 /// "debug" and "release" have already been handled, so it always returns "unknown".
 #[cfg(unix)]
-const fn profile_name_to_static(_name: &str) -> &'static str {
-    "unknown"
-}
+const fn profile_name_to_static(_name: &str) -> &'static str { "unknown" }
 
 /// Computes a short hash of the source path for staging directory uniqueness.
 #[cfg(unix)]

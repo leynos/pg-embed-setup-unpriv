@@ -3,17 +3,23 @@
 //! Provides synchronous and asynchronous shutdown methods, as well as
 //! drop-time cleanup for both worker-managed and in-process clusters.
 
-use crate::error::BootstrapResult;
-use crate::observability::LOG_TARGET;
-use crate::{CleanupMode, TestBootstrapSettings};
-use postgresql_embedded::{PostgreSQL, Settings};
 use std::{fmt::Display, time::Duration};
+
+use postgresql_embedded::{PostgreSQL, Settings};
 use tokio::time;
 
-use super::cleanup;
-use super::runtime::build_runtime;
-use super::worker_invoker::WorkerInvoker as ClusterWorkerInvoker;
-use super::worker_operation;
+use super::{
+    cleanup,
+    runtime::build_runtime,
+    worker_invoker::WorkerInvoker as ClusterWorkerInvoker,
+    worker_operation,
+};
+use crate::{
+    CleanupMode,
+    TestBootstrapSettings,
+    error::BootstrapResult,
+    observability::LOG_TARGET,
+};
 
 /// Context for cluster drop operations, grouping related shutdown state.
 pub(super) struct DropContext<'a> {
@@ -354,15 +360,17 @@ pub(super) fn warn_stop_failure(context: &str, err: &impl Display) {
 /// Logs a warning when stopping the cluster times out.
 pub(super) fn warn_stop_timeout(timeout_secs: u64, context: &str) {
     tracing::warn!(
-        "SKIP-TEST-CLUSTER: stop() timed out after {timeout_secs}s ({context}); proceeding with drop"
+        "SKIP-TEST-CLUSTER: stop() timed out after {timeout_secs}s ({context}); proceeding with \
+         drop"
     );
 }
 
 #[cfg(all(test, feature = "cluster-unit-tests"))]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::test_support::capture_warn_logs;
-    use rstest::rstest;
 
     #[rstest]
     #[case::timeout(

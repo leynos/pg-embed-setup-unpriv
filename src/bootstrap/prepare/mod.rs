@@ -1,28 +1,30 @@
 //! Prepares filesystem state for the bootstrap flows.
 
+#[cfg(unix)]
+use std::net::TcpListener;
+
 use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(unix)]
 use color_eyre::eyre::{Context, eyre};
+#[cfg(unix)]
+use nix::unistd::{Uid, User, fchown, geteuid};
 use postgresql_embedded::Settings;
+use tracing::debug;
 
+use super::env::{TestBootstrapEnvironment, XdgDirs, prepare_timezone_env};
+#[cfg(unix)]
+use crate::privileges::{
+    default_paths_for,
+    ensure_dir_for_user,
+    ensure_tree_owned_by_user,
+    make_data_dir_private,
+};
 use crate::{
     PgEnvCfg,
     error::{BootstrapError, BootstrapResult},
     fs::{ensure_dir_exists, set_permissions},
     observability::LOG_TARGET,
 };
-
-use super::env::{TestBootstrapEnvironment, XdgDirs, prepare_timezone_env};
-
-#[cfg(unix)]
-use crate::privileges::{
-    default_paths_for, ensure_dir_for_user, ensure_tree_owned_by_user, make_data_dir_private,
-};
-#[cfg(unix)]
-use nix::unistd::{Uid, User, fchown, geteuid};
-#[cfg(unix)]
-use std::net::TcpListener;
-use tracing::debug;
 
 const PGPASS_MODE: u32 = 0o600;
 

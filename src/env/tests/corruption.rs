@@ -5,10 +5,9 @@
 //! drops). These helpers are used by the parameterised `rstest` cases in
 //! `mod.rs`.
 
-use super::ScopedEnv;
-use super::THREAD_STATE;
-use std::ffi::OsString;
-use std::panic;
+use std::{ffi::OsString, panic};
+
+use super::{ScopedEnv, THREAD_STATE};
 
 /// Runs a corruption scenario with a unique env key and delegated assertions.
 pub(super) fn run_scoped_env_corruption_test<F>(test_name: &str, setup_and_corrupt: F)
@@ -83,14 +82,8 @@ pub(super) fn apply_invalid_scope_exit() -> bool {
 }
 
 /// Returns false so callers skip restoration assertions.
-pub(super) const fn no_corruption() -> bool {
-    false
-}
+pub(super) const fn no_corruption() -> bool { false }
 
-pub(super) fn drop_guards_in_order(guards: GuardSet) {
-    guards.drop_in_order();
-}
+pub(super) fn drop_guards_in_order(guards: GuardSet) { guards.drop_in_order(); }
 
-pub(super) fn drop_guards_out_of_order(guards: GuardSet) {
-    guards.drop_out_of_order();
-}
+pub(super) fn drop_guards_out_of_order(guards: GuardSet) { guards.drop_out_of_order(); }

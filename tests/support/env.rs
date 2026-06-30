@@ -2,8 +2,7 @@
 
 use std::ffi::{OsStr, OsString};
 
-use pg_embedded_setup_unpriv::ScopedEnv;
-use pg_embedded_setup_unpriv::test_support;
+use pg_embedded_setup_unpriv::{ScopedEnv, test_support};
 
 /// Collection type for guarded environment variables.
 pub type ScopedEnvVars = Vec<(OsString, Option<OsString>)>;
@@ -43,9 +42,7 @@ where
 /// nested scopes on the same thread share the mutex whilst recording the outer
 /// state. Scopes on different threads still serialise to avoid interleaving
 /// process-level environment mutations.
-pub fn apply_env(vars: ScopedEnvVars) -> ScopedEnvGuard {
-    test_support::scoped_env(vars)
-}
+pub fn apply_env(vars: ScopedEnvVars) -> ScopedEnvGuard { test_support::scoped_env(vars) }
 
 /// Runs `body` with the provided environment variables temporarily set.
 ///
@@ -54,7 +51,6 @@ pub fn apply_env(vars: ScopedEnvVars) -> ScopedEnvGuard {
 /// access so concurrent tests cannot interleave environment mutations. Calls on the
 /// same thread are re-entrant, enabling helpers to compose without risking
 /// deadlocks.
-///
 pub fn with_scoped_env<R>(
     vars: impl IntoIterator<Item = (OsString, Option<OsString>)>,
     body: impl FnOnce() -> R,

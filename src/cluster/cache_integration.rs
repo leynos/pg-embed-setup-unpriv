@@ -3,17 +3,24 @@
 //! Provides methods to check and populate the shared `PostgreSQL` binary cache,
 //! avoiding repeated downloads across test runs.
 
-use crate::TestBootstrapSettings;
-use crate::cache::{
-    BinaryCacheConfig, CacheLock, CacheLookupResult, check_cache, copy_from_cache,
-    find_matching_cached_version, populate_cache,
-};
-use crate::observability::LOG_TARGET;
 use camino::Utf8PathBuf;
 use postgresql_embedded::{Settings, VersionReq};
 use tracing::{debug, info, warn};
 
 use super::installation;
+use crate::{
+    TestBootstrapSettings,
+    cache::{
+        BinaryCacheConfig,
+        CacheLock,
+        CacheLookupResult,
+        check_cache,
+        copy_from_cache,
+        find_matching_cached_version,
+        populate_cache,
+    },
+    observability::LOG_TARGET,
+};
 
 /// Sets the exact version requirement in settings to skip GitHub API resolution.
 fn set_exact_version(settings: &mut Settings, version: &str) {

@@ -12,16 +12,15 @@
 //! subprocess needs permission to modify the data directory).
 #![cfg(all(unix, feature = "cluster-unit-tests", feature = "privileged-tests"))]
 
-use std::fs;
-use std::time::Duration;
+use std::{fs, time::Duration};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Result, ensure, eyre};
 use nix::unistd::{Gid, Uid, User, chown, geteuid};
-use pg_embedded_setup_unpriv::bootstrap_for_tests;
-use pg_embedded_setup_unpriv::test_support::worker_binary_for_tests;
-use pg_embedded_setup_unpriv::worker_process_test_api::{
-    WorkerOperation, WorkerRequest, WorkerRequestArgs,
+use pg_embedded_setup_unpriv::{
+    bootstrap_for_tests,
+    test_support::worker_binary_for_tests,
+    worker_process_test_api::{WorkerOperation, WorkerRequest, WorkerRequestArgs},
 };
 use rstest::rstest;
 

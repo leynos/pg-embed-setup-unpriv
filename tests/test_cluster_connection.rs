@@ -1,15 +1,16 @@
 //! Behavioural coverage for the connection helpers exposed by `TestCluster`.
 #![cfg(unix)]
 
-use std::cell::RefCell;
+use std::{
+    cell::RefCell,
+    ffi::{OsStr, OsString},
+};
 
 use color_eyre::eyre::{Context, Result, ensure, eyre};
-use diesel::prelude::*;
-use diesel::sql_types::Integer;
+use diesel::{prelude::*, sql_types::Integer};
 use pg_embedded_setup_unpriv::{ConnectionMetadata, TestCluster};
 use rstest::fixture;
 use rstest_bdd_macros::{given, scenario, then, when};
-use std::ffi::{OsStr, OsString};
 
 #[path = "support/cap_fs_bootstrap.rs"]
 mod cap_fs;
@@ -67,9 +68,7 @@ impl ConnectionWorld {
         self.skip_reason = Some(message);
     }
 
-    const fn is_skipped(&self) -> bool {
-        self.skip_reason.is_some()
-    }
+    const fn is_skipped(&self) -> bool { self.skip_reason.is_some() }
 
     fn ensure_not_skipped(&self) -> Result<()> {
         if self.is_skipped() {
@@ -101,13 +100,9 @@ impl ConnectionWorld {
         }
     }
 
-    fn record_metadata(&mut self, metadata: ConnectionMetadata) {
-        self.metadata = Some(metadata);
-    }
+    fn record_metadata(&mut self, metadata: ConnectionMetadata) { self.metadata = Some(metadata); }
 
-    const fn record_selected_value(&mut self, value: i32) {
-        self.selected_value = Some(value);
-    }
+    const fn record_selected_value(&mut self, value: i32) { self.selected_value = Some(value); }
 
     fn record_query_error(&mut self, err: impl Into<String>) {
         self.query_error = Some(err.into());
@@ -149,9 +144,7 @@ impl ConnectionWorld {
 }
 
 impl Drop for ConnectionWorld {
-    fn drop(&mut self) {
-        drop(self.cluster.take());
-    }
+    fn drop(&mut self) { drop(self.cluster.take()); }
 }
 
 type ConnectionWorldFixture = Result<RefCell<ConnectionWorld>>;
@@ -164,7 +157,8 @@ fn borrow_world(world: &ConnectionWorldFixture) -> Result<&RefCell<ConnectionWor
 
 #[fixture]
 fn world() -> ConnectionWorldFixture {
-    Ok(RefCell::new(ConnectionWorld::new()?))
+    let world = ConnectionWorld::new()?;
+    Ok(RefCell::new(world))
 }
 
 #[given("a sandboxed TestCluster is running")]

@@ -1,18 +1,18 @@
 //! Behavioural coverage for observability instrumentation.
 #![cfg(unix)]
 
-use std::cell::RefCell;
-use std::ffi::OsString;
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
-
-use color_eyre::eyre::{Context, Report, Result, ensure, eyre};
-use pg_embedded_setup_unpriv::test_support::capture_info_logs_with_spans;
-use pg_embedded_setup_unpriv::{BootstrapResult, TestCluster, WorkerOperation};
-use rstest::fixture;
-use rstest_bdd_macros::{given, scenario, then, when};
+use std::{cell::RefCell, ffi::OsString, fs, os::unix::fs::PermissionsExt};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use color_eyre::eyre::{Context, Report, Result, ensure, eyre};
+use pg_embedded_setup_unpriv::{
+    BootstrapResult,
+    TestCluster,
+    WorkerOperation,
+    test_support::capture_info_logs_with_spans,
+};
+use rstest::fixture;
+use rstest_bdd_macros::{given, scenario, then, when};
 
 #[path = "support/cap_fs_bootstrap.rs"]
 mod cap_fs;
@@ -75,7 +75,8 @@ impl ObservabilityWorld {
                 } else if coverage_mode() && message.contains("postgresql_embedded::setup() failed")
                 {
                     self.skip_reason = Some(
-                        "skipping observability success scenario under coverage: embedded postgres setup failed"
+                        "skipping observability success scenario under coverage: embedded \
+                         postgres setup failed"
                             .to_owned(),
                     );
                 } else if let Some(reason) = cluster_skip_message(&message, Some(&debug)) {
@@ -97,7 +98,8 @@ fn borrow_world(world: &WorldFixture) -> Result<&RefCell<ObservabilityWorld>> {
 
 #[fixture]
 fn world() -> WorldFixture {
-    Ok(RefCell::new(ObservabilityWorld::new()?))
+    let world = ObservabilityWorld::new()?;
+    Ok(RefCell::new(world))
 }
 
 #[given("an observability sandbox")]
@@ -296,9 +298,7 @@ fn permission_denied_in_chain(report: &Report) -> bool {
     })
 }
 
-fn coverage_mode() -> bool {
-    std::env::var("CARGO_LLVM_COV").is_ok()
-}
+fn coverage_mode() -> bool { std::env::var("CARGO_LLVM_COV").is_ok() }
 
 fn ensure_runtime_dir_matches(
     env_vars: &[(OsString, Option<OsString>)],

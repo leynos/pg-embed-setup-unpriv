@@ -26,6 +26,7 @@ CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
 MDLINT ?= markdownlint-cli2
 NIXIE ?= nixie
+INTERROGATE ?= interrogate
 
 build: ## Build debug binary
 	$(CARGO) build $(BUILD_JOBS) --bin "$(APP)"
@@ -59,6 +60,7 @@ release-archive: ## Package release binaries for cargo-binstall
 lint: ## Run Clippy with warnings denied
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)
 	$(CARGO) clippy $(CLIPPY_FLAGS)
+	$(INTERROGATE) --fail-under 100 .
 
 typecheck: ## Typecheck the workspace
 	$(CARGO) check --workspace --all-targets --all-features $(BUILD_JOBS)

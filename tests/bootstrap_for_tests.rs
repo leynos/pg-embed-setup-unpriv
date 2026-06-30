@@ -1,17 +1,22 @@
 //! Behavioural coverage for the `bootstrap_for_tests` helper.
 #![cfg(unix)]
 
-use std::cell::RefCell;
-use std::ffi::OsStr;
-use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::{
+    cell::RefCell,
+    ffi::OsStr,
+    fs,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Report, Result, ensure, eyre};
 use nix::unistd::User;
-use pg_embedded_setup_unpriv::test_support::worker_binary_for_tests;
 use pg_embedded_setup_unpriv::{
-    ExecutionPrivileges, TestBootstrapSettings, bootstrap_for_tests, detect_execution_privileges,
+    ExecutionPrivileges,
+    TestBootstrapSettings,
+    bootstrap_for_tests,
+    detect_execution_privileges,
+    test_support::worker_binary_for_tests,
 };
 use rstest::fixture;
 use rstest_bdd_macros::{given, scenario, then, when};
@@ -64,9 +69,7 @@ impl BootstrapWorld {
         self.skip_reason = Some(message);
     }
 
-    const fn is_skipped(&self) -> bool {
-        self.skip_reason.is_some()
-    }
+    const fn is_skipped(&self) -> bool { self.skip_reason.is_some() }
 
     fn record_settings(&mut self, settings: TestBootstrapSettings) {
         self.settings = Some(settings);
@@ -81,13 +84,9 @@ impl BootstrapWorld {
         self.env_expected = None;
     }
 
-    fn record_restored_env(&mut self, snapshot: EnvSnapshot) {
-        self.env_restored = Some(snapshot);
-    }
+    fn record_restored_env(&mut self, snapshot: EnvSnapshot) { self.env_restored = Some(snapshot); }
 
-    fn record_expected_env(&mut self, snapshot: EnvSnapshot) {
-        self.env_expected = Some(snapshot);
-    }
+    fn record_expected_env(&mut self, snapshot: EnvSnapshot) { self.env_expected = Some(snapshot); }
 
     fn handle_outcome(&mut self, outcome: Result<TestBootstrapSettings, Report>) -> Result<()> {
         match outcome {
@@ -162,7 +161,8 @@ fn borrow_world(world: &BootstrapWorldFixture) -> Result<&RefCell<BootstrapWorld
 
 #[fixture]
 fn world() -> BootstrapWorldFixture {
-    Ok(RefCell::new(BootstrapWorld::new()?))
+    let world = BootstrapWorld::new()?;
+    Ok(RefCell::new(world))
 }
 
 #[given("a bootstrap sandbox for tests")]

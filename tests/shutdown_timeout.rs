@@ -1,8 +1,7 @@
 //! Validates configuration of the shutdown timeout environment variable.
 #![cfg(unix)]
 
-use std::ffi::OsString;
-use std::time::Duration;
+use std::{ffi::OsString, time::Duration};
 
 use color_eyre::eyre::{Result, ensure, eyre};
 use pg_embedded_setup_unpriv::bootstrap_for_tests;

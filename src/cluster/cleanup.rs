@@ -1,14 +1,16 @@
 //! Cleanup helpers for `TestCluster` shutdown.
 
-use crate::cleanup_helpers::{RemovalOutcome, has_parent_dir, try_remove_dir_all};
-use crate::observability::LOG_TARGET;
-use crate::{CleanupMode, TestBootstrapSettings};
-use postgresql_embedded::Settings;
-use std::error::Error;
-use std::path::Path;
+use std::{error::Error, path::Path};
 
-use super::worker_invoker::WorkerInvoker as ClusterWorkerInvoker;
-use super::worker_operation;
+use postgresql_embedded::Settings;
+
+use super::{worker_invoker::WorkerInvoker as ClusterWorkerInvoker, worker_operation};
+use crate::{
+    CleanupMode,
+    TestBootstrapSettings,
+    cleanup_helpers::{RemovalOutcome, has_parent_dir, try_remove_dir_all},
+    observability::LOG_TARGET,
+};
 
 #[derive(Debug, Clone, Copy)]
 enum DirectoryLabel {
@@ -207,12 +209,14 @@ fn warn_cleanup_removal_failure(
 
 #[cfg(test)]
 mod tests {
-    use super::cleanup_in_process;
-    use crate::CleanupMode;
+    use std::fs;
+
     use postgresql_embedded::Settings;
     use rstest::rstest;
-    use std::fs;
     use tempfile::tempdir;
+
+    use super::cleanup_in_process;
+    use crate::CleanupMode;
 
     #[rstest]
     #[case::data_only(CleanupMode::DataOnly, false, true)]

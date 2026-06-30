@@ -12,19 +12,28 @@
     feature = "privileged-tests",
 ))]
 
+use std::{
+    fs,
+    os::unix::{fs::PermissionsExt, process::ExitStatusExt},
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
+
 use camino::{Utf8Path, Utf8PathBuf};
 use color_eyre::eyre::{Context, eyre};
-use pg_embedded_setup_unpriv::worker_process_test_api::{
-    WorkerOperation, WorkerRequest, WorkerRequestArgs, disable_privilege_drop_for_tests,
-    render_failure_for_tests, run,
+use pg_embedded_setup_unpriv::{
+    BootstrapError,
+    BootstrapResult,
+    worker_process_test_api::{
+        WorkerOperation,
+        WorkerRequest,
+        WorkerRequestArgs,
+        disable_privilege_drop_for_tests,
+        render_failure_for_tests,
+        run,
+    },
 };
-use pg_embedded_setup_unpriv::{BootstrapError, BootstrapResult};
 use postgresql_embedded::Settings;
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::process::ExitStatusExt;
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
 use tempfile::tempdir;
 
 const TRUNCATION_SUFFIX: &str = "… [truncated]";
@@ -122,7 +131,8 @@ fn run_truncates_stdout_and_stderr_on_failure() -> BootstrapResult<()> {
         let env_vars = Vec::new();
         let long_output = "A".repeat(5_000);
         let script_body = format!(
-            "#!/bin/sh\ncat <<'EOF'\n{long_output}\nEOF\ncat <<'EOF' >&2\n{long_output}\nEOF\nexit 1\n"
+            "#!/bin/sh\ncat <<'EOF'\n{long_output}\nEOF\ncat <<'EOF' \
+             >&2\n{long_output}\nEOF\nexit 1\n"
         );
         let worker_path = write_script(sandbox.path(), "fail.sh", &script_body)?;
         let request = request(

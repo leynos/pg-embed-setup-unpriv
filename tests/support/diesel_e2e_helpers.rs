@@ -1,14 +1,18 @@
 //! Helpers for the Diesel-based `PostgreSQL` embedded e2e test.
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Result, eyre};
-use diesel::prelude::*;
-use diesel::sql_types::{Bool, Text};
+use diesel::{
+    prelude::*,
+    sql_types::{Bool, Text},
+};
 use pg_embedded_setup_unpriv::worker_process_test_api::{
-    WorkerOperation, WorkerRequest, WorkerRequestArgs, run as run_worker,
+    WorkerOperation,
+    WorkerRequest,
+    WorkerRequestArgs,
+    run as run_worker,
 };
 use postgresql_embedded::PostgreSQL;
 

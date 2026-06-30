@@ -61,8 +61,8 @@ impl TestBootstrapEnvironment {
     ///
     /// # Examples
     /// ```
-    /// use pg_embedded_setup_unpriv::TestBootstrapEnvironment;
     /// use camino::Utf8PathBuf;
+    /// use pg_embedded_setup_unpriv::TestBootstrapEnvironment;
     ///
     /// let env = TestBootstrapEnvironment {
     ///     home: Utf8PathBuf::from("/tmp/home"),

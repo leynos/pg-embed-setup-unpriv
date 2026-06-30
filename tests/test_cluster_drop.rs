@@ -1,12 +1,15 @@
 //! Unit coverage for the `TestCluster` RAII guard.
 #![cfg(unix)]
 
+use std::{thread, time::Duration};
+
 use camino::Utf8PathBuf;
-use color_eyre::Report;
-use color_eyre::eyre::{Context, Result, ensure, eyre};
+use color_eyre::{
+    Report,
+    eyre::{Context, Result, ensure, eyre},
+};
 use pg_embedded_setup_unpriv::{CleanupMode, TestCluster};
 use rstest::rstest;
-use std::{thread, time::Duration};
 
 #[path = "support/cap_fs_bootstrap.rs"]
 mod cap_fs;

@@ -1,12 +1,13 @@
 //! Tests for cache operations.
 
-use super::lookup::COMPLETION_MARKER;
-use super::*;
+use std::fs;
+
 use camino::Utf8Path;
 use postgresql_embedded::VersionReq;
 use rstest::{fixture, rstest};
-use std::fs;
 use tempfile::{TempDir, tempdir};
+
+use super::{lookup::COMPLETION_MARKER, *};
 
 /// Creates a `bin` subdirectory in the given path with mock `postgres` and
 /// `pg_ctl` binary files for cache tests.
@@ -152,14 +153,10 @@ fn assert_try_use_cache(populate_cache: bool, expected_result: bool, check_files
 }
 
 #[test]
-fn try_use_cache_returns_false_on_miss() {
-    assert_try_use_cache(false, false, false);
-}
+fn try_use_cache_returns_false_on_miss() { assert_try_use_cache(false, false, false); }
 
 #[test]
-fn try_use_cache_returns_true_on_hit() {
-    assert_try_use_cache(true, true, true);
-}
+fn try_use_cache_returns_true_on_hit() { assert_try_use_cache(true, true, true); }
 
 #[rstest]
 fn find_matching_cached_version_returns_none_for_empty_cache(

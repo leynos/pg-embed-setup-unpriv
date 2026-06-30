@@ -1,17 +1,24 @@
 //! Unit tests for the [`WorkerInvoker`] component, verifying both in-process
 //! execution for unprivileged operations and hook delegation for root operations.
 
-use super::*;
-use crate::ExecutionPrivileges;
-use crate::test_support::{
-    RunRootOperationHookInstallError, drain_hook_install_logs, dummy_settings,
-    install_run_root_operation_hook, test_runtime,
-};
-use color_eyre::eyre::{Result, ensure, eyre};
-use serial_test::serial;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
+};
+
+use color_eyre::eyre::{Result, ensure, eyre};
+use serial_test::serial;
+
+use super::*;
+use crate::{
+    ExecutionPrivileges,
+    test_support::{
+        RunRootOperationHookInstallError,
+        drain_hook_install_logs,
+        dummy_settings,
+        install_run_root_operation_hook,
+        test_runtime,
+    },
 };
 
 #[test]

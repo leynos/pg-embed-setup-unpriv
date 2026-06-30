@@ -1,14 +1,15 @@
 //! Behavioural coverage for settings observability and redaction.
 #![cfg(all(unix, any(feature = "cluster-unit-tests", feature = "dev-worker")))]
 
-use std::cell::RefCell;
-use std::ffi::OsString;
-use std::fs;
+use std::{cell::RefCell, ffi::OsString, fs};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Report, Result, ensure, eyre};
-use pg_embedded_setup_unpriv::test_support::capture_debug_logs;
-use pg_embedded_setup_unpriv::{BootstrapResult, bootstrap_for_tests};
+use pg_embedded_setup_unpriv::{
+    BootstrapResult,
+    bootstrap_for_tests,
+    test_support::capture_debug_logs,
+};
 use rstest::fixture;
 use rstest_bdd_macros::{given, scenario, then, when};
 
@@ -96,7 +97,8 @@ fn borrow_world(world: &WorldFixture) -> Result<&RefCell<SettingsLoggingWorld>> 
 
 #[fixture]
 fn world() -> WorldFixture {
-    Ok(RefCell::new(SettingsLoggingWorld::new()?))
+    let world = SettingsLoggingWorld::new()?;
+    Ok(RefCell::new(world))
 }
 
 #[given("a settings logging sandbox")]

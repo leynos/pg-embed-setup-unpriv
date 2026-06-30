@@ -51,9 +51,7 @@ pub fn ambient_dir_and_path(path: &Utf8Path) -> Result<(Dir, Utf8PathBuf)> {
 /// # }
 /// ```
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
-pub fn ensure_dir_exists(path: &Utf8Path) -> Result<()> {
-    fs::ensure_dir_exists(path)
-}
+pub fn ensure_dir_exists(path: &Utf8Path) -> Result<()> { fs::ensure_dir_exists(path) }
 
 /// Applies POSIX permissions to the provided path when it already exists.
 ///
@@ -68,9 +66,7 @@ pub fn ensure_dir_exists(path: &Utf8Path) -> Result<()> {
 /// # }
 /// ```
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
-pub fn set_permissions(path: &Utf8Path, mode: u32) -> Result<()> {
-    fs::set_permissions(path, mode)
-}
+pub fn set_permissions(path: &Utf8Path, mode: u32) -> Result<()> { fs::set_permissions(path, mode) }
 
 /// Retrieves metadata for the provided path using capability APIs.
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
@@ -207,9 +203,7 @@ impl CapabilityTempDir {
 
     /// Returns the UTF-8 path to the temporary directory.
     #[must_use]
-    pub fn path(&self) -> &Utf8Path {
-        &self.path
-    }
+    pub fn path(&self) -> &Utf8Path { &self.path }
 
     fn remove_dir(dir: Dir, path: &Utf8Path) {
         if let Err(err) = dir.remove_open_dir_all() {
