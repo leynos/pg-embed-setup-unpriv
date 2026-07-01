@@ -57,7 +57,6 @@ loom::thread_local! {
         RefCell::new(ThreadStateInner::new());
     static LAST_FAKE_ENV_SNAPSHOT: RefCell<Snapshot> = RefCell::new(Vec::new());
 }
-
 /// Enters a scoped environment frame using Loom thread-local state.
 fn enter_scope_loom(vars: Vec<(OsString, Option<OsString>)>) -> usize {
     LOOM_THREAD_STATE.with(|cell| {
@@ -65,7 +64,6 @@ fn enter_scope_loom(vars: Vec<(OsString, Option<OsString>)>) -> usize {
         state.enter_scope(vars)
     })
 }
-
 /// Exits a scoped environment frame from Loom thread-local state.
 fn exit_scope_loom(index: usize) {
     LOOM_THREAD_STATE.with(|cell| {
@@ -73,7 +71,6 @@ fn exit_scope_loom(index: usize) {
         state.exit_scope(index);
     });
 }
-
 /// Applies test environment changes through the Loom state hooks.
 fn apply_loom(vars: &[(String, Option<String>)]) -> ScopedEnv {
     let owned: Vec<(OsString, Option<OsString>)> = vars
@@ -82,14 +79,12 @@ fn apply_loom(vars: &[(String, Option<String>)]) -> ScopedEnv {
         .collect();
     ScopedEnv::apply_owned_with_state(owned, enter_scope_loom, exit_scope_loom)
 }
-
 fn vars(input: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
     input
         .iter()
         .map(|(key, value)| ((*key).to_owned(), value.map(str::to_owned)))
         .collect()
 }
-
 fn snapshot_from_map(map: &FakeEnv) -> Snapshot {
     map.iter()
         .map(|(key, value)| {
@@ -102,7 +97,6 @@ fn snapshot_from_map(map: &FakeEnv) -> Snapshot {
         })
         .collect()
 }
-
 fn record_thread_local_snapshot(map: &FakeEnv) {
     let snapshot = snapshot_from_map(map);
     LAST_FAKE_ENV_SNAPSHOT.with(|cell| *cell.borrow_mut() = snapshot);
@@ -160,7 +154,7 @@ where
     builder.check(f);
 }
 
-/// Verifies that concurrent scoped environments cannot overlap.
+/// Models that independent threads cannot overlap active environment scopes.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_serialises_concurrent_scopes() {
@@ -192,7 +186,7 @@ fn scoped_env_serialises_concurrent_scopes() {
     });
 }
 
-/// Verifies that nested scopes on one thread keep the lock reentrant.
+/// Models that nested scopes on one thread retain the outer lock until exit.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_allows_reentrant_scopes_on_one_thread() {
@@ -219,6 +213,9 @@ fn scoped_env_allows_reentrant_scopes_on_one_thread() {
     });
 }
 
+/// Models backup and restoration for set, replace, and unset operations.
+#[test]
+#[ignore = "requires Loom model checking"]
 fn scoped_env_exercises_backup_restore_bookkeeping() {
     run_loom_model(|| {
         let baseline = &[
@@ -247,6 +244,9 @@ fn scoped_env_exercises_backup_restore_bookkeeping() {
     });
 }
 
+/// Models helper-thread acquisition while another thread holds the scope.
+#[test]
+#[ignore = "requires Loom model checking"]
 fn scoped_env_handles_spawn_while_holding_scope() {
     run_loom_model(|| {
         let baseline = &[("PGDATA", Some("base")), ("PGHOST", None)];
@@ -293,6 +293,9 @@ fn scoped_env_handles_spawn_while_holding_scope() {
     });
 }
 
+/// Models restoration and thread-local reset when a scoped body unwinds.
+#[test]
+#[ignore = "requires Loom model checking"]
 fn scoped_env_restores_on_panic_unwind() {
     run_loom_model(|| {
         let baseline = &[("PGDATA", Some("base")), ("TZDIR", None)];
@@ -331,6 +334,9 @@ fn scoped_env_restores_on_panic_unwind() {
     });
 }
 
+/// Models that short and long scopes remain serialized across threads.
+#[test]
+#[ignore = "requires Loom model checking"]
 fn scoped_env_handles_asymmetric_scope_lifetimes() {
     run_loom_model(|| {
         let baseline = &[("PGDATA", Some("base")), ("PGHOST", None), ("TZDIR", None)];
@@ -366,6 +372,9 @@ fn scoped_env_handles_asymmetric_scope_lifetimes() {
     });
 }
 
+/// Models independent per-thread recursion depth under nested scopes.
+#[test]
+#[ignore = "requires Loom model checking"]
 fn scoped_env_tracks_per_thread_depth_correctly() {
     run_loom_model(|| {
         let baseline = &[("PGDATA", Some("base")), ("PGHOST", None), ("TZDIR", None)];
