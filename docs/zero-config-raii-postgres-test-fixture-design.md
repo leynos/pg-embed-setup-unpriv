@@ -1,18 +1,18 @@
 # Zero-config RAII Postgres test fixture design
 
 To evolve **pg-embedded-setup-unpriv** into a seamless, zero-configuration
-Resource Acquisition Is Initialization (RAII) test fixture, we will create a
-high-level testing helper that automatically handles environment differences
+Resource Acquisition Is Initialization (RAII) test fixture, the design creates
+a high-level testing helper that automatically handles environment differences
 (root vs non-root) and integrates with Rust test frameworks. The goal is for
 developers to **write tests that spin up an embedded PostgreSQL instance with
 no manual setup**, whether running as root (e.g. Codex sandbox) or as an
-unprivileged user (e.g. GitHub CI), using the same code. Below we outline the
-design steps and features:
+unprivileged user (e.g. GitHub CI), using the same code. The design steps and
+features are outlined below:
 
 ## Automatic privilege detection (root vs. unprivileged)
 
-We will make the fixture **auto-detect the execution context** and adjust
-accordingly, so the developer “shouldn’t have to do anything” extra (see
+The fixture will **auto-detect the execution context** and adjust accordingly,
+so the developer “shouldn’t have to do anything” extra (see
 docs/next-steps.md). This can be done at runtime by checking the effective user
 ID:
 
@@ -87,28 +87,33 @@ sequenceDiagram
     Bootstrap-->>Caller: Result<()>
 ```
 
+_Figure 1: Privilege-detection flow for root and unprivileged bootstrap paths._
+
 - **If running as root on Linux:** the helper prepares directories that are
   owned by the sandbox user (currently `"nobody"`) and delegates every
   privileged filesystem task to the `pg_worker` subprocess. The parent keeps
   its original UID and GID throughout; the worker assumes the sandbox
   credentials before touching the filesystem or launching PostgreSQL.
 
-- **If running as a normal user or on non-Linux platforms:** no privilege
-  dropping is needed. The helper will simply use the `postgresql_embedded`
-  crate in its normal mode (which runs as the current user). On macOS/BSD, we
-  treat the helper as a **no-op pass-through** to `postgresql_embedded`
-  (privileged setup is only targeted on Linux) – meaning the library will just
-  use the embedded Postgres defaults without special permission handling.
+- **If running as a normal user:** no privilege dropping is needed. The helper
+  uses the `postgresql_embedded` crate in its normal mode, which runs as the
+  current user.
+- **If running as root on macOS:** the helper fails fast with an unsupported
+  privilege-drop error because no macOS privilege-dropping implementation is
+  supported.
+- **If running on Windows or other non-Linux, non-root platforms:** privilege
+  detection selects the unprivileged in-process path because those platforms do
+  not enter the embedded-postgres root privilege-dropping flow.
 
 This runtime detection makes the behaviour “fixed per environment” but
-**transparent to the developer** – your test code calls the same API in all
-cases, and the library decides whether to invoke the privileged path or not.
+**transparent to the developer** – test code calls the same API in all cases,
+and the library decides whether to invoke the privileged path or not.
 (Compile-time detection is less practical for root vs non-root, so a runtime
 check of UID is simplest and robust.)
 
 ## RAII `TestCluster` implementation
 
-We will introduce a `TestCluster` RAII struct that encapsulates an embedded
+The design introduces a `TestCluster` RAII struct that encapsulates an embedded
 Postgres instance’s lifecycle (see docs/next-steps.md). This struct will hide
 all setup/teardown details:
 
@@ -122,35 +127,35 @@ all setup/teardown details:
 - **On drop:** `TestCluster` will implement `Drop` to automatically **stop the
   database and clean up**. Upon going out of scope (e.g. end of a test), it
   will call `postgresql_embedded.stop()` to shut down the Postgres subprocess
-  gracefully (see postgresql-embedded README). This ensures no orphan processes
+  gracefully (see postgresql_embedded README). This ensures no orphan processes
   or locks remain, giving true RAII semantics.
 
 - **Connection info and utilities:** `TestCluster` can hold the connection
   parameters (port, host, credentials) or even provide convenience methods. For
-  example, we can include a method like `get_diesel_connection()` to quickly
+  example, it can include a method like `get_diesel_connection()` to quickly
   obtain a Diesel `PgConnection` to the test database, and perhaps methods to
   execute SQL or apply fixture scripts (see docs/next-steps.md). (While schema
-  loading or SQL fixtures are a *“day 2”* feature, designing `TestCluster` with
+  loading or SQL fixtures are a _“day 2”_ feature, designing `TestCluster` with
   extension points for running setup SQL is wise for future needs.)
 
 - **Zero configuration defaults:** To keep it zero-config, `TestCluster` will
-  choose sensible defaults if the user doesn’t specify any. We’ll leverage
+  choose sensible defaults if the caller does not specify any. It will leverage
   `PgEnvCfg::load()` (from the existing OrthoConfig integration) to gather any
   env/file configs, but if none are provided, use
   `postgresql_embedded::Settings::default()` with smart tweaks (see
   docs/next-steps.md). This means using the latest PostgreSQL version by
   default, a random free port, and temporary directories for data. All of this
-  happens behind the scenes, so in most cases **the developer simply creates a
+  happens behind the scenes, so in most cases **test code simply creates a
   `TestCluster` with no arguments**.
 
 ## Bootstrapping and configuration handling
 
-We will provide a high-level **`bootstrap_for_tests()` helper** as a one-call
-setup for tests (see docs/next-steps.md). This function will:
+The design provides a high-level **`bootstrap_for_tests()` helper** as a
+one-call setup for tests (see docs/next-steps.md). This function will:
 
 - Load the configuration from environment or config files via `PgEnvCfg::load()`
   (using ortho_config), applying any overrides like `PG_VERSION_REQ`,
-  `PG_PORT`, etc., but **the developer need not set anything** for defaults.
+  `PG_PORT`, etc., without requiring default values to be set explicitly.
 
 - Internally prepare the directories and configuration with the correct owner
   and permissions, then invoke either the in-process bootstrap or the
@@ -160,10 +165,10 @@ setup for tests (see docs/next-steps.md). This function will:
   remaining privileged calls. Unprivileged callers stay within the current
   process because no identity switch is necessary.
 
-- Return the resulting configuration (e.g. a `PgSettings` or our own struct) and
-  paths that were used (see docs/next-steps.md). This gives visibility into
-  where the data directory and binaries are, and the connection info (like the
-  chosen port).
+- Return the resulting configuration (e.g. a `PgSettings` or fixture-owned
+  struct) and paths that were used (see docs/next-steps.md). This gives
+  visibility into where the data directory and binaries are, and the connection
+  info (like the chosen port).
 
 ### Implementation update (2024-05-24)
 
@@ -289,7 +294,7 @@ essentially one line in the test setup.
 - Recorded this dependency uplift to keep the design doc aligned with the tool
   chain choices and to signpost downstream crates that they can rely on the
   0.5.0 APIs when authoring scenarios.
-- Added a Dutch `rstest-bdd` scenario (`tests/localized_diagnostics.rs`) that
+- Added a French `rstest-bdd` scenario (`tests/localized_diagnostics.rs`) that
   switches diagnostics to French via `select_localizations`. The test is part of
   `make test`, giving CI a deterministic signal that localization bundles ship
   correctly on every target platform.
@@ -338,6 +343,34 @@ essentially one line in the test setup.
   exercised in automated runs.
 - Behavioural suites now coordinate across binaries with a shared lock file,
   so concurrent PostgreSQL setup or download tasks do not race in CI.
+
+### Implementation update (2026-06-26): Windows and macOS validation
+
+- CI now includes required macOS and Windows unprivileged test legs. These legs
+  build both binaries, run the setup binary's `--version` smoke test, cache the
+  PostgreSQL binary download by OS and architecture, and execute the
+  `cluster-unit-tests,async-api` feature set without running Linux-only
+  privileged tests.
+- The release and pull-request packaging paths now build `cargo binstall`
+  archives through the same release-archive script. Pull-request CI performs a
+  real local install-and-run on Linux x86-64, macOS Apple Silicon, and Windows
+  x86-64. The release workflow builds and audits five published targets:
+  `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+  `x86_64-pc-windows-msvc`, `aarch64-apple-darwin`, and `x86_64-apple-darwin`.
+- Windows on ARM is deliberately out of scope. The upstream PostgreSQL binary
+  archive does not provide `aarch64-pc-windows-msvc` binaries, so no release
+  archive or CI target is published for that triple.
+- Filesystem mode application is now target-gated in `src/fs.rs`: Unix targets
+  apply the requested POSIX modes, while Windows logs that POSIX permission
+  changes were skipped. This keeps the cross-platform code path compiling
+  without pretending that Windows ACLs match Unix `0700`/`0755` privacy
+  semantics.
+- Shared cluster process-exit cleanup remains POSIX `atexit`-based on macOS.
+  On Windows, the postmaster process tree is assigned to a kill-on-close Job
+  Object and direct process-tree termination remains as a fallback. The Windows
+  cleanup path verifies the live process image name and creation time parsed
+  from `postmaster.pid` before assigning or terminating a tree, reducing the
+  risk from PID reuse.
 
 #### Class diagram (2025-12-10)
 
@@ -421,7 +454,7 @@ classDiagram
     secret_string_option ..> SecretString : uses
 ```
 
-*Figure: Worker payload serialization and redaction flow.*
+_Figure: Worker payload serialization and redaction flow._
 
 ### Implementation update (2026-01-15): Async API
 
@@ -520,45 +553,45 @@ sequenceDiagram
     end
 ```
 
-*Figure: Control flow for privilege-aware worker binary requirement in test
+_Figure: Control flow for privilege-aware worker binary requirement in test
 fixtures. Unprivileged users bypass worker detection entirely, whilst root
-users follow the existing worker location logic. See issue #52[^1].*
+users follow the existing worker location logic. See issue #52[^1]._
 
 [^1]: <https://github.com/leynos/pg-embedded-setup-unpriv/issues/52>
 
 ### Ephemeral ports and isolation
 
 To allow the same tests to run concurrently (especially under `nextest`, which
-runs tests in parallel), our fixture should avoid fixed resources like static
-ports. We will configure the cluster to use **ephemeral ports by default**,
-unless a specific `PG_PORT` is given. The `postgresql_embedded` crate supports
-running on ephemeral ports (see postgresql-embedded README), so by setting the
-port to 0 in the settings (or leaving it unspecified and letting the crate
-choose), each `TestCluster` will get a free port assigned at runtime. The
-chosen port can be obtained from the returned settings or directly via the
-`PostgreSQL` handle after startup.
+runs tests in parallel), the fixture should avoid fixed resources like static
+ports. The cluster will use **ephemeral ports by default**, unless a specific
+`PG_PORT` is given. The `postgresql_embedded` crate supports running on
+ephemeral ports (see postgresql_embedded README), so by setting the port to 0
+in the settings (or leaving it unspecified and letting the crate choose), each
+`TestCluster` will get a free port assigned at runtime. The chosen port can be
+obtained from the returned settings or directly via the `PostgreSQL` handle
+after startup.
 
-Similarly, we should ensure each cluster uses a unique data directory (if not
-explicitly configured). For example, we can generate a temp directory (in
+Similarly, each cluster should use a unique data directory (if not explicitly
+configured). For example, the fixture can generate a temp directory (in
 `/var/tmp/pg-embed-<uid>/...` or using `tempfile::tempdir`) for each test
 instance. The current default is to use `/var/tmp/pg-embed-<uid>/data` and
-`.../install` for a given UID (see src/lib.rs) – we may tweak this so that if
-multiple clusters are initialized in one run, they do not all target the exact
-same path. One approach is to include a random suffix or use the OS tempdir for
-isolation. This way, two tests running in parallel will not conflict over the
-data directory or lock files. The **installation binaries cache** could still
-be shared (so we do not re-download Postgres multiple times), but the database
-**data directory will be distinct per cluster**.
+`.../install` for a given UID (see src/lib.rs) – this may be adjusted so that
+if multiple clusters are initialized in one run, they do not all target the
+exact same path. One approach is to include a random suffix or use the OS
+tempdir for isolation. This way, two tests running in parallel will not
+conflict over the data directory or lock files. The **installation binaries
+cache** could still be shared (so Postgres is not re-downloaded multiple
+times), but the database **data directory will be distinct per cluster**.
 
 ## Integration with test frameworks (sync and async tests)
 
-We will ensure the library works smoothly in both synchronous and asynchronous
-Rust tests:
+The library should work smoothly in both synchronous and asynchronous Rust
+tests:
 
-- **Synchronous tests (`cargo test`):** We can enable the
-  `postgresql_embedded` crate’s `"blocking"` feature to use its blocking API
-  (see postgresql-embedded README). This allows calling `PostgreSQL::setup()`
-  and `start()` in a normal
+- **Synchronous tests (`cargo test`):** The
+  `postgresql_embedded` crate’s `"blocking"` feature must be enabled to use its
+  blocking API (see postgresql_embedded README). This allows calling
+  `PostgreSQL::setup()` and `start()` in a normal
   #[test] function without needing an async runtime. For example,
   `TestCluster::start()` can internally call the blocking setup/start and
   return once the DB is running. Developers can then use Diesel or any blocking
@@ -624,57 +657,58 @@ tests concise and consistent across projects, with unified behaviour for both
 root and unprivileged execution paths.
 
 - **Parallel test runners:** Using `cargo nextest` (or even running
-  `cargo test -- --test-threads=n`), multiple tests may run concurrently. We
-  have addressed this by using ephemeral ports and separate data directories as
-  noted. We will also implement any necessary synchronization to avoid race
-  conditions on initial download (for example, one test could call
+  `cargo test -- --test-threads=n`), multiple tests may run concurrently.
+  Ephemeral ports and separate data directories address the primary isolation
+  requirements. Any necessary synchronization should also be implemented to
+  avoid race conditions on initial download (for example, one test could call
   `ensure_pg_binaries_cached()` at the start of the suite – see below). With
-  these measures, our fixture will be **nextest-ready**, and tests can run in
+  these measures, the fixture will be **nextest-ready**, and tests can run in
   parallel without interfering with each other.
 
 ## Caching and CI-friendly features
 
-To optimize performance and reliability in CI or rapid local testing, we will
-add a couple of helper functions:
+To optimize performance and reliability in CI or rapid local testing, the
+design will add a couple of helper functions:
 
 - **Binary Cache Preloading:** Provide an `ensure_pg_binaries_cached()`
   function (see docs/next-steps.md) that pre-fetches the PostgreSQL binaries
   archive (using the configured version). This would essentially invoke the
   download logic of `postgresql_embedded` ahead of time. In a busy CI
   environment, this avoids each test run (or each parallel test) hitting the
-  GitHub releases API and potentially running into rate limits. We can make
-  this function automatically use a `GITHUB_TOKEN` from the environment to
-  authenticate and increase rate limits during the download (see
-  docs/next-steps.md). Developers could call this in a `build.rs` or a test
-  setup hook (or we might integrate it into `bootstrap_for_tests` to run once).
-  After caching, all test clusters can reuse the local archive, resulting in
-  faster startup and a *flakeless* experience even with many tests.
+  GitHub releases API and potentially running into rate limits. This function
+  can automatically use a `GITHUB_TOKEN` from the environment to authenticate
+  and increase rate limits during the download (see docs/next-steps.md).
+  Developers could call this in a `build.rs` or a test setup hook (or it could
+  be integrated into `bootstrap_for_tests` to run once). After caching, all
+  test clusters can reuse the local archive, resulting in faster startup and a
+  _flakeless_ experience even with many tests.
 
 - **Prerequisite checks (tzdata, etc.):** The helper will detect common
   environment issues and either fix or emit clear errors (see
   docs/next-steps.md). A primary example is the time zone data requirement – if
   the host is missing the `tzdata` package, PostgreSQL may fail to start with a
-  time zone error (see README.md). We can proactively check for the presence of
-  the system time zone database (e.g. check if `/usr/share/zoneinfo` exists)
-  and **guide the user to install it** if not. For instance, if not found, we
-  can return an error like *“Time zone database not found (tzdata missing).
-  Please install tzdata (e.g. `apt-get install tzdata`) on this system.” (see
-  docs/next-steps.md). Similar checks could be done for other prerequisites
-  (though tzdata is the main one encountered). By doing this, we prevent
-  puzzling failures and make the developer experience smoother.
+  time zone error (see README.md). The helper can proactively check for the
+  presence of the system time zone database (e.g. check if
+  `/usr/share/zoneinfo` exists) and **guide the user to install it** if not.
+  For instance, if not found, the helper can return an error like *“Time zone
+  database not found (tzdata missing). Please install tzdata (e.g.
+  `apt-get install tzdata`) on this system.” (see docs/next-steps.md). Similar
+  checks could be done for other prerequisites (though tzdata is the main one
+  encountered). By doing this, the helper prevents puzzling failures and makes
+  the developer experience smoother.
 
 - **Environment setup (TZDIR, etc.):** The library can also set up any required
-  environment variables automatically. For example, if we need to set `TZDIR` or
-  `TZ` environment for the embedded Postgres to find time zone info, or
-  `PGPASSFILE` for the generated password file, the `bootstrap_for_tests()`
-  should handle that internally (see docs/next-steps.md). This encapsulates all
-  those nitty-gritty details so tests don’t need to worry about them.
+  environment variables automatically. For example, if `TZDIR` or `TZ` must be
+  set for the embedded Postgres to find time zone info, or `PGPASSFILE` for the
+  generated password file, the `bootstrap_for_tests()` should handle that
+  internally (see docs/next-steps.md). This encapsulates all those nitty-gritty
+  details so tests don’t need to worry about them.
 
 ## Logging and visibility
 
-For a pleasant developer experience, we will add **logging instrumentation** to
-the helper’s operations (see docs/next-steps.md). Using the `tracing` crate, we
-can emit debug/info logs for steps like:
+For a pleasant developer experience, the helper will add **logging
+instrumentation** to its operations (see docs/next-steps.md). Using the
+`tracing` crate, it can emit debug/info logs for steps like:
 
 - Delegating privileged filesystem work (e.g. “Invoking pg_worker as nobody for
   setup”).
@@ -682,7 +716,7 @@ can emit debug/info logs for steps like:
 - Directory creation and ownership changes (e.g. “Chowning
   /var/tmp/pg-embed-1000 to user nobody”).
 
-- Setting environment variables (like informing if we override `HOME`,
+- Setting environment variables (like informing if the helper overrides `HOME`,
   `XDG_CACHE_HOME`, `PGPASSFILE` paths for the embedded process).
 
 - Postgres startup events (downloading binaries, starting server on port XYZ,
@@ -697,24 +731,23 @@ or the expected PG version).
 
 ## Platform support and limitations
 
-Initially, our focus is **Linux** for the worker-mediated privileged flow. On
-Linux, running tests as root will trigger the privileged path, provisioning
-directories for `nobody` and delegating to the subprocess so PostgreSQL is
-initialised without ever changing the parent’s identity. On other Unix-like
-OSes (macOS, FreeBSD), we do not attempt any worker delegation because tests
-usually run as an unprivileged user. If someone does run as root on macOS, we
-either error out or treat the execution as unprivileged. The embedded Postgres
-crate itself supports Mac/Windows, but those environments rely on the normal
-in-process bootstrap – effectively the fixture calls `PostgreSQL::setup()` and
-`start()` directly on those platforms.
+The worker-mediated privileged flow is supported on Linux and the other
+root-capable Unix targets guarded in the bootstrap code. On those targets,
+running tests as root triggers the privileged path, provisions directories for
+`nobody`, and delegates to the subprocess, so PostgreSQL is initialized without
+changing the parent’s identity. On macOS, root execution fails fast because no
+privilege-dropping implementation is supported there. On Windows, privilege
+detection always selects the unprivileged path and lifecycle operations run
+in-process.
 
-We are **leveraging the `postgresql-embedded` crate** as the core engine for
-cross-platform support (see postgresql-embedded README), so all OS-specific
-nuances of downloading and running PostgreSQL are handled by that library. Our
-layer is an orchestration on top to handle permission and configuration in a
-test-friendly way. This means as `postgresql-embedded` gains features or
-support, our fixture inherits them. (For example, Windows support is
-out-of-scope for now, but could be considered in the future through that crate.)
+The **`postgresql_embedded` crate** provides the core engine for cross-platform
+support (see the `postgresql_embedded` README), so OS-specific nuances of
+downloading and running PostgreSQL are handled by that library. This layer adds
+orchestration for permission and configuration handling in a test-friendly
+form. As `postgresql_embedded` gains features or platform support, the fixture
+inherits them. Windows x86-64 and macOS unprivileged support are now validated
+in CI. Windows on ARM remains unsupported until the upstream PostgreSQL binary
+archive publishes `aarch64-pc-windows-msvc` binaries.
 
 ## Summary: developer experience
 
@@ -722,14 +755,14 @@ Once these improvements are in place, using the library in tests will be
 extremely easy and consistent:
 
 - **No manual setup:** The test writer does not need to manually create users,
-  directories, or call out to `sudo` scripts. Just calling our fixture is
+  directories, or call out to `sudo` scripts. Just calling the fixture is
   enough to get a working empty PostgreSQL instance.
 
-- **Same code runs anywhere:** The *same test code* runs on a root CI (where we
-  chown directories and delegate privileged work to the worker subprocess) and
-  on an unprivileged machine (where everything stays in-process). There’s no
-  need for conditional logic in the test depending on environment – the library
-  handles it.
+- **Same code runs anywhere:** The _same test code_ runs on a root CI (where
+  directories are chowned and privileged work is delegated to the worker
+  subprocess) and on an unprivileged machine (where everything stays
+  in-process). There’s no need for conditional logic in the test depending on
+  environment – the library handles it.
 
 - **Integration with frameworks:** Using the provided rstest fixture or similar,
   tests can be written in a clean style without repetitive setup/teardown code.
@@ -746,24 +779,24 @@ extremely easy and consistent:
 In conclusion, **pg-embedded-setup-unpriv** will evolve from a low-level
 bootstrap tool into a robust test fixture foundation. By combining automatic
 root handling, an RAII `TestCluster` struct, and helper utilities (for caching
-and prerequisites), we provide a **smooth, seamless developer experience** for
-Postgres integration testing. Developers can write tests once and run them
-anywhere with confidence that the embedded database will spin up and tear down
-correctly, whether under root in a container or as a normal user on a laptop.
-These changes align with the planned ergonomic improvements (see
+and prerequisites), the library provides a **smooth, seamless developer
+experience** for Postgres integration testing. Developers can write tests once
+and run them anywhere with confidence that the embedded database will spin up
+and tear down correctly, whether under root in a container or as a normal user
+on a laptop. These changes align with the planned ergonomic improvements (see
 docs/next-steps.md) and will make PostgreSQL integration tests in Rust as
 effortless as using an in-memory database, but with full PostgreSQL fidelity.
 
 **Sources:**
 
-- pg_embedded_setup_unpriv – *Next Steps for Root-Oriented Postgres
-  Testing* (see docs/next-steps.md) (design goals for fixtures, RAII cluster,
+- pg_embedded_setup_unpriv – _Next Steps for Root-Oriented Postgres
+  Testing_ (see docs/next-steps.md) (design goals for fixtures, RAII cluster,
   caching, etc.)
 
-- pg_embedded_setup_unpriv – *README (Usage and
-  prerequisites)* (see README.md) (need for root and tzdata for embedded
+- pg_embedded_setup_unpriv – _README (Usage and
+  prerequisites)_ (see README.md) (need for root and tzdata for embedded
   Postgres)
 
-- theseus-rs/postgresql_embedded – *README (features and
-  examples)* (see postgresql-embedded README) (capabilities of the underlying
+- theseus-rs/postgresql_embedded – _README (features and
+  examples)_ (see postgresql_embedded README) (capabilities of the underlying
   embedded Postgres crate, async vs blocking API, ephemeral ports support)

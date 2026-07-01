@@ -1,4 +1,4 @@
-//! End-to-end lifecycle test for the atexit shutdown hook.
+//! End-to-end lifecycle test for the process-exit shutdown hook.
 //!
 //! Verifies that `PostgreSQL` processes do not survive test binary exit when
 //! the shutdown hook is registered. Uses a subprocess pattern: the parent
@@ -6,10 +6,12 @@
 //! hook, writes the postmaster PID to a temp file, then calls
 //! `std::process::exit(0)`. The parent waits for the child to exit and then
 //! confirms the postmaster has also terminated.
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 #[path = "support/cluster_skip.rs"]
 mod cluster_skip;
+#[path = "support/serial.rs"]
+mod serial;
 #[path = "support/skip.rs"]
 mod skip;
 
@@ -19,8 +21,11 @@ use std::{env, fs, thread};
 
 use cluster_skip::cluster_skip_message;
 use color_eyre::eyre::{Context, Result, eyre};
-use libc::pid_t;
-use pg_embedded_setup_unpriv::test_support::{process_is_running, read_postmaster_pid};
+use pg_embedded_setup_unpriv::test_support::{
+    PostmasterPid, process_is_running, read_postmaster_pid,
+};
+use rstest::rstest;
+use serial::{ScenarioSerialGuard, serial_guard};
 
 /// Environment variable used to signal that this binary is running as the
 /// child subprocess.
@@ -39,9 +44,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Spawns a child process that creates a cluster with the shutdown hook,
 /// then verifies the postmaster is stopped after the child exits.
-#[test]
-#[ignore = "requires real PostgreSQL — run with `cargo test -- --ignored`"]
-fn postmaster_exits_after_child_process_with_shutdown_hook() -> Result<()> {
+#[rstest]
+fn postmaster_exits_after_child_process_with_shutdown_hook(
+    serial_guard: ScenarioSerialGuard,
+) -> Result<()> {
+    let _guard = serial_guard;
     let tmp_dir = tempfile::tempdir().context("create temp dir")?;
     let pid_file = tmp_dir.path().join("postmaster_pid");
 
@@ -60,7 +67,7 @@ fn postmaster_exits_after_child_process_with_shutdown_hook() -> Result<()> {
         return Ok(());
     }
 
-    let pid: pid_t = content
+    let pid: PostmasterPid = content
         .trim()
         .parse()
         .context("parse postmaster PID from child")?;
@@ -81,10 +88,10 @@ fn spawn_child(pid_file: &Path) -> Result<std::process::ExitStatus> {
         .context("spawn child process")
 }
 
-fn wait_for_postmaster_exit(pid: pid_t) -> Result<()> {
+fn wait_for_postmaster_exit(pid: PostmasterPid) -> Result<()> {
     let deadline = std::time::Instant::now() + POSTMASTER_EXIT_TIMEOUT;
     loop {
-        if !process_is_running(pid) {
+        if !process_is_running(pid)? {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
@@ -145,7 +152,7 @@ fn shutdown_hook_lifecycle_child_entry() -> Result<()> {
         .context("register shutdown hook")?;
 
     // Write postmaster PID to the temp file for the parent to verify.
-    let pid = read_postmaster_pid(&handle.settings().data_dir)
+    let pid = read_postmaster_pid(&handle.settings().data_dir)?
         .ok_or_else(|| eyre!("postmaster.pid not found after cluster start"))?;
     fs::write(&pid_file_path, pid.to_string()).context("write PID file")?;
 

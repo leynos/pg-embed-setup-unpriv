@@ -4,21 +4,61 @@ use camino::Utf8PathBuf;
 use color_eyre::eyre::{ensure, eyre};
 use std::path::Path;
 
+#[cfg(unix)]
 use nix::unistd::geteuid;
-#[cfg(feature = "privileged-tests")]
-use pg_embedded_setup_unpriv::Error as PgEmbeddedError;
-#[cfg(any(
+#[cfg(all(
+    unix,
     feature = "privileged-tests",
-    all(unix, feature = "cluster-unit-tests")
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
+use pg_embedded_setup_unpriv::Error as PgEmbeddedError;
+use pg_embedded_setup_unpriv::PgEnvCfg;
+#[cfg(all(
+    unix,
+    any(feature = "privileged-tests", feature = "cluster-unit-tests"),
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
 ))]
 use pg_embedded_setup_unpriv::nobody_uid;
-use pg_embedded_setup_unpriv::{ExecutionPrivileges, PgEnvCfg, detect_execution_privileges};
-#[cfg(all(unix, feature = "cluster-unit-tests"))]
+#[cfg(unix)]
+use pg_embedded_setup_unpriv::{ExecutionPrivileges, detect_execution_privileges};
+#[cfg(all(
+    unix,
+    feature = "cluster-unit-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 use pg_embedded_setup_unpriv::{make_data_dir_private, make_dir_accessible};
 use postgresql_embedded::VersionReq;
 use rstest::{fixture, rstest};
 
-#[cfg(feature = "privileged-tests")]
+#[cfg(all(
+    unix,
+    feature = "privileged-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 #[expect(
     deprecated,
     reason = "Tests assert the deprecated helper surfaces its failure path"
@@ -140,7 +180,17 @@ fn to_settings_omits_worker_limits_by_default(default_pg_env: PgEnvCfg) -> color
     Ok(())
 }
 
-#[cfg(all(unix, feature = "privileged-tests"))]
+#[cfg(all(
+    unix,
+    feature = "privileged-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 #[rstest]
 /// Verify that the effective uid is changed within the passed block
 fn with_temp_euid_changes_uid() -> color_eyre::Result<()> {
@@ -170,7 +220,19 @@ fn with_temp_euid_changes_uid() -> color_eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(all(unix, not(feature = "privileged-tests")))]
+#[cfg(all(
+    unix,
+    any(
+        not(feature = "privileged-tests"),
+        not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "dragonfly",
+        )),
+    ),
+))]
 #[rstest]
 /// Stub variant ensuring the suite reports skipped when privilege drops are unavailable.
 fn with_temp_euid_changes_uid() -> color_eyre::Result<()> {
@@ -180,11 +242,31 @@ fn with_temp_euid_changes_uid() -> color_eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(all(unix, feature = "cluster-unit-tests"))]
+#[cfg(all(
+    unix,
+    feature = "cluster-unit-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 #[path = "support/cap_fs_settings.rs"]
 mod cap_fs;
 
-#[cfg(all(unix, feature = "cluster-unit-tests"))]
+#[cfg(all(
+    unix,
+    feature = "cluster-unit-tests",
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 mod dir_accessible_tests {
     use super::*;
     use cap_std::fs::{MetadataExt, PermissionsExt};
@@ -275,7 +357,16 @@ fn detect_execution_privileges_tracks_effective_uid() -> color_eyre::Result<()> 
         detect_execution_privileges() == ExecutionPrivileges::Root,
         "root execution should be detected as privileged",
     );
-    #[cfg(feature = "privileged-tests")]
+    #[cfg(all(
+        feature = "privileged-tests",
+        any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "dragonfly",
+        ),
+    ))]
     {
         let Err(err) = invoke_deprecated_with_temp_euid() else {
             return Err(eyre!("with_temp_euid should now reject privilege swaps"));
@@ -283,7 +374,16 @@ fn detect_execution_privileges_tracks_effective_uid() -> color_eyre::Result<()> 
         tracing::warn!("skipping privilege swap: {err}");
     }
 
-    #[cfg(not(feature = "privileged-tests"))]
+    #[cfg(any(
+        not(feature = "privileged-tests"),
+        not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "dragonfly",
+        )),
+    ))]
     {
         tracing::warn!(
             "skipping privileged uid swap: enable the privileged-tests feature to drop privileges",

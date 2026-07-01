@@ -16,13 +16,17 @@ use std::os::unix::io::AsRawFd;
 #[cfg(unix)]
 use std::path::PathBuf;
 
+#[cfg(not(unix))]
+#[path = "serial/non_unix.rs"]
+mod non_unix;
+
 static SCENARIO_MUTEX: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
 
 #[cfg(unix)]
 type ProcessLock = std::fs::File;
 
 #[cfg(not(unix))]
-type ProcessLock = ();
+use non_unix::ProcessLock;
 
 #[derive(Debug)]
 #[must_use = "Hold this guard for the duration of the serialized scenario"]
@@ -41,11 +45,9 @@ pub struct ScenarioLocalGuard {
 ///
 /// Acquires a global mutex to ensure that scenarios relying on shared state
 /// (such as process environment variables or singleton resources) execute
-/// serially, preventing cross-test interference. A cross-process file lock is
-/// also acquired so independent test binaries coordinate access to the shared
-/// `PostgreSQL` cache and installation directories. On non-Unix platforms this
-/// lock is a no-op, so cross-process runs may still race when touching shared
-/// caches.
+/// serially, preventing cross-test interference. A cross-process lock is also
+/// acquired so independent test binaries coordinate access to the shared
+/// `PostgreSQL` cache and installation directories.
 ///
 /// # Behaviour
 ///
@@ -154,16 +156,16 @@ fn acquire_process_lock() -> ProcessLock {
 
 #[cfg(not(unix))]
 fn acquire_process_lock() -> ProcessLock {
-    ()
+    non_unix::acquire_process_lock()
 }
 
 #[cfg(test)]
 mod tests {
     //! Unit tests for scenario serialization guards.
 
-    use rstest::rstest;
-
     use super::*;
+    #[cfg(unix)]
+    use rstest::rstest;
 
     #[test]
     fn serial_guard_is_not_reentrant() {

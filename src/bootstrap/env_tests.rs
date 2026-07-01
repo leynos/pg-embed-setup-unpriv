@@ -1,8 +1,15 @@
 //! Tests for bootstrap environment discovery helpers.
 
-use super::{BootstrapErrorKind, WORKER_BINARY_NAME, discover_worker_from_path_value};
+#[cfg(all(unix, not(target_os = "macos")))]
+use super::{BootstrapErrorKind, WORKER_BINARY_NAME};
+use super::{discover_worker_from_path_value, worker_binary_from_env};
+use crate::bootstrap::mode::ExecutionPrivileges;
+use crate::env::ScopedEnv;
+#[cfg(all(unix, not(target_os = "macos")))]
 use std::ffi::OsString;
+#[cfg(all(unix, not(target_os = "macos")))]
 use std::os::unix::ffi::OsStringExt;
+#[cfg(all(unix, not(target_os = "macos")))]
 use std::os::unix::fs::PermissionsExt;
 
 #[test]
@@ -12,6 +19,23 @@ fn discover_worker_returns_none_when_path_is_absent() {
 }
 
 #[test]
+fn worker_binary_from_env_ignores_env_for_unprivileged_bootstrap() {
+    let _guard = ScopedEnv::apply(&[(
+        String::from("PG_EMBEDDED_WORKER"),
+        Some(String::from("/definitely/missing/pg_worker")),
+    )]);
+
+    let result = worker_binary_from_env(ExecutionPrivileges::Unprivileged)
+        .expect("unprivileged bootstrap should not validate PG_EMBEDDED_WORKER");
+
+    assert!(
+        result.is_none(),
+        "unprivileged bootstrap should not use PG_EMBEDDED_WORKER"
+    );
+}
+
+#[test]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn discover_worker_errors_on_non_utf8_path_entry() {
     let temp = tempfile::tempdir().expect("tempdir");
     let valid_dir = temp.path().join("valid");

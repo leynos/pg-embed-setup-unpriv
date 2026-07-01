@@ -6,6 +6,7 @@ BUILD_JOBS ?=
 DIST_DIR ?= dist
 RELEASE_BINARIES ?= pg_embedded_setup_unpriv pg_worker
 TARGET ?=
+UV ?= uv
 MANIFEST_VERSION := $(strip $(shell awk '\
 	/^\[package\]$$/ { in_package = 1; next } \
 	/^\[/ { if (in_package) exit; next } \
@@ -19,9 +20,6 @@ VERSION ?= $(MANIFEST_VERSION)
 ifeq ($(strip $(VERSION)),)
 $(error VERSION is empty; set [package].version in Cargo.toml or pass VERSION explicitly)
 endif
-RELEASE_ARCHIVE_STEM = pg-embed-setup-unpriv-$(TARGET)-v$(VERSION)
-RELEASE_ARCHIVE_DIR = $(DIST_DIR)/$(RELEASE_ARCHIVE_STEM)
-RELEASE_ARCHIVE_FILE = $(RELEASE_ARCHIVE_DIR).tgz
 CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
 MDLINT ?= markdownlint-cli2
@@ -47,14 +45,12 @@ release-archive: ## Package release binaries for cargo-binstall
 	@test -n "$(TARGET)" || (echo "TARGET is required" >&2; exit 1)
 	@test "$(MANIFEST_VERSION)" = "$(VERSION)" || \
 		(echo "VERSION ($(VERSION)) must match Cargo.toml package version ($(MANIFEST_VERSION))" >&2; exit 1)
-	$(CARGO) build $(BUILD_JOBS) --release --target "$(TARGET)" $(foreach bin,$(RELEASE_BINARIES),--bin $(bin))
-	rm -rf "$(RELEASE_ARCHIVE_DIR)" "$(RELEASE_ARCHIVE_FILE)"
-	mkdir -p "$(RELEASE_ARCHIVE_DIR)"
-	@set -e; for bin in $(RELEASE_BINARIES); do \
-		cp "target/$(TARGET)/release/$$bin" "$(RELEASE_ARCHIVE_DIR)/$$bin"; \
-	done
-	tar -C "$(DIST_DIR)" -czf "$(RELEASE_ARCHIVE_FILE)" "$(RELEASE_ARCHIVE_STEM)"
-	rm -rf "$(RELEASE_ARCHIVE_DIR)"
+	$(UV) run --script scripts/release_archive.py "$(TARGET)" \
+		--release-version "$(VERSION)" \
+		--dist-dir "$(DIST_DIR)" \
+		--cargo "$(CARGO)" \
+		$(if $(BUILD_JOBS),--build-jobs "$(BUILD_JOBS)") \
+		$(foreach bin,$(RELEASE_BINARIES),--binary $(bin))
 
 lint: ## Run Clippy with warnings denied
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)

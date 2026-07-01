@@ -394,6 +394,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Err("pg_worker is not supported on non-Unix platforms".into())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, unix, feature = "dev-worker"))]
 #[path = "pg_worker/tests.rs"]
 mod tests;

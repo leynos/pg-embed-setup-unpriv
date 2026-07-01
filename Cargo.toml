@@ -3,7 +3,7 @@ name = "pg-embed-setup-unpriv"
 version = "0.5.1"
 edition = "2024"
 rust-version = "1.85"
-description = "Initialises postgresql_embedded clusters as root while handing off filesystem work to nobody"
+description = "Initialises postgresql_embedded clusters with platform-appropriate setup"
 license = "ISC"
 documentation = "https://docs.rs/pg-embed-setup-unpriv/latest/pg_embedded_setup_unpriv"
 homepage = "https://df12.studio/docs.html"
@@ -52,6 +52,11 @@ path = "tests/bootstrap_worker_binary.rs"
 required-features = ["cluster-unit-tests"]
 
 [[test]]
+name = "cluster_split_constructors"
+path = "tests/cluster_split_constructors.rs"
+required-features = ["cluster-unit-tests"]
+
+[[test]]
 name = "data_dir_recovery"
 path = "tests/data_dir_recovery.rs"
 required-features = ["cluster-unit-tests", "privileged-tests"]
@@ -65,6 +70,11 @@ required-features = ["cluster-unit-tests"]
 name = "observability"
 path = "tests/observability.rs"
 required-features = ["cluster-unit-tests"]
+
+[[test]]
+name = "recovery_integration"
+path = "tests/recovery_integration.rs"
+required-features = ["dev-worker"]
 
 [[test]]
 name = "shutdown_timeout"
@@ -112,7 +122,6 @@ path = "tests/settings.rs"
 
 [dependencies]
 postgresql_embedded = { version = "0.20.2", features = ["tokio"] }
-nix = { version = "0.30.1", default-features = false, features = ["user", "fs"] }
 color-eyre = "0.6"
 tokio = { version = "1", features = ["rt", "macros", "time", "fs"] }
 serde = { version = "1", features = ["derive"] }
@@ -122,7 +131,6 @@ postgres = "0.19"
 ortho_config = { version = "0.5.0", features = ["json5", "yaml", "toml"] }
 clap = { version = "4", features = ["derive"] }
 figment = { version = "0.10", features = ["env"] }
-xdg = "3"
 uncased = "0.9"
 figment-json5 = "0.1.1"
 cap-std = "4.0.2"
@@ -137,12 +145,14 @@ loom = { version = "0.7.2", optional = true }
 wait-timeout = "0.2"
 tracing = { version = "0.1", features = ["std"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
-openssl-sys = { version = "0.9.111", features = ["vendored"] }
 pq-sys = { version = "0.7.5", optional = true, features = ["bundled"] }
 rstest = "0.26"
 dashmap = "6.1.0"
 dirs = "6.0"
 sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30.1", default-features = false, features = ["user", "fs"] }
 
 [features]
 toml = []
@@ -242,3 +252,6 @@ unic-langid = "0.9"
 serial_test = { version = "3.4.0", features = ["file_locks"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 mockall = "0.14"
+proptest = "1"
+trybuild = "1"
+insta = "1"

@@ -124,7 +124,16 @@ mod behaviour_tests {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 mod unix_tests {
     use super::*;
     use nix::unistd::{Uid, User, geteuid};

@@ -37,13 +37,10 @@ jobs:
             tag="$REF_NAME"
           fi
 
-          case "$tag" in
-            v*) ;;
-            *)
-              echo "Release tags must start with 'v': $tag" >&2
-              exit 1
-              ;;
-          esac
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must match vMAJOR.MINOR.PATCH: $tag" >&2
+            exit 1
+          fi
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
@@ -82,26 +79,281 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@b61ad14766ae81b830abdaf066eb3d9b6c4f537b
+        uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
       - name: Build release archive
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          TARGET: ${{ matrix.target }}
         run: >-
-          make release-archive
-          TARGET=${{ matrix.target }}
-          VERSION=${{ needs.prepare.outputs.version }}
+          uv run --script scripts/release_archive.py
+          "$TARGET"
+          --release-version "$RELEASE_VERSION"
       - name: Upload release archive
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release upload "$TAG" dist/*.tgz --clobber
 
+  audit-draft-assets:
+    name: Audit draft assets (${{ matrix.target }})
+    needs: [prepare, build-assets]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_PORT: "8765"
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+      - name: Install cargo-binstall 1.19.1
+        shell: bash
+        env:
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          set -euo pipefail
+
+          requested_binstall_dir="$RUNNER_TEMP/cargo-binstall-1.19.1"
+          mkdir -p "$requested_binstall_dir"
+          cargo binstall -y \
+            --install-path "$requested_binstall_dir" \
+            --force \
+            cargo-binstall@1.19.1
+
+          effective_binstall_dir="$requested_binstall_dir"
+          binstall_bin="$requested_binstall_dir/cargo-binstall"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            binstall_bin="${binstall_bin}.exe"
+          fi
+
+          if [[ ! -x "$binstall_bin" ]]; then
+            cargo_home_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+            fallback_binstall_bin="$cargo_home_bin/cargo-binstall"
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              fallback_binstall_bin="${fallback_binstall_bin}.exe"
+            fi
+            if [[ -x "$fallback_binstall_bin" ]]; then
+              effective_binstall_dir="$cargo_home_bin"
+              binstall_bin="$fallback_binstall_bin"
+            fi
+          fi
+
+          if [[ ! -x "$binstall_bin" ]]; then
+            echo "cargo-binstall 1.19.1 was not found after installation" >&2
+            echo "checked $requested_binstall_dir and ${CARGO_HOME:-$HOME/.cargo}/bin" >&2
+            exit 1
+          fi
+
+          echo "$effective_binstall_dir" >> "$GITHUB_PATH"
+          binstall_version="$("$binstall_bin" -V)"
+          echo "$binstall_version"
+          if [[ "$binstall_version" != *"1.19.1"* ]]; then
+            echo "expected cargo-binstall 1.19.1, got $binstall_version" >&2
+            exit 1
+          fi
+      - name: Download draft release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          rm -rf release-dist
+          mkdir -p release-dist
+          gh release download "$TAG" \
+            --dir release-dist \
+            --pattern "*.tgz"
+      - name: Audit cargo-binstall assets
+        shell: bash
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+
+          install_dir="$PWD/.binstall-bin"
+          cert_dir="$RUNNER_TEMP/binstall-cert"
+          rm -rf "$install_dir" "$cert_dir"
+          mkdir -p "$install_dir" "$cert_dir"
+
+          cat > "$cert_dir/ca.cnf" <<'EOF'
+          [ req ]
+          prompt = no
+          distinguished_name = ca_dn
+          x509_extensions = v3_ca
+          default_md = sha256
+          string_mask = utf8only
+
+          [ ca_dn ]
+          O = pg-embed-setup-unpriv
+          CN = pg local test CA
+
+          [ v3_ca ]
+          subjectKeyIdentifier = hash
+          authorityKeyIdentifier = keyid:always
+          basicConstraints = critical,CA:TRUE,pathlen:0
+          keyUsage = critical,keyCertSign,cRLSign
+          EOF
+          env MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes \
+            -sha256 \
+            -days 1 \
+            -set_serial 1 \
+            -keyout "$cert_dir/ca.key" \
+            -out "$cert_dir/ca.pem" \
+            -config "$cert_dir/ca.cnf"
+
+          cat > "$cert_dir/server-req.cnf" <<'EOF'
+          [ req ]
+          prompt = no
+          distinguished_name = server_dn
+          default_md = sha256
+          string_mask = utf8only
+
+          [ server_dn ]
+          O = pg-embed-setup-unpriv
+          CN = 127.0.0.1
+          EOF
+          env MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes \
+            -sha256 \
+            -keyout "$cert_dir/server.key" \
+            -out "$cert_dir/server.csr" \
+            -config "$cert_dir/server-req.cnf"
+          cat > "$cert_dir/server-ext.cnf" <<'EOF'
+          [ server_cert ]
+          subjectKeyIdentifier = hash
+          authorityKeyIdentifier = keyid,issuer
+          basicConstraints = critical,CA:FALSE
+          subjectAltName = IP:127.0.0.1
+          extendedKeyUsage = serverAuth
+          keyUsage = critical,digitalSignature,keyEncipherment
+          EOF
+          env MSYS_NO_PATHCONV=1 openssl x509 -req \
+            -in "$cert_dir/server.csr" \
+            -CA "$cert_dir/ca.pem" \
+            -CAkey "$cert_dir/ca.key" \
+            -set_serial 2 \
+            -sha256 \
+            -days 1 \
+            -out "$cert_dir/server.pem" \
+            -extfile "$cert_dir/server-ext.cnf" \
+            -extensions server_cert
+          openssl verify -x509_strict -purpose sslserver \
+            -CAfile "$cert_dir/ca.pem" \
+            "$cert_dir/server.pem"
+
+          if command -v python3 >/dev/null 2>&1; then
+            python_bin=python3
+          else
+            python_bin=python
+          fi
+
+          CERT_DIR="$cert_dir" "$python_bin" - <<'PY' >"$RUNNER_TEMP/binstall-http.log" 2>&1 &
+          from functools import partial
+          from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+          import os
+          import ssl
+
+          cert_dir = Path(os.environ["CERT_DIR"])
+          handler = partial(SimpleHTTPRequestHandler, directory=str(Path("release-dist").resolve()))
+          server = ThreadingHTTPServer(("127.0.0.1", 8765), handler)
+          context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+          context.load_cert_chain(cert_dir / "server.pem", cert_dir / "server.key")
+          server.socket = context.wrap_socket(server.socket, server_side=True)
+          server.serve_forever()
+          PY
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --insecure -fsS "https://127.0.0.1:${RELEASE_PORT}/" >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" -eq 30 ]]; then
+              cat "$RUNNER_TEMP/binstall-http.log" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          pkg_url="https://127.0.0.1:${RELEASE_PORT}/{ name }-{ target }-v{ version }{ archive-suffix }"
+          for target in \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            x86_64-pc-windows-msvc \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin
+          do
+            cargo binstall -y \
+              --manifest-path Cargo.toml \
+              --targets "$target" \
+              --strategies crate-meta-data \
+              --pkg-url "$pkg_url" \
+              --root-certificates "$cert_dir/ca.pem" \
+              --install-path "$RUNNER_TEMP/binstall-dry-run" \
+              --force \
+              --dry-run \
+              pg-embed-setup-unpriv
+          done
+
+          cargo binstall -y \
+            --manifest-path Cargo.toml \
+            --targets "$TARGET" \
+            --strategies crate-meta-data \
+            --pkg-url "$pkg_url" \
+            --root-certificates "$cert_dir/ca.pem" \
+            --install-path "$install_dir" \
+            --force \
+            pg-embed-setup-unpriv
+
+          binary_ext=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            binary_ext=".exe"
+          fi
+
+          test -f "$install_dir/pg_embedded_setup_unpriv${binary_ext}"
+          test -f "$install_dir/pg_worker${binary_ext}"
+          "$install_dir/pg_embedded_setup_unpriv${binary_ext}" --version
+
   publish-release:
     name: Publish release
-    needs: [prepare, build-assets]
+    needs: [prepare, audit-draft-assets]
     runs-on: ubuntu-24.04
     steps:
       - name: Publish draft release
@@ -112,3 +364,61 @@ jobs:
           set -euo pipefail
 
           gh release edit "$TAG" --draft=false
+
+  verify-published-assets:
+    name: Verify published asset URLs
+    needs: [prepare, publish-release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@7da7c6d89033d13cbb1c64803d108ddca97e69c2
+      - name: Install cargo-binstall 1.19.1
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          requested_binstall_dir="$RUNNER_TEMP/cargo-binstall-1.19.1"
+          mkdir -p "$requested_binstall_dir"
+          cargo binstall -y \
+            --install-path "$requested_binstall_dir" \
+            --force \
+            cargo-binstall@1.19.1
+
+          export PATH="$requested_binstall_dir:$PATH"
+          echo "$requested_binstall_dir" >> "$GITHUB_PATH"
+          binstall_version="$(cargo binstall -V)"
+          echo "$binstall_version"
+          if [[ "$binstall_version" != *"1.19.1"* ]]; then
+            echo "expected cargo-binstall 1.19.1, got $binstall_version" >&2
+            exit 1
+          fi
+      - name: Dry-run published release asset URLs
+        run: |
+          set -euo pipefail
+
+          for target in \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            x86_64-pc-windows-msvc \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin
+          do
+            cargo binstall -y \
+              --manifest-path Cargo.toml \
+              --targets "$target" \
+              --strategies crate-meta-data \
+              --github-token "$GITHUB_TOKEN" \
+              --install-path "$RUNNER_TEMP/binstall-url-dry-run" \
+              --force \
+              --dry-run \
+              pg-embed-setup-unpriv
+          done

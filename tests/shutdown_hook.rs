@@ -3,16 +3,20 @@
 //! Verifies that the shutdown hook can be registered successfully on a running
 //! cluster. End-to-end process lifecycle verification is in
 //! `shutdown_hook_lifecycle.rs`.
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 #[path = "support/cluster_skip.rs"]
 mod cluster_skip;
+#[path = "support/serial.rs"]
+mod serial;
 #[path = "support/skip.rs"]
 mod skip;
 
 use cluster_skip::cluster_skip_message;
 use color_eyre::eyre::{Result, ensure};
 use pg_embedded_setup_unpriv::TestCluster;
+use rstest::rstest;
+use serial::{ScenarioSerialGuard, serial_guard};
 use tracing::warn;
 
 /// Returns `true` if the error should cause a soft skip rather than a hard
@@ -25,8 +29,11 @@ fn should_skip(message: &str, debug: &str) -> bool {
 
 /// Verifies that `register_shutdown_on_exit()` succeeds for a running cluster
 /// created via `new_split()`, including idempotent re-registration.
-#[test]
-fn register_shutdown_on_exit_succeeds_for_running_cluster() -> Result<()> {
+#[rstest]
+fn register_shutdown_on_exit_succeeds_for_running_cluster(
+    serial_guard: ScenarioSerialGuard,
+) -> Result<()> {
+    let _guard = serial_guard;
     let (handle, guard) = match create_cluster() {
         Ok(pair) => pair,
         Err(SkipOrFail::Skip(reason)) => {

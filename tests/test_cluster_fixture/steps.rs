@@ -3,6 +3,7 @@
 use std::panic::AssertUnwindSafe;
 
 use color_eyre::eyre::{Result, ensure};
+use nix::unistd::geteuid;
 use pg_embedded_setup_unpriv::test_support::test_cluster;
 use rstest_bdd_macros::{given, scenario, then, when};
 
@@ -27,12 +28,20 @@ fn given_missing_timezone(world: &FixtureWorldFixture) -> Result<()> {
 
 #[given("the rstest fixture runs without a worker binary")]
 fn given_missing_worker(world: &FixtureWorldFixture) -> Result<()> {
-    set_profile(world, FixtureEnvProfile::MissingWorkerBinary)
+    set_root_worker_profile(
+        world,
+        FixtureEnvProfile::MissingWorkerBinary,
+        "missing worker binary validation",
+    )
 }
 
 #[given("the rstest fixture uses a non-executable worker binary")]
 fn given_non_executable_worker(world: &FixtureWorldFixture) -> Result<()> {
-    set_profile(world, FixtureEnvProfile::NonExecutableWorkerBinary)
+    set_root_worker_profile(
+        world,
+        FixtureEnvProfile::NonExecutableWorkerBinary,
+        "non-executable worker validation",
+    )
 }
 
 #[given("the rstest fixture encounters filesystem permission issues")]
@@ -58,9 +67,27 @@ fn set_profile(world: &FixtureWorldFixture, profile: FixtureEnvProfile) -> Resul
     Ok(())
 }
 
+fn set_root_worker_profile(
+    world: &FixtureWorldFixture,
+    profile: FixtureEnvProfile,
+    description: &str,
+) -> Result<()> {
+    set_profile(world, profile)?;
+    if !geteuid().is_root() {
+        borrow_world(world)?
+            .borrow_mut()
+            .mark_skip(format!("{description} requires root privileges"));
+    }
+    Ok(())
+}
+
 #[when("test_cluster is invoked via rstest")]
 fn when_fixture_runs(world: &FixtureWorldFixture) -> Result<()> {
     let world_cell = borrow_world(world)?;
+    if world_cell.borrow().is_skipped() {
+        return Ok(());
+    }
+
     let env_profile = { world_cell.borrow().env_profile };
     let vars = {
         let world_ref = world_cell.borrow();

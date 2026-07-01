@@ -5,10 +5,31 @@
 
 use crate::error::BootstrapResult;
 use crate::observability::LOG_TARGET;
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 use color_eyre::eyre::{Context, eyre};
 use std::path::Path;
 use std::process::Command;
-use tracing::{info, info_span};
+use tracing::info;
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
+use tracing::info_span;
 
 macro_rules! cfg_privilege_drop {
     ($($item:item)*) => {
@@ -228,20 +249,6 @@ cfg_privilege_drop! {
             },
         );
     }
-}
-
-#[cfg(not(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-)))]
-const fn skip_privilege_drop_for_tests() -> bool {
-    false
 }
 
 #[cfg(all(
