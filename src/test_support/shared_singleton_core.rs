@@ -1,25 +1,25 @@
 //! Shared singleton state-machine core.
 //!
-//! This module owns the fallible lazy-initialisation state machine shared by
+//! This module owns the fallible lazy-initialization state machine shared by
 //! `shared_singleton.rs` and the Loom model tests. Keeping the transition logic
 //! here gives runtime callers and test-only concurrency models the same
 //! behaviour without coupling either side to the other's locking primitive or
 //! storage strategy.
 
-/// State machine for fallible lazy singleton initialisation.
+/// State machine for fallible lazy singleton initialization.
 pub(super) enum SharedInitState<T, C> {
-    /// Not yet initialised.
+    /// Not yet initialized.
     Uninitialised,
-    /// Successfully initialised with the cached value.
+    /// Successfully initialized with the cached value.
     Initialised(T),
-    /// Initialisation failed; stores the cached failure details.
+    /// Initialization failed; stores the cached failure details.
     Failed(C),
 }
 
-/// Result type returned by a first-attempt initialiser.
+/// Result type returned by a first-attempt initializer.
 pub(super) type InitialiserResult<T, C, E> = Result<T, (C, E)>;
 
-/// Resolves a shared singleton state, initialising it at most once.
+/// Resolves a shared singleton state, initializing it at most once.
 pub(super) fn get_or_try_init_shared<T, C, E, Init, CachedError>(
     state: &mut SharedInitState<T, C>,
     init: Init,

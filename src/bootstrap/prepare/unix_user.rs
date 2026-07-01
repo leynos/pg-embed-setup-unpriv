@@ -1,4 +1,11 @@
 //! Unix user ownership helpers for bootstrap preparation.
+//!
+//! This Unix-only module handles filesystem ownership work that the
+//! cross-platform prepare flow cannot express portably, such as handing
+//! prepared directories and `PGPASSFILE` ownership to the target user. Keeping
+//! those operations here leaves the shared prepare logic focused on path and
+//! environment setup while isolating Unix permission and descriptor-based file
+//! handling behind a narrow boundary.
 
 use camino::Utf8PathBuf;
 use cap_std::fs::{OpenOptions, OpenOptionsExt};

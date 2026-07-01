@@ -1,7 +1,7 @@
 //! Loom checks for shared singleton state transitions.
 //!
 //! These tests model `shared_singleton_core` under deterministic thread
-//! interleavings. They verify that concurrent callers initialise the shared
+//! interleavings. They verify that concurrent callers initialize the shared
 //! singleton at most once, observe one cached success or failure, and never see
 //! a torn intermediate state while reusing the same core state-machine logic as
 //! `shared_singleton.rs`.
@@ -10,6 +10,9 @@ use super::shared_singleton_core::{SharedInitState, get_or_try_init_shared};
 use loom::sync::atomic::{AtomicUsize, Ordering};
 use loom::sync::{Arc, Mutex};
 use loom::thread;
+
+const FIRST_FAILURE: usize = 13;
+const CACHED_FAILURE: usize = 17;
 
 struct LoomSharedState {
     state: Mutex<SharedInitState<usize, usize>>,
@@ -48,7 +51,7 @@ impl LoomSharedState {
             &mut state,
             || {
                 self.initialisations.fetch_add(1, Ordering::SeqCst);
-                Err((13, 13))
+                Err((CACHED_FAILURE, FIRST_FAILURE))
             },
             |cached| *cached,
         )
@@ -108,8 +111,22 @@ fn shared_singleton_caches_failed_initialisation() {
             panic!("second thread should join");
         };
 
-        assert_eq!(first_result, Err(13));
-        assert_eq!(second_result, Err(13));
+        assert_cached_failure_translation(first_result, second_result);
         assert_eq!(state.initialisations.load(Ordering::SeqCst), 1);
     });
+}
+
+fn assert_cached_failure_translation(
+    first_result: Result<usize, usize>,
+    second_result: Result<usize, usize>,
+) {
+    let Err(first_error) = first_result else {
+        panic!("first caller should observe failure");
+    };
+    let Err(second_error) = second_result else {
+        panic!("second caller should observe failure");
+    };
+    let mut errors = [first_error, second_error];
+    errors.sort_unstable();
+    assert_eq!(errors, [FIRST_FAILURE, CACHED_FAILURE]);
 }
