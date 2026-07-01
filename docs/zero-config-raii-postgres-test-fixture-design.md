@@ -339,6 +339,19 @@ essentially one line in the test setup.
 - Behavioural suites now coordinate across binaries with a shared lock file,
   so concurrent PostgreSQL setup or download tasks do not race in CI.
 
+### Implementation update (2026-06-26)
+
+- Added property-based lifecycle tests for schedule-independent guarantees:
+  cleanup-mode relationships, dangerous cleanup path rejection, repeated
+  cleanup, cleanup after partial setup, and deterministic bootstrap path
+  preparation.
+- Extended the `loom-tests` suite beyond `ScopedEnv` to model-check
+  race-sensitive lifecycle paths: per-template database creation, shared
+  singleton initialisation, and shutdown-hook registration.
+- Continuous Integration runs the ignored library Loom models explicitly with
+  `cargo test --workspace --all-features --lib -- --ignored`, while the
+  property tests continue to run in the ordinary unit suite.
+
 #### Class diagram (2025-12-10)
 
 The worker payload and snapshot types are organized as follows.

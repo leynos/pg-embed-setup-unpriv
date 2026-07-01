@@ -3,13 +3,13 @@
 //! This module provides methods for creating, dropping, and managing databases
 //! on a running `PostgreSQL` cluster.
 
-use std::sync::{Mutex, OnceLock};
-
 use color_eyre::eyre::WrapErr;
-use dashmap::DashMap;
 use tracing::info_span;
 
 use super::connection::{TestClusterConnection, escape_identifier};
+use super::lifecycle_template::{
+    STD_TEMPLATE_LOCKS, TemplateCreationOps, ensure_template_exists_with_lock,
+};
 use super::temporary_database::TemporaryDatabase;
 use crate::error::BootstrapResult;
 
@@ -65,16 +65,6 @@ impl From<String> for DatabaseName {
     fn from(s: String) -> Self {
         Self(s)
     }
-}
-
-/// Global per-template locks to prevent concurrent template creation.
-///
-/// Uses a `DashMap` to allow lock-free reads and concurrent access to
-/// different templates while serialising access to the same template.
-static TEMPLATE_LOCKS: OnceLock<DashMap<String, Mutex<()>>> = OnceLock::new();
-
-fn template_locks() -> &'static DashMap<String, Mutex<()>> {
-    TEMPLATE_LOCKS.get_or_init(DashMap::new)
 }
 
 impl TestClusterConnection {
@@ -279,19 +269,16 @@ impl TestClusterConnection {
     {
         let db_name = name.into();
         let _span = info_span!("ensure_template_exists", template = %db_name.as_str()).entered();
-        let locks = template_locks();
-        let lock = locks
-            .entry(db_name.as_str().to_owned())
-            .or_insert_with(|| Mutex::new(()));
-        let _guard = lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-        if !self.database_exists(db_name.as_str())? {
-            self.create_database(db_name.as_str())?;
-            setup_fn(db_name.as_str())?;
-        }
-        Ok(())
+        ensure_template_exists_with_lock(
+            &STD_TEMPLATE_LOCKS,
+            db_name.as_str(),
+            TemplateCreationOps {
+                database_exists: || self.database_exists(db_name.as_str()),
+                create_database: || self.create_database(db_name.as_str()),
+                drop_database: || self.drop_database(db_name.as_str()),
+                setup_fn: || setup_fn(db_name.as_str()),
+            },
+        )
     }
 
     /// Creates a temporary database that is dropped when the guard is dropped.

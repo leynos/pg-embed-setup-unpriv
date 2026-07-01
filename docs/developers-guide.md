@@ -12,6 +12,9 @@ consumer-facing guidance.
   `TestCluster` teardown, demonstrating that no orphaned processes remain.
 - Behavioural tests driven by `rstest-bdd` exercise both privilege branches to
   guard against regressions in ownership or permission handling.
+- Property tests exercise lifecycle invariants that do not depend on a
+  particular thread schedule, including repeated cleanup, partial setup
+  cleanup, cleanup-mode relationships, and pure bootstrap path preparation.
 - Behavioural suites coordinate via a shared lock file, so concurrent test
   binaries do not contend over PostgreSQL setup or cache directories.
 
@@ -33,17 +36,27 @@ workflow creates a draft GitHub release, builds native Linux archives on
 `[package.metadata.binstall]` entries so `cargo binstall pg-embed-setup-unpriv`
 can install those published assets on Linux `x86_64` and `aarch64`.
 
-## Loom concurrency tests
+## Lifecycle verification
 
-Loom-based checks for `ScopedEnv` are opt-in and only compile when the
-`loom-tests` feature is enabled. The Loom tests are marked `#[ignore]`, and
-`make test` keeps them dormant: the nextest run uses `--all-features`, while
-the follow-up `cargo test` run disables default features (enabling `dev-worker`
-only). Run the Loom suite with:
+`proptest` cases run as part of the default unit suite and protect the
+schedule-independent lifecycle guarantees. These cover idempotent cleanup,
+cleanup after partial setup, dangerous cleanup path rejection, cleanup-mode
+relationships, and deterministic bootstrap path preparation.
+
+Loom-based checks are opt-in and only compile when the `loom-tests` feature is
+enabled. The Loom tests are marked `#[ignore]`, and `make test` keeps them
+dormant: the nextest run uses `--all-features`, while the follow-up
+`cargo test` run disables default features (enabling `dev-worker` only). CI
+runs the ignored library Loom models explicitly. Run the same suite locally
+with:
 
 ```sh
-cargo test --features "loom-tests" --lib -- --ignored
+RUSTFLAGS="-D warnings" cargo test --workspace --all-features --lib -- --ignored
 ```
+
+The Loom models cover the schedule-sensitive lifecycle paths: scoped
+environment state, per-template database creation, shared singleton
+initialisation, and shutdown-hook registration.
 
 ## Further reading
 

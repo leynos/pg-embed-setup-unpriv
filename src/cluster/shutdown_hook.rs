@@ -56,23 +56,40 @@ pub(super) fn register_shutdown_hook(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    if guard.is_some() {
+    let registered = register_shutdown_hook_with_state(
+        &mut guard,
+        ShutdownState {
+            settings,
+            shutdown_timeout,
+            cleanup_mode,
+        },
+        register_atexit,
+    )?;
+    if registered {
+        log_registration_success();
+    } else {
         log_already_registered();
-        return Ok(());
     }
+    Ok(())
+}
 
-    register_atexit()?;
+fn register_shutdown_hook_with_state<F>(
+    guard: &mut Option<ShutdownState>,
+    state: ShutdownState,
+    register: F,
+) -> BootstrapResult<bool>
+where
+    F: FnOnce() -> BootstrapResult<()>,
+{
+    if guard.is_some() {
+        return Ok(false);
+    }
+    register()?;
 
     // Store state only AFTER atexit succeeds, so a failed registration
     // does not poison the slot for future attempts.
-    *guard = Some(ShutdownState {
-        settings,
-        shutdown_timeout,
-        cleanup_mode,
-    });
-
-    log_registration_success();
-    Ok(())
+    *guard = Some(state);
+    Ok(true)
 }
 
 /// Logs that a duplicate registration was skipped.
@@ -301,3 +318,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(all(test, feature = "loom-tests"))]
+#[path = "shutdown_hook_loom_tests.rs"]
+mod shutdown_hook_loom_tests;

@@ -54,6 +54,7 @@ mod guard;
 mod handle;
 mod installation;
 mod lifecycle;
+mod lifecycle_template;
 pub(crate) mod panic_utils;
 mod runtime;
 mod runtime_mode;
@@ -69,6 +70,9 @@ mod startup;
 mod temporary_database;
 mod worker_invoker;
 mod worker_operation;
+
+#[cfg(all(test, feature = "loom-tests"))]
+mod lifecycle_loom_tests;
 
 pub use self::connection::{ConnectionMetadata, TestClusterConnection};
 pub use self::guard::ClusterGuard;

@@ -20,6 +20,9 @@ mod panic;
 mod partial_data_dir;
 mod scoped_env;
 mod shared_singleton;
+mod shared_singleton_core;
+#[cfg(all(test, feature = "loom-tests"))]
+mod shared_singleton_loom_tests;
 mod worker_env;
 
 #[cfg(doc)]
