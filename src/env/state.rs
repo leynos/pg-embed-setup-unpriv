@@ -12,6 +12,9 @@ pub(crate) trait EnvLockOps {
 
     fn lock_env_mutex() -> Self::Guard;
     fn ensure_lock_is_clean();
+    fn var_os(guard: &Self::Guard, key: &OsString) -> Option<OsString>;
+    fn set_var(guard: &mut Self::Guard, key: &OsString, value: OsString);
+    fn remove_var(guard: &mut Self::Guard, key: &OsString);
 }
 
 #[derive(Debug)]
@@ -33,6 +36,26 @@ impl EnvLockOps for StdEnvLock {
                 "ENV_LOCK was poisoned; clearing poison and proceeding"
             );
             ENV_LOCK.clear_poison();
+        }
+    }
+
+    fn var_os(_guard: &Self::Guard, key: &OsString) -> Option<OsString> {
+        env::var_os(key)
+    }
+
+    fn set_var(_guard: &mut Self::Guard, key: &OsString, value: OsString) {
+        unsafe {
+            // SAFETY: `ENV_LOCK` serialises changes. Drop restores recorded
+            // values before releasing the lock.
+            env::set_var(key, value);
+        }
+    }
+
+    fn remove_var(_guard: &mut Self::Guard, key: &OsString) {
+        unsafe {
+            // SAFETY: `ENV_LOCK` serialises changes. Drop restores recorded
+            // values before releasing the lock.
+            env::remove_var(key);
         }
     }
 }
@@ -90,11 +113,17 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
     {
+        let env_vars: Vec<_> = vars.into_iter().collect();
+        for (key, value) in &env_vars {
+            Self::validate_env_key(key);
+            Self::validate_env_value(value.as_ref());
+        }
+
         self.acquire_lock_if_needed();
 
         self.depth += 1;
 
-        let saved = self.apply_env_vars(vars);
+        let saved = self.apply_env_vars(env_vars);
 
         let index = self.stack.len();
         self.stack.push(GuardState {
@@ -134,18 +163,14 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         self.lock = Some(guard);
     }
 
-    fn apply_env_vars<I>(&self, vars: I) -> Vec<(OsString, Option<OsString>)>
+    fn apply_env_vars<I>(&mut self, vars: I) -> Vec<(OsString, Option<OsString>)>
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
     {
-        assert!(
-            self.lock.is_some(),
-            "ScopedEnv must hold the mutex before mutating the environment",
-        );
+        let guard = self.guard_mut("ScopedEnv must hold the mutex before mutating the environment");
         let mut saved = Vec::new();
         for (key, new_value) in vars {
-            Self::validate_env_key(&key);
-            let previous = Self::apply_single_var(&key, new_value);
+            let previous = Self::apply_single_var(guard, &key, new_value);
             saved.push((key, previous));
         }
         saved
@@ -157,9 +182,22 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
             "ScopedEnv received an empty environment variable name"
         );
         assert!(
+            !Self::contains_nul(key),
+            "ScopedEnv received an environment variable name containing NUL"
+        );
+        assert!(
             !Self::contains_equals(key),
             "ScopedEnv received an environment variable name containing '='"
         );
+    }
+
+    fn validate_env_value(value: Option<&OsString>) {
+        if let Some(env_value) = value {
+            assert!(
+                !Self::contains_nul(env_value),
+                "ScopedEnv received an environment variable value containing NUL"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -183,23 +221,44 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         key.to_string_lossy().contains('=')
     }
 
-    fn apply_single_var(key: &OsString, new_value: Option<OsString>) -> Option<OsString> {
+    #[cfg(unix)]
+    fn contains_nul(value: &OsString) -> bool {
+        use std::os::unix::ffi::OsStrExt;
+
+        value.as_os_str().as_bytes().contains(&b'\0')
+    }
+
+    #[cfg(windows)]
+    fn contains_nul(value: &OsString) -> bool {
+        use std::os::windows::ffi::OsStrExt;
+
+        value.as_os_str().encode_wide().any(|unit| unit == 0)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn contains_nul(value: &OsString) -> bool {
+        value.to_string_lossy().contains('\0')
+    }
+
+    fn apply_single_var(
+        guard: &mut L::Guard,
+        key: &OsString,
+        new_value: Option<OsString>,
+    ) -> Option<OsString> {
         debug_assert!(
-            !key.is_empty() && !Self::contains_equals(key),
+            !key.is_empty() && !Self::contains_nul(key) && !Self::contains_equals(key),
             "invalid env var name: {key:?}"
         );
-        let previous = env::var_os(key);
+        debug_assert!(
+            new_value
+                .as_ref()
+                .is_none_or(|value| !Self::contains_nul(value)),
+            "invalid env var value for {key:?}"
+        );
+        let previous = L::var_os(guard, key);
         match new_value {
-            Some(value) => unsafe {
-                // SAFETY: `ENV_LOCK` serialises changes. Drop restores
-                // recorded values before releasing the lock.
-                env::set_var(key, value);
-            },
-            None => unsafe {
-                // SAFETY: `ENV_LOCK` serialises changes. Drop restores
-                // recorded values before releasing the lock.
-                env::remove_var(key);
-            },
+            Some(value) => L::set_var(guard, key, value),
+            None => L::remove_var(guard, key),
         }
         previous
     }
@@ -230,7 +289,10 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
                 self.stack.push(guard_state);
                 break;
             }
-            restore_saved(guard_state.saved);
+            let guard = self.guard_mut(
+                "ScopedEnv must hold the mutex before restoring finished environment scopes",
+            );
+            restore_saved::<L>(guard, guard_state.saved);
         }
     }
 
@@ -288,7 +350,8 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
         self.ensure_lock_for_restore();
         while let Some(state) = self.stack.pop() {
-            restore_saved(state.saved);
+            let guard = self.guard_mut("ScopedEnv must hold the mutex before restoring all scopes");
+            restore_saved::<L>(guard, state.saved);
         }
     }
 
@@ -297,6 +360,35 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         if let Some(guard) = self.lock.take() {
             drop(guard);
         }
+    }
+
+    fn guard_mut(&mut self, context: &str) -> &mut L::Guard {
+        let Some(guard) = self.lock.as_mut() else {
+            panic!("{context}");
+        };
+        guard
+    }
+}
+
+#[cfg(all(test, feature = "loom-tests"))]
+impl<L: EnvLockOps> ThreadStateCore<L> {
+    pub(crate) const fn depth(&self) -> usize {
+        self.depth
+    }
+
+    pub(crate) fn is_stack_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+
+    pub(crate) const fn has_lock(&self) -> bool {
+        self.lock.is_some()
+    }
+
+    pub(crate) fn with_lock_guard<R>(&self, inspect: impl FnOnce(&L::Guard) -> R) -> R {
+        let Some(guard) = self.lock.as_ref() else {
+            panic!("ScopedEnv should hold the mutex during active inspection");
+        };
+        inspect(guard)
     }
 }
 
@@ -315,19 +407,11 @@ impl ThreadState {
     }
 }
 
-fn restore_saved(saved: Vec<(OsString, Option<OsString>)>) {
+fn restore_saved<L: EnvLockOps>(guard: &mut L::Guard, saved: Vec<(OsString, Option<OsString>)>) {
     for (key, value) in saved.into_iter().rev() {
         match value {
-            Some(previous) => unsafe {
-                // SAFETY: restoration still holds `ENV_LOCK`, so no other
-                // mutations can observe intermediate states.
-                env::set_var(&key, previous);
-            },
-            None => unsafe {
-                // SAFETY: restoration still holds `ENV_LOCK`, so no other
-                // mutations can observe intermediate states.
-                env::remove_var(&key);
-            },
+            Some(previous) => L::set_var(guard, &key, previous),
+            None => L::remove_var(guard, &key),
         }
     }
 }

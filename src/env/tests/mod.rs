@@ -168,18 +168,55 @@ fn serialises_env_across_threads() {
     drop(restore_env);
 }
 
-#[test]
+#[rstest]
+#[case::contains_equals(
+    vec![(OsString::from("INVALID=KEY"), Some(OsString::from("value")))],
+    "environment names containing '='",
+)]
+#[case::key_contains_nul(
+    vec![(OsString::from("INVALID\0KEY"), Some(OsString::from("value")))],
+    "environment names containing NUL",
+)]
+#[case::value_contains_nul(
+    vec![(OsString::from("INVALID_VALUE"), Some(OsString::from("bad\0value")))],
+    "environment values containing NUL",
+)]
 #[serial]
-fn apply_os_rejects_invalid_keys() {
+fn apply_os_rejects_invalid_input_before_lock(
+    #[case] vars: Vec<(OsString, Option<OsString>)>,
+    #[case] reason: &str,
+) {
     let result = panic::catch_unwind(|| {
-        let invalid = vec![(OsString::from("INVALID=KEY"), Some(OsString::from("value")))];
-        let _guard = ScopedEnv::apply_os(invalid);
+        let _guard = ScopedEnv::apply_os(vars);
     });
 
-    assert!(
-        result.is_err(),
-        "apply_os must reject environment names containing '='"
-    );
+    assert!(result.is_err(), "apply_os must reject {reason}");
+    assert_thread_state_reset();
+    assert_env_lock_released();
+}
+
+#[rstest]
+#[case::key_contains_nul(vec![(
+    OsString::from("THREAD_STATE\0INVALID_KEY"),
+    Some(OsString::from("value")),
+)])]
+#[case::value_contains_nul(vec![(
+    OsString::from("THREAD_STATE_INVALID_VALUE"),
+    Some(OsString::from("bad\0value")),
+)])]
+#[serial]
+fn thread_state_rejects_nul_before_lock(#[case] vars: Vec<(OsString, Option<OsString>)>) {
+    let mut state = ThreadState::new();
+
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let _index = state.enter_scope(vars);
+    }));
+
+    assert!(result.is_err(), "ThreadState must reject NUL input");
+    assert_eq!(state.depth(), 0);
+    assert!(state.is_stack_empty());
+    assert!(!state.has_lock());
+    assert_env_lock_released();
 }
 
 #[test]
