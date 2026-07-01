@@ -2,6 +2,8 @@
 
 use std::{ffi::c_void, ptr::NonNull};
 
+use crate::error::BootstrapResult;
+
 mod identity;
 mod job;
 
@@ -24,6 +26,7 @@ const TERMINATION_WAIT_MS: u32 = 5_000;
 const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
 const MAX_PATH: usize = 260;
 const INVALID_HANDLE_VALUE: *mut c_void = -1_isize as *mut c_void;
+const ERROR_INVALID_PARAMETER: u32 = 87;
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -35,6 +38,7 @@ unsafe extern "system" {
     fn Process32FirstW(snapshot: *mut c_void, process_entry: *mut ProcessEntry32W) -> i32;
     fn Process32NextW(snapshot: *mut c_void, process_entry: *mut ProcessEntry32W) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
+    fn GetLastError() -> u32;
 }
 
 /// Parses a strictly positive postmaster PID.
@@ -88,12 +92,15 @@ pub(in crate::cluster::shutdown_hook) fn force_shutdown(process: PostmasterProce
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub(in crate::cluster::shutdown_hook) fn process_is_running_for_platform(
     pid: PostmasterPid,
-) -> bool {
+) -> BootstrapResult<bool> {
     if pid == 0 {
-        return false;
+        return Ok(false);
     }
 
-    ProcessHandle::open_query(pid).is_some_and(|process| process.is_active())
+    let Some(process) = ProcessHandle::open_query_checked(pid)? else {
+        return Ok(false);
+    };
+    process.is_active_checked()
 }
 
 /// Returns `true` when the postmaster identity still matches a live process.
@@ -147,6 +154,10 @@ struct ProcessHandle {
 }
 
 impl ProcessHandle {
+    fn open_query_checked(pid: PostmasterPid) -> BootstrapResult<Option<Self>> {
+        Self::open_with_access_checked(pid, PROCESS_QUERY_LIMITED_INFORMATION)
+    }
+
     fn open_query(pid: PostmasterPid) -> Option<Self> {
         // SAFETY: `OpenProcess` is called with query-only access, handle
         // inheritance disabled, and a concrete process id read from
@@ -175,6 +186,25 @@ impl ProcessHandle {
         NonNull::new(raw_handle).map(|raw| Self { raw, pid })
     }
 
+    fn open_with_access_checked(pid: PostmasterPid, access: u32) -> BootstrapResult<Option<Self>> {
+        // SAFETY: same handle invariants as `open_with_access`.
+        let raw_handle = unsafe { OpenProcess(access, 0, pid) };
+        if let Some(raw) = NonNull::new(raw_handle) {
+            return Ok(Some(Self { raw, pid }));
+        }
+
+        // SAFETY: `GetLastError` has no preconditions and reads the thread's
+        // last OS error after the failed `OpenProcess` call above.
+        let code = unsafe { GetLastError() };
+        if code == ERROR_INVALID_PARAMETER {
+            return Ok(None);
+        }
+        Err(color_eyre::eyre::eyre!(
+            "failed to open process {pid} for query access: Windows error {code}"
+        )
+        .into())
+    }
+
     fn raw(&self) -> *mut c_void {
         self.raw.as_ptr()
     }
@@ -192,6 +222,27 @@ impl ProcessHandle {
         //   of the call.
         let succeeded = unsafe { GetExitCodeProcess(self.raw(), exit_code_ptr) };
         succeeded != 0 && exit_code == STILL_ACTIVE
+    }
+
+    fn is_active_checked(&self) -> BootstrapResult<bool> {
+        let mut exit_code = 0_u32;
+        let exit_code_ptr = std::ptr::addr_of_mut!(exit_code);
+        // SAFETY:
+        // - `self.0` is a non-null process handle owned by this wrapper.
+        // - `exit_code_ptr` points to valid writable storage for the duration
+        //   of the call.
+        let succeeded = unsafe { GetExitCodeProcess(self.raw(), exit_code_ptr) };
+        if succeeded == 0 {
+            // SAFETY: `GetLastError` has no preconditions and reads the
+            // thread's last OS error after the failed query above.
+            let code = unsafe { GetLastError() };
+            return Err(color_eyre::eyre::eyre!(
+                "failed to query exit status for process {}: Windows error {code}",
+                self.pid
+            )
+            .into());
+        }
+        Ok(exit_code == STILL_ACTIVE)
     }
 
     pub(super) fn matches_postmaster(&self, expected: PostmasterProcess) -> bool {
