@@ -1,5 +1,8 @@
 //! Platform-specific process controls for the shutdown hook.
 
+#[cfg(unix)]
+use crate::error::BootstrapResult;
+
 #[cfg(windows)]
 mod windows;
 
@@ -63,9 +66,9 @@ pub(super) fn force_shutdown(process: PostmasterProcess) {
 
 /// Returns `true` when the process exists.
 #[cfg(unix)]
-pub(super) fn process_is_running_for_platform(pid: PostmasterPid) -> bool {
+pub(super) fn process_is_running_for_platform(pid: PostmasterPid) -> BootstrapResult<bool> {
     if pid <= 0 {
-        return false;
+        return Ok(false);
     }
 
     // SAFETY: `kill` with signal `0` probes whether the process exists
@@ -73,19 +76,28 @@ pub(super) fn process_is_running_for_platform(pid: PostmasterPid) -> bool {
     // semantics.
     let rc = unsafe { libc::kill(pid, 0) };
     if rc == 0 {
-        return true;
+        return Ok(true);
     }
 
-    !matches!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(code) if code == libc::ESRCH
-    )
+    let err = std::io::Error::last_os_error();
+    if matches!(err.raw_os_error(), Some(code) if code == libc::ESRCH) {
+        return Ok(false);
+    }
+
+    Err(color_eyre::eyre::eyre!("failed to probe process {pid}: {err}").into())
 }
 
 /// Returns `true` when the postmaster identity still matches a live process.
 #[cfg(unix)]
 pub(super) fn postmaster_process_is_running(process: PostmasterProcess) -> bool {
-    process_is_running_for_platform(process)
+    process_is_running_for_platform(process).unwrap_or_else(|err| {
+        tracing::warn!(
+            target: crate::observability::LOG_TARGET,
+            %err,
+            "failed to probe postmaster process during shutdown"
+        );
+        true
+    })
 }
 
 #[cfg(unix)]

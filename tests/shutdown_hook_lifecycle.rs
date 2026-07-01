@@ -91,7 +91,7 @@ fn spawn_child(pid_file: &Path) -> Result<std::process::ExitStatus> {
 fn wait_for_postmaster_exit(pid: PostmasterPid) -> Result<()> {
     let deadline = std::time::Instant::now() + POSTMASTER_EXIT_TIMEOUT;
     loop {
-        if !process_is_running(pid) {
+        if !process_is_running(pid)? {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {

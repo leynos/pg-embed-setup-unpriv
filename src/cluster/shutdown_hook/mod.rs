@@ -269,9 +269,13 @@ fn read_postmaster_pid_file(pid_file: &Path) -> BootstrapResult<String> {
 /// Returns `true` if a process with the given PID is currently running.
 ///
 /// Invalid PIDs are rejected immediately by the platform implementation.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns an error when the platform process probe fails for a reason other
+/// than the process being absent.
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
-pub fn process_is_running(pid: PostmasterPid) -> bool {
+pub fn process_is_running(pid: PostmasterPid) -> BootstrapResult<bool> {
     platform::process_is_running_for_platform(pid)
 }
 
@@ -340,7 +344,10 @@ mod tests {
     fn process_is_running_returns_true_for_current_process() -> Result<()> {
         let pid = PostmasterPid::try_from(std::process::id())?;
 
-        ensure!(process_is_running(pid), "current process should be running");
+        ensure!(
+            process_is_running(pid)?,
+            "current process should be running"
+        );
         Ok(())
     }
 
@@ -348,7 +355,7 @@ mod tests {
     fn process_is_running_returns_false_for_nonexistent_pid() -> Result<()> {
         // PID i32::MAX is extremely unlikely to be in use.
         ensure!(
-            !process_is_running(PostmasterPid::MAX),
+            !process_is_running(PostmasterPid::MAX)?,
             "nonexistent PID should not be running"
         );
         Ok(())
@@ -359,7 +366,7 @@ mod tests {
         let pid = 0;
 
         ensure!(
-            !process_is_running(pid),
+            !process_is_running(pid)?,
             "zero PID should not be considered running"
         );
         Ok(())
@@ -393,7 +400,7 @@ mod tests {
         let pid = -1;
 
         ensure!(
-            !process_is_running(pid),
+            !process_is_running(pid)?,
             "negative PID should not be considered running"
         );
         Ok(())
