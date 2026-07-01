@@ -55,21 +55,18 @@ loom::thread_local! {
         RefCell::new(ThreadStateInner::new());
     static LAST_FAKE_ENV_SNAPSHOT: RefCell<Snapshot> = RefCell::new(Vec::new());
 }
-
 fn enter_scope_loom(vars: Vec<(OsString, Option<OsString>)>) -> usize {
     LOOM_THREAD_STATE.with(|cell| {
         let mut state = cell.borrow_mut();
         state.enter_scope(vars)
     })
 }
-
 fn exit_scope_loom(index: usize) {
     LOOM_THREAD_STATE.with(|cell| {
         let mut state = cell.borrow_mut();
         state.exit_scope(index);
     });
 }
-
 fn apply_loom(vars: &[(String, Option<String>)]) -> ScopedEnv {
     let owned: Vec<(OsString, Option<OsString>)> = vars
         .iter()
@@ -77,14 +74,12 @@ fn apply_loom(vars: &[(String, Option<String>)]) -> ScopedEnv {
         .collect();
     ScopedEnv::apply_owned_with_state(owned, enter_scope_loom, exit_scope_loom)
 }
-
 fn vars(input: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
     input
         .iter()
         .map(|(key, value)| ((*key).to_owned(), value.map(str::to_owned)))
         .collect()
 }
-
 fn snapshot_from_map(map: &FakeEnv) -> Snapshot {
     map.iter()
         .map(|(key, value)| {
@@ -97,7 +92,6 @@ fn snapshot_from_map(map: &FakeEnv) -> Snapshot {
         })
         .collect()
 }
-
 fn record_thread_local_snapshot(map: &FakeEnv) {
     let snapshot = snapshot_from_map(map);
     LAST_FAKE_ENV_SNAPSHOT.with(|cell| *cell.borrow_mut() = snapshot);
@@ -140,6 +134,7 @@ fn assert_fake_env(expected: &[(&str, Option<&str>)]) {
 fn assert_current_scope_env(expected: &[(&str, Option<&str>)]) {
     assert_eq!(snapshot_current_scope(), vars(expected));
 }
+
 fn run_loom_model<F>(f: F)
 where
     F: Fn() + Send + Sync + 'static,
@@ -151,6 +146,7 @@ where
     builder.check(f);
 }
 
+/// Models that independent threads cannot overlap active environment scopes.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_serialises_concurrent_scopes() {
@@ -182,6 +178,7 @@ fn scoped_env_serialises_concurrent_scopes() {
     });
 }
 
+/// Models that nested scopes on one thread retain the outer lock until exit.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_allows_reentrant_scopes_on_one_thread() {
@@ -208,6 +205,7 @@ fn scoped_env_allows_reentrant_scopes_on_one_thread() {
     });
 }
 
+/// Models backup and restoration for set, replace, and unset operations.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_exercises_backup_restore_bookkeeping() {
@@ -238,6 +236,7 @@ fn scoped_env_exercises_backup_restore_bookkeeping() {
     });
 }
 
+/// Models helper-thread acquisition while another thread holds the scope.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_handles_spawn_while_holding_scope() {
@@ -286,6 +285,7 @@ fn scoped_env_handles_spawn_while_holding_scope() {
     });
 }
 
+/// Models restoration and thread-local reset when a scoped body unwinds.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_restores_on_panic_unwind() {
@@ -326,6 +326,7 @@ fn scoped_env_restores_on_panic_unwind() {
     });
 }
 
+/// Models that short and long scopes remain serialized across threads.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_handles_asymmetric_scope_lifetimes() {
@@ -363,6 +364,7 @@ fn scoped_env_handles_asymmetric_scope_lifetimes() {
     });
 }
 
+/// Models independent per-thread recursion depth under nested scopes.
 #[test]
 #[ignore = "requires Loom model checking"]
 fn scoped_env_tracks_per_thread_depth_correctly() {
