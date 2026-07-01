@@ -73,47 +73,16 @@ where
         setup_fn,
     } = ops;
     locks.with_template_lock(template_name, || {
-        if !database_exists()? {
-            create_and_setup_template(&mut create_database, &mut drop_database, setup_fn)?;
+        if database_exists()? {
+            return Ok(());
         }
-        Ok(())
+
+        create_database()?;
+        run_setup_with_recovery(setup_fn, &mut drop_database)
     })
 }
 
-fn create_and_setup_template<Create, Drop, Setup>(
-    create_database: &mut Create,
-    drop_database: &mut Drop,
-    setup_fn: Setup,
-) -> BootstrapResult<()>
-where
-    Create: FnMut() -> BootstrapResult<()>,
-    Drop: FnMut() -> BootstrapResult<()>,
-    Setup: FnOnce() -> BootstrapResult<()>,
-{
-    let mut should_rollback_on_panic = false;
-    let unwind_result = catch_unwind(AssertUnwindSafe(|| {
-        create_database()?;
-        should_rollback_on_panic = true;
-        setup_template_or_rollback(setup_fn, drop_database)
-    }));
-
-    match unwind_result {
-        Ok(setup_result) => setup_result,
-        Err(payload) => {
-            if let Some(rollback_error) =
-                rollback_after_panic(should_rollback_on_panic, drop_database)
-            {
-                return Err(template_setup_panic_rollback_error(
-                    payload.as_ref(),
-                    rollback_error,
-                ));
-            }
-            resume_unwind(payload);
-        }
-    }
-}
-
-fn setup_template_or_rollback<Drop, Setup>(
+fn run_setup_with_recovery<Drop, Setup>(
     setup_fn: Setup,
     drop_database: &mut Drop,
 ) -> BootstrapResult<()>
@@ -121,27 +90,40 @@ where
     Drop: FnMut() -> BootstrapResult<()>,
     Setup: FnOnce() -> BootstrapResult<()>,
 {
-    if let Err(setup_error) = setup_fn() {
-        if let Err(rollback_error) = drop_database() {
-            return Err(template_setup_rollback_error(setup_error, rollback_error));
-        }
-        return Err(setup_error);
+    match catch_unwind(AssertUnwindSafe(setup_fn)) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(setup_error)) => rollback_after_setup_error(setup_error, drop_database),
+        Err(payload) => handle_setup_panic(payload, drop_database),
     }
-    Ok(())
 }
 
-fn rollback_after_panic<Drop>(
-    should_rollback: bool,
+fn rollback_after_setup_error<Drop>(
+    setup_error: BootstrapError,
     drop_database: &mut Drop,
-) -> Option<BootstrapError>
+) -> BootstrapResult<()>
 where
     Drop: FnMut() -> BootstrapResult<()>,
 {
-    if should_rollback {
-        drop_database().err()
-    } else {
-        None
+    if let Err(rollback_error) = drop_database() {
+        return Err(template_setup_rollback_error(setup_error, rollback_error));
     }
+    Err(setup_error)
+}
+
+fn handle_setup_panic<Drop>(
+    payload: Box<dyn Any + Send>,
+    drop_database: &mut Drop,
+) -> BootstrapResult<()>
+where
+    Drop: FnMut() -> BootstrapResult<()>,
+{
+    if let Err(rollback_error) = drop_database() {
+        return Err(template_setup_panic_rollback_error(
+            payload.as_ref(),
+            rollback_error,
+        ));
+    }
+    resume_unwind(payload);
 }
 
 fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
