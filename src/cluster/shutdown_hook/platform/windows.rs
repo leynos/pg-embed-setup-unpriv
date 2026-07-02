@@ -187,14 +187,6 @@ impl ProcessHandle {
         Self::open_with_access_checked(pid, PROCESS_QUERY_LIMITED_INFORMATION)
     }
 
-    fn open_query(pid: PostmasterPid) -> Option<Self> {
-        // SAFETY: `OpenProcess` is called with query-only access, handle
-        // inheritance disabled, and a concrete process id read from
-        // `postmaster.pid`. A null return is handled as absence.
-        let raw_handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        NonNull::new(raw_handle).map(|raw| Self { raw, pid })
-    }
-
     fn open_terminate(pid: PostmasterPid) -> Option<Self> {
         let access = PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION;
         Self::open_with_access(pid, access)
