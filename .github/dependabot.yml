@@ -9,6 +9,10 @@ updates:
       - "github-actions"
     schedule:
       interval: "weekly"
+    # Only raise PRs once a release has settled; major bumps wait longer.
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
 
   # Enable version updates for Cargo
   - package-ecosystem: "cargo"
@@ -19,4 +23,6 @@ updates:
       - "cargo"
     schedule:
       interval: "daily"
-      
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
