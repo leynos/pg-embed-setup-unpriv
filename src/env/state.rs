@@ -13,10 +13,15 @@ pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 pub(crate) trait EnvLockOps {
     type Guard: 'static;
 
+    /// Acquire the environment lock and return the guard that authorizes access.
     fn lock_env_mutex() -> Self::Guard;
+    /// Clear or verify lock poison before a new outer scope acquires it.
     fn ensure_lock_is_clean();
+    /// Read an environment variable while the caller holds the lock guard.
     fn var_os(guard: &Self::Guard, key: &OsString) -> Option<OsString>;
+    /// Set an environment variable while the caller holds the lock guard.
     fn set_var(guard: &mut Self::Guard, key: &OsString, value: OsString);
+    /// Remove an environment variable while the caller holds the lock guard.
     fn remove_var(guard: &mut Self::Guard, key: &OsString);
 }
 
@@ -26,12 +31,14 @@ pub(crate) struct StdEnvLock;
 impl EnvLockOps for StdEnvLock {
     type Guard = MutexGuard<'static, ()>;
 
+    /// Acquire `ENV_LOCK`, recovering the guard if a previous holder panicked.
     fn lock_env_mutex() -> Self::Guard {
         ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Clear `ENV_LOCK` poison so future scoped environment use can proceed.
     fn ensure_lock_is_clean() {
         if ENV_LOCK.is_poisoned() {
             tracing::warn!(
@@ -42,10 +49,10 @@ impl EnvLockOps for StdEnvLock {
         }
     }
 
-    fn var_os(_guard: &Self::Guard, key: &OsString) -> Option<OsString> {
-        env::var_os(key)
-    }
+    /// Delegate locked reads to `std::env::var_os`.
+    fn var_os(_guard: &Self::Guard, key: &OsString) -> Option<OsString> { env::var_os(key) }
 
+    /// Delegate locked writes to `std::env::set_var`.
     fn set_var(_guard: &mut Self::Guard, key: &OsString, value: OsString) {
         unsafe {
             // SAFETY: `ENV_LOCK` serialises changes. Drop restores recorded
@@ -54,6 +61,7 @@ impl EnvLockOps for StdEnvLock {
         }
     }
 
+    /// Delegate locked removals to `std::env::remove_var`.
     fn remove_var(_guard: &mut Self::Guard, key: &OsString) {
         unsafe {
             // SAFETY: `ENV_LOCK` serialises changes. Drop restores recorded
@@ -82,12 +90,14 @@ pub(crate) struct ThreadState {
 }
 
 impl ThreadState {
+    /// Create empty thread-local scoped environment state.
     pub const fn new() -> Self {
         Self {
             inner: ThreadStateCore::new(),
         }
     }
 
+    /// Enter a new scope and return the stack index used to exit it.
     pub fn enter_scope<I>(&mut self, vars: I) -> usize
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
@@ -95,6 +105,7 @@ impl ThreadState {
         self.inner.enter_scope(vars)
     }
 
+    /// Exit a previously entered scope by stack index.
     pub fn exit_scope(&mut self, index: usize) { self.inner.exit_scope(index); }
 }
 
@@ -102,6 +113,7 @@ impl ThreadState {
 pub(crate) type ThreadStateInner<L> = ThreadStateCore<L>;
 
 impl<L: EnvLockOps> ThreadStateCore<L> {
+    /// Create empty scoped environment state for the supplied lock backend.
     pub const fn new() -> Self {
         Self {
             depth: 0,
@@ -110,6 +122,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Validate input, acquire the outer lock if needed, and apply variables.
     pub fn enter_scope<I>(&mut self, vars: I) -> usize
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
@@ -134,6 +147,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         index
     }
 
+    /// Mark a scope finished and restore any now-uncovered environment state.
     pub fn exit_scope(&mut self, index: usize) {
         if self.depth == 0 {
             self.force_restore_and_reset("ScopedEnv drop without matching apply", None);
@@ -150,6 +164,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Acquire the backend lock for the first active scope on this thread.
     fn acquire_lock_if_needed(&mut self) {
         if self.depth > 0 {
             return;
@@ -164,6 +179,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         self.lock = Some(guard);
     }
 
+    /// Apply requested variables and return their previous values in order.
     fn apply_env_vars<I>(&mut self, vars: I) -> Vec<(OsString, Option<OsString>)>
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
@@ -177,6 +193,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         saved
     }
 
+    /// Reject environment keys that `std::env` cannot mutate safely.
     fn validate_env_key(key: &OsString) {
         assert!(
             !key.is_empty(),
@@ -192,6 +209,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         );
     }
 
+    /// Reject environment values that would make `std::env::set_var` panic.
     fn validate_env_value(value: Option<&OsString>) {
         if let Some(env_value) = value {
             assert!(
@@ -201,6 +219,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Detect `=` in Unix environment keys without lossy conversion.
     #[cfg(unix)]
     fn contains_equals(key: &OsString) -> bool {
         use std::os::unix::ffi::OsStrExt;
@@ -208,6 +227,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         key.as_os_str().as_bytes().contains(&b'=')
     }
 
+    /// Detect `=` in Windows environment keys using wide units.
     #[cfg(windows)]
     fn contains_equals(key: &OsString) -> bool {
         use std::os::windows::ffi::OsStrExt;
@@ -217,9 +237,11 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
             .any(|value| value == u16::from(b'='))
     }
 
+    /// Detect `=` in environment keys on fallback platforms.
     #[cfg(not(any(unix, windows)))]
     fn contains_equals(key: &OsString) -> bool { key.to_string_lossy().contains('=') }
 
+    /// Detect NUL bytes in Unix environment keys or values.
     #[cfg(unix)]
     fn contains_nul(value: &OsString) -> bool {
         use std::os::unix::ffi::OsStrExt;
@@ -227,6 +249,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         value.as_os_str().as_bytes().contains(&b'\0')
     }
 
+    /// Detect NUL units in Windows environment keys or values.
     #[cfg(windows)]
     fn contains_nul(value: &OsString) -> bool {
         use std::os::windows::ffi::OsStrExt;
@@ -234,11 +257,11 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         value.as_os_str().encode_wide().any(|unit| unit == 0)
     }
 
+    /// Detect NUL characters in environment values on fallback platforms.
     #[cfg(not(any(unix, windows)))]
-    fn contains_nul(value: &OsString) -> bool {
-        value.to_string_lossy().contains('\0')
-    }
+    fn contains_nul(value: &OsString) -> bool { value.to_string_lossy().contains('\0') }
 
+    /// Apply one variable mutation and return the value that must be restored.
     fn apply_single_var(
         guard: &mut L::Guard,
         key: &OsString,
@@ -262,6 +285,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         previous
     }
 
+    /// Mark a stack entry finished and report whether restoration can continue.
     fn finish_scope(&mut self, index: usize) -> bool {
         {
             let Some(state) = self.stack.get_mut(index) else {
@@ -279,6 +303,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         true
     }
 
+    /// Restore contiguous finished scopes from the top of the stack.
     fn restore_finished_scopes(&mut self) {
         if self.stack.last().is_some_and(|state| state.finished) {
             self.ensure_lock_for_restore();
@@ -295,6 +320,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Drop the backend lock after the outermost scope has restored everything.
     fn release_outermost_lock(&mut self) {
         debug_assert!(
             self.stack.is_empty(),
@@ -307,6 +333,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Restore all tracked scopes and reset depth after corrupted scope order.
     fn force_restore_and_reset(&mut self, reason: &str, index: Option<usize>) {
         self.log_corruption(reason, index);
         if self.stack.is_empty() {
@@ -322,6 +349,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         self.reset_depth_and_unlock();
     }
 
+    /// Emit diagnostic context for corrupted scoped environment state.
     fn log_corruption(&self, reason: &str, index: Option<usize>) {
         let depth = self.depth;
         let stack_len = self.stack.len();
@@ -336,6 +364,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         );
     }
 
+    /// Ensure restoration has a lock guard even after corrupted state.
     fn ensure_lock_for_restore(&mut self) {
         if self.lock.is_none() {
             L::ensure_lock_is_clean();
@@ -343,6 +372,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Restore every saved scope regardless of finished-stack ordering.
     fn restore_all_scopes(&mut self) {
         if self.stack.is_empty() {
             return;
@@ -354,6 +384,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Reset recursion depth and release the backend lock if present.
     fn reset_depth_and_unlock(&mut self) {
         self.depth = 0;
         if let Some(guard) = self.lock.take() {
@@ -361,6 +392,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Return the mutable lock guard or panic with the caller's context.
     fn guard_mut(&mut self, context: &str) -> &mut L::Guard {
         let Some(guard) = self.lock.as_mut() else {
             panic!("{context}");
@@ -371,18 +403,16 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
 
 #[cfg(all(test, feature = "loom-tests"))]
 impl<L: EnvLockOps> ThreadStateCore<L> {
-    pub(crate) const fn depth(&self) -> usize {
-        self.depth
-    }
+    /// Return the current per-thread recursive scope depth.
+    pub(crate) const fn depth(&self) -> usize { self.depth }
 
-    pub(crate) fn is_stack_empty(&self) -> bool {
-        self.stack.is_empty()
-    }
+    /// Report whether all tracked scope entries have been restored.
+    pub(crate) fn is_stack_empty(&self) -> bool { self.stack.is_empty() }
 
-    pub(crate) const fn has_lock(&self) -> bool {
-        self.lock.is_some()
-    }
+    /// Report whether this thread currently owns the backend lock.
+    pub(crate) const fn has_lock(&self) -> bool { self.lock.is_some() }
 
+    /// Inspect the held lock guard during Loom-only model assertions.
     pub(crate) fn with_lock_guard<R>(&self, inspect: impl FnOnce(&L::Guard) -> R) -> R {
         let Some(guard) = self.lock.as_ref() else {
             panic!("ScopedEnv should hold the mutex during active inspection");
@@ -393,13 +423,17 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
 
 #[cfg(test)]
 impl ThreadState {
+    /// Return the current test-visible recursive scope depth.
     pub const fn depth(&self) -> usize { self.inner.depth }
 
+    /// Report whether test-visible state has no tracked scopes.
     pub fn is_stack_empty(&self) -> bool { self.inner.stack.is_empty() }
 
+    /// Report whether test-visible state currently holds `ENV_LOCK`.
     pub const fn has_lock(&self) -> bool { self.inner.lock.is_some() }
 }
 
+/// Restore saved environment values in reverse application order.
 fn restore_saved<L: EnvLockOps>(guard: &mut L::Guard, saved: Vec<(OsString, Option<OsString>)>) {
     for (key, value) in saved.into_iter().rev() {
         match value {
