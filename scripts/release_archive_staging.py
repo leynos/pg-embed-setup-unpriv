@@ -33,6 +33,7 @@ class ManifestVersionError(Exception):
     reason: str
 
     def __str__(self) -> str:
+        """Format the manifest path and parse failure for CLI output."""
         return f"failed to read package version from {self.manifest_path}: {self.reason}"
 
 

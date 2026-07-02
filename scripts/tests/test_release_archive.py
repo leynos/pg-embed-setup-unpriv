@@ -64,6 +64,7 @@ def assert_build_release_binaries_invokes_cargo(
 
 
 def test_windows_targets_use_exe_suffix() -> None:
+    """Windows targets use `.exe` while Unix-like release targets do not."""
     assert release_archive.binary_extension("x86_64-pc-windows-msvc") == ".exe"
     assert release_archive.binary_extension("aarch64-apple-darwin") == ""
 
@@ -88,6 +89,7 @@ def test_manifest_version_reports_manifest_errors(
     expected_reason: str,
     match_kind: str,
 ) -> None:
+    """Manifest version discovery reports missing and malformed manifests."""
     manifest = tmp_path / "Cargo.toml"
     if manifest_content is not None:
         manifest.write_text(manifest_content)
@@ -105,6 +107,7 @@ def test_manifest_version_reports_manifest_errors(
 
 
 def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) -> None:
+    """Windows archives use cargo-binstall layout with `.exe` binaries."""
     target = "x86_64-pc-windows-msvc"
     binaries = ("pg_embedded_setup_unpriv", "pg_worker")
     for binary in binaries:
@@ -130,6 +133,7 @@ def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) ->
 
 
 def test_stage_archive_rejects_path_like_target(tmp_path: Path) -> None:
+    """Archive staging rejects targets that would escape the archive root."""
     spec = release_archive.ReleaseArchiveSpec(
         repo=tmp_path,
         target="../x86_64-unknown-linux-gnu",
@@ -143,6 +147,7 @@ def test_stage_archive_rejects_path_like_target(tmp_path: Path) -> None:
 
 
 def test_stage_archive_rejects_path_like_binary(tmp_path: Path) -> None:
+    """Archive staging rejects binary names that would escape the root."""
     spec = release_archive.ReleaseArchiveSpec(
         repo=tmp_path,
         target="x86_64-unknown-linux-gnu",
@@ -181,11 +186,13 @@ def test_validate_release_spec_components_rejects_path_like_values(
     binaries: tuple[str, ...],
     expected_message: str,
 ) -> None:
+    """Release spec validation rejects empty or path-like components."""
     with pytest.raises(SystemExit, match=re.escape(expected_message)):
         release_archive.validate_release_spec_components(target, binaries)
 
 
 def test_build_release_binaries_invokes_cargo_with_all_bins(tmp_path: Path) -> None:
+    """Release builds invoke Cargo once with every configured binary."""
     binaries = ("pg_embedded_setup_unpriv", "pg_worker")
     expected_args = (
         "build",
@@ -213,6 +220,7 @@ def test_build_release_binaries_invokes_cargo_with_all_bins(tmp_path: Path) -> N
 
 
 def test_build_release_binaries_preserves_build_jobs_flags(tmp_path: Path) -> None:
+    """Release builds preserve explicit Cargo job flags."""
     binaries = ("pg_embedded_setup_unpriv",)
     expected_args = (
         "build",
@@ -240,6 +248,7 @@ def test_build_release_binaries_preserves_build_jobs_flags(tmp_path: Path) -> No
 
 
 def test_build_release_binaries_preserves_cargo_wrapper_args(tmp_path: Path) -> None:
+    """Release builds preserve wrapper commands before Cargo."""
     binaries = ("pg_embedded_setup_unpriv",)
     expected_args = (
         "cargo",
@@ -266,6 +275,7 @@ def test_build_release_binaries_preserves_cargo_wrapper_args(tmp_path: Path) -> 
 
 
 def test_cargo_program_and_args_preserves_absolute_wrapper_args() -> None:
+    """Cargo command parsing keeps absolute wrapper paths and arguments."""
     cargo = "/usr/bin/sccache cargo"
 
     program, program_args = release_archive._cargo_program_and_args(cargo)
@@ -275,6 +285,7 @@ def test_cargo_program_and_args_preserves_absolute_wrapper_args() -> None:
 
 
 def test_cargo_program_and_args_preserves_windows_wrapper_args() -> None:
+    """Cargo command parsing keeps Windows `.exe` wrapper paths."""
     cargo = r"C:\Tools\sccache.exe cargo"
 
     program, program_args = release_archive._cargo_program_and_args(cargo)
@@ -285,6 +296,7 @@ def test_cargo_program_and_args_preserves_windows_wrapper_args() -> None:
 
 def test_build_release_binaries_treats_cargo_path_with_spaces_as_executable(
 ) -> None:
+    """Cargo paths with spaces are treated as the executable."""
     cargo = r"C:\Program Files\Rust\cargo.exe"
 
     program, program_args = release_archive._cargo_program_and_args(cargo)
@@ -294,6 +306,7 @@ def test_build_release_binaries_treats_cargo_path_with_spaces_as_executable(
 
 
 def test_cargo_program_and_args_rejects_malformed_quoting() -> None:
+    """Malformed Cargo command quoting exits with a CLI error."""
     with pytest.raises(
         SystemExit,
         match=re.escape("invalid cargo executable command: No closing quotation"),
@@ -302,6 +315,7 @@ def test_cargo_program_and_args_rejects_malformed_quoting() -> None:
 
 
 def test_main_rejects_version_mismatch_before_build(tmp_path: Path) -> None:
+    """The CLI rejects release version mismatches before building."""
     manifest = write_manifest(tmp_path, version="0.5.1")
 
     expected_message = "VERSION (0.5.2) must match Cargo.toml package version (0.5.1)"
