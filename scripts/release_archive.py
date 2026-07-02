@@ -4,6 +4,7 @@
 # dependencies = [
 #   "cuprum==0.1.0",
 #   "cyclopts==4.19.0",
+#   "hypothesis==6.155.7",
 # ]
 # ///
 """Build and package release binaries for cargo-binstall."""

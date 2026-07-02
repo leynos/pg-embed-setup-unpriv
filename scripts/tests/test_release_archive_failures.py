@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shlex
 import sys
 import tarfile
 from pathlib import Path
@@ -21,6 +22,7 @@ release_archive = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 sys.modules[SPEC.name] = release_archive
 SPEC.loader.exec_module(release_archive)
+import release_archive_cargo
 
 SAFE_COMPONENT = st.text(
     alphabet=st.characters(
@@ -46,6 +48,30 @@ PATH_LIKE_COMPONENT = st.one_of(
     SAFE_COMPONENT.map(lambda value: f"{value}/child"),
     SAFE_COMPONENT.map(lambda value: f"{value}\\child"),
 )
+SAFE_SHELL_WORD = st.text(
+    alphabet=st.characters(
+        whitelist_categories=("Ll", "Lu", "Nd"),
+        whitelist_characters="-_./:",
+    ),
+    min_size=1,
+    max_size=16,
+)
+PATH_SEGMENT = st.text(
+    alphabet=st.characters(
+        whitelist_categories=("Ll", "Lu", "Nd"),
+        whitelist_characters="-_",
+    ),
+    min_size=1,
+    max_size=12,
+)
+WHITESPACE = st.text(alphabet=" \t\n\r", min_size=1, max_size=16)
+
+
+@st.composite
+def safe_release_component(draw: st.DrawFn) -> str:
+    """Generate non-empty release components without path syntax."""
+    segments = draw(st.lists(PATH_SEGMENT, min_size=1, max_size=4))
+    return ".".join(segments)
 
 
 def write_manifest(repo: Path, version: str = "0.5.1") -> Path:
@@ -164,13 +190,64 @@ def test_main_uses_default_release_binaries(
 
 
 @settings(max_examples=150)
-@given(target=SAFE_COMPONENT, binaries=st.lists(SAFE_COMPONENT, min_size=1, max_size=4).map(tuple))
+@given(
+    target=safe_release_component(),
+    binaries=st.lists(safe_release_component(), min_size=1, max_size=4).map(tuple),
+)
 def test_validate_release_spec_components_accepts_generated_safe_values(
     target: str,
     binaries: tuple[str, ...],
 ) -> None:
     """Release spec validation accepts generated non-path components."""
     release_archive.validate_release_spec_components(target, binaries)
+
+
+@settings(max_examples=100)
+@given(prefix=PATH_SEGMENT, suffix=PATH_SEGMENT)
+def test_validate_release_spec_components_rejects_parent_dir_segments(
+    prefix: str,
+    suffix: str,
+) -> None:
+    """Release spec validation rejects generated parent-dir segments."""
+    target = f"{prefix}/../{suffix}"
+
+    with pytest.raises(SystemExit, match=re.escape("target cannot contain '..'")):
+        release_archive.validate_release_spec_components(target, ("pg_worker",))
+
+
+@settings(max_examples=100)
+@given(
+    prefix=PATH_SEGMENT,
+    suffix=PATH_SEGMENT,
+    separator=st.sampled_from(("/", "\\")),
+)
+def test_validate_release_spec_components_rejects_path_separators(
+    prefix: str,
+    suffix: str,
+    separator: str,
+) -> None:
+    """Release spec validation rejects generated path separators."""
+    binary = f"{prefix}{separator}{suffix}"
+
+    with pytest.raises(
+        SystemExit,
+        match=re.escape("binary cannot contain path separators"),
+    ):
+        release_archive.validate_release_spec_components(
+            "x86_64-unknown-linux-gnu",
+            (binary,),
+        )
+
+
+def test_validate_release_spec_components_rejects_empty_strings() -> None:
+    """Release spec validation always rejects empty components."""
+    with pytest.raises(SystemExit, match=re.escape("target cannot be empty")):
+        release_archive.validate_release_spec_components("", ("pg_worker",))
+    with pytest.raises(SystemExit, match=re.escape("binary cannot be empty")):
+        release_archive.validate_release_spec_components(
+            "x86_64-unknown-linux-gnu",
+            ("",),
+        )
 
 
 @settings(max_examples=150)
@@ -240,3 +317,35 @@ def test_cargo_program_and_args_preserves_generated_windows_wrappers(
 
     assert parsed_program == program
     assert parsed_args == args
+
+
+@settings(max_examples=100)
+@given(words=st.lists(SAFE_SHELL_WORD, min_size=1, max_size=5))
+def test_split_cargo_command_roundtrips_shell_quoted_strings(words: list[str]) -> None:
+    """Cargo command splitting follows shell quoting for generated argv."""
+    command = " ".join(shlex.quote(word) for word in words)
+
+    assert release_archive_cargo._split_cargo_command(command) == shlex.split(command)
+
+
+@settings(max_examples=50)
+@given(prefix=SAFE_SHELL_WORD)
+def test_split_cargo_command_rejects_generated_malformed_quoting(prefix: str) -> None:
+    """Cargo command splitting reports generated unbalanced quotes."""
+    command = f"{prefix} 'unterminated"
+
+    with pytest.raises(
+        SystemExit,
+        match=re.escape("invalid cargo executable command"),
+    ):
+        release_archive_cargo._split_cargo_command(command)
+
+
+@settings(max_examples=50)
+@given(command=WHITESPACE)
+def test_cargo_program_and_args_rejects_generated_blank_input(command: str) -> None:
+    """Cargo command parsing rejects generated blank input."""
+    with pytest.raises(SystemExit, match=re.escape("cargo executable cannot be empty")):
+        release_archive._cargo_program_and_args(command)
+    with pytest.raises(SystemExit, match=re.escape("cargo executable cannot be empty")):
+        release_archive_cargo._split_cargo_command(command)
