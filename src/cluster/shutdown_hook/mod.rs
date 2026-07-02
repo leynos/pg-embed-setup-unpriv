@@ -11,7 +11,7 @@
 //! escalates to forceful termination if the timeout elapses.
 
 use std::path::Path;
-use std::sync::{Mutex, TryLockError};
+use std::sync::{Condvar, Mutex, TryLockError};
 use std::time::Duration;
 
 use crate::CleanupMode;
@@ -25,19 +25,28 @@ use postgresql_embedded::Settings;
 mod platform;
 
 /// State captured at registration time and read by the atexit callback.
-struct ShutdownState {
+struct RegisteredShutdownState {
     settings: Settings,
     shutdown_timeout: Duration,
     cleanup_mode: CleanupMode,
     _exit_failsafe: platform::ProcessExitFailsafe,
 }
 
+/// Registration state for the singleton process-exit hook.
+enum ShutdownRegistrationState {
+    Empty,
+    Registering,
+    Registered(Box<RegisteredShutdownState>),
+}
+
 /// Initialisation guard for the atexit callback.
 ///
-/// Uses `Mutex<Option<...>>` rather than `OnceLock` so that state can be
-/// rolled back if `libc::atexit` registration fails, avoiding a poisoned
-/// state where subsequent calls silently no-op.
-static SHUTDOWN_STATE: Mutex<Option<ShutdownState>> = Mutex::new(None);
+/// Uses an explicit state machine rather than `OnceLock` so registration can
+/// be rolled back if preflight or `libc::atexit` registration fails, avoiding a
+/// poisoned state where subsequent calls silently no-op.
+static SHUTDOWN_STATE: Mutex<ShutdownRegistrationState> =
+    Mutex::new(ShutdownRegistrationState::Empty);
+static SHUTDOWN_STATE_CHANGED: Condvar = Condvar::new();
 
 /// Polling interval when waiting for the postmaster to exit after SIGTERM.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -63,30 +72,91 @@ pub(super) fn register_shutdown_hook(
     shutdown_timeout: Duration,
     cleanup_mode: CleanupMode,
 ) -> BootstrapResult<()> {
+    if !reserve_shutdown_registration() {
+        return Ok(());
+    }
+
+    let state = match build_shutdown_state(settings, shutdown_timeout, cleanup_mode) {
+        Ok(state) => state,
+        Err(err) => {
+            rollback_shutdown_registration();
+            return Err(err);
+        }
+    };
+
+    commit_shutdown_registration(state);
+    log_registration_success();
+    Ok(())
+}
+
+/// Claims the singleton registration slot before external work starts.
+fn reserve_shutdown_registration() -> bool {
     let mut guard = SHUTDOWN_STATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    if guard.is_some() {
-        log_already_registered();
-        return Ok(());
+    loop {
+        match &*guard {
+            ShutdownRegistrationState::Empty => {
+                *guard = ShutdownRegistrationState::Registering;
+                return true;
+            }
+            ShutdownRegistrationState::Registered(_) => {
+                log_already_registered();
+                return false;
+            }
+            ShutdownRegistrationState::Registering => {
+                guard = SHUTDOWN_STATE_CHANGED
+                    .wait(guard)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+        }
     }
+}
 
+/// Builds shutdown state without holding the global registration mutex.
+fn build_shutdown_state(
+    settings: Settings,
+    shutdown_timeout: Duration,
+    cleanup_mode: CleanupMode,
+) -> BootstrapResult<RegisteredShutdownState> {
     let postmaster_process = read_postmaster_process(&settings.data_dir)?;
     register_atexit()?;
     let exit_failsafe = prepare_process_exit_failsafe(postmaster_process);
 
-    // Store state only AFTER atexit succeeds, so a failed registration
-    // does not poison the slot for future attempts.
-    *guard = Some(ShutdownState {
+    Ok(RegisteredShutdownState {
         settings,
         shutdown_timeout,
         cleanup_mode,
         _exit_failsafe: exit_failsafe,
-    });
+    })
+}
 
-    log_registration_success();
-    Ok(())
+/// Stores registered state after all fallible registration work succeeds.
+fn commit_shutdown_registration(state: RegisteredShutdownState) {
+    let mut guard = SHUTDOWN_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = ShutdownRegistrationState::Registered(Box::new(state));
+    SHUTDOWN_STATE_CHANGED.notify_all();
+}
+
+/// Releases the registration slot after preflight or atexit registration fails.
+fn rollback_shutdown_registration() {
+    let mut guard = SHUTDOWN_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = ShutdownRegistrationState::Empty;
+    SHUTDOWN_STATE_CHANGED.notify_all();
+}
+
+#[cfg(all(test, feature = "cluster-unit-tests"))]
+fn reset_shutdown_registration_for_tests() {
+    let mut guard = SHUTDOWN_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = ShutdownRegistrationState::Empty;
+    SHUTDOWN_STATE_CHANGED.notify_all();
 }
 
 /// Logs that a duplicate registration was skipped.
@@ -170,7 +240,9 @@ fn shutdown_work() -> Option<ShutdownWork> {
         }
     };
 
-    let state = guard.as_ref()?;
+    let ShutdownRegistrationState::Registered(state) = &*guard else {
+        return None;
+    };
 
     Some(ShutdownWork {
         settings: state.settings.clone(),
@@ -289,120 +361,4 @@ fn best_effort_cleanup(state: &ShutdownWork) {
 }
 
 #[cfg(all(test, feature = "cluster-unit-tests"))]
-mod tests {
-    use super::*;
-
-    use color_eyre::eyre::{Result, ensure};
-    use proptest::prelude::*;
-    use rstest::{fixture, rstest};
-    use tempfile::TempDir;
-
-    /// Creates a fresh temporary directory for PID file tests.
-    #[fixture]
-    fn pid_dir() -> Result<TempDir> {
-        Ok(tempfile::tempdir()?)
-    }
-
-    #[rstest]
-    #[case::valid_file(Some("12345\nother\nlines\n"), Some(12345))]
-    #[case::missing_file(None, None)]
-    #[case::empty_file(Some(""), None)]
-    fn read_postmaster_pid_parses_first_line(
-        pid_dir: Result<TempDir>,
-        #[case] file_content: Option<&str>,
-        #[case] expected: Option<PostmasterPid>,
-    ) -> Result<()> {
-        let dir = pid_dir?;
-        if let Some(content) = file_content {
-            std::fs::write(dir.path().join("postmaster.pid"), content)?;
-        }
-
-        let result = read_postmaster_pid(dir.path())?;
-
-        ensure!(result == expected, "expected {expected:?}, got {result:?}");
-        Ok(())
-    }
-
-    #[rstest]
-    #[case::zero_pid("0\n")]
-    #[case::negative_pid("-1\n")]
-    #[case::non_numeric_pid("not-a-pid\n")]
-    fn read_postmaster_pid_reports_malformed_file(
-        pid_dir: Result<TempDir>,
-        #[case] file_content: &str,
-    ) -> Result<()> {
-        let dir = pid_dir?;
-        std::fs::write(dir.path().join("postmaster.pid"), file_content)?;
-
-        let result = read_postmaster_pid(dir.path());
-
-        ensure!(result.is_err(), "expected malformed PID to error");
-        Ok(())
-    }
-
-    #[test]
-    fn process_is_running_returns_true_for_current_process() -> Result<()> {
-        let pid = PostmasterPid::try_from(std::process::id())?;
-
-        ensure!(
-            process_is_running(pid)?,
-            "current process should be running"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn process_is_running_returns_false_for_nonexistent_pid() -> Result<()> {
-        // PID i32::MAX is extremely unlikely to be in use.
-        ensure!(
-            !process_is_running(PostmasterPid::MAX)?,
-            "nonexistent PID should not be running"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn process_is_running_rejects_zero_pid() -> Result<()> {
-        let pid = 0;
-
-        ensure!(
-            !process_is_running(pid)?,
-            "zero PID should not be considered running"
-        );
-        Ok(())
-    }
-
-    proptest! {
-        #[test]
-        fn parse_pid_accepts_only_positive_values(pid in 1_u32..=i32::MAX as u32) {
-            let expected = PostmasterPid::try_from(pid).expect("positive PID should fit");
-            let parsed = platform::parse_pid(&pid.to_string());
-            prop_assert_eq!(parsed, Some(expected));
-        }
-
-        #[cfg(unix)]
-        #[test]
-        fn parse_pid_rejects_non_positive_values(pid in i32::MIN..=0) {
-            let parsed = platform::parse_pid(&pid.to_string());
-            prop_assert_eq!(parsed, None);
-        }
-
-        #[test]
-        fn parse_pid_rejects_arbitrary_non_numeric_text(text in "\\PC*") {
-            prop_assume!(text.trim().parse::<PostmasterPid>().is_err());
-            prop_assert_eq!(platform::parse_pid(&text), None);
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn process_is_running_rejects_negative_pid() -> Result<()> {
-        let pid = -1;
-
-        ensure!(
-            !process_is_running(pid)?,
-            "negative PID should not be considered running"
-        );
-        Ok(())
-    }
-}
+mod tests;

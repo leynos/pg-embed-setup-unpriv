@@ -31,18 +31,29 @@ unsafe impl Send for JobHandle {}
 
 impl JobHandle {
     pub(super) fn create_for_process_tree(root: PostmasterProcess) -> Option<Self> {
-        let root_process = ProcessHandle::open_assign_to_job(root.pid())?;
+        let Some(root_process) = ProcessHandle::open_assign_to_job(root.pid()) else {
+            tracing::debug!(
+                target: crate::observability::LOG_TARGET,
+                pid = root.pid(),
+                "skipping Windows Job Object failsafe because root process could not be opened"
+            );
+            return None;
+        };
         if !root_process.matches_postmaster(root) {
             tracing::debug!(
+                target: crate::observability::LOG_TARGET,
                 pid = root.pid(),
                 "skipping Windows Job Object failsafe because root identity changed"
             );
             return None;
         }
 
-        let job = Self::create_kill_on_close()?;
+        let Some(job) = Self::create_kill_on_close(root.pid()) else {
+            return None;
+        };
         let assigned = job.assign_process_tree(root.pid(), &root_process);
         tracing::debug!(
+            target: crate::observability::LOG_TARGET,
             pid = root.pid(),
             assigned,
             "prepared Windows Job Object failsafe"
@@ -50,21 +61,33 @@ impl JobHandle {
         assigned.then_some(job)
     }
 
-    fn create_kill_on_close() -> Option<Self> {
+    fn create_kill_on_close(root: PostmasterPid) -> Option<Self> {
         // SAFETY:
         // - null security attributes request the default descriptor.
         // - null name creates an unnamed private job.
         // - a null return is handled as failure.
         let raw_handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
-        let job = NonNull::new(raw_handle).map(Self)?;
-        job.enable_kill_on_close().then_some(job)
+        let Some(job) = NonNull::new(raw_handle).map(Self) else {
+            tracing::debug!(
+                target: crate::observability::LOG_TARGET,
+                root_pid = root,
+                "failed to create Windows Job Object for process-exit failsafe"
+            );
+            return None;
+        };
+        job.enable_kill_on_close(root).then_some(job)
     }
 
-    fn enable_kill_on_close(&self) -> bool {
+    fn enable_kill_on_close(&self, root: PostmasterPid) -> bool {
         let mut info = JobObjectExtendedLimitInformation::kill_on_close();
         let Ok(info_length) =
             u32::try_from(std::mem::size_of::<JobObjectExtendedLimitInformation>())
         else {
+            tracing::debug!(
+                target: crate::observability::LOG_TARGET,
+                root_pid = root,
+                "failed to size Windows Job Object limit information"
+            );
             return false;
         };
         let info_ptr = std::ptr::addr_of_mut!(info).cast::<c_void>();
@@ -74,20 +97,29 @@ impl JobHandle {
         // - `info_ptr` points to an initialized job-information value with a
         //   valid byte length for this process architecture.
         // - the callee reads the buffer only for the duration of the call.
-        unsafe {
+        let enabled = unsafe {
             SetInformationJobObject(
                 self.0.as_ptr(),
                 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
                 info_ptr,
                 info_length,
             ) != 0
+        };
+        if !enabled {
+            tracing::debug!(
+                target: crate::observability::LOG_TARGET,
+                root_pid = root,
+                "failed to enable kill-on-close for Windows Job Object"
+            );
         }
+        enabled
     }
 
     fn assign_process_tree(&self, root: PostmasterPid, root_process: &ProcessHandle) -> bool {
         let assigned_root = self.assign_process_handle(root_process);
         if !assigned_root {
             tracing::debug!(
+                target: crate::observability::LOG_TARGET,
                 pid = root,
                 "skipping Windows Job Object descendant assignment because root assignment failed"
             );
@@ -105,6 +137,7 @@ impl JobHandle {
     fn assign_process(&self, process: &ProcessHandle) -> bool {
         if !process.is_active_postgres() {
             tracing::debug!(
+                target: crate::observability::LOG_TARGET,
                 pid = process.pid(),
                 "skipping Windows Job Object assignment because process is no longer active postgres"
             );
@@ -120,6 +153,7 @@ impl JobHandle {
         //   `AssignProcessToJobObject`.
         let assigned = unsafe { AssignProcessToJobObject(self.0.as_ptr(), process.raw()) != 0 };
         tracing::debug!(
+            target: crate::observability::LOG_TARGET,
             pid = process.pid(),
             assigned,
             "attempted Windows Job Object process assignment"

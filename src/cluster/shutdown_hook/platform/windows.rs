@@ -56,13 +56,21 @@ pub(in crate::cluster::shutdown_hook) struct ProcessExitFailsafe {
 pub(in crate::cluster::shutdown_hook) fn prepare_process_exit_failsafe(
     process: Option<PostmasterProcess>,
 ) -> ProcessExitFailsafe {
-    if let Some(process) = process {
+    let job = process.and_then(|process| {
         tracing::debug!(
             pid = process.pid(),
             "preparing Windows process-exit Job Object failsafe"
         );
-    }
-    let job = process.and_then(JobHandle::create_for_process_tree);
+        let job = JobHandle::create_for_process_tree(process);
+        if job.is_none() {
+            tracing::warn!(
+                target: crate::observability::LOG_TARGET,
+                pid = process.pid(),
+                "Windows Job Object failsafe unavailable; shutdown hook will use callback cleanup"
+            );
+        }
+        job
+    });
     ProcessExitFailsafe { _job: job }
 }
 
@@ -107,8 +115,29 @@ pub(in crate::cluster::shutdown_hook) fn process_is_running_for_platform(
 pub(in crate::cluster::shutdown_hook) fn postmaster_process_is_running(
     process: PostmasterProcess,
 ) -> bool {
-    ProcessHandle::open_query(process.pid())
-        .is_some_and(|handle| handle.matches_postmaster(process))
+    let handle = match ProcessHandle::open_query_checked(process.pid()) {
+        Ok(Some(handle)) => handle,
+        Ok(None) => return false,
+        Err(err) => {
+            tracing::warn!(
+                target: crate::observability::LOG_TARGET,
+                pid = process.pid(),
+                %err,
+                "failed to probe postmaster process during shutdown"
+            );
+            return true;
+        }
+    };
+
+    let matches_postmaster = handle.matches_postmaster(process);
+    if !matches_postmaster {
+        tracing::debug!(
+            target: crate::observability::LOG_TARGET,
+            pid = process.pid(),
+            "postmaster process probe found no matching live postgres process"
+        );
+    }
+    matches_postmaster
 }
 
 #[repr(C)]
@@ -367,6 +396,11 @@ fn terminate_process_tree(process: PostmasterProcess) {
 
 fn process_tree(root: PostmasterPid) -> Vec<ProcessEntry> {
     let Some(snapshot) = SnapshotHandle::capture_processes() else {
+        tracing::warn!(
+            target: crate::observability::LOG_TARGET,
+            root_pid = root,
+            "failed to capture Windows process snapshot; falling back to root-only process tree"
+        );
         return vec![ProcessEntry {
             process_id: root,
             parent_process_id: root,
