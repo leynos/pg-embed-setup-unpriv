@@ -12,7 +12,6 @@ updates:
     # Only raise PRs once a release has settled; major bumps wait longer.
     cooldown:
       default-days: 7
-      semver-major-days: 14
 
   # Enable version updates for Cargo
   - package-ecosystem: "cargo"
