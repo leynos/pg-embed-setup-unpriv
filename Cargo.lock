@@ -2334,6 +2334,7 @@ version = "0.5.1"
 dependencies = [
  "camino",
  "cap-std 4.0.2",
+ "cfg_aliases",
  "clap",
  "color-eyre",
  "dashmap",

@@ -36,7 +36,20 @@ class ReleaseBuildSpecLike(Protocol):
 
 
 def build_release_binaries(spec: ReleaseBuildSpecLike) -> None:
-    """Build the selected release binaries for `spec.target`."""
+    """Build the selected release binaries for `spec.target`.
+
+    Parameters
+    ----------
+    spec : ReleaseBuildSpecLike
+        Cargo release build inputs, including the repository root, target
+        triple, binary names, Cargo command, and optional job count.
+
+    Raises
+    ------
+    SystemExit
+        Raised with Cargo's exit code when the Cargo build command exits
+        non-zero.
+    """
     validate_release_spec_components(spec.target, spec.binaries)
     program, program_args = _cargo_program_and_args(spec.cargo)
     args = [*program_args, "build", "--release", "--target", spec.target]

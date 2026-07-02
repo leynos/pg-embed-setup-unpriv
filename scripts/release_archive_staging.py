@@ -238,7 +238,28 @@ def _separator_path_component_violation(value: str, kind: str) -> str | None:
 
 
 def stage_archive(spec: ReleaseArchiveSpecLike) -> Path:
-    """Stage release binaries and return the produced `.tgz` path."""
+    """Stage release binaries and return the produced `.tgz` path.
+
+    Parameters
+    ----------
+    spec : ReleaseArchiveSpecLike
+        Archive inputs, including the repository root, target triple, package
+        version, distribution directory, and binary names.
+
+    Returns
+    -------
+    Path
+        Path to the created cargo-binstall `.tgz` archive.
+
+    Raises
+    ------
+    SystemExit
+        Raised by `validate_release_spec_components` when `spec.target` or any
+        binary name is path-like or empty.
+    FileNotFoundError
+        Raised by `copy_release_binaries` when an expected release binary is
+        missing from Cargo's target output directory.
+    """
     validate_release_spec_components(spec.target, spec.binaries)
     spec.dist_dir.mkdir(parents=True, exist_ok=True)
     stem = archive_stem(spec.target, spec.version)
@@ -261,7 +282,28 @@ def copy_release_binaries(
     binaries: tuple[str, ...],
     staging_root: Path,
 ) -> None:
-    """Copy Cargo release binaries into the archive staging directory."""
+    """Copy Cargo release binaries into the archive staging directory.
+
+    Parameters
+    ----------
+    repo : Path
+        Repository root containing Cargo's `target` directory.
+    target : str
+        Rust target triple used to locate release build outputs.
+    binaries : tuple[str, ...]
+        Binary target names to copy into `staging_root`.
+    staging_root : Path
+        Archive root directory receiving the copied binary files.
+
+    Raises
+    ------
+    SystemExit
+        Raised by `release_binary_path` when `target` or any binary name is
+        path-like or empty.
+    FileNotFoundError
+        Raised when an expected release binary does not exist under Cargo's
+        target output directory.
+    """
     for binary in binaries:
         source = release_binary_path(repo, target, binary)
         if not source.is_file():
