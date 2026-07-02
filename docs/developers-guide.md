@@ -82,7 +82,6 @@ Linux, macOS, and Windows using cargo-binstall 1.19.1. The release workflow
 audits published asset URLs with the same pinned cargo-binstall bootstrap
 before the draft release is published.
 
-
 ## Windows shutdown hook
 
 Windows shared-cluster cleanup uses a platform-specific shutdown hook rather
