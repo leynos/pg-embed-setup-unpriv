@@ -1,4 +1,4 @@
-.PHONY: help all clean test build release release-archive lint fmt check-fmt markdownlint nixie typecheck
+.PHONY: help all clean test test-loom build release release-archive lint fmt check-fmt markdownlint nixie typecheck
 
 APP ?= pg_embedded_setup_unpriv
 CARGO ?= cargo
@@ -26,6 +26,8 @@ CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
 MDLINT ?= markdownlint-cli2
 NIXIE ?= nixie
+INTERROGATE ?= interrogate
+PY_DOCSTRING_COVERAGE ?= 100
 
 build: ## Build debug binary
 	$(CARGO) build $(BUILD_JOBS) --bin "$(APP)"
@@ -43,6 +45,9 @@ test: ## Run tests with warnings treated as errors
 	RUSTFLAGS="-D warnings" $(CARGO) nextest run --all-targets --all-features $(BUILD_JOBS)
 	RUSTFLAGS="-D warnings" $(CARGO) nextest run --tests --workspace --no-default-features --features dev-worker $(BUILD_JOBS)
 
+test-loom: ## Run Loom concurrency tests
+	$(CARGO) test --features "loom-tests" --lib -- --ignored
+
 release-archive: ## Package release binaries for cargo-binstall
 	@test -n "$(TARGET)" || (echo "TARGET is required" >&2; exit 1)
 	@test "$(MANIFEST_VERSION)" = "$(VERSION)" || \
@@ -57,6 +62,7 @@ release-archive: ## Package release binaries for cargo-binstall
 	rm -rf "$(RELEASE_ARCHIVE_DIR)"
 
 lint: ## Run Clippy with warnings denied
+	$(INTERROGATE) --fail-under $(PY_DOCSTRING_COVERAGE) .
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)
 	$(CARGO) clippy $(CLIPPY_FLAGS)
 

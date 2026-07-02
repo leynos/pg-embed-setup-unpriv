@@ -38,12 +38,18 @@ can install those published assets on Linux `x86_64` and `aarch64`.
 Loom-based checks for `ScopedEnv` are opt-in and only compile when the
 `loom-tests` feature is enabled. The Loom tests are marked `#[ignore]`, and
 `make test` keeps them dormant: the nextest run uses `--all-features`, while
-the follow-up `cargo test` run disables default features (enabling `dev-worker`
-only). Run the Loom suite with:
+the follow-up `cargo nextest run` disables default features (enabling
+`dev-worker` only). Run the Loom suite locally with:
 
 ```sh
-cargo test --features "loom-tests" --lib -- --ignored
+make test-loom
 ```
+
+The scheduler budget in `src/env/loom_tests.rs` currently uses
+`max_threads = 3`, `max_branches = 64`, and `preemption_bound = Some(3)`. The
+three bounds jointly constrain the search space so the suite stays tractable.
+Changing any of them requires justification, and may need matching CI timeout
+adjustments.
 
 ## Further reading
 
