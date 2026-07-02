@@ -23,6 +23,24 @@ also runs a Linux matrix for unprivileged and root execution. The root variant
 invokes the test suite under `sudo` so root-only privilege paths execute, while
 the unprivileged variant continues to collect coverage.
 
+## Lint and formatting toolchain
+
+The repository pins its Rust toolchain in `rust-toolchain.toml` to a dated
+nightly release because `rustfmt.toml` uses unstable formatter options imported
+from the shared Rust agent template. Run formatting through the Makefile so the
+pinned `rustfmt` and workspace settings are used consistently:
+
+```sh
+make check-fmt
+```
+
+`make lint` is the authoritative local lint gate. It requires 100% Python
+docstring coverage through `interrogate --fail-under 100 .`, builds Rust
+documentation with warnings denied, and runs Clippy with warnings denied across
+all targets and features. CI installs the pinned Interrogate tool before this
+gate runs, so contributors should keep local Interrogate versions aligned with
+the Makefile and workflow when updating the lint policy.
+
 ## Release process
 
 Tagging a release with `v*` triggers `.github/workflows/release.yml`. The
