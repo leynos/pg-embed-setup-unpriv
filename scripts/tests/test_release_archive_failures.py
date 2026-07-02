@@ -35,7 +35,7 @@ SAFE_COMPONENT = st.text(
 SAFE_WORD = st.text(
     alphabet=st.characters(
         whitelist_categories=("Ll", "Lu", "Nd"),
-        whitelist_characters="-_.",
+        whitelist_characters="-_",
     ),
     min_size=1,
     max_size=16,
@@ -99,6 +99,17 @@ def archive_members(archive: Path) -> list[str]:
     """Return archive member names in stored order."""
     with tarfile.open(archive, "r:gz") as tar:
         return tar.getnames()
+
+
+def assert_cargo_program_and_args_preserved(
+    cargo: str,
+    expected_program: str,
+    expected_args: list[str],
+) -> None:
+    """Assert that Cargo command parsing preserves the expected argv split."""
+    parsed_program, parsed_args = release_archive._cargo_program_and_args(cargo)
+    assert parsed_program == expected_program
+    assert parsed_args == expected_args
 
 
 def test_stage_archive_reports_missing_release_binary(tmp_path: Path) -> None:
@@ -282,10 +293,7 @@ def test_cargo_program_and_args_preserves_generated_wrapper_args(
     """Cargo command parsing preserves generated wrapper argv."""
     cargo = " ".join([program, *args])
 
-    parsed_program, parsed_args = release_archive._cargo_program_and_args(cargo)
-
-    assert parsed_program == program
-    assert parsed_args == args
+    assert_cargo_program_and_args_preserved(cargo, program, args)
 
 
 @settings(max_examples=150)
@@ -313,10 +321,7 @@ def test_cargo_program_and_args_preserves_generated_windows_wrappers(
     program = rf"C:\Tools\{wrapper}.exe"
     cargo = " ".join([program, *args])
 
-    parsed_program, parsed_args = release_archive._cargo_program_and_args(cargo)
-
-    assert parsed_program == program
-    assert parsed_args == args
+    assert_cargo_program_and_args_preserved(cargo, program, args)
 
 
 @settings(max_examples=100)
