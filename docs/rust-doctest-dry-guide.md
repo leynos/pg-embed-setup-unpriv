@@ -400,12 +400,12 @@ builds.[^13]
 
 ```Rust
 /// A socket that is only available on Unix platforms.
-#[cfg(any(target_os = "unix", doc))]
+#[cfg(any(unix, doc))]
 pub struct UnixSocket;
 ```
 
-This `any` directive ensures the struct is compiled either when the target OS is
-`unix` OR when `rustdoc` is running. This correctly makes the item visible in
+This `any` directive ensures the struct is compiled either when the `unix` cfg
+is set OR when `rustdoc` is running. This correctly makes the item visible in
 the generated HTML. However, it is crucial to understand that this **does not**
 make the doctest for `UnixSocket` pass on non-Unix platforms.
 
@@ -413,11 +413,10 @@ This distinction highlights the "cfg duality." The `#[cfg(doc)]` attribute
 controls the *table of contents* of the documentation; it determines which
 items are parsed and rendered. The actual compilation of a doctest, however,
 happens in a separate, later stage. In that stage, the `doc` cfg is *not*
-passed to the compiler.[^13] The compiler only sees the host
-
-`cfg` (e.g., `target_os = "windows"`), so the `UnixSocket` type is not
-available, and the test fails to compile. `#[cfg(doc)]` affects what is
-documented, not what is testable.
+passed to the compiler.[^13] The compiler only sees the host cfg (e.g., the
+absence of `unix` on Windows), so the `UnixSocket` type is not available, and
+the test fails to compile. `#[cfg(doc)]` affects what is documented, not what
+is testable.
 
 ### 5.2 Executing Doctests Conditionally: Feature Flags
 
