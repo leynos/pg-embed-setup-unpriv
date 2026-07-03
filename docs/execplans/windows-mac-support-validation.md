@@ -2129,3 +2129,15 @@ scripts/release_archive.py`, release archive pytest via `uv`,
 `cargo test --features dev-worker --test ui`, `make check-fmt`, `make lint`,
 `make markdownlint`, `git diff --check`, and
 `CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`.
+
+Revision 17 (2026-07-04), after re-checking the shared CI action baseline. What
+changed and why:
+
+- Updated every `leynos/shared-actions` call site to the current default-branch
+  SHA `4711d929aa4461db34af92b72fc174bcca6a1190`, including `setup-rust`,
+  coverage upload, and the Dependabot reusable workflow.
+- Re-examined the local `setup-cargo-binstall` composite action. The current
+  shared `setup-rust` action does install `cargo-binstall`, but still pins
+  `1.16.6`; the local composite remains necessary for the packaging and release
+  audit jobs because those paths require `cargo-binstall` `1.19.1` for the
+  local-manifest archive validation.

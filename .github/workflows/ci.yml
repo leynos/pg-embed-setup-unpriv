@@ -27,7 +27,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
+        uses: leynos/shared-actions/.github/actions/setup-rust@4711d929aa4461db34af92b72fc174bcca6a1190
       - name: Format
         run: make check-fmt
       - name: Markdown lint
@@ -52,7 +52,7 @@ jobs:
           cargo nextest run --all-targets --all-features
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/generate-coverage@b61ad14766ae81b830abdaf066eb3d9b6c4f537b
+        uses: leynos/shared-actions/.github/actions/generate-coverage@4711d929aa4461db34af92b72fc174bcca6a1190
         with:
           output-path: lcov.info
           format: lcov
@@ -86,7 +86,7 @@ jobs:
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: ${{ env.CS_ACCESS_TOKEN && matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@b61ad14766ae81b830abdaf066eb3d9b6c4f537b
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@4711d929aa4461db34af92b72fc174bcca6a1190
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
@@ -117,7 +117,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
+        uses: leynos/shared-actions/.github/actions/setup-rust@4711d929aa4461db34af92b72fc174bcca6a1190
       - name: Restore PostgreSQL binary cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -177,7 +177,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
+        uses: leynos/shared-actions/.github/actions/setup-rust@4711d929aa4461db34af92b72fc174bcca6a1190
       - name: Install cargo-binstall 1.19.1
         uses: ./.github/actions/setup-cargo-binstall
       - name: Setup uv
