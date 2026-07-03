@@ -27,6 +27,7 @@
 - POSIX file-mode privacy does not apply on Windows. Directory privacy depends
   on the account's access control lists (ACLs), so callers should choose
   private runtime and data paths when local account separation matters.
+
 ## 1. Stabilize zero-configuration bootstrap
 
 ### 1.1. Detect and adapt to execution privileges
