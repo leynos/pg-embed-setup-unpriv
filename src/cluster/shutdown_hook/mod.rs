@@ -219,7 +219,7 @@ extern "C" fn shutdown_callback() {
         }
     };
 
-    if !platform_postmaster_process_is_running(process) {
+    if !postmaster_process_is_running_for_shutdown(process) {
         best_effort_cleanup(&work);
         return;
     }
@@ -272,6 +272,11 @@ fn stop_postmaster(process: platform::PostmasterProcess, state: &ShutdownWork) {
     }
 
     // Timeout expired — escalate to forceful platform termination.
+    tracing::warn!(
+        target: crate::observability::LOG_TARGET,
+        timeout_ms = state.shutdown_timeout.as_millis(),
+        "postmaster did not exit before shutdown-hook timeout; escalating to forceful termination"
+    );
     force_shutdown(process);
     std::thread::sleep(POST_SIGKILL_GRACE);
 }
@@ -282,7 +287,7 @@ fn stop_postmaster(process: platform::PostmasterProcess, state: &ShutdownWork) {
 fn wait_for_exit(process: platform::PostmasterProcess, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        if !platform_postmaster_process_is_running(process) {
+        if !postmaster_process_is_running_for_shutdown(process) {
             return true;
         }
         if std::time::Instant::now() >= deadline {
@@ -290,6 +295,17 @@ fn wait_for_exit(process: platform::PostmasterProcess, timeout: Duration) -> boo
         }
         std::thread::sleep(POLL_INTERVAL);
     }
+}
+
+fn postmaster_process_is_running_for_shutdown(process: platform::PostmasterProcess) -> bool {
+    platform_postmaster_process_is_running(process).unwrap_or_else(|err| {
+        tracing::warn!(
+            target: crate::observability::LOG_TARGET,
+            %err,
+            "failed to probe postmaster process during shutdown"
+        );
+        true
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -373,9 +389,13 @@ pub fn process_is_running(pid: PostmasterPid) -> BootstrapResult<bool> {
 ///
 /// This helper preserves the shutdown hook's PID-reuse-safe process identity
 /// check for integration tests.
+///
+/// # Errors
+///
+/// Returns an error when the platform process probe fails for a reason other
+/// than the process being absent.
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
-#[must_use]
-pub fn postmaster_process_is_running(process: PostmasterProcess) -> bool {
+pub fn postmaster_process_is_running(process: PostmasterProcess) -> BootstrapResult<bool> {
     platform_postmaster_process_is_running(process)
 }
 

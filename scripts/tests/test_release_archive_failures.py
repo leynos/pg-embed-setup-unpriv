@@ -353,7 +353,7 @@ def test_split_cargo_command_roundtrips_shell_quoted_strings(words: list[str]) -
 @given(prefix=SAFE_SHELL_WORD)
 def test_split_cargo_command_rejects_generated_malformed_quoting(prefix: str) -> None:
     """Cargo command splitting reports generated unbalanced quotes."""
-    command = f"{prefix} 'unterminated"
+    command = f"{shlex.quote(prefix)} 'unterminated"
 
     with pytest.raises(
         SystemExit,

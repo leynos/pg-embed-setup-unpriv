@@ -55,12 +55,24 @@ pub(super) const fn prepare_process_exit_failsafe(
 /// Requests graceful `PostgreSQL` shutdown.
 #[cfg(unix)]
 pub(super) fn request_shutdown(process: PostmasterProcess) {
+    tracing::debug!(
+        target: crate::observability::LOG_TARGET,
+        pid = process,
+        signal = libc::SIGTERM,
+        "requesting Unix postmaster shutdown"
+    );
     send_signal(process, libc::SIGTERM);
 }
 
 /// Forces `PostgreSQL` shutdown after the graceful timeout.
 #[cfg(unix)]
 pub(super) fn force_shutdown(process: PostmasterProcess) {
+    tracing::warn!(
+        target: crate::observability::LOG_TARGET,
+        pid = process,
+        signal = libc::SIGKILL,
+        "forcing Unix postmaster shutdown"
+    );
     send_signal(process, libc::SIGKILL);
 }
 
@@ -89,15 +101,8 @@ pub(super) fn process_is_running_for_platform(pid: PostmasterPid) -> BootstrapRe
 
 /// Returns `true` when the postmaster identity still matches a live process.
 #[cfg(unix)]
-pub(super) fn postmaster_process_is_running(process: PostmasterProcess) -> bool {
-    process_is_running_for_platform(process).unwrap_or_else(|err| {
-        tracing::warn!(
-            target: crate::observability::LOG_TARGET,
-            %err,
-            "failed to probe postmaster process during shutdown"
-        );
-        true
-    })
+pub(super) fn postmaster_process_is_running(process: PostmasterProcess) -> BootstrapResult<bool> {
+    process_is_running_for_platform(process)
 }
 
 #[cfg(unix)]

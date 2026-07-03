@@ -238,7 +238,7 @@ impl JobObjectExtendedLimitInformation {
 #[cfg(test)]
 mod tests {
     use super::super::{
-        ProcessEntry, collect_process_tree, descendant_is_still_in_root_tree,
+        ProcessEntry, ProcessTreeIndex, collect_process_tree, descendant_is_still_in_root_tree,
         process_has_root_ancestor,
     };
 
@@ -274,14 +274,16 @@ mod tests {
     fn descendant_validation_rejects_reused_pid_from_different_tree() {
         let descendant = entry(20, 10);
         let entries = [entry(20, 99), entry(99, 99)];
+        let index = ProcessTreeIndex::new(&entries);
 
-        assert!(!descendant_is_still_in_root_tree(10, descendant, &entries));
+        assert!(!descendant_is_still_in_root_tree(10, descendant, &index));
     }
 
     #[test]
     fn descendant_validation_rejects_parent_cycles() {
         let entries = [entry(20, 30), entry(30, 20)];
+        let index = ProcessTreeIndex::new(&entries);
 
-        assert!(!process_has_root_ancestor(10, 20, &entries));
+        assert!(!process_has_root_ancestor(10, 20, &index));
     }
 }

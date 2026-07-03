@@ -274,6 +274,47 @@ def test_build_release_binaries_preserves_cargo_wrapper_args(tmp_path: Path) -> 
     )
 
 
+def test_main_discovers_manifest_version_when_release_version_is_none(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CLI uses Cargo.toml when no release version override is supplied."""
+    target = "x86_64-unknown-linux-gnu"
+    manifest = write_manifest(tmp_path, version="0.5.2")
+    for binary in release_archive.DEFAULT_BINARIES:
+        write_release_binary(tmp_path, target, binary)
+
+    with CmdMox() as mox:
+        mox.mock("cargo").with_args(
+            "build",
+            "--release",
+            "--target",
+            target,
+            "--bin",
+            "pg_embedded_setup_unpriv",
+            "--bin",
+            "pg_worker",
+        ).returns()
+        mox.replay()
+
+        release_archive.main(
+            target,
+            release_version=None,
+            manifest_path=manifest,
+            dist_dir=Path("dist"),
+            cargo="cargo",
+        )
+
+    archive = Path(capsys.readouterr().out.strip())
+    root = "pg-embed-setup-unpriv-x86_64-unknown-linux-gnu-v0.5.2"
+    assert archive == tmp_path / "dist" / f"{root}.tgz"
+    assert archive_members(archive) == [
+        root,
+        f"{root}/pg_embedded_setup_unpriv",
+        f"{root}/pg_worker",
+    ]
+
+
 def test_cargo_program_and_args_preserves_absolute_wrapper_args() -> None:
     """Cargo command parsing keeps absolute wrapper paths and arguments."""
     cargo = "/usr/bin/sccache cargo"

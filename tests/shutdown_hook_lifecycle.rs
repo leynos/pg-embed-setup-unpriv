@@ -12,14 +12,10 @@
 mod cluster_skip;
 mod serial;
 mod skip;
+type OsPid = u32;
 
 use std::{env, fs, path::Path, thread, time::Duration};
 
-use cluster_skip::cluster_skip_message;
-use color_eyre::eyre::{Context, Result, eyre};
-
-use rstest::rstest;
-use serial::{ScenarioSerialGuard, serial_guard};
 
 /// Environment variable used to signal that this binary is running as the
 /// child subprocess.
@@ -61,9 +57,10 @@ fn postmaster_exits_after_child_process_with_shutdown_hook(
         return Ok(());
     }
 
-    let postmaster_process = read_postmaster_process(tmp_dir.path())?
+    let _postmaster_process = read_postmaster_process(tmp_dir.path())?
         .ok_or_else(|| eyre!("postmaster process identity not found after child exit"))?;
-    wait_for_postmaster_exit(postmaster_process)
+    let postmaster_pid = read_postmaster_pid_from_identity_file(&content)?;
+    wait_for_postmaster_exit(postmaster_pid)
 }
 
 /// Spawns the child subprocess that creates and forgets a cluster.
@@ -80,10 +77,20 @@ fn spawn_child(pid_file: &Path) -> Result<std::process::ExitStatus> {
         .context("spawn child process")
 }
 
-fn wait_for_postmaster_exit(postmaster_process: PostmasterProcess) -> Result<()> {
+fn read_postmaster_pid_from_identity_file(contents: &str) -> Result<OsPid> {
+    let first_line = contents
+        .lines()
+        .next()
+        .ok_or_else(|| eyre!("postmaster identity file was empty"))?;
+    first_line
+        .trim()
+        .parse::<OsPid>()
+        .with_context(|| format!("parse postmaster PID from '{first_line}'"))
+}
+fn wait_for_postmaster_exit(postmaster_pid: OsPid) -> Result<()> {
     let deadline = std::time::Instant::now() + POSTMASTER_EXIT_TIMEOUT;
     loop {
-        if !postmaster_process_is_running(postmaster_process) {
+        if !os_process_is_running(postmaster_pid) {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
@@ -95,28 +102,16 @@ fn wait_for_postmaster_exit(postmaster_process: PostmasterProcess) -> Result<()>
     }
 }
 
-/// Returns `true` if the error should cause a soft skip rather than a hard
-/// failure.
-fn should_skip(message: &str, debug: &str) -> bool {
-    cluster_skip_message(message, Some(debug)).is_some()
-        || debug.contains("another server might be running")
-}
+fn os_process_is_running(pid: OsPid) -> bool {
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const ERROR_INVALID_PARAMETER: u32 = 87;
 
-// ============================================================================
-// Child (subprocess entry point)
-// ============================================================================
-
-/// Entry point for the child subprocess.
-///
-/// This function is invoked when the binary detects the `CHILD_ENV_KEY`
-/// environment variable. It creates a cluster, registers the shutdown hook,
-/// writes the postmaster PID, and exits.
-///
-/// When the environment cannot support cluster creation (e.g. missing
-/// `PostgreSQL` binaries), the child writes "SKIP" to the PID file and
-/// exits cleanly so the parent can detect the soft skip.
-#[test]
-#[ignore = "child subprocess entry point — not a standalone test"]
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+        fn GetLastError() -> u32;
+    }
 fn shutdown_hook_lifecycle_child_entry() -> Result<()> {
     let Ok(pid_file_path) = env::var(CHILD_ENV_KEY) else {
         // Not running as the child subprocess — skip silently.

@@ -2141,3 +2141,19 @@ changed and why:
   `1.16.6`; the local composite remains necessary for the packaging and release
   audit jobs because those paths require `cargo-binstall` `1.19.1` for the
   local-manifest archive validation.
+
+Revision 18 (2026-07-04), after verifying the shutdown-hook review findings.
+What changed and why:
+
+- Made the exported postmaster identity liveness query fallible so platform
+  probe failures remain visible at the test-support API boundary. The atexit
+  callback now owns the best-effort warning-and-continue policy instead.
+- Switched the shutdown-hook lifecycle test's exit oracle to an independent
+  OS-level PID probe while still parsing the full postmaster identity copied
+  from the child process.
+- Added Unix shutdown request/force logs and a shutdown-hook timeout escalation
+  warning so hung postmaster cleanup has PID and timeout context in logs.
+- Replaced Windows process-tree descendant validation scans with indexed
+  PID-to-entry and parent-to-child lookups to avoid repeated full-list scans.
+- Added release-archive coverage for `main(..., release_version=None)` so the
+  manifest-version discovery path is exercised directly.

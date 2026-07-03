@@ -1,6 +1,10 @@
 //! Windows process controls for the shutdown hook.
 
-use std::{ffi::c_void, ptr::NonNull};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    ffi::c_void,
+    ptr::NonNull,
+};
 
 use crate::error::BootstrapResult;
 
@@ -114,22 +118,14 @@ pub(in crate::cluster::shutdown_hook) fn process_is_running_for_platform(
 /// Returns `true` when the postmaster identity still matches a live process.
 pub(in crate::cluster::shutdown_hook) fn postmaster_process_is_running(
     process: PostmasterProcess,
-) -> bool {
+) -> BootstrapResult<bool> {
     let handle = match ProcessHandle::open_query_checked(process.pid()) {
         Ok(Some(handle)) => handle,
-        Ok(None) => return false,
-        Err(err) => {
-            tracing::warn!(
-                target: crate::observability::LOG_TARGET,
-                pid = process.pid(),
-                %err,
-                "failed to probe postmaster process during shutdown"
-            );
-            return true;
-        }
+        Ok(None) => return Ok(false),
+        Err(err) => return Err(err),
     };
 
-    let matches_postmaster = handle.matches_postmaster(process);
+    let matches_postmaster = handle.matches_postmaster_checked(process)?;
     if !matches_postmaster {
         tracing::debug!(
             target: crate::observability::LOG_TARGET,
@@ -137,7 +133,7 @@ pub(in crate::cluster::shutdown_hook) fn postmaster_process_is_running(
             "postmaster process probe found no matching live postgres process"
         );
     }
-    matches_postmaster
+    Ok(matches_postmaster)
 }
 
 #[repr(C)]
@@ -245,7 +241,6 @@ impl ProcessHandle {
         succeeded != 0 && exit_code == STILL_ACTIVE
     }
 
-    #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
     fn is_active_checked(&self) -> BootstrapResult<bool> {
         let mut exit_code = 0_u32;
         let exit_code_ptr = std::ptr::addr_of_mut!(exit_code);
@@ -269,6 +264,10 @@ impl ProcessHandle {
 
     pub(super) fn matches_postmaster(&self, expected: PostmasterProcess) -> bool {
         self.is_active() && process_matches_postmaster(self.raw(), expected)
+    }
+
+    fn matches_postmaster_checked(&self, expected: PostmasterProcess) -> BootstrapResult<bool> {
+        Ok(self.is_active_checked()? && process_matches_postmaster(self.raw(), expected))
     }
 
     fn is_active_postgres(&self) -> bool {
@@ -403,24 +402,29 @@ fn process_tree(root: PostmasterPid) -> Vec<ProcessEntry> {
 }
 
 fn collect_process_tree(root: PostmasterPid, entries: &[ProcessEntry]) -> Vec<ProcessEntry> {
+    let mut children_by_parent: HashMap<PostmasterPid, Vec<ProcessEntry>> = HashMap::new();
+    for entry in entries {
+        children_by_parent
+            .entry(entry.parent_process_id)
+            .or_default()
+            .push(*entry);
+    }
+
     let mut tree = vec![ProcessEntry {
         process_id: root,
         parent_process_id: root,
     }];
-    let mut found_child = true;
+    let mut seen = HashSet::from([root]);
+    let mut queue = VecDeque::from([root]);
 
-    while found_child {
-        found_child = false;
-        for entry in entries {
-            let parent_is_in_tree = tree
-                .iter()
-                .any(|member| member.process_id == entry.parent_process_id);
-            let process_is_in_tree = tree
-                .iter()
-                .any(|member| member.process_id == entry.process_id);
-            if parent_is_in_tree && !process_is_in_tree {
-                tree.push(*entry);
-                found_child = true;
+    while let Some(parent) = queue.pop_front() {
+        let Some(children) = children_by_parent.get(&parent) else {
+            continue;
+        };
+        for child in children {
+            if seen.insert(child.process_id) {
+                tree.push(*child);
+                queue.push_back(child.process_id);
             }
         }
     }
@@ -457,12 +461,13 @@ fn open_validated_descendant_processes(
         return Vec::new();
     };
     let current_entries = snapshot.process_entries();
+    let current_index = ProcessTreeIndex::new(&current_entries);
 
     candidates
         .into_iter()
         .filter_map(|(member, process)| {
             let is_valid = process.is_active_postgres()
-                && descendant_is_still_in_root_tree(root, member, &current_entries);
+                && descendant_is_still_in_root_tree(root, member, &current_index);
             if !is_valid {
                 tracing::debug!(
                     pid = member.process_id,
@@ -479,25 +484,37 @@ fn open_validated_descendant_processes(
 fn descendant_is_still_in_root_tree(
     root: PostmasterPid,
     descendant: ProcessEntry,
-    entries: &[ProcessEntry],
+    entries: &ProcessTreeIndex,
 ) -> bool {
-    let Some(current) = entries
-        .iter()
-        .find(|entry| entry.process_id == descendant.process_id)
-    else {
+    let Some(current) = entries.by_pid.get(&descendant.process_id) else {
         return false;
     };
     current.parent_process_id == descendant.parent_process_id
         && process_has_root_ancestor(root, descendant.process_id, entries)
 }
 
+struct ProcessTreeIndex {
+    by_pid: HashMap<PostmasterPid, ProcessEntry>,
+}
+
+impl ProcessTreeIndex {
+    fn new(entries: &[ProcessEntry]) -> Self {
+        Self {
+            by_pid: entries
+                .iter()
+                .map(|entry| (entry.process_id, *entry))
+                .collect(),
+        }
+    }
+}
+
 fn process_has_root_ancestor(
     root: PostmasterPid,
     mut process_id: PostmasterPid,
-    entries: &[ProcessEntry],
+    entries: &ProcessTreeIndex,
 ) -> bool {
-    for _ in 0..entries.len() {
-        let Some(entry) = entries.iter().find(|entry| entry.process_id == process_id) else {
+    for _ in 0..entries.by_pid.len() {
+        let Some(entry) = entries.by_pid.get(&process_id) else {
             return false;
         };
         if entry.parent_process_id == root {
