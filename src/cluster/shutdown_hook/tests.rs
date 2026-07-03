@@ -87,9 +87,13 @@ fn process_is_running_rejects_zero_pid() -> Result<()> {
 #[serial(shutdown_hook_state)]
 fn register_shutdown_hook_rolls_back_after_preflight_failure() -> Result<()> {
     reset_shutdown_registration_for_tests();
-    let data_dir_file = tempfile::NamedTempFile::new()?;
+    let failing_data_dir = tempfile::tempdir()?;
+    std::fs::write(
+        failing_data_dir.path().join("postmaster.pid"),
+        "not-a-pid\n",
+    )?;
     let mut settings = Settings {
-        data_dir: data_dir_file.path().into(),
+        data_dir: failing_data_dir.path().into(),
         ..Settings::default()
     };
 
