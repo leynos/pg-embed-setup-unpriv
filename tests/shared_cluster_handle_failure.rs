@@ -17,14 +17,10 @@ use pg_embedded_setup_unpriv::{
 };
 use tracing::warn;
 
-#[expect(dead_code, reason = "required by env_isolation module")]
-#[path = "support/env.rs"]
-mod env;
-#[expect(dead_code, reason = "only set_env_var and remove_env_var are used")]
-#[path = "support/env_isolation.rs"]
-mod env_isolation;
+#[path = "support/env_mutation.rs"]
+mod env_mutation;
 
-use env_isolation::{remove_env_var, set_env_var};
+use env_mutation::{remove_env_var, set_env_var};
 
 /// Sets up the environment to force bootstrap failure.
 ///
