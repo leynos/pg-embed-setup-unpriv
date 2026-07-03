@@ -16,6 +16,7 @@
 //! let url = cluster.settings().url("my_database");
 //! // Perform test database work here.
 //! drop(cluster); // `PostgreSQL` stops automatically.
+//!
 //! # Ok(())
 //! # }
 //! ```
@@ -70,28 +71,35 @@ mod temporary_database;
 mod worker_invoker;
 mod worker_operation;
 
-pub use self::connection::{ConnectionMetadata, TestClusterConnection};
-pub use self::guard::ClusterGuard;
-pub use self::handle::ClusterHandle;
-pub use self::lifecycle::DatabaseName;
-pub use self::temporary_database::TemporaryDatabase;
+use std::ops::Deref;
+
+use tracing::info_span;
+
+pub(crate) use self::startup::setup_postgres_only;
+#[cfg(feature = "async-api")]
+use self::startup::start_postgres_async;
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub use self::worker_invoker::WorkerInvoker;
 #[doc(hidden)]
 pub use self::worker_operation::WorkerOperation;
-
-use self::runtime::build_runtime;
-use self::runtime_mode::ClusterRuntime;
-pub(crate) use self::startup::setup_postgres_only;
-#[cfg(feature = "async-api")]
-use self::startup::start_postgres_async;
-use self::startup::{cache_config_from_bootstrap, start_postgres};
-use crate::bootstrap_for_tests;
-use crate::env::ScopedEnv;
-use crate::error::BootstrapResult;
-use crate::observability::LOG_TARGET;
-use std::ops::Deref;
-use tracing::info_span;
+pub use self::{
+    connection::{ConnectionMetadata, TestClusterConnection},
+    guard::ClusterGuard,
+    handle::ClusterHandle,
+    lifecycle::DatabaseName,
+    temporary_database::TemporaryDatabase,
+};
+use self::{
+    runtime::build_runtime,
+    runtime_mode::ClusterRuntime,
+    startup::{cache_config_from_bootstrap, start_postgres},
+};
+use crate::{
+    bootstrap_for_tests,
+    env::ScopedEnv,
+    error::BootstrapResult,
+    observability::LOG_TARGET,
+};
 
 /// Embedded `PostgreSQL` instance whose lifecycle follows Rust's drop semantics.
 ///
@@ -108,15 +116,16 @@ use tracing::info_span;
 ///
 /// ```no_run
 /// use std::sync::OnceLock;
+///
 /// use pg_embedded_setup_unpriv::{ClusterHandle, TestCluster};
 ///
 /// static SHARED: OnceLock<ClusterHandle> = OnceLock::new();
 ///
 /// fn shared_cluster() -> &'static ClusterHandle {
 ///     SHARED.get_or_init(|| {
-///         let (handle, guard) = TestCluster::new_split()
-///             .expect("cluster bootstrap failed");
-///         handle.register_shutdown_on_exit()
+///         let (handle, guard) = TestCluster::new_split().expect("cluster bootstrap failed");
+///         handle
+///             .register_shutdown_on_exit()
 ///             .expect("shutdown hook registration failed");
 ///         std::mem::forget(guard);
 ///         handle
@@ -178,15 +187,16 @@ impl TestCluster {
     ///
     /// ```no_run
     /// use std::sync::OnceLock;
+    ///
     /// use pg_embedded_setup_unpriv::{ClusterHandle, TestCluster};
     ///
     /// static SHARED: OnceLock<ClusterHandle> = OnceLock::new();
     ///
     /// fn shared_cluster() -> &'static ClusterHandle {
     ///     SHARED.get_or_init(|| {
-    ///         let (handle, guard) = TestCluster::new_split()
-    ///             .expect("cluster bootstrap failed");
-    ///         handle.register_shutdown_on_exit()
+    ///         let (handle, guard) = TestCluster::new_split().expect("cluster bootstrap failed");
+    ///         handle
+    ///             .register_shutdown_on_exit()
     ///             .expect("shutdown hook registration failed");
     ///         std::mem::forget(guard);
     ///         handle
@@ -404,9 +414,7 @@ impl TestCluster {
 impl Deref for TestCluster {
     type Target = ClusterHandle;
 
-    fn deref(&self) -> &Self::Target {
-        &self.handle
-    }
+    fn deref(&self) -> &Self::Target { &self.handle }
 }
 
 // Note: TestCluster does NOT implement Drop because the ClusterGuard handles shutdown.

@@ -1,13 +1,17 @@
 //! Tests for bootstrap orchestration and backend selection.
 
-use super::*;
-use crate::test_support::scoped_env;
+use std::{
+    ffi::OsString,
+    sync::{Arc, Mutex},
+};
+
 use camino::Utf8PathBuf;
 use rstest::{fixture, rstest};
 use serial_test::serial;
-use std::ffi::OsString;
-use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
+
+use super::*;
+use crate::test_support::scoped_env;
 
 /// Converts string key-value pairs to `OsString` pairs for `scoped_env`.
 fn env_vars<const N: usize>(pairs: [(&str, Option<&str>); N]) -> Vec<(OsString, Option<OsString>)> {

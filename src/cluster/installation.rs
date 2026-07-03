@@ -3,13 +3,17 @@
 //! Handles refreshing the installation directory and port after worker setup,
 //! as well as reading `postmaster.pid` for port discovery.
 
-use crate::error::BootstrapResult;
-use crate::observability::LOG_TARGET;
-use crate::{ExecutionPrivileges, TestBootstrapSettings};
+use std::{path::Path, time::Duration};
+
 use color_eyre::eyre::eyre;
 use postgresql_embedded::{Settings, Version};
-use std::path::Path;
-use std::time::Duration;
+
+use crate::{
+    ExecutionPrivileges,
+    TestBootstrapSettings,
+    error::BootstrapResult,
+    observability::LOG_TARGET,
+};
 
 /// Number of attempts to read the postmaster port.
 pub(super) const POSTMASTER_PORT_ATTEMPTS: usize = 10;
@@ -215,9 +219,10 @@ pub(super) fn resolve_installed_dir(settings: &Settings) -> Option<std::path::Pa
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
     use crate::test_support::dummy_settings;
-    use std::fs;
 
     #[test]
     fn refresh_worker_port_reads_postmaster_pid() {

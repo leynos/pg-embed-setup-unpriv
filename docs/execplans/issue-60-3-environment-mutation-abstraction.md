@@ -1,9 +1,8 @@
 # Issue 60.3: Environment Mutation Abstraction
 
-This execution plan (ExecPlan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This execution plan (ExecPlan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
@@ -106,8 +105,8 @@ actual current state of the work.
   and pass to `apply_worker_environment`.
 - [x] (2026-01-21 21:22Z) Add unit test for `TestEnvStore`
   demonstrating `get`, `set`, and `remove`.
-- [x] (2026-01-21 21:28Z) Run `make check-fmt`, `make lint`, and `make
-  test` to validate all changes.
+- [x] (2026-01-21 21:28Z) Run `make check-fmt`, `make lint`, and `make test` to
+      validate all changes.
 - [x] (2026-01-21 21:29Z) Commit the changes with a descriptive message.
 
 ## Surprises & discoveries
@@ -138,8 +137,8 @@ All objectives achieved:
   with `set` and `remove` methods.
 - `ProcessEnvStore` wraps real `env::set_var` and `env::remove_var` with
   explicit SAFETY comments.
-- `TestEnvStore` provides in-memory storage with `HashMap<String,
-  Option<String>>` and a `get` method for test assertions.
+- `TestEnvStore` provides in-memory storage with
+  `HashMap<String, Option<String>>` and a `get` method for test assertions.
 - `apply_worker_environment` refactored to accept `&mut dyn EnvStore`
   parameter.
 - `run_worker` updated to create `ProcessEnvStore` and pass to
@@ -213,8 +212,8 @@ Existing tests use an `EnvironmentOperations` trait from
 
 This plan introduces a new `EnvStore` trait that:
 
-- Defines `set(&mut self, key: &str, value: &str)` and `remove(&mut self, key:
-  &str)` methods
+- Defines `set(&mut self, key: &str, value: &str)` and
+  `remove(&mut self, key: &str)` methods
 - Is placed directly in `tests/support/pg_worker.rs` alongside the production
   code
 - Provides two implementations: `ProcessEnvStore` for production and
@@ -283,9 +282,10 @@ Validation: The code should compile with
 In `tests/support/pg_worker.rs`, modify the `apply_worker_environment` function
 (currently lines 208-221):
 
-1. Change the function signature from `fn apply_worker_environment(environment:
-   &[(String, Option<PlainSecret>)])` to `fn apply_worker_environment(store:
-   &mut dyn EnvStore, environment: &[(String, Option<PlainSecret)])`.
+1. Change the function signature from
+   `fn apply_worker_environment(environment: &[(String, Option<PlainSecret>)])`
+   to
+   `fn apply_worker_environment(store: &mut dyn EnvStore, environment: &[(String, Option<PlainSecret>)])`.
 
 2. Update the function body to use the store parameter instead of calling
    `env::set_var` and `env::remove_var` directly. Replace the unsafe calls with
@@ -328,8 +328,8 @@ Validation:
 - The existing test `apply_worker_environment_uses_plaintext_and_unsets`
   should continue to pass as it uses the separate `EnvironmentOperations` trait
   from helpers.
-- All tests in the file should pass with `cargo test --bin pg_worker
-  --features dev-worker --lib`.
+- All tests in the file should pass with
+  `cargo test --bin pg_worker --features dev-worker --lib`.
 
 ### Stage D: validation and commit
 

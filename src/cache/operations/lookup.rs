@@ -2,9 +2,10 @@
 //!
 //! Provides functions for checking cache status and finding matching versions.
 
+use std::fs;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use postgresql_embedded::{Version, VersionReq};
-use std::fs;
 use tracing::{debug, warn};
 
 use super::copy::copy_from_cache;
@@ -54,7 +55,7 @@ fn is_cache_entry_complete(version_dir: &Utf8Path) -> bool {
 ///
 /// ```no_run
 /// use camino::Utf8Path;
-/// use pg_embedded_setup_unpriv::cache::{check_cache, CacheLookupResult};
+/// use pg_embedded_setup_unpriv::cache::{CacheLookupResult, check_cache};
 ///
 /// let cache_dir = Utf8Path::new("/home/user/.cache/pg-embedded/binaries");
 /// match check_cache(cache_dir, "17.4.0") {
@@ -118,8 +119,8 @@ fn log_cache_miss(version_dir: &Utf8Path, version: &str) {
 ///
 /// ```no_run
 /// use camino::Utf8Path;
-/// use postgresql_embedded::VersionReq;
 /// use pg_embedded_setup_unpriv::cache::find_matching_cached_version;
+/// use postgresql_embedded::VersionReq;
 ///
 /// let cache_dir = Utf8Path::new("/home/user/.cache/pg-embedded/binaries");
 /// let version_req = VersionReq::parse("^17").expect("valid version req");

@@ -7,26 +7,24 @@ mod env_types;
 mod mode;
 mod prepare;
 
+#[cfg(test)]
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use color_eyre::eyre::{Context, eyre};
-use postgresql_embedded::Settings;
-use serde::{Deserialize, Serialize};
-#[cfg(test)]
-use std::sync::{Arc, Mutex, OnceLock};
-
-use crate::{
-    PgEnvCfg,
-    error::{BootstrapResult, Result as CrateResult},
-};
-
 pub use env::{TestBootstrapEnvironment, find_timezone_dir};
 pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
+use postgresql_embedded::Settings;
+use serde::{Deserialize, Serialize};
 
 use self::{
     env::{shutdown_timeout_from_env, worker_binary_from_env},
     mode::determine_execution_mode,
     prepare::prepare_bootstrap,
+};
+use crate::{
+    PgEnvCfg,
+    error::{BootstrapResult, Result as CrateResult},
 };
 
 const DEFAULT_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
@@ -129,10 +127,13 @@ pub fn run() -> CrateResult<()> {
 ///
 /// # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
 /// let bootstrap = bootstrap_for_tests()?;
-/// with_vars(bootstrap.environment.to_env(), || -> pg_embedded_setup_unpriv::BootstrapResult<()> {
-///     // Launch application logic that relies on `bootstrap.settings` here.
-///     Ok(())
-/// })?;
+/// with_vars(
+///     bootstrap.environment.to_env(),
+///     || -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+///         // Launch application logic that relies on `bootstrap.settings` here.
+///         Ok(())
+///     },
+/// )?;
 /// # Ok(())
 /// # }
 /// ```
@@ -189,7 +190,8 @@ fn validate_backend_selection() -> BootstrapResult<()> {
         return Ok(());
     }
     Err(eyre!(
-        "SKIP-TEST-CLUSTER: unsupported PG_TEST_BACKEND '{trimmed}'; supported backends: postgresql_embedded"
+        "SKIP-TEST-CLUSTER: unsupported PG_TEST_BACKEND '{trimmed}'; supported backends: \
+         postgresql_embedded"
     )
     .into())
 }

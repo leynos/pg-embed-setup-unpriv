@@ -77,3 +77,9 @@
   Windows in the roadmap appendix.
 - [ ] 3.3.2. Establish guardrails that fail fast on unsupported root scenarios
   on non-Linux systems, including unit coverage for the error messaging.
+
+### 3.4 Maintain contributor quality gates
+
+- [x] 3.4.1. Pin the Rust formatting and linting toolchain, import the shared
+  rustfmt and Clippy policy, and require 100% Python docstring coverage in the
+  local and CI lint gates.

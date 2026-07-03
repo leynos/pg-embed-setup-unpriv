@@ -3,14 +3,15 @@
 //! The helper records `WARN`-level logs without timestamps so assertions can
 //! match human-readable messages directly.
 
-use std::io::{Result as IoResult, Write};
-use std::sync::{Arc, Mutex};
+use std::{
+    io::{Result as IoResult, Write},
+    sync::{Arc, Mutex},
+};
+
+use tracing::{Level, subscriber::with_default};
+use tracing_subscriber::{fmt, fmt::format::FmtSpan};
 
 use crate::observability::LOG_TARGET;
-use tracing::Level;
-use tracing::subscriber::with_default;
-use tracing_subscriber::fmt;
-use tracing_subscriber::fmt::format::FmtSpan;
 
 struct BufferWriter {
     buffer: Arc<Mutex<Vec<u8>>>,
@@ -26,9 +27,7 @@ impl Write for BufferWriter {
         Ok(buf.len())
     }
 
-    fn flush(&mut self) -> IoResult<()> {
-        Ok(())
-    }
+    fn flush(&mut self) -> IoResult<()> { Ok(()) }
 }
 
 /// Runs `action`, capturing warning logs and returning them alongside the
@@ -159,8 +158,9 @@ fn decode_logs(bytes: Vec<u8>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_debug_logs, capture_info_logs_with_spans, capture_warn_logs, decode_logs};
     use tracing::info_span;
+
+    use super::{capture_debug_logs, capture_info_logs_with_spans, capture_warn_logs, decode_logs};
 
     #[test]
     fn captures_span_enter_and_close_events() {
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn decode_logs_uses_lossy_utf8_for_invalid_bytes() {
-        let bytes = vec![b'a', b'b', b'\n', 0xF0, 0x28, 0x8C, 0x28];
+        let bytes = vec![b'a', b'b', b'\n', 0xf0, 0x28, 0x8c, 0x28];
         let (warn_logs, logs) = capture_warn_logs(|| decode_logs(bytes));
 
         assert_eq!(

@@ -7,16 +7,13 @@ use color_eyre::eyre::eyre;
 use postgres::{Client, NoTls};
 use postgresql_embedded::Settings;
 
-use crate::TestBootstrapSettings;
-use crate::error::BootstrapResult;
+use crate::{TestBootstrapSettings, error::BootstrapResult};
 
 /// Escapes a SQL identifier by doubling embedded double quotes.
 ///
 /// `PostgreSQL` identifiers are quoted with double quotes. Any embedded
 /// double quote must be escaped by doubling it.
-pub(crate) fn escape_identifier(name: &str) -> String {
-    name.replace('"', "\"\"")
-}
+pub(crate) fn escape_identifier(name: &str) -> String { name.replace('"', "\"\"") }
 
 /// Creates a new `PostgreSQL` client connection from the given URL.
 ///
@@ -57,40 +54,28 @@ impl ConnectionMetadata {
 
     /// Returns the configured database host.
     #[must_use]
-    pub fn host(&self) -> &str {
-        self.settings.host.as_str()
-    }
+    pub fn host(&self) -> &str { self.settings.host.as_str() }
 
     /// Returns the configured port.
     #[must_use]
-    pub const fn port(&self) -> u16 {
-        self.settings.port
-    }
+    pub const fn port(&self) -> u16 { self.settings.port }
 
     /// Returns the configured superuser name.
     #[must_use]
-    pub fn superuser(&self) -> &str {
-        self.settings.username.as_str()
-    }
+    pub fn superuser(&self) -> &str { self.settings.username.as_str() }
 
     /// Returns the generated superuser password.
     #[must_use]
-    pub fn password(&self) -> &str {
-        self.settings.password.as_str()
-    }
+    pub fn password(&self) -> &str { self.settings.password.as_str() }
 
     /// Returns the prepared `.pgpass` file path.
     #[must_use]
-    pub fn pgpass_file(&self) -> &Utf8Path {
-        self.pgpass_file.as_ref()
-    }
+    pub fn pgpass_file(&self) -> &Utf8Path { self.pgpass_file.as_ref() }
 
     /// Constructs a libpq-compatible URL for `database` using the underlying
     /// `postgresql_embedded` helper.
     #[must_use]
-    pub fn database_url(&self, database: &str) -> String {
-        self.settings.url(database)
-    }
+    pub fn database_url(&self, database: &str) -> String { self.settings.url(database) }
 }
 
 /// Accessor for connection helpers derived from a
@@ -123,45 +108,31 @@ impl TestClusterConnection {
 
     /// Returns host metadata without exposing internal storage.
     #[must_use]
-    pub fn host(&self) -> &str {
-        self.metadata.host()
-    }
+    pub fn host(&self) -> &str { self.metadata.host() }
 
     /// Returns the configured port.
     #[must_use]
-    pub const fn port(&self) -> u16 {
-        self.metadata.port()
-    }
+    pub const fn port(&self) -> u16 { self.metadata.port() }
 
     /// Returns the configured superuser account name.
     #[must_use]
-    pub fn superuser(&self) -> &str {
-        self.metadata.superuser()
-    }
+    pub fn superuser(&self) -> &str { self.metadata.superuser() }
 
     /// Returns the generated password for the superuser.
     #[must_use]
-    pub fn password(&self) -> &str {
-        self.metadata.password()
-    }
+    pub fn password(&self) -> &str { self.metadata.password() }
 
     /// Returns the `.pgpass` file prepared during bootstrap.
     #[must_use]
-    pub fn pgpass_file(&self) -> &Utf8Path {
-        self.metadata.pgpass_file()
-    }
+    pub fn pgpass_file(&self) -> &Utf8Path { self.metadata.pgpass_file() }
 
     /// Provides an owned snapshot of the connection metadata.
     #[must_use]
-    pub fn metadata(&self) -> ConnectionMetadata {
-        self.metadata.clone()
-    }
+    pub fn metadata(&self) -> ConnectionMetadata { self.metadata.clone() }
 
     /// Builds a libpq-compatible database URL for `database`.
     #[must_use]
-    pub fn database_url(&self, database: &str) -> String {
-        self.metadata.database_url(database)
-    }
+    pub fn database_url(&self, database: &str) -> String { self.metadata.database_url(database) }
 
     /// Establishes a Diesel connection for the target `database`.
     ///
@@ -184,11 +155,16 @@ impl TestClusterConnection {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::bootstrap::{ExecutionMode, ExecutionPrivileges, TestBootstrapEnvironment};
-    use crate::{CleanupMode, TestBootstrapSettings};
-    use postgresql_embedded::Settings;
     use std::time::Duration;
+
+    use postgresql_embedded::Settings;
+
+    use super::*;
+    use crate::{
+        CleanupMode,
+        TestBootstrapSettings,
+        bootstrap::{ExecutionMode, ExecutionPrivileges, TestBootstrapEnvironment},
+    };
 
     fn sample_settings() -> TestBootstrapSettings {
         let settings = Settings {

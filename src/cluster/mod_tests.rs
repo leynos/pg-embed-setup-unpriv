@@ -2,15 +2,20 @@
 
 use std::ffi::OsString;
 
-use super::TestCluster;
-use super::guard::ClusterGuard;
-use super::handle::ClusterHandle;
-use super::runtime_mode::ClusterRuntime;
-use crate::ExecutionPrivileges;
-use crate::env::ScopedEnv;
-use crate::observability::LOG_TARGET;
-use crate::test_support::{dummy_settings, scoped_env};
 use tracing::info_span;
+
+use super::{
+    TestCluster,
+    guard::ClusterGuard,
+    handle::ClusterHandle,
+    runtime_mode::ClusterRuntime,
+};
+use crate::{
+    ExecutionPrivileges,
+    env::ScopedEnv,
+    observability::LOG_TARGET,
+    test_support::{dummy_settings, scoped_env},
+};
 
 #[test]
 fn with_worker_guard_restores_environment() {

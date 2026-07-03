@@ -2,11 +2,10 @@
 //!
 //! Provides recursive directory copying with permission preservation.
 
+use std::{fs, io, path::Path};
+
 use camino::Utf8Path;
 use color_eyre::eyre::Context;
-use std::fs;
-use std::io;
-use std::path::Path;
 use tracing::debug;
 
 use crate::error::BootstrapResult;

@@ -1,9 +1,11 @@
 //! Tests for bootstrap environment discovery helpers.
 
+use std::{
+    ffi::OsString,
+    os::unix::{ffi::OsStringExt, fs::PermissionsExt},
+};
+
 use super::{BootstrapErrorKind, WORKER_BINARY_NAME, discover_worker_from_path_value};
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStringExt;
-use std::os::unix::fs::PermissionsExt;
 
 #[test]
 fn discover_worker_returns_none_when_path_is_absent() {

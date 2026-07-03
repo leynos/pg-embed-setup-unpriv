@@ -1,20 +1,25 @@
 //! Parses environment variables used by the bootstrapper and surfaces the
 //! resulting configuration for the filesystem preparers.
-pub use crate::bootstrap::env_types::TestBootstrapEnvironment;
-use crate::bootstrap::env_types::TimezoneEnv;
-pub(super) use crate::bootstrap::env_types::XdgDirs;
-use crate::bootstrap::mode::ExecutionPrivileges;
-use crate::error::{BootstrapError, BootstrapErrorKind, BootstrapResult};
-use crate::fs::ambient_dir_and_path;
+use std::{
+    env::{self, VarError},
+    ffi::OsString,
+    io::ErrorKind,
+    path::PathBuf,
+    time::Duration,
+};
+
 use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(unix)]
 use cap_std::fs::PermissionsExt;
 use color_eyre::eyre::Report;
-use std::env::{self, VarError};
-use std::ffi::OsString;
-use std::io::ErrorKind;
-use std::path::PathBuf;
-use std::time::Duration;
+
+pub use crate::bootstrap::env_types::TestBootstrapEnvironment;
+pub(super) use crate::bootstrap::env_types::XdgDirs;
+use crate::{
+    bootstrap::{env_types::TimezoneEnv, mode::ExecutionPrivileges},
+    error::{BootstrapError, BootstrapErrorKind, BootstrapResult},
+    fs::ambient_dir_and_path,
+};
 #[cfg(unix)]
 const WORKER_BINARY_NAME: &str = "pg_worker";
 #[cfg(windows)]
@@ -39,7 +44,8 @@ fn discover_worker_from_path_value(
         let dir = Utf8PathBuf::from_path_buf(entry).map_err(|invalid_entry| {
             let invalid_value = invalid_entry.as_os_str().to_string_lossy();
             let report = color_eyre::eyre::eyre!(
-                "PATH contains a non-UTF-8 entry: {invalid_value:?}; remove or replace the malformed entry."
+                "PATH contains a non-UTF-8 entry: {invalid_value:?}; remove or replace the \
+                 malformed entry."
             );
             BootstrapError::new(BootstrapErrorKind::WorkerBinaryPathNonUtf8, report)
         })?;
@@ -67,9 +73,7 @@ fn is_executable(path: &Utf8Path) -> bool {
 }
 
 #[cfg(not(unix))]
-fn is_executable(_path: &Utf8Path) -> bool {
-    true
-}
+fn is_executable(_path: &Utf8Path) -> bool { true }
 
 /// Common Unix paths where time zone databases may be installed.
 ///
@@ -133,7 +137,8 @@ pub(super) fn shutdown_timeout_from_env() -> BootstrapResult<Duration> {
 
             if seconds > MAX_SHUTDOWN_TIMEOUT_SECS {
                 return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                    "{SHUTDOWN_TIMEOUT_ENV} must be {MAX_SHUTDOWN_TIMEOUT_SECS} seconds or less (received {trimmed})"
+                    "{SHUTDOWN_TIMEOUT_ENV} must be {MAX_SHUTDOWN_TIMEOUT_SECS} seconds or less \
+                     (received {trimmed})"
                 )));
             }
 
@@ -154,8 +159,8 @@ pub(super) fn worker_binary_from_env(
         let path = Utf8PathBuf::from_path_buf(PathBuf::from(&raw)).map_err(|_| {
             let invalid_value = raw.to_string_lossy().to_string();
             BootstrapError::from(color_eyre::eyre::eyre!(
-                "PG_EMBEDDED_WORKER contains a non-UTF-8 value: {invalid_value:?}. \
-                 Provide a UTF-8 encoded absolute path to the worker binary."
+                "PG_EMBEDDED_WORKER contains a non-UTF-8 value: {invalid_value:?}. Provide a \
+                 UTF-8 encoded absolute path to the worker binary."
             ))
         })?;
 

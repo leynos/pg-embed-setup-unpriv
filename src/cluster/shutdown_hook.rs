@@ -10,13 +10,11 @@
 //! postmaster PID from disk, sends SIGTERM (signal 15, terminate), polls for
 //! exit, and escalates to SIGKILL if the timeout elapses.
 
-use std::path::Path;
-use std::sync::Mutex;
-use std::time::Duration;
+use std::{path::Path, sync::Mutex, time::Duration};
 
-use crate::CleanupMode;
-use crate::error::BootstrapResult;
 use postgresql_embedded::Settings;
+
+use crate::{CleanupMode, error::BootstrapResult};
 
 /// State captured at registration time and read by the atexit callback.
 struct ShutdownState {
@@ -238,16 +236,17 @@ fn best_effort_cleanup(state: &ShutdownState) {
 
 #[cfg(all(test, feature = "cluster-unit-tests"))]
 mod tests {
-    use super::*;
-
     use color_eyre::eyre::{Result, ensure};
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
 
+    use super::*;
+
     /// Creates a fresh temporary directory for PID file tests.
     #[fixture]
     fn pid_dir() -> Result<TempDir> {
-        Ok(tempfile::tempdir()?)
+        let pid_dir = tempfile::tempdir()?;
+        Ok(pid_dir)
     }
 
     #[rstest]

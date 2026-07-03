@@ -54,26 +54,18 @@ impl BootstrapError {
     /// Constructs a new bootstrap error with the provided kind and diagnostic
     /// report.
     #[must_use]
-    pub const fn new(kind: BootstrapErrorKind, report: Report) -> Self {
-        Self { kind, report }
-    }
+    pub const fn new(kind: BootstrapErrorKind, report: Report) -> Self { Self { kind, report } }
 
     /// Returns the semantic category for this bootstrap failure.
     #[must_use]
-    pub const fn kind(&self) -> BootstrapErrorKind {
-        self.kind
-    }
+    pub const fn kind(&self) -> BootstrapErrorKind { self.kind }
 
     /// Extracts the underlying diagnostic report.
-    pub fn into_report(self) -> Report {
-        self.report
-    }
+    pub fn into_report(self) -> Report { self.report }
 }
 
 impl From<Report> for BootstrapError {
-    fn from(report: Report) -> Self {
-        Self::new(BootstrapErrorKind::Other, report)
-    }
+    fn from(report: Report) -> Self { Self::new(BootstrapErrorKind::Other, report) }
 }
 
 impl From<PrivilegeError> for BootstrapError {
@@ -114,9 +106,10 @@ pub struct ConfigError(#[from] Report);
 mod tests {
     //! Unit tests for error display formats.
 
-    use super::*;
     use color_eyre::eyre::eyre;
     use rstest::rstest;
+
+    use super::*;
 
     #[rstest]
     #[case::bootstrap(

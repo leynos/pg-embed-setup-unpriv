@@ -3,12 +3,13 @@
 use super::*;
 
 mod sanitized_settings {
-    use super::log_sanitized_settings;
-    use crate::test_support::capture_debug_logs;
+    use std::{collections::HashMap, time::Duration};
+
     use color_eyre::eyre::{Result, ensure};
     use postgresql_embedded::VersionReq;
-    use std::collections::HashMap;
-    use std::time::Duration;
+
+    use super::log_sanitized_settings;
+    use crate::test_support::capture_debug_logs;
 
     fn sample_settings() -> Result<postgresql_embedded::Settings> {
         let mut configuration = HashMap::new();
@@ -77,10 +78,12 @@ mod sanitized_settings {
 }
 
 mod behaviour_tests {
+    use std::ffi::OsString;
+
+    use tempfile::tempdir;
+
     use super::*;
     use crate::test_support::scoped_env;
-    use std::ffi::OsString;
-    use tempfile::tempdir;
 
     #[test]
     fn bootstrap_unprivileged_sets_up_directories() {
@@ -126,10 +129,12 @@ mod behaviour_tests {
 
 #[cfg(unix)]
 mod unix_tests {
-    use super::*;
-    use nix::unistd::{Uid, User, geteuid};
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    use nix::unistd::{Uid, User, geteuid};
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn ensure_settings_paths_applies_defaults() {

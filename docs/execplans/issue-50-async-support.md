@@ -1,9 +1,8 @@
 # Add async API for TestCluster
 
-This Execution Plan (ExecPlan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & discoveries`,
-`Decision log`, and `Outcomes & retrospective` must be kept up to date as work
-proceeds.
+This Execution Plan (ExecPlan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & discoveries`, `Decision log`,
+and `Outcomes & retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
@@ -190,8 +189,9 @@ Successfully implemented async API for `TestCluster`:
 - `src/cluster/runtime.rs` (22 lines) - Builds the single-threaded Tokio
   runtime via `build_runtime()`.
 
-- `Cargo.toml` - Line 43: `tokio = { version = "1", features = ["rt", "macros"]
-  }`. Line 70-77: Feature flags section.
+- `Cargo.toml` - Line 43:
+  `tokio = { version = "1", features = ["rt", "macros"] }`. Line 70-77: Feature
+  flags section.
 
 ### Current architecture
 

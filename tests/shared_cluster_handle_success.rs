@@ -11,8 +11,10 @@ mod cluster_skip;
 mod skip;
 
 use cluster_skip::cluster_skip_message;
-use pg_embedded_setup_unpriv::BootstrapError;
-use pg_embedded_setup_unpriv::test_support::{scoped_env, shared_cluster_handle};
+use pg_embedded_setup_unpriv::{
+    BootstrapError,
+    test_support::{scoped_env, shared_cluster_handle},
+};
 use tempfile::tempdir;
 use tracing::warn;
 

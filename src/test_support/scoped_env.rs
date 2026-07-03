@@ -13,9 +13,10 @@ use crate::env::ScopedEnv;
 ///
 /// use pg_embedded_setup_unpriv::test_support;
 ///
-/// let guard = test_support::scoped_env(vec![
-///     (OsString::from("PGUSER"), Some(OsString::from("postgres"))),
-/// ]);
+/// let guard = test_support::scoped_env(vec![(
+///     OsString::from("PGUSER"),
+///     Some(OsString::from("postgres")),
+/// )]);
 /// drop(guard);
 /// ```
 #[doc(hidden)]

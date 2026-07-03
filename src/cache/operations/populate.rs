@@ -2,9 +2,10 @@
 //!
 //! Provides functions to copy freshly downloaded binaries into the cache.
 
+use std::fs;
+
 use camino::Utf8Path;
 use color_eyre::eyre::Context;
-use std::fs;
 use tracing::{debug, warn};
 
 use super::copy::copy_dir_recursive;

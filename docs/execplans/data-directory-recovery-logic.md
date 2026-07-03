@@ -1,9 +1,8 @@
 # Data Directory Recovery Logic for pg_worker
 
-This Execution Plan (ExecPlan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This Execution Plan (ExecPlan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETED
 
@@ -298,8 +297,8 @@ Validation for Stage C:
 Run quality gates to ensure code meets project standards.
 
 1. Run `make test` (equivalent to `cargo test --workspace`)
-2. Run `make lint` (equivalent to `cargo clippy --workspace
-   --all-targets --all-features -- -D warnings`)
+2. Run `make lint` (equivalent to
+   `cargo clippy --workspace --all-targets --all-features -- -D warnings`)
 3. Run `make check-fmt` (equivalent to `cargo fmt --workspace -- --check`)
 
 ## Concrete Steps
@@ -330,7 +329,7 @@ Step 2: Remove dead_code expectation
 
   Command: Edit `tests/support/pg_worker.rs` and remove the
   `#[expect(dead_code, reason = "variant reserved for future data directory recovery errors")]`
-   line and the closing `]` from the `WorkerError::DataDirRecovery` variant.
+  line and the closing `]` from the `WorkerError::DataDirRecovery` variant.
 
   Expected result: No change to behaviour, clippy no longer expects the variant
   to be unused.

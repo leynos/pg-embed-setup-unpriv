@@ -6,15 +6,15 @@
 //! mutex, then environment mutex). Following this order prevents deadlocks when
 //! multiple suites mutate process-wide state.
 
-use rstest::fixture;
-use std::sync::{Mutex, MutexGuard};
-
 #[cfg(unix)]
 use std::fs::OpenOptions;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 #[cfg(unix)]
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
+
+use rstest::fixture;
 
 static SCENARIO_MUTEX: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
 
@@ -50,8 +50,8 @@ pub struct ScenarioLocalGuard {
 /// # Behaviour
 ///
 /// - Acquires the global `SCENARIO_MUTEX` and wraps the guard.
-/// - If the mutex is poisoned (a previous test panicked whilst holding the lock),
-///   the poison is cleared and execution continues.
+/// - If the mutex is poisoned (a previous test panicked whilst holding the lock), the poison is
+///   cleared and execution continues.
 /// - The guard is automatically released when dropped at the end of the test.
 ///
 /// # Examples
@@ -85,8 +85,8 @@ pub fn serial_guard() -> ScenarioSerialGuard {
 /// # Behaviour
 ///
 /// - Acquires the global `SCENARIO_MUTEX` and wraps the guard.
-/// - If the mutex is poisoned (a previous test panicked whilst holding the lock),
-///   the poison is cleared and execution continues.
+/// - If the mutex is poisoned (a previous test panicked whilst holding the lock), the poison is
+///   cleared and execution continues.
 /// - The guard is automatically released when dropped at the end of the test.
 ///
 /// # Examples
@@ -153,9 +153,7 @@ fn acquire_process_lock() -> ProcessLock {
 }
 
 #[cfg(not(unix))]
-fn acquire_process_lock() -> ProcessLock {
-    ()
-}
+fn acquire_process_lock() -> ProcessLock { () }
 
 #[cfg(test)]
 mod tests {
@@ -185,8 +183,7 @@ mod tests {
     fn acquire_process_lock_places_lock_file_in_cargo_target_dir(
         serial_guard: ScenarioSerialGuard,
     ) {
-        use std::ffi::OsString;
-        use std::{env, fs};
+        use std::{env, ffi::OsString, fs};
 
         use pg_embedded_setup_unpriv::test_support::scoped_env;
 
@@ -212,7 +209,8 @@ mod tests {
             .collect();
         assert!(
             !entries.is_empty(),
-            "expected acquire_process_lock to create a lock file in {tmp_dir:?}, but directory was empty"
+            "expected acquire_process_lock to create a lock file in {tmp_dir:?}, but directory \
+             was empty"
         );
 
         // Best-effort cleanup; errors are non-fatal in test teardown.

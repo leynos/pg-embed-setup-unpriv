@@ -27,6 +27,11 @@ mod operations;
 pub use config::{BinaryCacheConfig, resolve_cache_dir};
 pub use lock::CacheLock;
 pub use operations::{
-    CacheLookupResult, check_cache, copy_from_cache, find_matching_cached_version, populate_cache,
-    try_populate_cache, try_use_cache,
+    CacheLookupResult,
+    check_cache,
+    copy_from_cache,
+    find_matching_cached_version,
+    populate_cache,
+    try_populate_cache,
+    try_use_cache,
 };

@@ -8,7 +8,10 @@ use super::{
     TestSandbox,
     env_isolation::{EnvIsolationGuard, set_env_var},
     process_utils::{
-        read_postmaster_pid, sandbox_root_path, wait_for_pid_file_removal, wait_for_process_exit,
+        read_postmaster_pid,
+        sandbox_root_path,
+        wait_for_pid_file_removal,
+        wait_for_process_exit,
     },
     serial::{ScenarioSerialGuard, serial_guard},
 };

@@ -1,9 +1,8 @@
 # Promote pg_worker to first-class binary
 
-This Execution Plan (ExecPlan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & discoveries`,
-`Decision log`, and `Outcomes & retrospective` must be kept up to date as work
-proceeds.
+This Execution Plan (ExecPlan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & discoveries`, `Decision log`,
+and `Outcomes & retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETED
 
@@ -110,7 +109,7 @@ After this change:
   `CapabilityTempDir` are only used in test code (under `tests/`), which
   documentation builds don't see. Solution: Add
   `#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]`
-   attributes to align with how they're exported in `mod.rs`.
+  attributes to align with how they're exported in `mod.rs`.
 
 ## Decision log
 
@@ -714,10 +713,10 @@ These are independent and serve different purposes:
 
 *Table 1: Discovery mechanisms by context.*
 
-| Context    | Discovery mechanism             | Purpose                   |
-| ---------- | ------------------------------- | ------------------------- |
-| Tests      | Build directory search          | Find freshly built binary |
-| Production | Explicit config → PATH search   | Find installed binary     |
+| Context    | Discovery mechanism           | Purpose                   |
+| ---------- | ----------------------------- | ------------------------- |
+| Tests      | Build directory search        | Find freshly built binary |
+| Production | Explicit config → PATH search | Find installed binary     |
 
 ### Binary location structure
 

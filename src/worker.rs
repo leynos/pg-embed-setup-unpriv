@@ -5,10 +5,10 @@
 //!
 //! # Examples
 //! ```no_run
+//! use std::{error::Error, time::Duration};
+//!
 //! use pg_embedded_setup_unpriv::worker::{SettingsSnapshot, WorkerPayload};
 //! use postgresql_embedded::Settings;
-//! use std::error::Error;
-//! use std::time::Duration;
 //!
 //! fn main() -> Result<(), Box<dyn Error>> {
 //!     let mut settings = Settings::default();
@@ -22,7 +22,9 @@
 //!     settings.password = "secret".into();
 //!     settings.temporary = false;
 //!     settings.timeout = Some(Duration::from_secs(30));
-//!     settings.configuration.insert("log_min_messages".into(), "debug".into());
+//!     settings
+//!         .configuration
+//!         .insert("log_min_messages".into(), "debug".into());
 //!     settings.trust_installation_dir = true;
 //!
 //!     let snapshot = SettingsSnapshot::try_from(&settings)?;
@@ -40,15 +42,16 @@
 //!     Ok(())
 //! }
 //! ```
-use crate::error::BootstrapError;
+use std::{collections::HashMap, time::Duration};
+
 use camino::Utf8PathBuf;
 use color_eyre::eyre::eyre;
 use postgresql_embedded::{Settings, VersionReq};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, DurationSeconds, serde_as};
-use std::collections::HashMap;
-use std::time::Duration;
+
+use crate::error::BootstrapError;
 
 /// Serialised representation of [`Settings`] for subprocess helpers.
 #[serde_as]
@@ -74,9 +77,7 @@ pub struct SettingsSnapshot {
 
 impl SettingsSnapshot {
     /// Converts the snapshot back into [`Settings`].
-    pub fn into_settings(self) -> Result<Settings, BootstrapError> {
-        Ok(self.into())
-    }
+    pub fn into_settings(self) -> Result<Settings, BootstrapError> { Ok(self.into()) }
 }
 
 impl TryFrom<&Settings> for SettingsSnapshot {
@@ -143,7 +144,8 @@ impl From<SettingsSnapshot> for Settings {
         // sensible value until this snapshot explicitly models them.
         #[expect(
             clippy::needless_update,
-            reason = "Keep upstream defaults for future Settings fields this snapshot does not yet model"
+            reason = "Keep upstream defaults for future Settings fields this snapshot does not \
+                      yet model"
         )]
         Self {
             releases_url: snapshot.releases_url,
@@ -171,27 +173,19 @@ pub struct PlainSecret(SecretString);
 
 impl PlainSecret {
     #[must_use]
-    pub fn expose(&self) -> &str {
-        self.0.expose_secret()
-    }
+    pub fn expose(&self) -> &str { self.0.expose_secret() }
 }
 
 impl From<String> for PlainSecret {
-    fn from(secret: String) -> Self {
-        Self(SecretString::from(secret))
-    }
+    fn from(secret: String) -> Self { Self(SecretString::from(secret)) }
 }
 
 impl From<&str> for PlainSecret {
-    fn from(secret: &str) -> Self {
-        Self(SecretString::from(secret.to_owned()))
-    }
+    fn from(secret: &str) -> Self { Self(SecretString::from(secret.to_owned())) }
 }
 
 impl From<PlainSecret> for SecretString {
-    fn from(secret: PlainSecret) -> Self {
-        secret.0
-    }
+    fn from(secret: PlainSecret) -> Self { secret.0 }
 }
 
 impl Serialize for PlainSecret {

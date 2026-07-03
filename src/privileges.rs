@@ -9,9 +9,8 @@
         target_os = "dragonfly",
     )
 ))]
-use crate::error::{PrivilegeError, PrivilegeResult};
-use crate::fs::{ensure_dir_exists, set_permissions};
-use crate::observability::LOG_TARGET;
+use std::io::ErrorKind;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::{
     ambient_authority,
@@ -19,8 +18,13 @@ use cap_std::{
 };
 use color_eyre::eyre::{Context, eyre};
 use nix::unistd::{Uid, User, chown};
-use std::io::ErrorKind;
 use tracing::{info, info_span};
+
+use crate::{
+    error::{PrivilegeError, PrivilegeResult},
+    fs::{ensure_dir_exists, set_permissions},
+    observability::LOG_TARGET,
+};
 
 pub(crate) fn ensure_dir_for_user<P: AsRef<Utf8Path>>(
     directory: P,
@@ -197,9 +201,7 @@ fn chown_entry(path: &Utf8Path, user: &User) -> PrivilegeResult<()> {
     Ok(())
 }
 
-fn is_directory(entry: &DirEntry) -> bool {
-    entry.file_type().is_ok_and(|ft| ft.is_dir())
-}
+fn is_directory(entry: &DirEntry) -> bool { entry.file_type().is_ok_and(|ft| ft.is_dir()) }
 
 /// Retrieves the UID of the `nobody` account, defaulting to 65534 when absent.
 ///

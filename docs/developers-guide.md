@@ -23,6 +23,33 @@ also runs a Linux matrix for unprivileged and root execution. The root variant
 invokes the test suite under `sudo` so root-only privilege paths execute, while
 the unprivileged variant continues to collect coverage.
 
+## Lint and formatting toolchain
+
+The repository pins `rust-toolchain.toml` to `nightly-2026-04-25` because the
+imported `rustfmt.toml` template uses unstable rustfmt options. Use the
+Makefile targets rather than invoking Cargo directly so local checks and CI
+exercise the same nightly formatter and Clippy policy:
+
+```sh
+make check-fmt
+```
+
+Run the complete lint gate before committing changes:
+
+```sh
+make lint
+```
+
+`make lint` runs three tiers in order, each gating the next:
+
+1. `interrogate --fail-under 100 .` — Python docstring coverage at 100%.
+2. `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS` set to deny warnings.
+3. `cargo clippy --all-targets --all-features -- -D warnings`.
+
+CI installs the pinned `interrogate==1.7.0` uv tool before running `make lint`.
+Keep the Makefile and workflow versions aligned when updating the
+docstring-coverage policy.
+
 ## Release process
 
 Tagging a release with `v*` triggers `.github/workflows/release.yml`. The

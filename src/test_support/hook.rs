@@ -1,15 +1,20 @@
 //! Hook infrastructure that intercepts privileged worker operations during
 //! tests to assert behaviour and control cluster bootstrapping.
 
-use std::future::Future;
-use std::mem;
-use std::sync::{Arc, Mutex, OnceLock};
-use std::thread;
+use std::{
+    future::Future,
+    mem,
+    sync::{Arc, Mutex, OnceLock},
+    thread,
+};
 
-use crate::TestBootstrapSettings;
-use crate::cluster::{WorkerInvoker, WorkerOperation};
-use crate::error::BootstrapResult;
 use tracing::debug_span;
+
+use crate::{
+    TestBootstrapSettings,
+    cluster::{WorkerInvoker, WorkerOperation},
+    error::BootstrapResult,
+};
 
 #[doc(hidden)]
 /// Signature for intercepting privileged worker operations triggered by `TestCluster`.
@@ -18,9 +23,7 @@ use tracing::debug_span;
 /// ```
 /// use pg_embedded_setup_unpriv::test_support::RunRootOperationHook;
 ///
-/// fn installs_hook(hook: RunRootOperationHook) {
-///     let _ = hook;
-/// }
+/// fn installs_hook(hook: RunRootOperationHook) { let _ = hook; }
 /// ```
 pub type RunRootOperationHook = Arc<
     dyn Fn(
@@ -62,8 +65,7 @@ pub fn drain_hook_install_logs() -> Vec<String> {
 ///     run_root_operation_hook,
 /// };
 ///
-/// let guard = install_run_root_operation_hook(|_, _, _| Ok(()))
-///     .expect("hook should install");
+/// let guard = install_run_root_operation_hook(|_, _, _| Ok(())).expect("hook should install");
 /// assert!(
 ///     run_root_operation_hook()
 ///         .lock()
@@ -82,8 +84,7 @@ pub fn run_root_operation_hook() -> &'static Mutex<Option<RunRootOperationHook>>
 /// ```
 /// use pg_embedded_setup_unpriv::test_support::install_run_root_operation_hook;
 ///
-/// let guard = install_run_root_operation_hook(|_, _, _| Ok(()))
-///     .expect("hook should install");
+/// let guard = install_run_root_operation_hook(|_, _, _| Ok(())).expect("hook should install");
 /// drop(guard); // hook removed automatically
 /// ```
 pub struct HookGuard;
@@ -165,8 +166,7 @@ where
 /// ```
 /// use pg_embedded_setup_unpriv::test_support::install_run_root_operation_hook;
 ///
-/// let guard = install_run_root_operation_hook(|_, _, _| Ok(()))
-///     .expect("hook should install");
+/// let guard = install_run_root_operation_hook(|_, _, _| Ok(())).expect("hook should install");
 /// drop(guard);
 /// ```
 pub fn install_run_root_operation_hook<F>(

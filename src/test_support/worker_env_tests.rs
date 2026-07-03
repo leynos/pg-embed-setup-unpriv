@@ -1,10 +1,11 @@
 //! Tests for worker binary staging logic.
 
-use super::*;
-use rstest::{fixture, rstest};
-
 #[cfg(unix)]
 use std::path::PathBuf;
+
+use rstest::{fixture, rstest};
+
+use super::*;
 
 /// Guard that cleans up a staged directory when dropped.
 #[cfg(unix)]

@@ -1,9 +1,12 @@
 //! Thread-local state and mutex management for scoped environment guards.
 
+use std::{
+    env,
+    ffi::OsString,
+    sync::{Mutex, MutexGuard},
+};
+
 use crate::observability::LOG_TARGET;
-use std::env;
-use std::ffi::OsString;
-use std::sync::{Mutex, MutexGuard};
 
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -69,9 +72,7 @@ impl ThreadState {
         self.inner.enter_scope(vars)
     }
 
-    pub fn exit_scope(&mut self, index: usize) {
-        self.inner.exit_scope(index);
-    }
+    pub fn exit_scope(&mut self, index: usize) { self.inner.exit_scope(index); }
 }
 
 #[cfg(all(test, feature = "loom-tests"))]
@@ -179,9 +180,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
     }
 
     #[cfg(not(any(unix, windows)))]
-    fn contains_equals(key: &OsString) -> bool {
-        key.to_string_lossy().contains('=')
-    }
+    fn contains_equals(key: &OsString) -> bool { key.to_string_lossy().contains('=') }
 
     fn apply_single_var(key: &OsString, new_value: Option<OsString>) -> Option<OsString> {
         debug_assert!(
@@ -302,17 +301,11 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
 
 #[cfg(test)]
 impl ThreadState {
-    pub const fn depth(&self) -> usize {
-        self.inner.depth
-    }
+    pub const fn depth(&self) -> usize { self.inner.depth }
 
-    pub fn is_stack_empty(&self) -> bool {
-        self.inner.stack.is_empty()
-    }
+    pub fn is_stack_empty(&self) -> bool { self.inner.stack.is_empty() }
 
-    pub const fn has_lock(&self) -> bool {
-        self.inner.lock.is_some()
-    }
+    pub const fn has_lock(&self) -> bool { self.inner.lock.is_some() }
 }
 
 fn restore_saved(saved: Vec<(OsString, Option<OsString>)>) {
