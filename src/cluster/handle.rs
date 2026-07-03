@@ -90,139 +90,173 @@ impl From<TestBootstrapSettings> for ClusterHandle {
 }
 
 impl ClusterHandle {
-    /// Registers a process-exit hook that stops the `PostgreSQL` postmaster
-    /// when the process terminates.
-    ///
-    /// Intended for shared clusters where the [`ClusterGuard`](super::ClusterGuard)
-    /// is intentionally forgotten. The hook requests platform shutdown and
-    /// waits up to the configured shutdown timeout before escalating to the
-    /// platform's forceful termination mechanism.
-    ///
-    /// The method is idempotent: subsequent calls after the first
-    /// successful registration are no-ops. Only one cluster can be
-    /// tracked per process, matching the one-shared-cluster pattern.
-    ///
-    /// # Platform Support
-    ///
-    /// Supported on Unix (Linux, macOS) and Windows. Windows shutdown requests
-    /// terminate the postmaster process tree immediately because the process
-    /// exit hook cannot safely issue a graceful `PostgreSQL` shutdown command. On
-    /// other platforms this method is a silent no-op that returns `Ok(())`, so
-    /// callers need not gate on platform cfgs.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `libc::atexit` registration fails on a supported
-    /// platform.
+    /// Creates a new handle from bootstrap settings.
+    pub(super) const fn new(bootstrap: TestBootstrapSettings) -> Self { Self { bootstrap } }
+
+    /// Returns the prepared `PostgreSQL` settings for the running cluster.
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use std::sync::OnceLock;
+    /// use pg_embedded_setup_unpriv::TestCluster;
     ///
-    /// use pg_embedded_setup_unpriv::{ClusterHandle, TestCluster};
-    ///
-    /// static SHARED: OnceLock<ClusterHandle> = OnceLock::new();
-    ///
-    /// fn shared_handle() -> &'static ClusterHandle {
-    ///     SHARED.get_or_init(|| {
-    ///         let (handle, guard) = TestCluster::new_split().expect("cluster bootstrap failed");
-    ///         handle
-    ///             .register_shutdown_on_exit()
-    ///             .expect("shutdown hook registration failed");
-    ///         std::mem::forget(guard);
-    ///         handle
-    ///     })
-    /// }
+    /// let (handle, _guard) = TestCluster::new_split()?;
+    /// let url = handle.settings().url("my_database");
+    /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
     /// ```
-    pub fn register_shutdown_on_exit(&self) -> BootstrapResult<()> {
-        self.register_shutdown_on_exit_impl()
-    }
+    #[must_use]
+    pub const fn settings(&self) -> &Settings { &self.bootstrap.settings }
 
-    #[cfg(any(unix, windows))]
-    fn register_shutdown_on_exit_impl(&self) -> BootstrapResult<()> {
-        super::shutdown_hook::register_shutdown_hook(
-            self.bootstrap.settings.clone(),
-            self.bootstrap.shutdown_timeout,
-            self.bootstrap.cleanup_mode,
-        )
-    }
+    /// Returns the environment required for clients to interact with the cluster.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pg_embedded_setup_unpriv::TestCluster;
+    ///
+    /// let (handle, _guard) = TestCluster::new_split()?;
+    /// let env = handle.environment();
+    /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
+    /// ```
+    #[must_use]
+    pub const fn environment(&self) -> &TestBootstrapEnvironment { &self.bootstrap.environment }
 
-    #[cfg(not(any(unix, windows)))]
-    fn register_shutdown_on_exit_impl(&self) -> BootstrapResult<()> {
-        // No-op on unsupported platforms. Unix and Windows both have concrete
-        // process-exit reapers; other targets can still use normal Drop-based
-        // cleanup.
-        Ok(())
+    /// Returns the bootstrap metadata captured when the cluster was started.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pg_embedded_setup_unpriv::TestCluster;
+    ///
+    /// let (handle, _guard) = TestCluster::new_split()?;
+    /// let bootstrap = handle.bootstrap();
+    /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
+    /// ```
+    #[must_use]
+    pub const fn bootstrap(&self) -> &TestBootstrapSettings { &self.bootstrap }
+
+    /// Returns helper methods for constructing connection artefacts.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pg_embedded_setup_unpriv::TestCluster;
+    ///
+    /// let (handle, _guard) = TestCluster::new_split()?;
+    /// let metadata = handle.connection().metadata();
+    /// println!(
+    ///     "postgresql://{}:***@{}:{}/postgres",
+    ///     metadata.superuser(),
+    ///     metadata.host(),
+    ///     metadata.port(),
+    /// );
+    /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
+    /// ```
+    #[must_use]
+    pub fn connection(&self) -> TestClusterConnection {
+        TestClusterConnection::new(&self.bootstrap)
     }
 }
 
-// Process-exit shutdown hook registration.
+// Delegation methods that forward to TestClusterConnection.
 impl ClusterHandle {
-    /// Registers a process-exit hook that stops the `PostgreSQL` postmaster
-    /// when the process terminates.
+    /// Creates a new database with the given name.
     ///
-    /// Intended for shared clusters where the [`ClusterGuard`](super::ClusterGuard)
-    /// is intentionally forgotten. The hook requests platform shutdown and
-    /// waits up to the configured shutdown timeout before escalating to the
-    /// platform's forceful termination mechanism.
-    ///
-    /// The method is idempotent: subsequent calls after the first
-    /// successful registration are no-ops. Only one cluster can be
-    /// tracked per process, matching the one-shared-cluster pattern.
-    ///
-    /// # Platform Support
-    ///
-    /// Supported on Unix (Linux, macOS) and Windows. Windows shutdown requests
-    /// terminate the postmaster process tree immediately because the process
-    /// exit hook cannot safely issue a graceful `PostgreSQL` shutdown command. On
-    /// other platforms this method is a silent no-op that returns `Ok(())`, so
-    /// callers need not gate on platform cfgs.
+    /// See [`TestClusterConnection::create_database`] for details.
     ///
     /// # Errors
     ///
-    /// Returns an error if `libc::atexit` registration fails on a supported
-    /// platform.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::sync::OnceLock;
-    ///
-    /// use pg_embedded_setup_unpriv::{ClusterHandle, TestCluster};
-    ///
-    /// static SHARED: OnceLock<ClusterHandle> = OnceLock::new();
-    ///
-    /// fn shared_handle() -> &'static ClusterHandle {
-    ///     SHARED.get_or_init(|| {
-    ///         let (handle, guard) = TestCluster::new_split().expect("cluster bootstrap failed");
-    ///         handle
-    ///             .register_shutdown_on_exit()
-    ///             .expect("shutdown hook registration failed");
-    ///         std::mem::forget(guard);
-    ///         handle
-    ///     })
-    /// }
-    /// ```
-    pub fn register_shutdown_on_exit(&self) -> BootstrapResult<()> {
-        self.register_shutdown_on_exit_impl()
+    /// Returns an error if the database already exists or if the connection fails.
+    pub fn create_database(&self, name: impl Into<DatabaseName>) -> BootstrapResult<()> {
+        self.connection().create_database(name)
     }
 
-    #[cfg(any(unix, windows))]
-    fn register_shutdown_on_exit_impl(&self) -> BootstrapResult<()> {
-        super::shutdown_hook::register_shutdown_hook(
-            self.bootstrap.settings.clone(),
-            self.bootstrap.shutdown_timeout,
-            self.bootstrap.cleanup_mode,
-        )
+    /// Creates a new database by cloning an existing template.
+    ///
+    /// See [`TestClusterConnection::create_database_from_template`] for details.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target database already exists, the template does
+    /// not exist, or the connection fails.
+    pub fn create_database_from_template(
+        &self,
+        name: impl Into<DatabaseName>,
+        template: impl Into<DatabaseName>,
+    ) -> BootstrapResult<()> {
+        self.connection()
+            .create_database_from_template(name, template)
     }
 
-    #[cfg(not(any(unix, windows)))]
-    fn register_shutdown_on_exit_impl(&self) -> BootstrapResult<()> {
-        // No-op on unsupported platforms. Unix and Windows both have concrete
-        // process-exit reapers; other targets can still use normal Drop-based
-        // cleanup.
-        Ok(())
+    /// Drops an existing database.
+    ///
+    /// See [`TestClusterConnection::drop_database`] for details.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database does not exist or the connection fails.
+    pub fn drop_database(&self, name: impl Into<DatabaseName>) -> BootstrapResult<()> {
+        self.connection().drop_database(name)
+    }
+
+    /// Checks whether a database with the given name exists.
+    ///
+    /// See [`TestClusterConnection::database_exists`] for details.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails.
+    pub fn database_exists(&self, name: impl Into<DatabaseName>) -> BootstrapResult<bool> {
+        self.connection().database_exists(name)
+    }
+
+    /// Ensures a template database exists, creating it if necessary.
+    ///
+    /// See [`TestClusterConnection::ensure_template_exists`] for details.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if database creation fails or if `setup_fn` returns an error.
+    pub fn ensure_template_exists<F>(
+        &self,
+        name: impl Into<DatabaseName>,
+        setup_fn: F,
+    ) -> BootstrapResult<()>
+    where
+        F: FnOnce(&str) -> BootstrapResult<()>,
+    {
+        self.connection().ensure_template_exists(name, setup_fn)
+    }
+
+    /// Creates a temporary database that is dropped when the guard is dropped.
+    ///
+    /// See [`TestClusterConnection::temporary_database`] for details.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database already exists or the connection fails.
+    pub fn temporary_database(
+        &self,
+        name: impl Into<DatabaseName>,
+    ) -> BootstrapResult<TemporaryDatabase> {
+        self.connection().temporary_database(name)
+    }
+
+    /// Creates a temporary database from a template.
+    ///
+    /// See [`TestClusterConnection::temporary_database_from_template`] for details.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target database already exists, the template does
+    /// not exist, or the connection fails.
+    pub fn temporary_database_from_template(
+        &self,
+        name: impl Into<DatabaseName>,
+        template: impl Into<DatabaseName>,
+    ) -> BootstrapResult<TemporaryDatabase> {
+        self.connection()
+            .temporary_database_from_template(name, template)
     }
 }
 

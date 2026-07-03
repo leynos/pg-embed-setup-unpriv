@@ -1,16 +1,21 @@
 //! Prepares filesystem state for the bootstrap flows.
 
-#[cfg(unix)]
+#[cfg(all(unix, privileged_unix_platform))]
 use std::net::TcpListener;
 
 use camino::{Utf8Path, Utf8PathBuf};
-#[cfg(unix)]
-#[cfg(unix)]
+#[cfg(all(unix, privileged_unix_platform))]
+use color_eyre::eyre::{Context, eyre};
+#[cfg(all(unix, privileged_unix_platform))]
 use nix::unistd::{Uid, User, fchown, geteuid};
 use postgresql_embedded::Settings;
 use tracing::debug;
 
-#[cfg(unix)]
+use super::{
+    env::{TestBootstrapEnvironment, XdgDirs, prepare_timezone_env},
+    mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error},
+};
+#[cfg(all(unix, privileged_unix_platform))]
 use crate::privileges::{
     default_paths_for,
     ensure_dir_for_user,
@@ -181,9 +186,10 @@ fn resolve_settings_paths_for_uid(
 #[cfg(all(unix, privileged_unix_platform))]
 fn resolve_settings_paths_for_current_user(
     settings: &mut Settings,
-    _cfg: &PgEnvCfg,
+    cfg: &PgEnvCfg,
 ) -> BootstrapResult<SettingsPaths> {
-    settings_paths_from_settings(settings, false, false)
+    let uid = geteuid();
+    resolve_settings_paths_for_uid(settings, cfg, uid)
 }
 
 #[cfg(not(all(unix, privileged_unix_platform)))]

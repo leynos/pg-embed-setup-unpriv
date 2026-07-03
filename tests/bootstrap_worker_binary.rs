@@ -26,6 +26,9 @@ mod pg_worker_helpers;
 #[path = "support/sandbox.rs"]
 mod sandbox;
 
+use pg_worker_helpers::{pg_worker_binary, run_pg_worker};
+use sandbox::TestSandbox;
+
 fn skip_worker_validation_when_unprivileged(test_name: &str) -> bool {
     if geteuid().is_root() {
         return false;
@@ -34,6 +37,8 @@ fn skip_worker_validation_when_unprivileged(test_name: &str) -> bool {
     tracing::warn!("skipping {test_name}: requires root privileges");
     true
 }
+
+#[test]
 fn bootstrap_fails_when_worker_binary_missing() -> Result<()> {
     if skip_worker_validation_when_unprivileged("missing worker binary validation") {
         return Ok(());

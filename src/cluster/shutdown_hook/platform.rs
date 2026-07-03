@@ -6,17 +6,21 @@ use crate::error::BootstrapResult;
 #[cfg(windows)]
 mod windows;
 
-#[cfg(windows)]
-pub(super) use self::windows::{
-    PostmasterProcess, ProcessExitFailsafe, force_shutdown, parse_postmaster_process,
-    postmaster_process_is_running, prepare_process_exit_failsafe, request_shutdown,
-};
-
 #[cfg(all(
     windows,
     any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
 ))]
 pub(super) use self::windows::{PostmasterPid, parse_pid, process_is_running_for_platform};
+#[cfg(windows)]
+pub(super) use self::windows::{
+    PostmasterProcess,
+    ProcessExitFailsafe,
+    force_shutdown,
+    parse_postmaster_process,
+    postmaster_process_is_running,
+    prepare_process_exit_failsafe,
+    request_shutdown,
+};
 
 /// Platform-specific process identifier stored in `postmaster.pid`.
 #[cfg(unix)]

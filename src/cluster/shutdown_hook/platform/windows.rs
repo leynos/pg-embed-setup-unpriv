@@ -12,10 +12,13 @@ mod identity;
 mod job;
 
 pub(in crate::cluster::shutdown_hook) use self::identity::{
-    PostmasterProcess, parse_postmaster_process,
+    PostmasterProcess,
+    parse_postmaster_process,
 };
-use self::identity::{image_file_name_is_postgres, process_matches_postmaster};
-use self::job::JobHandle;
+use self::{
+    identity::{image_file_name_is_postgres, process_matches_postmaster},
+    job::JobHandle,
+};
 
 /// Platform-specific process identifier stored in `postmaster.pid`.
 pub(in crate::cluster::shutdown_hook) type PostmasterPid = u32;
@@ -195,8 +198,8 @@ impl ProcessHandle {
 
     fn open_with_access(pid: PostmasterPid, access: u32) -> Option<Self> {
         // SAFETY:
-        // - `OpenProcess` receives a concrete process id read from
-        //   `postmaster.pid` or from the process snapshot.
+        // - `OpenProcess` receives a concrete process id read from `postmaster.pid` or from the
+        //   process snapshot.
         // - handle inheritance is disabled.
         // - a null return is handled as failure and no handle is retained.
         let raw_handle = unsafe { OpenProcess(access, 0, pid) };
@@ -222,21 +225,16 @@ impl ProcessHandle {
         .into())
     }
 
-    fn raw(&self) -> *mut c_void {
-        self.raw.as_ptr()
-    }
+    fn raw(&self) -> *mut c_void { self.raw.as_ptr() }
 
-    fn pid(&self) -> PostmasterPid {
-        self.pid
-    }
+    fn pid(&self) -> PostmasterPid { self.pid }
 
     fn is_active(&self) -> bool {
         let mut exit_code = 0_u32;
         let exit_code_ptr = std::ptr::addr_of_mut!(exit_code);
         // SAFETY:
         // - `self.0` is a non-null process handle owned by this wrapper.
-        // - `exit_code_ptr` points to valid writable storage for the duration
-        //   of the call.
+        // - `exit_code_ptr` points to valid writable storage for the duration of the call.
         let succeeded = unsafe { GetExitCodeProcess(self.raw(), exit_code_ptr) };
         succeeded != 0 && exit_code == STILL_ACTIVE
     }
@@ -246,8 +244,7 @@ impl ProcessHandle {
         let exit_code_ptr = std::ptr::addr_of_mut!(exit_code);
         // SAFETY:
         // - `self.0` is a non-null process handle owned by this wrapper.
-        // - `exit_code_ptr` points to valid writable storage for the duration
-        //   of the call.
+        // - `exit_code_ptr` points to valid writable storage for the duration of the call.
         let succeeded = unsafe { GetExitCodeProcess(self.raw(), exit_code_ptr) };
         if succeeded == 0 {
             // SAFETY: `GetLastError` has no preconditions and reads the
@@ -276,10 +273,8 @@ impl ProcessHandle {
 
     fn terminate(&self) -> bool {
         // SAFETY:
-        // - `self.0` is a non-null process handle opened with
-        //   `PROCESS_TERMINATE | SYNCHRONIZE`.
-        // - the callee does not retain pointers and no Rust references cross
-        //   the FFI boundary.
+        // - `self.0` is a non-null process handle opened with `PROCESS_TERMINATE | SYNCHRONIZE`.
+        // - the callee does not retain pointers and no Rust references cross the FFI boundary.
         let terminated = unsafe { TerminateProcess(self.raw(), TERMINATE_EXIT_CODE) != 0 };
         // SAFETY: same handle invariant as the termination call above.
         let wait_result = unsafe { WaitForSingleObject(self.raw(), TERMINATION_WAIT_MS) };
@@ -310,10 +305,9 @@ struct SnapshotHandle(NonNull<c_void>);
 impl SnapshotHandle {
     fn capture_processes() -> Option<Self> {
         // SAFETY:
-        // - `CreateToolhelp32Snapshot` receives the process-snapshot flag and
-        //   process id `0`, which requests all processes.
-        // - invalid and null handles are rejected before constructing the
-        //   owning wrapper.
+        // - `CreateToolhelp32Snapshot` receives the process-snapshot flag and process id `0`, which
+        //   requests all processes.
+        // - invalid and null handles are rejected before constructing the owning wrapper.
         let raw_handle = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
         if raw_handle == INVALID_HANDLE_VALUE {
             return None;
@@ -330,8 +324,8 @@ impl SnapshotHandle {
 
         // SAFETY:
         // - `self.0` is a non-null snapshot handle owned by this wrapper.
-        // - `raw_entry_ptr` points to initialized writable storage and its
-        //   `size` field is set as required by the Toolhelp API.
+        // - `raw_entry_ptr` points to initialized writable storage and its `size` field is set as
+        //   required by the Toolhelp API.
         let mut has_entry = unsafe { Process32FirstW(self.0.as_ptr(), raw_entry_ptr) } != 0;
         while has_entry {
             entries.push(ProcessEntry {
@@ -340,8 +334,8 @@ impl SnapshotHandle {
             });
 
             // SAFETY:
-            // - same handle and writable `PROCESSENTRY32W` buffer invariants as
-            //   for `Process32FirstW` above.
+            // - same handle and writable `PROCESSENTRY32W` buffer invariants as for
+            //   `Process32FirstW` above.
             has_entry = unsafe { Process32NextW(self.0.as_ptr(), raw_entry_ptr) } != 0;
         }
 
@@ -473,7 +467,8 @@ fn open_validated_descendant_processes(
                     pid = member.process_id,
                     parent_pid = member.parent_process_id,
                     root_pid = root,
-                    "skipping Windows descendant because it is no longer in the validated postmaster tree"
+                    "skipping Windows descendant because it is no longer in the validated \
+                     postmaster tree"
                 );
             }
             is_valid.then_some(process)

@@ -1,11 +1,13 @@
 //! Non-Unix process-lock implementation for behavioural test serialization.
 
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
-use std::{fs::OpenOptions, io::Write};
-
 #[cfg(windows)]
 use std::ffi::c_void;
+use std::{
+    fs::OpenOptions,
+    io::Write,
+    path::{Path, PathBuf},
+    time::{Duration, Instant, SystemTime},
+};
 
 pub(super) const PROCESS_LOCK_OWNER_GRACE: Duration = Duration::from_secs(2);
 
@@ -140,13 +142,9 @@ fn write_process_lock_owner(lock_path: &Path) -> Option<ProcessLock> {
     })
 }
 
-fn process_lock_owner_path(lock_path: &Path) -> PathBuf {
-    lock_path.join("owner")
-}
+fn process_lock_owner_path(lock_path: &Path) -> PathBuf { lock_path.join("owner") }
 
-fn process_lock_owner_contents() -> String {
-    format!("pid={}\n", std::process::id())
-}
+fn process_lock_owner_contents() -> String { format!("pid={}\n", std::process::id()) }
 
 fn process_lock_state(lock_path: &Path) -> ProcessLockState {
     process_lock_state_at(lock_path, SystemTime::now())
@@ -231,9 +229,7 @@ fn owner_process_is_running(pid: u32) -> bool {
 }
 
 #[cfg(not(windows))]
-fn owner_process_is_running(_pid: u32) -> bool {
-    false
-}
+fn owner_process_is_running(_pid: u32) -> bool { false }
 
 #[cfg(test)]
 mod tests {
@@ -241,8 +237,10 @@ mod tests {
 
     use rstest::rstest;
 
-    use super::super::{ScenarioSerialGuard, serial_guard};
-    use super::*;
+    use super::{
+        super::{ScenarioSerialGuard, serial_guard},
+        *,
+    };
 
     #[rstest]
     #[expect(
@@ -250,8 +248,7 @@ mod tests {
         reason = "best-effort cleanup where errors are intentionally ignored"
     )]
     fn acquire_process_lock_places_lockdir_in_cargo_target_dir(serial_guard: ScenarioSerialGuard) {
-        use std::ffi::OsString;
-        use std::{env, fs};
+        use std::{env, ffi::OsString, fs};
 
         use pg_embedded_setup_unpriv::test_support::scoped_env;
 

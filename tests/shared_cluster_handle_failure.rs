@@ -9,10 +9,15 @@
 //! verification.
 #![cfg(unix)]
 
-use pg_embedded_setup_unpriv::ScopedEnv;
-use pg_embedded_setup_unpriv::test_support::{scoped_env, shared_cluster_handle};
-use pg_embedded_setup_unpriv::{BootstrapError, BootstrapErrorKind, ClusterHandle};
 use std::ffi::OsString;
+
+use pg_embedded_setup_unpriv::{
+    BootstrapError,
+    BootstrapErrorKind,
+    ClusterHandle,
+    ScopedEnv,
+    test_support::{scoped_env, shared_cluster_handle},
+};
 use tracing::warn;
 
 /// Sets up the environment to force bootstrap failure.

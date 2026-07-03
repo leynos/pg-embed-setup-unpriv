@@ -1,12 +1,12 @@
-//! Dispatches `PostgreSQL` lifecycle operations either in-process or via the privileged worker binary.
+//! Dispatches `PostgreSQL` lifecycle operations either in-process or via the privileged worker
+//! binary.
 use std::future::Future;
 
 use color_eyre::eyre::{Context, eyre};
 use tokio::runtime::Runtime;
+use tracing::{error, info, info_span};
 
-use crate::bootstrap::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
-use crate::error::{BootstrapError, BootstrapResult};
-use crate::observability::LOG_TARGET;
+use super::{WorkerOperation, panic_utils::nested_runtime_thread_panic};
 #[cfg(all(
     unix,
     any(
@@ -18,11 +18,14 @@ use crate::observability::LOG_TARGET;
     ),
 ))]
 use crate::worker_process::{self, WorkerRequest, WorkerRequestArgs};
-use crate::{ExecutionMode, ExecutionPrivileges, TestBootstrapSettings};
-
-use super::WorkerOperation;
-use super::panic_utils::nested_runtime_thread_panic;
-use tracing::{error, info, info_span};
+use crate::{
+    ExecutionMode,
+    ExecutionPrivileges,
+    TestBootstrapSettings,
+    bootstrap::{root_privilege_drop_supported, unsupported_root_privilege_drop_error},
+    error::{BootstrapError, BootstrapResult},
+    observability::LOG_TARGET,
+};
 
 // ============================================================================
 // Shared helper functions

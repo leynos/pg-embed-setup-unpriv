@@ -3,6 +3,8 @@
 use std::io::ErrorKind;
 
 use camino::{Utf8Path, Utf8PathBuf};
+#[cfg(unix)]
+use cap_std::fs::{Permissions, PermissionsExt};
 use cap_std::{
     ambient_authority,
     fs::{Dir, Metadata},
@@ -161,6 +163,23 @@ fn set_permissions_inner(
     set_permissions_for_platform(path, mode, dir, relative)
 }
 
+#[cfg(unix)]
+fn set_permissions_for_platform(
+    path: &Utf8Path,
+    mode: u32,
+    dir: &Dir,
+    relative: &Utf8PathBuf,
+) -> Result<()> {
+    match dir.set_permissions(relative.as_std_path(), Permissions::from_mode(mode)) {
+        Ok(()) => {
+            log_permissions_applied(path, mode);
+            Ok(())
+        }
+        Err(err) => handle_permission_error(path, mode, err),
+    }
+}
+
+#[cfg(not(unix))]
 fn set_permissions_for_platform(
     path: &Utf8Path,
     mode: u32,
@@ -177,6 +196,8 @@ fn set_permissions_for_platform(
     );
     Ok(())
 }
+
+#[cfg(unix)]
 fn log_permissions_applied(path: &Utf8Path, mode: u32) {
     info!(
         target: LOG_TARGET,
@@ -239,6 +260,20 @@ fn log_dir_metadata_error(path: &Utf8Path, err: std::io::Error) -> std::io::Erro
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for filesystem helpers.
+
+    use std::{fs::File, io::ErrorKind};
+
+    use camino::{Utf8Path, Utf8PathBuf};
+    use rstest::rstest;
+    use tempfile::tempdir;
+
+    #[cfg(unix)]
+    use super::ensure_dir_exists;
+    #[cfg(not(unix))]
+    use super::set_permissions;
+    use super::{ensure_existing_path_is_dir, find_existing_ancestor};
+
     /// Test-case container: `create_file` selects file vs directory, and
     /// `error_kind` records the expected `ErrorKind` outcome.
     struct ExistingPathCase {
@@ -246,6 +281,15 @@ mod tests {
         error_kind: Option<ErrorKind>,
     }
 
+    #[rstest]
+    #[case::directory(ExistingPathCase {
+        create_file: false,
+        error_kind: None,
+    })]
+    #[case::file(ExistingPathCase {
+        create_file: true,
+        error_kind: Some(ErrorKind::NotADirectory),
+    })]
     fn ensure_existing_path_is_dir_handles_existing_paths(#[case] case: ExistingPathCase) {
         let temp = tempdir().expect("tempdir");
         let path = if case.create_file {

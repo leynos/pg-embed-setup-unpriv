@@ -1,12 +1,13 @@
 //! Tests for worker binary staging logic.
 
-use super::*;
-use color_eyre::eyre::ensure;
-use rstest::rstest;
-
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
+
+use color_eyre::eyre::ensure;
+use rstest::rstest;
+
+use super::*;
 
 /// Guard that cleans up a staged directory when dropped.
 #[cfg(unix)]

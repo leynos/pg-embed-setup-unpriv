@@ -10,18 +10,22 @@
 //! postmaster PID from disk, asks the platform to stop it, polls for exit, and
 //! escalates to forceful termination if the timeout elapses.
 
-use std::path::Path;
-use std::sync::{Condvar, Mutex, TryLockError};
-use std::time::Duration;
+use std::{
+    path::Path,
+    sync::{Condvar, Mutex, TryLockError},
+    time::Duration,
+};
 
-use crate::CleanupMode;
-use crate::error::BootstrapResult;
 use platform::{
-    force_shutdown, parse_postmaster_process,
+    force_shutdown,
+    parse_postmaster_process,
     postmaster_process_is_running as platform_postmaster_process_is_running,
-    prepare_process_exit_failsafe, request_shutdown,
+    prepare_process_exit_failsafe,
+    request_shutdown,
 };
 use postgresql_embedded::Settings;
+
+use crate::{CleanupMode, error::BootstrapResult};
 
 mod platform;
 

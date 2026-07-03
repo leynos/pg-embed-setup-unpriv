@@ -1,8 +1,9 @@
 //! Parses environment variables used by the bootstrapper and surfaces the
 //! resulting configuration for the filesystem preparers.
+#[cfg(unix)]
+use std::ffi::OsString;
 use std::{
     env::{self, VarError},
-    ffi::OsString,
     io::ErrorKind,
     path::PathBuf,
     time::Duration,
@@ -16,14 +17,15 @@ use color_eyre::eyre::Report;
 pub use crate::bootstrap::env_types::TestBootstrapEnvironment;
 pub(super) use crate::bootstrap::env_types::XdgDirs;
 use crate::{
-    bootstrap::{env_types::TimezoneEnv, mode::ExecutionPrivileges},
+    bootstrap::{
+        env_types::TimezoneEnv,
+        mode::{ExecutionPrivileges, root_privilege_drop_supported},
+    },
     error::{BootstrapError, BootstrapErrorKind, BootstrapResult},
     fs::ambient_dir_and_path,
 };
 #[cfg(unix)]
-const WORKER_BINARY_NAME: &str = "pg_worker.exe";
-#[cfg(windows)]
-const WORKER_BINARY_NAME: &str = "pg_worker.exe";
+const WORKER_BINARY_NAME: &str = "pg_worker";
 pub(super) const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_SHUTDOWN_TIMEOUT_SECS: u64 = 600;
 const SHUTDOWN_TIMEOUT_ENV: &str = "PG_SHUTDOWN_TIMEOUT_SECS";

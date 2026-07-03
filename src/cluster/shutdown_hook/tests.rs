@@ -1,17 +1,18 @@
 //! Unit tests for shutdown-hook PID parsing and singleton registration.
 
-use super::*;
-
 use color_eyre::eyre::{Result, ensure};
 use proptest::prelude::*;
 use rstest::{fixture, rstest};
 use serial_test::serial;
 use tempfile::TempDir;
 
+use super::*;
+
 /// Creates a fresh temporary directory for PID file tests.
 #[fixture]
 fn pid_dir() -> Result<TempDir> {
-    Ok(tempfile::tempdir()?)
+    let dir = tempfile::tempdir()?;
+    Ok(dir)
 }
 
 #[rstest]

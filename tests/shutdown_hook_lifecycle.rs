@@ -10,12 +10,24 @@
 
 #[path = "support/cluster_skip.rs"]
 mod cluster_skip;
+#[path = "support/serial.rs"]
 mod serial;
+#[path = "support/skip.rs"]
 mod skip;
-type OsPid = u32;
 
 use std::{env, fs, path::Path, thread, time::Duration};
 
+use cluster_skip::cluster_skip_message;
+use color_eyre::eyre::{Context, Result, eyre};
+use pg_embedded_setup_unpriv::test_support::read_postmaster_process;
+use rstest::rstest;
+use serial::{ScenarioSerialGuard, serial_guard};
+
+#[cfg(unix)]
+type OsPid = libc::pid_t;
+
+#[cfg(windows)]
+type OsPid = u32;
 
 /// Environment variable used to signal that this binary is running as the
 /// child subprocess.
@@ -102,6 +114,20 @@ fn wait_for_postmaster_exit(postmaster_pid: OsPid) -> Result<()> {
     }
 }
 
+#[cfg(unix)]
+fn os_process_is_running(pid: OsPid) -> bool {
+    // SAFETY: `kill(pid, 0)` probes process existence without sending a signal.
+    let rc = unsafe { libc::kill(pid, 0) };
+    if rc == 0 {
+        return true;
+    }
+    !matches!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(code) if code == libc::ESRCH
+    )
+}
+
+#[cfg(windows)]
 fn os_process_is_running(pid: OsPid) -> bool {
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     const ERROR_INVALID_PARAMETER: u32 = 87;
@@ -112,6 +138,46 @@ fn os_process_is_running(pid: OsPid) -> bool {
         fn CloseHandle(handle: *mut c_void) -> i32;
         fn GetLastError() -> u32;
     }
+
+    use std::ffi::c_void;
+
+    // SAFETY: `OpenProcess` receives a concrete PID copied from
+    // `postmaster.pid`, and handle inheritance is disabled.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        // SAFETY: reads the thread's last OS error after `OpenProcess`.
+        let code = unsafe { GetLastError() };
+        return code != ERROR_INVALID_PARAMETER;
+    }
+    // SAFETY: the non-null handle was returned by `OpenProcess` above.
+    unsafe {
+        CloseHandle(handle);
+    }
+    true
+}
+
+/// Returns `true` if the error should cause a soft skip rather than a hard
+/// failure.
+fn should_skip(message: &str, debug: &str) -> bool {
+    cluster_skip_message(message, Some(debug)).is_some()
+        || debug.contains("another server might be running")
+}
+
+// ============================================================================
+// Child (subprocess entry point)
+// ============================================================================
+
+/// Entry point for the child subprocess.
+///
+/// This function is invoked when the binary detects the `CHILD_ENV_KEY`
+/// environment variable. It creates a cluster, registers the shutdown hook,
+/// writes the postmaster PID, and exits.
+///
+/// When the environment cannot support cluster creation (e.g. missing
+/// `PostgreSQL` binaries), the child writes "SKIP" to the PID file and
+/// exits cleanly so the parent can detect the soft skip.
+#[test]
+#[ignore = "child subprocess entry point - not a standalone test"]
 fn shutdown_hook_lifecycle_child_entry() -> Result<()> {
     let Ok(pid_file_path) = env::var(CHILD_ENV_KEY) else {
         // Not running as the child subprocess — skip silently.

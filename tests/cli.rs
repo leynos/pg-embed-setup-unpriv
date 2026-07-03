@@ -1,8 +1,9 @@
 //! Command-line interface behaviour tests for the setup binary.
 
+use std::process::Command;
+
 use color_eyre::eyre::{Result, ensure};
 use rstest::rstest;
-use std::process::Command;
 
 #[derive(Clone, Copy)]
 enum CliMetadataExpectation {

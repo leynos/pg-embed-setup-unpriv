@@ -14,6 +14,7 @@ use std::time::Duration;
 use color_eyre::eyre::{Context, eyre};
 pub use env::{TestBootstrapEnvironment, find_timezone_dir};
 pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
+pub(crate) use mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
 use postgresql_embedded::Settings;
 use serde::{Deserialize, Serialize};
 

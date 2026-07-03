@@ -3,7 +3,10 @@
 use std::{ffi::c_void, ptr::NonNull};
 
 use super::{
-    PostmasterPid, PostmasterProcess, ProcessHandle, open_assignable_descendant_processes,
+    PostmasterPid,
+    PostmasterProcess,
+    ProcessHandle,
+    open_assignable_descendant_processes,
     process_tree,
 };
 
@@ -94,8 +97,8 @@ impl JobHandle {
 
         // SAFETY:
         // - `self.0` is a non-null job handle owned by this wrapper.
-        // - `info_ptr` points to an initialized job-information value with a
-        //   valid byte length for this process architecture.
+        // - `info_ptr` points to an initialized job-information value with a valid byte length for
+        //   this process architecture.
         // - the callee reads the buffer only for the duration of the call.
         let enabled = unsafe {
             SetInformationJobObject(
@@ -238,7 +241,10 @@ impl JobObjectExtendedLimitInformation {
 #[cfg(test)]
 mod tests {
     use super::super::{
-        ProcessEntry, ProcessTreeIndex, collect_process_tree, descendant_is_still_in_root_tree,
+        ProcessEntry,
+        ProcessTreeIndex,
+        collect_process_tree,
+        descendant_is_still_in_root_tree,
         process_has_root_ancestor,
     };
 

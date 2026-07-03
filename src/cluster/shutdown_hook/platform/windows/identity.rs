@@ -41,9 +41,7 @@ impl PostmasterProcess {
         }
     }
 
-    pub(super) fn pid(self) -> PostmasterPid {
-        self.pid
-    }
+    pub(super) fn pid(self) -> PostmasterPid { self.pid }
 }
 
 /// Parses the Windows postmaster process identity.
@@ -80,12 +78,9 @@ fn process_image_name(process: *mut c_void) -> Option<String> {
     let size_ptr = std::ptr::addr_of_mut!(size);
 
     // SAFETY:
-    // - `process` is a non-null process handle opened with query access by the
-    //   caller.
-    // - `buffer` is writable UTF-16 storage with length reported through
-    //   `size_ptr`.
-    // - the callee writes at most `size` UTF-16 code units and does not retain
-    //   the pointer.
+    // - `process` is a non-null process handle opened with query access by the caller.
+    // - `buffer` is writable UTF-16 storage with length reported through `size_ptr`.
+    // - the callee writes at most `size` UTF-16 code units and does not retain the pointer.
     let succeeded =
         unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), size_ptr) };
     if succeeded == 0 {
@@ -109,10 +104,8 @@ fn creation_unix_seconds(process: *mut c_void) -> Option<u64> {
     let mut user_time = FileTime::zero();
 
     // SAFETY:
-    // - `process` is a non-null process handle opened with query access by the
-    //   caller.
-    // - all four pointers refer to writable `FILETIME`-layout values for the
-    //   duration of the call.
+    // - `process` is a non-null process handle opened with query access by the caller.
+    // - all four pointers refer to writable `FILETIME`-layout values for the duration of the call.
     let succeeded = unsafe {
         GetProcessTimes(
             process,

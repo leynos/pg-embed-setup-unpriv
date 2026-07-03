@@ -3,11 +3,12 @@
 //! `tests/ui.rs` uses this as a non-Windows trybuild pass fixture and as a
 //! directly included Windows smoke-compile module.
 
-use pg_embedded_setup_unpriv::BootstrapResult;
-use pg_embedded_setup_unpriv::test_support::{
-    PostmasterPid, process_is_running, read_postmaster_pid,
-};
 use std::path::Path;
+
+use pg_embedded_setup_unpriv::{
+    BootstrapResult,
+    test_support::{PostmasterPid, process_is_running, read_postmaster_pid},
+};
 
 pub fn verify_surface() -> BootstrapResult<()> {
     let missing_pid =
@@ -20,6 +21,4 @@ pub fn verify_surface() -> BootstrapResult<()> {
 }
 
 #[cfg(not(windows))]
-fn main() {
-    verify_surface().expect("shutdown-hook test-support surface should compile and run");
-}
+fn main() { verify_surface().expect("shutdown-hook test-support surface should compile and run"); }
