@@ -44,7 +44,7 @@ fn postmaster_exits_after_child_process_with_shutdown_hook(
 ) -> Result<()> {
     let _guard = serial_guard;
     let tmp_dir = tempfile::tempdir().context("create temp dir")?;
-    let pid_file = tmp_dir.path().join("postmaster_pid");
+    let pid_file = tmp_dir.path().join("postmaster.pid");
 
     let child_status = spawn_child(&pid_file)?;
 
@@ -52,7 +52,7 @@ fn postmaster_exits_after_child_process_with_shutdown_hook(
         return Err(eyre!("child process exited with status {child_status}"));
     }
 
-    // The child writes either a PID or "SKIP" to the temp file.
+    // The child writes either a postmaster identity file or "SKIP" to the temp file.
     // "SKIP" signals that the environment cannot support cluster creation
     // (e.g. missing PostgreSQL binaries).
     let content = fs::read_to_string(&pid_file).context("read PID file from child")?;
@@ -61,11 +61,9 @@ fn postmaster_exits_after_child_process_with_shutdown_hook(
         return Ok(());
     }
 
-    let pid: PostmasterPid = content
-        .trim()
-        .parse()
-        .context("parse postmaster PID from child")?;
-    wait_for_postmaster_exit(pid)
+    let postmaster_process = read_postmaster_process(tmp_dir.path())?
+        .ok_or_else(|| eyre!("postmaster process identity not found after child exit"))?;
+    wait_for_postmaster_exit(postmaster_process)
 }
 
 /// Spawns the child subprocess that creates and forgets a cluster.
@@ -82,15 +80,15 @@ fn spawn_child(pid_file: &Path) -> Result<std::process::ExitStatus> {
         .context("spawn child process")
 }
 
-fn wait_for_postmaster_exit(pid: PostmasterPid) -> Result<()> {
+fn wait_for_postmaster_exit(postmaster_process: PostmasterProcess) -> Result<()> {
     let deadline = std::time::Instant::now() + POSTMASTER_EXIT_TIMEOUT;
     loop {
-        if !process_is_running(pid)? {
+        if !postmaster_process_is_running(postmaster_process) {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
             return Err(eyre!(
-                "postmaster (PID {pid}) did not exit within {POSTMASTER_EXIT_TIMEOUT:?}"
+                "postmaster process did not exit within {POSTMASTER_EXIT_TIMEOUT:?}"
             ));
         }
         thread::sleep(POLL_INTERVAL);
@@ -146,9 +144,8 @@ fn shutdown_hook_lifecycle_child_entry() -> Result<()> {
         .context("register shutdown hook")?;
 
     // Write postmaster PID to the temp file for the parent to verify.
-    let pid = read_postmaster_pid(&handle.settings().data_dir)?
-        .ok_or_else(|| eyre!("postmaster.pid not found after cluster start"))?;
-    fs::write(&pid_file_path, pid.to_string()).context("write PID file")?;
+    let source_pid_file = handle.settings().data_dir.join("postmaster.pid");
+    fs::copy(&source_pid_file, &pid_file_path).context("write postmaster identity file")?;
 
     // Forget the guard so Drop doesn't shut down the cluster — the atexit
     // hook is responsible.

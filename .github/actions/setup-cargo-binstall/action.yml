@@ -1,0 +1,58 @@
+name: Setup cargo-binstall
+description: Install and verify the pinned cargo-binstall version.
+
+inputs:
+  version:
+    description: cargo-binstall version to install.
+    required: false
+    default: 1.19.1
+
+runs:
+  using: composite
+  steps:
+    - name: Install cargo-binstall
+      shell: bash
+      env:
+        CARGO_BINSTALL_VERSION: ${{ inputs.version }}
+        RUNNER_OS_NAME: ${{ runner.os }}
+      run: |
+        set -euo pipefail
+
+        requested_binstall_dir="$RUNNER_TEMP/cargo-binstall-${CARGO_BINSTALL_VERSION}"
+        mkdir -p "$requested_binstall_dir"
+        cargo binstall -y \
+          --install-path "$requested_binstall_dir" \
+          --force \
+          "cargo-binstall@${CARGO_BINSTALL_VERSION}"
+
+        effective_binstall_dir="$requested_binstall_dir"
+        binstall_bin="$requested_binstall_dir/cargo-binstall"
+        if [[ "$RUNNER_OS_NAME" == "Windows" ]]; then
+          binstall_bin="${binstall_bin}.exe"
+        fi
+
+        if [[ ! -x "$binstall_bin" ]]; then
+          cargo_home_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          fallback_binstall_bin="$cargo_home_bin/cargo-binstall"
+          if [[ "$RUNNER_OS_NAME" == "Windows" ]]; then
+            fallback_binstall_bin="${fallback_binstall_bin}.exe"
+          fi
+          if [[ -x "$fallback_binstall_bin" ]]; then
+            effective_binstall_dir="$cargo_home_bin"
+            binstall_bin="$fallback_binstall_bin"
+          fi
+        fi
+
+        if [[ ! -x "$binstall_bin" ]]; then
+          echo "cargo-binstall ${CARGO_BINSTALL_VERSION} was not found after installation" >&2
+          echo "checked $requested_binstall_dir and ${CARGO_HOME:-$HOME/.cargo}/bin" >&2
+          exit 1
+        fi
+
+        echo "$effective_binstall_dir" >> "$GITHUB_PATH"
+        binstall_version="$("$binstall_bin" -V)"
+        echo "$binstall_version"
+        if [[ "$binstall_version" != *"$CARGO_BINSTALL_VERSION"* ]]; then
+          echo "expected cargo-binstall ${CARGO_BINSTALL_VERSION}, got $binstall_version" >&2
+          exit 1
+        fi

@@ -129,8 +129,7 @@ fn bootstrap_fails_when_worker_binary_not_executable() -> Result<()> {
 
 #[test]
 fn bootstrap_fails_on_non_utf8_path_entry_when_root() -> Result<()> {
-    if !geteuid().is_root() {
-        tracing::warn!("skipping non-utf8 PATH test: requires root privileges");
+    if skip_worker_validation_when_unprivileged("non-utf8 PATH test") {
         return Ok(());
     }
 

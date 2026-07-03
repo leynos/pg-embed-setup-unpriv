@@ -142,50 +142,7 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
       - name: Install cargo-binstall 1.19.1
-        shell: bash
-        env:
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          set -euo pipefail
-
-          requested_binstall_dir="$RUNNER_TEMP/cargo-binstall-1.19.1"
-          mkdir -p "$requested_binstall_dir"
-          cargo binstall -y \
-            --install-path "$requested_binstall_dir" \
-            --force \
-            cargo-binstall@1.19.1
-
-          effective_binstall_dir="$requested_binstall_dir"
-          binstall_bin="$requested_binstall_dir/cargo-binstall"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            binstall_bin="${binstall_bin}.exe"
-          fi
-
-          if [[ ! -x "$binstall_bin" ]]; then
-            cargo_home_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-            fallback_binstall_bin="$cargo_home_bin/cargo-binstall"
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              fallback_binstall_bin="${fallback_binstall_bin}.exe"
-            fi
-            if [[ -x "$fallback_binstall_bin" ]]; then
-              effective_binstall_dir="$cargo_home_bin"
-              binstall_bin="$fallback_binstall_bin"
-            fi
-          fi
-
-          if [[ ! -x "$binstall_bin" ]]; then
-            echo "cargo-binstall 1.19.1 was not found after installation" >&2
-            echo "checked $requested_binstall_dir and ${CARGO_HOME:-$HOME/.cargo}/bin" >&2
-            exit 1
-          fi
-
-          echo "$effective_binstall_dir" >> "$GITHUB_PATH"
-          binstall_version="$("$binstall_bin" -V)"
-          echo "$binstall_version"
-          if [[ "$binstall_version" != *"1.19.1"* ]]; then
-            echo "expected cargo-binstall 1.19.1, got $binstall_version" >&2
-            exit 1
-          fi
+        uses: ./.github/actions/setup-cargo-binstall
       - name: Download draft release assets
         shell: bash
         env:
@@ -283,7 +240,7 @@ jobs:
             python_bin=python
           fi
 
-          CERT_DIR="$cert_dir" "$python_bin" - <<'PY' >"$RUNNER_TEMP/binstall-http.log" 2>&1 &
+          CERT_DIR="$cert_dir" RELEASE_PORT="$RELEASE_PORT" "$python_bin" - <<'PY' >"$RUNNER_TEMP/binstall-http.log" 2>&1 &
           from functools import partial
           from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
           from pathlib import Path
@@ -292,7 +249,8 @@ jobs:
 
           cert_dir = Path(os.environ["CERT_DIR"])
           handler = partial(SimpleHTTPRequestHandler, directory=str(Path("release-dist").resolve()))
-          server = ThreadingHTTPServer(("127.0.0.1", 8765), handler)
+          port = int(os.environ["RELEASE_PORT"])
+          server = ThreadingHTTPServer(("127.0.0.1", port), handler)
           context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
           context.load_cert_chain(cert_dir / "server.pem", cert_dir / "server.key")
           server.socket = context.wrap_socket(server.socket, server_side=True)
@@ -382,25 +340,7 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
       - name: Install cargo-binstall 1.19.1
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          requested_binstall_dir="$RUNNER_TEMP/cargo-binstall-1.19.1"
-          mkdir -p "$requested_binstall_dir"
-          cargo binstall -y \
-            --install-path "$requested_binstall_dir" \
-            --force \
-            cargo-binstall@1.19.1
-
-          export PATH="$requested_binstall_dir:$PATH"
-          echo "$requested_binstall_dir" >> "$GITHUB_PATH"
-          binstall_version="$(cargo binstall -V)"
-          echo "$binstall_version"
-          if [[ "$binstall_version" != *"1.19.1"* ]]; then
-            echo "expected cargo-binstall 1.19.1, got $binstall_version" >&2
-            exit 1
-          fi
+        uses: ./.github/actions/setup-cargo-binstall
       - name: Dry-run published release asset URLs
         run: |
           set -euo pipefail

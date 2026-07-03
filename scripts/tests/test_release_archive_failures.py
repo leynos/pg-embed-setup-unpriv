@@ -68,6 +68,19 @@ WHITESPACE = st.text(alphabet=" \t\n\r", min_size=1, max_size=16)
 
 
 @st.composite
+def generated_cargo_wrapper_command(draw: st.DrawFn) -> tuple[str, str, list[str]]:
+    """Generate Cargo wrapper commands and their expected argv split."""
+    args = draw(st.lists(SAFE_WORD, min_size=1, max_size=4))
+    if draw(st.booleans()):
+        program = draw(SAFE_WORD)
+    else:
+        wrapper = draw(SAFE_WORD)
+        program = rf"C:\Tools\{wrapper}.exe"
+    cargo = " ".join([program, *args])
+    return cargo, program, args
+
+
+@st.composite
 def safe_release_component(draw: st.DrawFn) -> str:
     """Generate non-empty release components without path syntax."""
     segments = draw(st.lists(PATH_SEGMENT, min_size=1, max_size=4))
@@ -128,6 +141,12 @@ def test_stage_archive_reports_missing_release_binary(tmp_path: Path) -> None:
         match=re.escape(f"release binary missing: {expected_path}"),
     ):
         release_archive.stage_archive(spec)
+
+
+def test_archive_stem_rejects_path_like_version() -> None:
+    """Archive stems reject versions that would change the archive path."""
+    with pytest.raises(SystemExit, match=re.escape("version cannot contain path separators")):
+        release_archive.archive_stem("x86_64-unknown-linux-gnu", "0.5/1")
 
 
 def test_build_release_binaries_raises_system_exit_on_cargo_failure(
@@ -285,18 +304,6 @@ def test_validate_release_spec_components_rejects_generated_path_like_binaries(
 
 
 @settings(max_examples=150)
-@given(program=SAFE_WORD, args=st.lists(SAFE_WORD, min_size=1, max_size=4))
-def test_cargo_program_and_args_preserves_generated_wrapper_args(
-    program: str,
-    args: list[str],
-) -> None:
-    """Cargo command parsing preserves generated wrapper argv."""
-    cargo = " ".join([program, *args])
-
-    assert_cargo_program_and_args_preserved(cargo, program, args)
-
-
-@settings(max_examples=150)
 @given(directory=SAFE_WORD, executable=SAFE_WORD)
 def test_cargo_program_and_args_treats_generated_paths_as_executables(
     directory: str,
@@ -312,14 +319,12 @@ def test_cargo_program_and_args_treats_generated_paths_as_executables(
 
 
 @settings(max_examples=150)
-@given(wrapper=SAFE_WORD, args=st.lists(SAFE_WORD, min_size=1, max_size=4))
-def test_cargo_program_and_args_preserves_generated_windows_wrappers(
-    wrapper: str,
-    args: list[str],
+@given(command=generated_cargo_wrapper_command())
+def test_cargo_program_and_args_preserves_generated_wrapper_argv(
+    command: tuple[str, str, list[str]],
 ) -> None:
-    """Cargo command parsing preserves generated Windows wrapper argv."""
-    program = rf"C:\Tools\{wrapper}.exe"
-    cargo = " ".join([program, *args])
+    """Cargo command parsing preserves generated wrapper argv."""
+    cargo, program, args = command
 
     assert_cargo_program_and_args_preserved(cargo, program, args)
 

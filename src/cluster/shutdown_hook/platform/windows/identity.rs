@@ -28,7 +28,7 @@ unsafe extern "system" {
 
 /// Windows postmaster identity parsed from `postmaster.pid`.
 #[derive(Clone, Copy)]
-pub(in crate::cluster::shutdown_hook) struct PostmasterProcess {
+pub struct PostmasterProcess {
     pid: PostmasterPid,
     started_at_unix_seconds: u64,
 }

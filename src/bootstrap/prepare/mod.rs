@@ -35,16 +35,7 @@ pub(super) fn prepare_bootstrap(
         return Err(unsupported_root_privilege_drop_error());
     }
 
-    #[cfg(all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "dragonfly",
-        ),
-    ))]
+    #[cfg(all(unix, privileged_unix_platform))]
     {
         match privileges {
             super::mode::ExecutionPrivileges::Root => bootstrap_with_root(settings, cfg),
@@ -52,16 +43,7 @@ pub(super) fn prepare_bootstrap(
         }
     }
 
-    #[cfg(not(all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "dragonfly",
-        ),
-    )))]
+    #[cfg(not(all(unix, privileged_unix_platform)))]
     {
         match privileges {
             super::mode::ExecutionPrivileges::Root => {
@@ -77,16 +59,7 @@ pub(super) struct PreparedBootstrap {
     pub(super) environment: TestBootstrapEnvironment,
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn bootstrap_with_root(
     mut settings: Settings,
     cfg: &PgEnvCfg,
@@ -126,16 +99,7 @@ fn bootstrap_with_root(
     })
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn ensure_root_port(settings: &mut Settings) -> BootstrapResult<()> {
     if settings.port > 0 {
         return Ok(());
@@ -152,16 +116,7 @@ fn ensure_root_port(settings: &mut Settings) -> BootstrapResult<()> {
     Ok(())
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn root_bind_host(settings: &Settings) -> &str {
     let host = settings.host.as_str();
     if host.is_empty() || host.starts_with('/') {
@@ -201,16 +156,7 @@ struct SettingsPaths {
     data_default: bool,
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn resolve_settings_paths_for_uid(
     settings: &mut Settings,
     cfg: &PgEnvCfg,
@@ -232,16 +178,7 @@ fn resolve_settings_paths_for_uid(
     settings_paths_from_settings(settings, install_default, data_default)
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn resolve_settings_paths_for_current_user(
     settings: &mut Settings,
     _cfg: &PgEnvCfg,
@@ -249,16 +186,7 @@ fn resolve_settings_paths_for_current_user(
     settings_paths_from_settings(settings, false, false)
 }
 
-#[cfg(not(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-)))]
+#[cfg(not(all(unix, privileged_unix_platform)))]
 fn resolve_settings_paths_for_current_user(
     settings: &mut Settings,
     _cfg: &PgEnvCfg,
@@ -355,16 +283,7 @@ fn prepare_xdg_dirs(install_dir: &Utf8PathBuf) -> BootstrapResult<XdgDirs> {
     })
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn ensure_xdg_dirs_owned_by_user(xdg: &XdgDirs, user: &User) -> BootstrapResult<()> {
     // The cache/run directories are created by the root worker, so explicitly
     // hand them to the unprivileged user to keep custom install dirs usable.
@@ -373,16 +292,7 @@ fn ensure_xdg_dirs_owned_by_user(xdg: &XdgDirs, user: &User) -> BootstrapResult<
     Ok(())
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn ensure_parent_for_user(path: &Utf8PathBuf, user: &User) -> BootstrapResult<()> {
     if let Some(parent) = path.parent() {
         ensure_dir_for_user(parent, user, 0o755)?;
@@ -425,31 +335,13 @@ fn sorted_configuration_keys(settings: &Settings) -> Vec<&str> {
     keys
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn ensure_install_dir_for_user(path: &Utf8PathBuf, user: &User) -> BootstrapResult<()> {
     ensure_dir_for_user(path, user, 0o755)?;
     Ok(())
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn ensure_pgpass_for_user(path: &Utf8PathBuf, user: &User) -> BootstrapResult<()> {
     use cap_std::fs::{OpenOptions, OpenOptionsExt};
     use nix::sys::stat::{Mode, fchmod};

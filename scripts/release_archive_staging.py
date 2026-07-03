@@ -135,7 +135,7 @@ def archive_stem(target: str, version: str) -> str:
     Raises
     ------
     SystemExit
-        Raised when `target` is path-like or empty.
+        Raised when `target` or `version` is path-like or empty.
 
     Examples
     --------
@@ -143,6 +143,7 @@ def archive_stem(target: str, version: str) -> str:
     'pg-embed-setup-unpriv-x86_64-unknown-linux-gnu-v0.5.1'
     """
     _validate_path_component(target, "target")
+    _validate_path_component(version, "version")
     return f"{PACKAGE_NAME}-{target}-v{version}"
 
 
@@ -170,8 +171,8 @@ def release_binary_path(repo: Path, target: str, binary: str) -> Path:
 
     Examples
     --------
-    >>> release_binary_path(Path("."), "x86_64-unknown-linux-gnu", "pg_worker")
-    PosixPath('target/x86_64-unknown-linux-gnu/release/pg_worker')
+    >>> release_binary_path(Path("."), "x86_64-unknown-linux-gnu", "pg_worker").as_posix()
+    'target/x86_64-unknown-linux-gnu/release/pg_worker'
     """
     _validate_path_component(target, "target")
     _validate_path_component(binary, "binary")

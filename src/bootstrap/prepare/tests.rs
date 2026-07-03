@@ -127,16 +127,7 @@ mod behaviour_tests {
     }
 }
 
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 mod unix_tests {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 

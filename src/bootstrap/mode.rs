@@ -59,16 +59,7 @@ pub fn detect_execution_privileges() -> ExecutionPrivileges {
 }
 
 pub(crate) const fn root_privilege_drop_supported() -> bool {
-    cfg!(all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "dragonfly",
-        )
-    ))
+    cfg!(all(unix, privileged_unix_platform))
 }
 
 pub(crate) fn unsupported_root_privilege_drop_error() -> BootstrapError {
@@ -77,7 +68,6 @@ pub(crate) fn unsupported_root_privilege_drop_error() -> BootstrapError {
     ))
 }
 
-#[cfg(unix)]
 pub(super) fn determine_execution_mode(
     privileges: ExecutionPrivileges,
     worker_binary: Option<&Utf8PathBuf>,
@@ -99,33 +89,13 @@ pub(super) fn determine_execution_mode(
     }
 }
 
-#[cfg(not(unix))]
-pub(super) fn determine_execution_mode(
-    privileges: ExecutionPrivileges,
-    _worker_binary: Option<&Utf8PathBuf>,
-) -> BootstrapResult<ExecutionMode> {
-    match privileges {
-        ExecutionPrivileges::Root => Err(unsupported_root_privilege_drop_error()),
-        ExecutionPrivileges::Unprivileged => Ok(ExecutionMode::InProcess),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     //! Unit tests for execution mode determination.
 
     use super::*;
 
-    #[cfg(all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "dragonfly",
-        )
-    ))]
+    #[cfg(all(unix, privileged_unix_platform))]
     #[test]
     fn determine_execution_mode_requires_worker_when_root() {
         let err = determine_execution_mode(ExecutionPrivileges::Root, None)
@@ -137,16 +107,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "dragonfly",
-        )
-    ))]
+    #[cfg(all(unix, privileged_unix_platform))]
     #[test]
     fn determine_execution_mode_allows_subprocess_with_worker() {
         let worker = Utf8PathBuf::from("/tmp/pg_worker");
@@ -172,16 +133,7 @@ mod tests {
         assert_eq!(mode, ExecutionMode::InProcess);
     }
 
-    #[cfg(not(all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "dragonfly",
-        )
-    )))]
+    #[cfg(not(all(unix, privileged_unix_platform)))]
     #[test]
     fn determine_execution_mode_rejects_root_when_privilege_drop_is_unsupported() {
         let worker = Utf8PathBuf::from("/tmp/pg_worker");

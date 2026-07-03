@@ -245,6 +245,7 @@ impl ProcessHandle {
         succeeded != 0 && exit_code == STILL_ACTIVE
     }
 
+    #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
     fn is_active_checked(&self) -> BootstrapResult<bool> {
         let mut exit_code = 0_u32;
         let exit_code_ptr = std::ptr::addr_of_mut!(exit_code);

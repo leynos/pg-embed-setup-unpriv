@@ -29,7 +29,10 @@ mod fixtures_docs;
     any(unix, windows),
     any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
 ))]
-pub use crate::cluster::{PostmasterPid, process_is_running, read_postmaster_pid};
+pub use crate::cluster::{
+    PostmasterPid, PostmasterProcess, postmaster_process_is_running, process_is_running,
+    read_postmaster_pid, read_postmaster_process,
+};
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub use errors::{bootstrap_error, privilege_error};
 pub use filesystem::ambient_dir_and_path;

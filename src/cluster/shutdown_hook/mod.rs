@@ -17,7 +17,8 @@ use std::time::Duration;
 use crate::CleanupMode;
 use crate::error::BootstrapResult;
 use platform::{
-    force_shutdown, parse_postmaster_process, postmaster_process_is_running,
+    force_shutdown, parse_postmaster_process,
+    postmaster_process_is_running as platform_postmaster_process_is_running,
     prepare_process_exit_failsafe, request_shutdown,
 };
 use postgresql_embedded::Settings;
@@ -57,6 +58,10 @@ const POST_SIGKILL_GRACE: Duration = Duration::from_millis(100);
 /// Platform-specific process identifier stored in `postmaster.pid`.
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub type PostmasterPid = platform::PostmasterPid;
+
+/// PID-reuse-safe platform-specific postmaster identity.
+#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
+pub type PostmasterProcess = platform::PostmasterProcess;
 
 /// Registers an atexit hook that will stop the `PostgreSQL` postmaster on
 /// process exit.
@@ -120,7 +125,7 @@ fn build_shutdown_state(
     shutdown_timeout: Duration,
     cleanup_mode: CleanupMode,
 ) -> BootstrapResult<RegisteredShutdownState> {
-    let postmaster_process = read_postmaster_process(&settings.data_dir)?;
+    let postmaster_process = read_postmaster_process_from_dir(&settings.data_dir)?;
     register_atexit()?;
     let exit_failsafe = prepare_process_exit_failsafe(postmaster_process);
 
@@ -197,7 +202,7 @@ extern "C" fn shutdown_callback() {
         return;
     };
 
-    let process = match read_postmaster_process(&work.settings.data_dir) {
+    let process = match read_postmaster_process_from_dir(&work.settings.data_dir) {
         Ok(Some(process)) => process,
         Ok(None) => {
             // PID file missing — cluster already stopped or was never started.
@@ -214,7 +219,7 @@ extern "C" fn shutdown_callback() {
         }
     };
 
-    if !postmaster_process_is_running(process) {
+    if !platform_postmaster_process_is_running(process) {
         best_effort_cleanup(&work);
         return;
     }
@@ -277,7 +282,7 @@ fn stop_postmaster(process: platform::PostmasterProcess, state: &ShutdownWork) {
 fn wait_for_exit(process: platform::PostmasterProcess, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        if !postmaster_process_is_running(process) {
+        if !platform_postmaster_process_is_running(process) {
             return true;
         }
         if std::time::Instant::now() >= deadline {
@@ -313,7 +318,20 @@ pub fn read_postmaster_pid(data_dir: &Path) -> BootstrapResult<Option<Postmaster
     })
 }
 
-fn read_postmaster_process(
+/// Reads the PID-reuse-safe postmaster process identity from `postmaster.pid`.
+///
+/// Returns `Ok(None)` if the file is missing or empty.
+///
+/// # Errors
+///
+/// Returns an error if the PID file cannot be read or contains a malformed
+/// platform-specific process identity.
+#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
+pub fn read_postmaster_process(data_dir: &Path) -> BootstrapResult<Option<PostmasterProcess>> {
+    read_postmaster_process_from_dir(data_dir)
+}
+
+fn read_postmaster_process_from_dir(
     data_dir: &Path,
 ) -> BootstrapResult<Option<platform::PostmasterProcess>> {
     let pid_file = data_dir.join("postmaster.pid");
@@ -349,6 +367,16 @@ fn read_postmaster_pid_file(pid_file: &Path) -> BootstrapResult<String> {
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub fn process_is_running(pid: PostmasterPid) -> BootstrapResult<bool> {
     platform::process_is_running_for_platform(pid)
+}
+
+/// Returns `true` when the postmaster identity still matches a live process.
+///
+/// This helper preserves the shutdown hook's PID-reuse-safe process identity
+/// check for integration tests.
+#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
+#[must_use]
+pub fn postmaster_process_is_running(process: PostmasterProcess) -> bool {
+    platform_postmaster_process_is_running(process)
 }
 
 // ---------------------------------------------------------------------------

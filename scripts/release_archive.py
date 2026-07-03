@@ -7,7 +7,25 @@
 #   "hypothesis==6.155.7",
 # ]
 # ///
-"""Build and package release binaries for cargo-binstall."""
+"""Build and package release binaries for cargo-binstall.
+
+This script builds the production binaries for a Rust target, stages the
+expected Cargo release outputs, and writes a cargo-binstall-compatible `.tgz`
+archive under the selected distribution directory.
+
+Inputs are the target triple, an optional release version override, an optional
+manifest path, optional Cargo wrapper arguments, and an optional binary list.
+When no binaries are supplied, the default production binary set is packaged.
+The command prints the archive path on success.
+
+Example
+-------
+Run the packager for the Linux GNU target:
+
+```
+uv run --script scripts/release_archive.py x86_64-unknown-linux-gnu
+```
+"""
 
 from __future__ import annotations
 
@@ -69,7 +87,21 @@ _BinaryArg = Annotated[
 
 @dataclass(frozen=True)
 class ReleaseBuildSpec:
-    """Build inputs for the release binaries."""
+    """Build inputs for the release binaries.
+
+    Attributes
+    ----------
+    repo : Path
+        Repository root where Cargo is invoked.
+    target : str
+        Rust target triple to build.
+    binaries : tuple[str, ...]
+        Binary targets to pass to `cargo build --bin`.
+    cargo : str
+        Cargo executable or wrapper command.
+    build_jobs : str | None
+        Optional Cargo job count or job flag value.
+    """
 
     repo: Path
     target: str
@@ -80,7 +112,21 @@ class ReleaseBuildSpec:
 
 @dataclass(frozen=True)
 class ReleaseArchiveSpec:
-    """Archive staging inputs for cargo-binstall release assets."""
+    """Archive staging inputs for cargo-binstall release assets.
+
+    Attributes
+    ----------
+    repo : Path
+        Repository root containing Cargo's target directory.
+    target : str
+        Rust target triple used in the archive name and release output path.
+    version : str
+        Package version without the leading `v`.
+    dist_dir : Path
+        Directory where the `.tgz` archive is written.
+    binaries : tuple[str, ...]
+        Binary names copied into the archive root.
+    """
 
     repo: Path
     target: str
