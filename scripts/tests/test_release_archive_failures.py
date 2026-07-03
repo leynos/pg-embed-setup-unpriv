@@ -51,7 +51,7 @@ PATH_LIKE_COMPONENT = st.one_of(
 SAFE_SHELL_WORD = st.text(
     alphabet=st.characters(
         whitelist_categories=("Ll", "Lu", "Nd"),
-        whitelist_characters="-_./:",
+        whitelist_characters="' -_./:",
     ),
     min_size=1,
     max_size=16,
