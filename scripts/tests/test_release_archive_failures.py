@@ -121,8 +121,14 @@ def assert_cargo_program_and_args_preserved(
 ) -> None:
     """Assert that Cargo command parsing preserves the expected argv split."""
     parsed_program, parsed_args = release_archive._cargo_program_and_args(cargo)
-    assert parsed_program == expected_program
-    assert parsed_args == expected_args
+    assert parsed_program == expected_program, (
+        "Cargo program split mismatch: "
+        f"cargo={cargo!r}, expected={expected_program!r}, actual={parsed_program!r}"
+    )
+    assert parsed_args == expected_args, (
+        "Cargo argument split mismatch: "
+        f"cargo={cargo!r}, expected={expected_args!r}, actual={parsed_args!r}"
+    )
 
 
 def test_stage_archive_reports_missing_release_binary(tmp_path: Path) -> None:
@@ -334,8 +340,13 @@ def test_cargo_program_and_args_preserves_generated_wrapper_argv(
 def test_split_cargo_command_roundtrips_shell_quoted_strings(words: list[str]) -> None:
     """Cargo command splitting follows shell quoting for generated argv."""
     command = " ".join(shlex.quote(word) for word in words)
+    parsed_words = release_archive_cargo._split_cargo_command(command)
+    expected_words = shlex.split(command)
 
-    assert release_archive_cargo._split_cargo_command(command) == shlex.split(command)
+    assert parsed_words == expected_words, (
+        "Cargo command split did not match shlex.split: "
+        f"command={command!r}, expected={expected_words!r}, actual={parsed_words!r}"
+    )
 
 
 @settings(max_examples=50)
