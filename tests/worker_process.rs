@@ -131,8 +131,13 @@ fn run_truncates_stdout_and_stderr_on_failure() -> BootstrapResult<()> {
         let env_vars = Vec::new();
         let long_output = "A".repeat(5_000);
         let script_body = format!(
-            "#!/bin/sh\ncat <<'EOF'\n{long_output}\nEOF\ncat <<'EOF' \
-             >&2\n{long_output}\nEOF\nexit 1\n"
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'EOF'\n{0}\nEOF\n",
+                "cat <<'EOF' >&2\n{0}\nEOF\n",
+                "exit 1\n",
+            ),
+            long_output
         );
         let worker_path = write_script(sandbox.path(), "fail.sh", &script_body)?;
         let request = request(

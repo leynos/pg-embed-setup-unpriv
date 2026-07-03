@@ -285,7 +285,7 @@ In `tests/support/pg_worker.rs`, modify the `apply_worker_environment` function
 1. Change the function signature from
    `fn apply_worker_environment(environment: &[(String, Option<PlainSecret>)])`
    to
-   `fn apply_worker_environment(store: &mut dyn EnvStore, environment: &[(String, Option<PlainSecret)])`.
+   `fn apply_worker_environment(store: &mut dyn EnvStore, environment: &[(String, Option<PlainSecret>)])`.
 
 2. Update the function body to use the store parameter instead of calling
    `env::set_var` and `env::remove_var` directly. Replace the unsafe calls with

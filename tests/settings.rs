@@ -98,10 +98,9 @@ fn to_settings_default_config() -> color_eyre::Result<()> {
 }
 
 #[fixture]
+#[rustfmt::skip]
 fn default_pg_env() -> PgEnvCfg {
-    PgEnvCfg {
-        ..PgEnvCfg::default()
-    }
+    PgEnvCfg::default()
 }
 
 #[rstest]
@@ -177,8 +176,11 @@ fn with_temp_euid_changes_uid() -> color_eyre::Result<()> {
 /// Stub variant ensuring the suite reports skipped when privilege drops are unavailable.
 fn with_temp_euid_changes_uid() -> color_eyre::Result<()> {
     tracing::warn!(
-        "skipping root-dependent test: enable the privileged-tests feature to exercise privilege \
-         drops",
+        "{}",
+        concat!(
+            "skipping root-dependent test: enable the privileged-tests feature to exercise ",
+            "privilege drops",
+        ),
     );
     Ok(())
 }

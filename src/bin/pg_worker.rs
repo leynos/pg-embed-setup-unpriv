@@ -77,8 +77,11 @@ impl Operation {
             "cleanup" => Ok(Self::Cleanup),
             "cleanup-full" => Ok(Self::CleanupFull),
             other => Err(WorkerError::InvalidArgs(format!(
-                "unknown operation '{other}'; expected setup, start, stop, cleanup, or \
-                 cleanup-full"
+                concat!(
+                    "unknown operation '{}'; expected setup, start, stop, cleanup, ",
+                    "or cleanup-full"
+                ),
+                other
             ))),
         }
     }
