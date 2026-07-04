@@ -232,7 +232,9 @@ impl TestClusterConnection {
     /// # Errors
     ///
     /// Returns an error if database creation fails or if `setup_fn` returns
-    /// an error.
+    /// an error. If setup fails or panics after this call creates the template,
+    /// the partially created template is dropped before the error is returned
+    /// or the panic resumes.
     ///
     /// # Examples
     ///

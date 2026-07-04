@@ -479,7 +479,9 @@ execution.
 
 The `ensure_template_exists` method provides concurrency-safe template creation
 with per-template locking to prevent race conditions when multiple tests try to
-initialize the same template simultaneously:
+initialize the same template simultaneously. If the setup callback fails or
+panics after creating the template, the helper drops that partially created
+template before returning the error or resuming the panic:
 
 ```rust,no_run
 use pg_embedded_setup_unpriv::TestCluster;

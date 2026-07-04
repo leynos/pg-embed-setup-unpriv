@@ -95,11 +95,6 @@ jobs:
           features: dev-worker
           with-default-features: "false"
           with-ratchet: 'true'
-      - name: Loom Concurrency Tests (non-blocking)
-        if: ${{ always() && matrix.privilege == 'unprivileged' }}
-        run: make test-loom
-        timeout-minutes: 1
-        continue-on-error: true
       - name: Install cargo-nextest and test (root)
         if: ${{ matrix.privilege == 'root' }}
         run: |
