@@ -9,6 +9,8 @@ use loom::{
     thread,
 };
 
+use crate::loom_model::run_loom_model;
+
 enum LoomShutdownRegistrationState {
     Empty,
     Registering,
@@ -71,17 +73,6 @@ impl LoomShutdownHook {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         matches!(*state, LoomShutdownRegistrationState::Registered)
     }
-}
-
-fn run_loom_model<F>(f: F)
-where
-    F: Fn() + Send + Sync + 'static,
-{
-    let mut builder = loom::model::Builder::new();
-    builder.max_threads = 3;
-    builder.max_branches = 64;
-    builder.preemption_bound = Some(3);
-    builder.check(f);
 }
 
 #[test]

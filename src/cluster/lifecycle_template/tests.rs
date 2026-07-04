@@ -14,11 +14,7 @@ use crate::error::BootstrapError;
 
 struct NoopLocks;
 
-type SetupAndRollbackResult = (
-    Cell<bool>,
-    Cell<bool>,
-    Result<BootstrapResult<()>, Box<dyn Any + Send>>,
-);
+type SetupAndRollbackResult = Result<BootstrapResult<()>, Box<dyn Any + Send>>;
 
 impl NoopLocks {
     const fn new() -> Self { Self }
@@ -30,6 +26,62 @@ impl TemplateLockOps for NoopLocks {
     }
 }
 
+struct RollbackHarness {
+    locks: NoopLocks,
+    created: Cell<bool>,
+    dropped: Cell<bool>,
+}
+
+impl RollbackHarness {
+    fn new() -> Self {
+        Self {
+            locks: NoopLocks::new(),
+            created: Cell::new(false),
+            dropped: Cell::new(false),
+        }
+    }
+
+    fn run_setup<Setup>(
+        &self,
+        setup_fn: Setup,
+        rollback_should_fail: bool,
+    ) -> SetupAndRollbackResult
+    where
+        Setup: FnOnce() -> BootstrapResult<()>,
+    {
+        catch_unwind(AssertUnwindSafe(|| {
+            ensure_template_exists_with_lock(
+                &self.locks,
+                "template",
+                TemplateCreationOps {
+                    database_exists: || Ok(self.created.get()),
+                    create_database: || {
+                        self.created.set(true);
+                        Ok(())
+                    },
+                    drop_database: || {
+                        self.dropped.set(true);
+                        self.rollback_result(rollback_should_fail)
+                    },
+                    setup_fn,
+                },
+            )
+        }))
+    }
+
+    fn created(&self) -> bool { self.created.get() }
+
+    fn dropped(&self) -> bool { self.dropped.get() }
+
+    fn rollback_result(&self, rollback_should_fail: bool) -> BootstrapResult<()> {
+        if rollback_should_fail {
+            return Err(bootstrap_error("rollback failed"));
+        }
+        self.created.set(false);
+        Ok(())
+    }
+}
+
 #[fixture]
 fn locks() -> NoopLocks {
     let locks = NoopLocks::new();
@@ -37,44 +89,6 @@ fn locks() -> NoopLocks {
 }
 
 fn bootstrap_error(message: &str) -> BootstrapError { eyre!("{message}").into() }
-
-fn setup_and_rollback_result<Setup>(
-    setup_fn: Setup,
-    rollback_should_fail: bool,
-) -> SetupAndRollbackResult
-where
-    Setup: FnOnce() -> BootstrapResult<()>,
-{
-    let locks = NoopLocks::new();
-    let created = Cell::new(false);
-    let dropped = Cell::new(false);
-
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        ensure_template_exists_with_lock(
-            &locks,
-            "template",
-            TemplateCreationOps {
-                database_exists: || Ok(created.get()),
-                create_database: || {
-                    created.set(true);
-                    Ok(())
-                },
-                drop_database: || {
-                    dropped.set(true);
-                    if rollback_should_fail {
-                        Err(bootstrap_error("rollback failed"))
-                    } else {
-                        created.set(false);
-                        Ok(())
-                    }
-                },
-                setup_fn,
-            },
-        )
-    }));
-
-    (created, dropped, result)
-}
 
 fn assert_combined_error(error: &BootstrapError, expected_primary: &str, expected_rollback: &str) {
     let display = error.to_string();
@@ -90,8 +104,9 @@ fn assert_combined_error(error: &BootstrapError, expected_primary: &str, expecte
 
 #[test]
 fn setup_failure_rolls_back_created_template() {
+    let harness = RollbackHarness::new();
     let setup_count = Cell::new(0);
-    let (created, dropped, outer_result) = setup_and_rollback_result(
+    let outer_result = harness.run_setup(
         || {
             setup_count.set(setup_count.get() + 1);
             Err(bootstrap_error("setup failed"))
@@ -106,14 +121,18 @@ fn setup_failure_rolls_back_created_template() {
         error.to_string().contains("setup failed"),
         "setup error should be preserved, got: {error}"
     );
-    assert!(!created.get(), "failed setup should remove the template");
-    assert!(dropped.get(), "failed setup should invoke rollback");
+    assert!(
+        !harness.created(),
+        "failed setup should remove the template"
+    );
+    assert!(harness.dropped(), "failed setup should invoke rollback");
 }
 
 #[test]
 fn rollback_failure_preserves_setup_error_context() {
+    let harness = RollbackHarness::new();
     let setup_count = Cell::new(0);
-    let (_created, dropped, outer_result) = setup_and_rollback_result(
+    let outer_result = harness.run_setup(
         || {
             setup_count.set(setup_count.get() + 1);
             Err(bootstrap_error("setup failed"))
@@ -124,14 +143,15 @@ fn rollback_failure_preserves_setup_error_context() {
     let error = inner_result.expect_err("combined setup and rollback failure should be returned");
 
     assert_eq!(setup_count.get(), 1);
-    assert!(dropped.get(), "failed setup should invoke rollback");
+    assert!(harness.dropped(), "failed setup should invoke rollback");
     assert_combined_error(&error, "setup failed", "rollback failed");
 }
 
 #[test]
 fn setup_panic_rolls_back_created_template() {
+    let harness = RollbackHarness::new();
     let setup_count = Cell::new(0);
-    let (created, dropped, outer_result) = setup_and_rollback_result(
+    let outer_result = harness.run_setup(
         || {
             setup_count.set(setup_count.get() + 1);
             panic!("setup panic")
@@ -141,14 +161,15 @@ fn setup_panic_rolls_back_created_template() {
     let _panic = outer_result.expect_err("setup panic should be resumed");
 
     assert_eq!(setup_count.get(), 1);
-    assert!(!created.get(), "panic path should remove the template");
-    assert!(dropped.get(), "panic path should invoke rollback");
+    assert!(!harness.created(), "panic path should remove the template");
+    assert!(harness.dropped(), "panic path should invoke rollback");
 }
 
 #[test]
 fn setup_panic_reports_rollback_failure() {
+    let harness = RollbackHarness::new();
     let setup_count = Cell::new(0);
-    let (_created, dropped, outer_result) = setup_and_rollback_result(
+    let outer_result = harness.run_setup(
         || {
             setup_count.set(setup_count.get() + 1);
             panic!("setup panic")
@@ -161,7 +182,7 @@ fn setup_panic_reports_rollback_failure() {
         inner_result.expect_err("rollback failure during setup panic should return an error");
 
     assert_eq!(setup_count.get(), 1);
-    assert!(dropped.get(), "panic path should invoke rollback");
+    assert!(harness.dropped(), "panic path should invoke rollback");
     assert_combined_error(&error, "setup panic", "rollback failed");
 }
 

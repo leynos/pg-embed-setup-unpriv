@@ -16,6 +16,7 @@ use super::lifecycle_template::{
     TemplateLockOps,
     ensure_template_exists_with_lock,
 };
+use crate::loom_model::run_loom_model;
 
 struct LoomTemplateLocks {
     locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
@@ -112,17 +113,6 @@ impl TemplateHarness {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         created.len()
     }
-}
-
-fn run_loom_model<F>(f: F)
-where
-    F: Fn() + Send + Sync + 'static,
-{
-    let mut builder = loom::model::Builder::new();
-    builder.max_threads = 3;
-    builder.max_branches = 64;
-    builder.preemption_bound = Some(3);
-    builder.check(f);
 }
 
 fn assert_two_template_setups(

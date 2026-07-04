@@ -12,6 +12,8 @@ mod cluster;
 mod env;
 mod error;
 mod fs;
+#[cfg(all(test, feature = "loom-tests"))]
+mod loom_model;
 mod observability;
 #[cfg(all(
     unix,
