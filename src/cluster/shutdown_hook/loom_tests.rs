@@ -1,5 +1,14 @@
 //! Loom checks for shutdown-hook registration state.
 
+use loom::{
+    sync::{
+        Arc,
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
+};
+
 enum LoomShutdownRegistrationState {
     Empty,
     Registering,
@@ -88,7 +97,10 @@ fn shutdown_hook_registers_once_under_concurrent_calls() {
 
         assert!(first_thread.join().is_ok(), "first thread should join");
         assert!(second_thread.join().is_ok(), "second thread should join");
-        assert!(hook.is_registered(), "registration should store shutdown state");
+        assert!(
+            hook.is_registered(),
+            "registration should store shutdown state"
+        );
         assert_eq!(hook.registrations.load(Ordering::SeqCst), 1);
     });
 }

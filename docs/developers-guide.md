@@ -85,7 +85,6 @@ Linux, macOS, and Windows using cargo-binstall 1.19.1. The release workflow
 audits published asset URLs with the same pinned cargo-binstall bootstrap
 before the draft release is published.
 
-
 ## Lifecycle verification
 
 `proptest` cases run as part of the default unit suite and protect the
