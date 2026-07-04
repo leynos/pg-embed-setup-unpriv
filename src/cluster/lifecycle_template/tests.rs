@@ -1,6 +1,7 @@
 //! Tests for template lifecycle coordination helpers.
 
 use std::{
+    any::Any,
     cell::Cell,
     panic::{AssertUnwindSafe, catch_unwind},
 };
@@ -13,6 +14,12 @@ use crate::error::BootstrapError;
 
 struct NoopLocks;
 
+type SetupAndRollbackResult = (
+    Cell<bool>,
+    Cell<bool>,
+    Result<BootstrapResult<()>, Box<dyn Any + Send>>,
+);
+
 impl NoopLocks {
     const fn new() -> Self { Self }
 }
@@ -23,99 +30,24 @@ impl TemplateLockOps for NoopLocks {
     }
 }
 
-struct TemplateState {
-    created: Cell<bool>,
-    dropped: Cell<bool>,
-    setup_count: Cell<u8>,
-}
-
-#[derive(Clone, Copy)]
-enum SetupAction {
-    Error,
-    Panic,
-}
-
-#[derive(Clone, Copy)]
-enum RollbackAction {
-    Succeed,
-    Fail,
-}
-
-#[derive(Clone, Copy)]
-enum ExpectedOutcome {
-    ErrorRollbackSuccess,
-    ErrorRollbackFailure,
-    PanicRollbackSuccess,
-    PanicRollbackFailure,
-}
-
-#[derive(Clone, Copy)]
-struct Scenario {
-    setup_action: SetupAction,
-    rollback_action: RollbackAction,
-    expected: ExpectedOutcome,
-}
-
-impl Scenario {
-    const fn new(
-        setup_action: SetupAction,
-        rollback_action: RollbackAction,
-        expected: ExpectedOutcome,
-    ) -> Self {
-        Self {
-            setup_action,
-            rollback_action,
-            expected,
-        }
-    }
-}
-
 #[fixture]
 fn locks() -> NoopLocks {
     let locks = NoopLocks::new();
     std::convert::identity(locks)
 }
 
-#[fixture]
-fn template_state() -> TemplateState {
-    TemplateState {
-        created: Cell::new(false),
-        dropped: Cell::new(false),
-        setup_count: Cell::new(0),
-    }
-}
-
 fn bootstrap_error(message: &str) -> BootstrapError { eyre!("{message}").into() }
 
-#[rstest]
-#[case::setup_error_rollback_success(Scenario::new(
-    SetupAction::Error,
-    RollbackAction::Succeed,
-    ExpectedOutcome::ErrorRollbackSuccess
-))]
-#[case::setup_error_rollback_failure(Scenario::new(
-    SetupAction::Error,
-    RollbackAction::Fail,
-    ExpectedOutcome::ErrorRollbackFailure
-))]
-#[case::setup_panic_rollback_success(Scenario::new(
-    SetupAction::Panic,
-    RollbackAction::Succeed,
-    ExpectedOutcome::PanicRollbackSuccess
-))]
-#[case::setup_panic_rollback_failure(Scenario::new(
-    SetupAction::Panic,
-    RollbackAction::Fail,
-    ExpectedOutcome::PanicRollbackFailure
-))]
-fn setup_failure_paths_roll_back_created_template(
-    locks: NoopLocks,
-    template_state: TemplateState,
-    #[case] scenario: Scenario,
-) {
-    let created = &template_state.created;
-    let dropped = &template_state.dropped;
-    let setup_count = &template_state.setup_count;
+fn setup_and_rollback_result<Setup>(
+    setup_fn: Setup,
+    rollback_should_fail: bool,
+) -> SetupAndRollbackResult
+where
+    Setup: FnOnce() -> BootstrapResult<()>,
+{
+    let locks = NoopLocks::new();
+    let created = Cell::new(false);
+    let dropped = Cell::new(false);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         ensure_template_exists_with_lock(
@@ -129,72 +61,108 @@ fn setup_failure_paths_roll_back_created_template(
                 },
                 drop_database: || {
                     dropped.set(true);
-                    match scenario.rollback_action {
-                        RollbackAction::Succeed => {
-                            created.set(false);
-                            Ok(())
-                        }
-                        RollbackAction::Fail => Err(bootstrap_error("rollback failed")),
+                    if rollback_should_fail {
+                        Err(bootstrap_error("rollback failed"))
+                    } else {
+                        created.set(false);
+                        Ok(())
                     }
                 },
-                setup_fn: || {
-                    setup_count.set(setup_count.get() + 1);
-                    match scenario.setup_action {
-                        SetupAction::Error => Err(bootstrap_error("setup failed")),
-                        SetupAction::Panic => panic!("setup panic"),
-                    }
-                },
+                setup_fn,
             },
         )
     }));
 
+    (created, dropped, result)
+}
+
+fn assert_combined_error(error: &BootstrapError, expected_primary: &str, expected_rollback: &str) {
+    let display = error.to_string();
+    assert!(
+        display.contains(expected_primary),
+        "combined error should preserve setup failure, got: {display}"
+    );
+    assert!(
+        display.contains(expected_rollback),
+        "combined error should include rollback failure, got: {display}"
+    );
+}
+
+#[test]
+fn setup_failure_rolls_back_created_template() {
+    let setup_count = Cell::new(0);
+    let (created, dropped, outer_result) = setup_and_rollback_result(
+        || {
+            setup_count.set(setup_count.get() + 1);
+            Err(bootstrap_error("setup failed"))
+        },
+        false,
+    );
+    let inner_result = outer_result.expect("setup failure should not panic");
+    let error = inner_result.expect_err("setup failure should be returned");
+
+    assert_eq!(setup_count.get(), 1);
+    assert!(
+        error.to_string().contains("setup failed"),
+        "setup error should be preserved, got: {error}"
+    );
+    assert!(!created.get(), "failed setup should remove the template");
+    assert!(dropped.get(), "failed setup should invoke rollback");
+}
+
+#[test]
+fn rollback_failure_preserves_setup_error_context() {
+    let setup_count = Cell::new(0);
+    let (_created, dropped, outer_result) = setup_and_rollback_result(
+        || {
+            setup_count.set(setup_count.get() + 1);
+            Err(bootstrap_error("setup failed"))
+        },
+        true,
+    );
+    let inner_result = outer_result.expect("setup failure should not panic");
+    let error = inner_result.expect_err("combined setup and rollback failure should be returned");
+
     assert_eq!(setup_count.get(), 1);
     assert!(dropped.get(), "failed setup should invoke rollback");
+    assert_combined_error(&error, "setup failed", "rollback failed");
+}
 
-    match scenario.expected {
-        ExpectedOutcome::ErrorRollbackSuccess => {
-            let Ok(Err(error)) = result else {
-                panic!("setup failure should be returned");
-            };
-            assert!(
-                error.to_string().contains("setup failed"),
-                "setup error should be preserved, got: {error}"
-            );
-            assert!(!created.get(), "failed setup should remove the template");
-        }
-        ExpectedOutcome::ErrorRollbackFailure => {
-            let Ok(Err(error)) = result else {
-                panic!("combined setup and rollback failure should be returned");
-            };
-            let display = error.to_string();
-            assert!(
-                display.contains("setup failed"),
-                "combined error should preserve setup failure, got: {display}"
-            );
-            assert!(
-                display.contains("rollback failed"),
-                "combined error should include rollback failure, got: {display}"
-            );
-        }
-        ExpectedOutcome::PanicRollbackSuccess => {
-            assert!(result.is_err(), "setup panic should be resumed");
-            assert!(!created.get(), "panic path should remove the template");
-        }
-        ExpectedOutcome::PanicRollbackFailure => {
-            let Ok(Err(error)) = result else {
-                panic!("rollback failure during setup panic should return an error");
-            };
-            let display = error.to_string();
-            assert!(
-                display.contains("setup panic"),
-                "error should preserve setup panic, got: {display}"
-            );
-            assert!(
-                display.contains("rollback failed"),
-                "error should include rollback failure, got: {display}"
-            );
-        }
-    }
+#[test]
+fn setup_panic_rolls_back_created_template() {
+    let setup_count = Cell::new(0);
+    let (created, dropped, outer_result) = setup_and_rollback_result(
+        || {
+            setup_count.set(setup_count.get() + 1);
+            panic!("setup panic")
+        },
+        false,
+    );
+    let _panic = outer_result.expect_err("setup panic should be resumed");
+
+    assert_eq!(setup_count.get(), 1);
+    assert!(!created.get(), "panic path should remove the template");
+    assert!(dropped.get(), "panic path should invoke rollback");
+}
+
+#[test]
+fn setup_panic_reports_rollback_failure() {
+    let setup_count = Cell::new(0);
+    let (_created, dropped, outer_result) = setup_and_rollback_result(
+        || {
+            setup_count.set(setup_count.get() + 1);
+            panic!("setup panic")
+        },
+        true,
+    );
+    let inner_result =
+        outer_result.expect("rollback failure during setup panic should not resume panic");
+    let error =
+        inner_result.expect_err("rollback failure during setup panic should return an error");
+
+    assert_eq!(setup_count.get(), 1);
+    assert!(dropped.get(), "panic path should invoke rollback");
+    assert_combined_error(&error, "setup panic", "rollback failed");
 }
 
 #[rstest]
