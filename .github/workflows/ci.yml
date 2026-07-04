@@ -29,8 +29,10 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
       - name: Format
+        if: ${{ matrix.privilege == 'unprivileged' }}
         run: make check-fmt
       - name: Markdown lint
+        if: ${{ matrix.privilege == 'unprivileged' }}
         uses: DavidAnson/markdownlint-cli2-action@30a0e04f1870d58f8d717450cc6134995f993c63
         with:
           globs: |
@@ -38,12 +40,15 @@ jobs:
             !**/target/**
             !**/dist/**
       - name: Setup uv
+        if: ${{ matrix.privilege == 'unprivileged' }}
         uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
         with:
           enable-cache: false
       - name: Install interrogate
+        if: ${{ matrix.privilege == 'unprivileged' }}
         run: uv tool install interrogate==1.7.0
       - name: Lint
+        if: ${{ matrix.privilege == 'unprivileged' }}
         run: make lint
       - name: Install cargo-nextest
         run: cargo binstall -y cargo-nextest@0.9.122

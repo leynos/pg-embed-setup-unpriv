@@ -262,7 +262,6 @@ jobs:
               --manifest-path Cargo.toml \
               --targets "$target" \
               --strategies crate-meta-data \
-              --github-token "$GITHUB_TOKEN" \
               --install-path "$RUNNER_TEMP/binstall-url-dry-run" \
               --force \
               --dry-run \
