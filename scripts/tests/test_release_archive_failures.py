@@ -184,27 +184,29 @@ def test_build_release_binaries_raises_system_exit_on_cargo_failure(
     assert exc_info.value.code == 42
 
 
-def test_main_uses_default_release_binaries(
+@pytest.mark.parametrize(
+    ("binary_override", "expected_binaries"),
+    [
+        pytest.param(None, release_archive.DEFAULT_BINARIES, id="default-binaries"),
+        pytest.param(["pg_worker"], ("pg_worker",), id="custom-binary-override"),
+    ],
+)
+def test_main_builds_and_stages_selected_release_binaries(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    binary_override: list[str] | None,
+    expected_binaries: tuple[str, ...],
 ) -> None:
-    """The CLI builds and stages the default production binary set."""
+    """The CLI builds and stages the selected production binary set."""
     target = "x86_64-unknown-linux-gnu"
     manifest = write_manifest(tmp_path, version="0.5.1")
-    for binary in release_archive.DEFAULT_BINARIES:
+    expected_build_args = ["build", "--release", "--target", target]
+    for binary in expected_binaries:
         write_release_binary(tmp_path, target, binary)
+        expected_build_args.extend(("--bin", binary))
 
     with CmdMox() as mox:
-        mox.mock("cargo").with_args(
-            "build",
-            "--release",
-            "--target",
-            target,
-            "--bin",
-            "pg_embedded_setup_unpriv",
-            "--bin",
-            "pg_worker",
-        ).returns()
+        mox.mock("cargo").with_args(*expected_build_args).returns()
         mox.replay()
 
         release_archive.main(
@@ -213,6 +215,7 @@ def test_main_uses_default_release_binaries(
             manifest_path=manifest,
             dist_dir=Path("dist"),
             cargo="cargo",
+            binary=binary_override,
         )
 
     archive = Path(capsys.readouterr().out.strip())
@@ -220,8 +223,7 @@ def test_main_uses_default_release_binaries(
     assert archive == tmp_path / "dist" / f"{root}.tgz"
     assert archive_members(archive) == [
         root,
-        f"{root}/pg_embedded_setup_unpriv",
-        f"{root}/pg_worker",
+        *(f"{root}/{binary}" for binary in expected_binaries),
     ]
 
 
