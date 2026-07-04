@@ -700,9 +700,9 @@ design will add a couple of helper functions:
 - **Environment setup (TZDIR, etc.):** The library can also set up any required
   environment variables automatically. For example, if `TZDIR` or `TZ` must be
   set for the embedded Postgres to find time zone info, or `PGPASSFILE` for the
-  generated password file, the `bootstrap_for_tests()` should handle that,
-  internally (see docs/next-steps.md). This encapsulates all those nitty-gritty
-  details so tests don’t need to worry about them.
+  generated password file, the `bootstrap_for_tests()` should handle that
+  internally (see docs/next-steps.md), so tests don’t need to worry about those
+  nitty-gritty details.
 
 ## Logging and visibility
 
