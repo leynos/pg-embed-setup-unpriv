@@ -239,6 +239,10 @@ fn thread_state_rejects_nul_before_lock(#[case] vars: Vec<(OsString, Option<OsSt
     assert!(!state.has_lock());
     assert_env_lock_released();
 }
+
+/// Verifies invalid scope exits restore state without panicking.
+#[test]
+#[serial]
 fn thread_state_recovers_from_invalid_index() {
     let key = OsString::from("THREAD_STATE_INVALID_INDEX");
     let original = env::var_os(&key);
