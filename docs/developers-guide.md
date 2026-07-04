@@ -15,8 +15,8 @@ consumer-facing guidance.
 - Behavioural suites coordinate via a shared lock file on Unix and an atomic
   lock directory on non-Unix platforms, so concurrent test binaries do not
   contend over PostgreSQL setup or cache directories. The non-Unix lock keeps a
-  short owner grace window for missing, malformed, or unreadable owner files so
-  a competing process cannot delete a newly created lock while the owner is
+  short owner grace window for missing, malformed, or unreadable owner files,
+  so a competing process cannot delete a newly created lock while the owner is
   still being recorded.
 
 ## Feature coverage in CI
@@ -68,7 +68,7 @@ workflow creates a draft GitHub release, builds native archives for Linux
 `pg-embed-setup-unpriv-{target}-v{version}.tgz` assets containing both
 `pg_embedded_setup_unpriv` and `pg_worker`.
 
-The release workflow invokes `scripts/release_archive.py` through `uv run` so
+The release workflow invokes `scripts/release_archive.py` through `uv run`, so
 Python 3.13 and the script dependencies are provisioned explicitly on every
 runner. The script builds the selected production binaries, applies the Windows
 `.exe` suffix when staging the archive, rejects path-like `target` and
@@ -90,7 +90,7 @@ the validated postmaster process tree and keeps direct `TerminateProcess`
 traversal as the forceful fallback. The root PID from `postmaster.pid` is
 verified against the live postmaster identity before any action, and
 descendants are revalidated against the current root tree before job assignment
-or termination so a reused PID is not treated as part of the original cluster.
+or termination, so a reused PID is not treated as part of the original cluster.
 
 Debug tracing records Job Object preparation, identity mismatches, descendant
 validation skips, assignment attempts, and termination attempts with PID and

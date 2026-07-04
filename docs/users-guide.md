@@ -15,7 +15,7 @@ tool and integrate it into automated test flows.
   the unprivileged path.
 - Rust toolchain specified in `rust-toolchain.toml`.
 - Outbound network access to crates.io and the PostgreSQL binary archive.
-- System timezone database where required. On Unix-like systems this package is
+- System timezone database where required. On Unix-like systems, this package is
   usually named `tzdata`; Windows uses the platform timezone database.
 
 ## Platform expectations
