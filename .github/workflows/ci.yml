@@ -38,7 +38,7 @@ jobs:
             !**/target/**
             !**/dist/**
       - name: Setup uv
-        uses: astral-sh/setup-uv@12d13f90bc3a5a1971bebad4beb09a4dfa962e91
+        uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
         with:
           enable-cache: false
       - name: Install interrogate
@@ -183,7 +183,7 @@ jobs:
       - name: Install cargo-binstall 1.19.1
         uses: ./.github/actions/setup-cargo-binstall
       - name: Setup uv
-        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
         with:
           enable-cache: false
       - name: Build cargo-binstall archive
