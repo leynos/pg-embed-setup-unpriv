@@ -19,15 +19,13 @@ use std::{env, fs, path::Path, thread, time::Duration};
 
 use cluster_skip::cluster_skip_message;
 use color_eyre::eyre::{Context, Result, eyre};
-use pg_embedded_setup_unpriv::test_support::read_postmaster_process;
+use pg_embedded_setup_unpriv::test_support::{
+    PostmasterProcess,
+    postmaster_process_is_running,
+    read_postmaster_process,
+};
 use rstest::rstest;
 use serial::{ScenarioSerialGuard, serial_guard};
-
-#[cfg(unix)]
-type OsPid = libc::pid_t;
-
-#[cfg(windows)]
-type OsPid = u32;
 
 /// Environment variable used to signal that this binary is running as the
 /// child subprocess.
@@ -69,10 +67,9 @@ fn postmaster_exits_after_child_process_with_shutdown_hook(
         return Ok(());
     }
 
-    let _postmaster_process = read_postmaster_process(tmp_dir.path())?
+    let postmaster_process = read_postmaster_process(tmp_dir.path())?
         .ok_or_else(|| eyre!("postmaster process identity not found after child exit"))?;
-    let postmaster_pid = read_postmaster_pid_from_identity_file(&content)?;
-    wait_for_postmaster_exit(postmaster_pid)
+    wait_for_postmaster_exit(postmaster_process)
 }
 
 /// Spawns the child subprocess that creates and forgets a cluster.
@@ -89,20 +86,10 @@ fn spawn_child(pid_file: &Path) -> Result<std::process::ExitStatus> {
         .context("spawn child process")
 }
 
-fn read_postmaster_pid_from_identity_file(contents: &str) -> Result<OsPid> {
-    let first_line = contents
-        .lines()
-        .next()
-        .ok_or_else(|| eyre!("postmaster identity file was empty"))?;
-    first_line
-        .trim()
-        .parse::<OsPid>()
-        .with_context(|| format!("parse postmaster PID from '{first_line}'"))
-}
-fn wait_for_postmaster_exit(postmaster_pid: OsPid) -> Result<()> {
+fn wait_for_postmaster_exit(postmaster_process: PostmasterProcess) -> Result<()> {
     let deadline = std::time::Instant::now() + POSTMASTER_EXIT_TIMEOUT;
     loop {
-        if !os_process_is_running(postmaster_pid) {
+        if !postmaster_process_is_running(postmaster_process)? {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
@@ -112,48 +99,6 @@ fn wait_for_postmaster_exit(postmaster_pid: OsPid) -> Result<()> {
         }
         thread::sleep(POLL_INTERVAL);
     }
-}
-
-#[cfg(unix)]
-fn os_process_is_running(pid: OsPid) -> bool {
-    // SAFETY: `kill(pid, 0)` probes process existence without sending a signal.
-    let rc = unsafe { libc::kill(pid, 0) };
-    if rc == 0 {
-        return true;
-    }
-    !matches!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(code) if code == libc::ESRCH
-    )
-}
-
-#[cfg(windows)]
-fn os_process_is_running(pid: OsPid) -> bool {
-    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
-    const ERROR_INVALID_PARAMETER: u32 = 87;
-
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
-        fn CloseHandle(handle: *mut c_void) -> i32;
-        fn GetLastError() -> u32;
-    }
-
-    use std::ffi::c_void;
-
-    // SAFETY: `OpenProcess` receives a concrete PID copied from
-    // `postmaster.pid`, and handle inheritance is disabled.
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle.is_null() {
-        // SAFETY: reads the thread's last OS error after `OpenProcess`.
-        let code = unsafe { GetLastError() };
-        return code != ERROR_INVALID_PARAMETER;
-    }
-    // SAFETY: the non-null handle was returned by `OpenProcess` above.
-    unsafe {
-        CloseHandle(handle);
-    }
-    true
 }
 
 /// Returns `true` if the error should cause a soft skip rather than a hard

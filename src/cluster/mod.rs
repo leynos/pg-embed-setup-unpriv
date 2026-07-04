@@ -65,14 +65,12 @@ mod shutdown_hook;
     any(unix, windows),
     any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
 ))]
-pub use self::shutdown_hook::{PostmasterPid, process_is_running, read_postmaster_pid};
-#[cfg(all(
-    any(unix, windows),
-    any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
-))]
 pub use self::shutdown_hook::{
+    PostmasterPid,
     PostmasterProcess,
     postmaster_process_is_running,
+    process_is_running,
+    read_postmaster_pid,
     read_postmaster_process,
 };
 mod startup;

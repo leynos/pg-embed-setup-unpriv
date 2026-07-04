@@ -1,4 +1,15 @@
-"""Manifest inspection and cargo-binstall archive staging."""
+"""Inspect Cargo manifests and stage cargo-binstall archives.
+
+This module owns the filesystem side of release archive creation. It reads the
+package version from `Cargo.toml`, validates target and binary identifiers, and
+copies release binaries from Cargo's output tree into the archive layout
+expected by `cargo-binstall`.
+
+Use this module after release binaries have been built. For example,
+`stage_archive(spec)` creates `dist/<package>-<target>-v<version>.tgz` from the
+configured binary list, while `manifest_version(Path("Cargo.toml"))` discovers
+the version used by the CLI entrypoint.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +27,21 @@ PATH_SEPARATORS = frozenset({"/", "\\"})
 
 
 class ReleaseArchiveSpecLike(Protocol):
-    """Archive inputs consumed by the staging flow."""
+    """Archive inputs consumed by the staging flow.
+
+    Attributes
+    ----------
+    repo : Path
+        Repository root containing Cargo's `target` directory.
+    target : str
+        Rust target triple used to locate release build outputs.
+    version : str
+        Package version used in the archive stem, without a leading `v`.
+    dist_dir : Path
+        Directory receiving the generated `.tgz` archive.
+    binaries : tuple[str, ...]
+        Binary target names to copy into the archive root.
+    """
 
     repo: Path
     target: str
@@ -27,7 +52,15 @@ class ReleaseArchiveSpecLike(Protocol):
 
 @dataclass(frozen=True)
 class ManifestVersionError(Exception):
-    """Typed failure raised when Cargo manifest version discovery fails."""
+    """Typed failure raised when Cargo manifest version discovery fails.
+
+    Attributes
+    ----------
+    manifest_path : Path
+        Manifest path that could not be read or interpreted.
+    reason : str
+        Human-readable explanation of the read, parse, or structure failure.
+    """
 
     manifest_path: Path
     reason: str
@@ -227,7 +260,9 @@ def _empty_path_component_violation(value: str, kind: str) -> str | None:
 
 def _parent_dir_path_component_violation(value: str, kind: str) -> str | None:
     """Return the validation error for a parent-directory path component."""
-    if value in {".", ".."} or ".." in value:
+    if value == ".":
+        return f"{kind} cannot be '.': {value}"
+    if value == ".." or ".." in value:
         return f"{kind} cannot contain '..': {value}"
     return None
 

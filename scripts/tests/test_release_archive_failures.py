@@ -320,8 +320,15 @@ def test_cargo_program_and_args_treats_generated_paths_as_executables(
 
     parsed_program, parsed_args = release_archive._cargo_program_and_args(cargo)
 
-    assert parsed_program == cargo
-    assert parsed_args == []
+    assert parsed_program == cargo, (
+        "test_cargo_program_and_args_treats_generated_paths_as_executables "
+        f"expected generated cargo path to be preserved: expected={cargo!r}, "
+        f"actual={parsed_program!r}"
+    )
+    assert parsed_args == [], (
+        "test_cargo_program_and_args_treats_generated_paths_as_executables "
+        f"expected path-like cargo executable to have no wrapper args: actual={parsed_args!r}"
+    )
 
 
 @settings(max_examples=150)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import re
-import shlex
 import sys
 import tarfile
 from pathlib import Path
@@ -55,9 +54,9 @@ def assert_build_release_binaries_invokes_cargo(
     expected_args: tuple[str, ...],
 ) -> None:
     """Assert the release binary build delegates to Cargo as expected."""
-    program = shlex.split(spec.cargo)[0]
+    program, program_args = release_archive._cargo_program_and_args(spec.cargo)
     with CmdMox() as mox:
-        mox.mock(program).with_args(*expected_args).returns()
+        mox.mock(program).with_args(*program_args, *expected_args).returns()
         mox.replay()
 
         release_archive.build_release_binaries(spec)
@@ -75,6 +74,12 @@ def test_windows_targets_use_exe_suffix() -> None:
         pytest.param(None, "No such file", "contains", id="missing-manifest"),
         pytest.param("[package\n", "invalid TOML:", "startswith", id="invalid-toml"),
         pytest.param('package = 1\n', "package must be a table", "exact", id="package-table"),
+        pytest.param(
+            '[package]\nname = "pg-embed-setup-unpriv"\n',
+            "missing key: 'version'",
+            "exact",
+            id="missing-version",
+        ),
         pytest.param(
             '[package]\nname = "pg-embed-setup-unpriv"\nversion = 1\n',
             "package.version must be a string",
@@ -251,7 +256,6 @@ def test_build_release_binaries_preserves_cargo_wrapper_args(tmp_path: Path) -> 
     """Release builds preserve wrapper commands before Cargo."""
     binaries = ("pg_embedded_setup_unpriv",)
     expected_args = (
-        "cargo",
         "build",
         "--release",
         "--target",

@@ -47,6 +47,8 @@ impl EnvSnapshot {
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for environment snapshot conversion helpers.
+
     use camino::Utf8PathBuf;
 
     use super::*;

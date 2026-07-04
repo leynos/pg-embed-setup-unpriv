@@ -7,16 +7,7 @@ use tokio::runtime::Runtime;
 use tracing::{error, info, info_span};
 
 use super::{WorkerOperation, panic_utils::nested_runtime_thread_panic};
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 use crate::worker_process::{self, WorkerRequest, WorkerRequestArgs};
 use crate::{
     ExecutionMode,
@@ -94,16 +85,7 @@ fn execute_root_operation(
 ///
 /// This is the shared implementation for worker spawning, used by both sync and
 /// async code paths.
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-))]
+#[cfg(all(unix, privileged_unix_platform))]
 fn spawn_worker_inner(
     bootstrap: &TestBootstrapSettings,
     env_vars: &[(String, Option<String>)],

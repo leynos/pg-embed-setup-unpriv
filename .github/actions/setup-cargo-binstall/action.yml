@@ -20,7 +20,19 @@ runs:
 
         requested_binstall_dir="$RUNNER_TEMP/cargo-binstall-${CARGO_BINSTALL_VERSION}"
         mkdir -p "$requested_binstall_dir"
-        cargo binstall -y \
+
+        bootstrap_binstall_dir="$RUNNER_TEMP/cargo-binstall-bootstrap-${CARGO_BINSTALL_VERSION}"
+        cargo install cargo-binstall \
+          --version "$CARGO_BINSTALL_VERSION" \
+          --root "$bootstrap_binstall_dir" \
+          --locked
+
+        bootstrap_binstall_bin="$bootstrap_binstall_dir/bin/cargo-binstall"
+        if [[ "$RUNNER_OS_NAME" == "Windows" ]]; then
+          bootstrap_binstall_bin="${bootstrap_binstall_bin}.exe"
+        fi
+
+        "$bootstrap_binstall_bin" -y \
           --install-path "$requested_binstall_dir" \
           --force \
           "cargo-binstall@${CARGO_BINSTALL_VERSION}"

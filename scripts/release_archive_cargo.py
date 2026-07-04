@@ -1,4 +1,15 @@
-"""Cargo command resolution and release binary builds."""
+"""Build release binaries with the configured Cargo command.
+
+This module owns the Cargo-facing half of release archive creation. It parses
+the caller's Cargo command, preserves wrapper arguments such as `sccache`, and
+invokes `cargo build --release` for the binaries that will later be staged into
+`cargo-binstall` archives.
+
+Use this module when release packaging needs to build binaries before archive
+staging. For example, `build_release_binaries(spec)` validates the release
+target and binary names, resolves the Cargo executable, and runs the build in
+`spec.repo`.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +37,21 @@ CATALOGUE = ProgramCatalogue(
 
 
 class ReleaseBuildSpecLike(Protocol):
-    """Build inputs consumed by the Cargo release builder."""
+    """Build inputs consumed by the Cargo release builder.
+
+    Attributes
+    ----------
+    repo : Path
+        Repository root used as the Cargo working directory.
+    target : str
+        Rust target triple to pass to `cargo build --target`.
+    binaries : tuple[str, ...]
+        Binary target names to build with repeated `--bin` arguments.
+    cargo : str
+        Cargo executable command, optionally including wrapper arguments.
+    build_jobs : str | None
+        Optional Cargo job-count flags supplied by the caller.
+    """
 
     repo: Path
     target: str

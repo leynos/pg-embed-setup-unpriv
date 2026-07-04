@@ -92,8 +92,8 @@ cargo binstall pg-embed-setup-unpriv
    budget. The helper accepts values between `1` and `600` seconds and reports
    an error when the override falls outside that range or cannot be parsed.
 
-3. Run the helper (`cargo run --release --bin pg_embedded_setup_unpriv`). The
-   command downloads the specified PostgreSQL release, ensures the directories
+3. Run the installed helper (`pg_embedded_setup_unpriv`). The command downloads
+   the specified PostgreSQL release, ensures the directories
    exist, applies PostgreSQL-compatible permissions on Unix (0755 for the
    installation cache, 0700 for the runtime and data directories), and
    initializes the cluster with the provided credentials via `initdb`. On
