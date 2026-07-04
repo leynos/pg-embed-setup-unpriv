@@ -1,14 +1,23 @@
 //! Property tests for cleanup lifecycle invariants.
 
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+use postgresql_embedded::Settings;
+use proptest::{
+    prelude::*,
+    test_runner::{TestCaseError, TestCaseResult},
+};
+
 use super::{
-    cleanup_in_process, is_dangerous_cleanup_path, should_remove_data, should_remove_install,
+    cleanup_in_process,
+    is_dangerous_cleanup_path,
+    should_remove_data,
+    should_remove_install,
 };
 use crate::CleanupMode;
-use postgresql_embedded::Settings;
-use proptest::prelude::*;
-use proptest::test_runner::{TestCaseError, TestCaseResult};
-use std::fs;
-use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy)]
 enum PathCase {
@@ -33,13 +42,9 @@ enum DirectoryEntryState {
 }
 
 impl DirectoryEntryState {
-    const fn is_present(self) -> bool {
-        matches!(self, Self::Empty | Self::Marked)
-    }
+    const fn is_present(self) -> bool { matches!(self, Self::Empty | Self::Marked) }
 
-    const fn has_marker(self) -> bool {
-        matches!(self, Self::Marked)
-    }
+    const fn has_marker(self) -> bool { matches!(self, Self::Marked) }
 }
 
 fn cleanup_mode_strategy() -> impl Strategy<Value = CleanupMode> {

@@ -6,11 +6,15 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::error::{BootstrapError, BootstrapResult};
-use crate::{ClusterHandle, TestCluster};
-
-use super::fixtures::ensure_worker_env;
-use super::shared_singleton_core::{SharedInitState, get_or_try_init_shared};
+use super::{
+    fixtures::ensure_worker_env,
+    shared_singleton_core::{SharedInitState, get_or_try_init_shared},
+};
+use crate::{
+    ClusterHandle,
+    TestCluster,
+    error::{BootstrapError, BootstrapResult},
+};
 
 // ============================================================================
 // Shared cluster handle singleton
@@ -274,21 +278,22 @@ pub fn shared_cluster() -> BootstrapResult<&'static TestCluster> {
     }
 }
 
+#[cfg(test)]
 mod tests {
     //! Tests for shared singleton lifecycle helpers.
 
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
     use super::*;
-    use crate::ExecutionPrivileges;
-    use crate::test_support::dummy_settings;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use crate::{ExecutionPrivileges, test_support::dummy_settings};
 
     struct DropProbe(Arc<AtomicBool>);
 
     impl Drop for DropProbe {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
-        }
+        fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); }
     }
 
     #[test]
@@ -309,7 +314,8 @@ mod tests {
         );
         assert!(
             was_dropped.load(Ordering::SeqCst),
-            "guard must drop on registration failure so postmaster.pid is removed and no orphaned PostgreSQL process remains"
+            "guard must drop on registration failure so postmaster.pid is removed and no orphaned \
+             PostgreSQL process remains"
         );
     }
 }

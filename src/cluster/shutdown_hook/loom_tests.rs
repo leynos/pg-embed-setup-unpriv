@@ -1,9 +1,5 @@
 //! Loom checks for shutdown-hook registration state.
 
-use loom::sync::atomic::{AtomicUsize, Ordering};
-use loom::sync::{Arc, Mutex};
-use loom::thread;
-
 enum LoomShutdownRegistrationState {
     Empty,
     Registering,

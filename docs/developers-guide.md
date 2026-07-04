@@ -97,7 +97,8 @@ Loom-based checks are opt-in and only compile when the `loom-tests` feature is
 enabled. The Loom tests are marked `#[ignore]`, and `make test` keeps them
 dormant: the nextest run uses `--all-features`, while the follow-up
 `cargo test` run disables default features (enabling `dev-worker` only). CI
-runs the ignored library Loom models explicitly. Run the same suite locally with:
+runs the ignored library Loom models explicitly. Run the same suite locally
+with:
 
 ```sh
 make test-loom

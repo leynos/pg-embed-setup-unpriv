@@ -253,7 +253,6 @@ fn sorted_configuration_keys(settings: &Settings) -> Vec<&str> {
     keys
 }
 mod property_tests;
-
 #[cfg(test)]
 mod tests;
 mod unix_user;

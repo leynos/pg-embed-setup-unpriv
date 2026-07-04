@@ -1,12 +1,21 @@
 //! Loom checks for template database lifecycle coordination.
 
-use super::lifecycle_template::{
-    TemplateCreationOps, TemplateLockOps, ensure_template_exists_with_lock,
-};
-use loom::sync::atomic::{AtomicUsize, Ordering};
-use loom::sync::{Arc, Mutex};
-use loom::thread;
 use std::collections::{BTreeMap, BTreeSet};
+
+use loom::{
+    sync::{
+        Arc,
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
+};
+
+use super::lifecycle_template::{
+    TemplateCreationOps,
+    TemplateLockOps,
+    ensure_template_exists_with_lock,
+};
 
 struct LoomTemplateLocks {
     locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,

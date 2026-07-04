@@ -9,13 +9,16 @@
 
 use camino::Utf8PathBuf;
 use cap_std::fs::{OpenOptions, OpenOptionsExt};
-use nix::sys::stat::{Mode, fchmod};
-use nix::unistd::{User, fchown};
-
-use crate::error::{BootstrapError, BootstrapResult};
-use crate::privileges::ensure_dir_for_user;
+use nix::{
+    sys::stat::{Mode, fchmod},
+    unistd::{User, fchown},
+};
 
 use super::PGPASS_MODE;
+use crate::{
+    error::{BootstrapError, BootstrapResult},
+    privileges::ensure_dir_for_user,
+};
 
 pub(super) fn ensure_install_dir_for_user(path: &Utf8PathBuf, user: &User) -> BootstrapResult<()> {
     ensure_dir_for_user(path, user, 0o755)?;

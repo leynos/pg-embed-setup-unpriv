@@ -6,11 +6,15 @@
 use color_eyre::eyre::WrapErr;
 use tracing::info_span;
 
-use super::connection::{TestClusterConnection, escape_identifier};
-use super::lifecycle_template::{
-    STD_TEMPLATE_LOCKS, TemplateCreationOps, ensure_template_exists_with_lock,
+use super::{
+    connection::{TestClusterConnection, escape_identifier},
+    lifecycle_template::{
+        STD_TEMPLATE_LOCKS,
+        TemplateCreationOps,
+        ensure_template_exists_with_lock,
+    },
+    temporary_database::TemporaryDatabase,
 };
-use super::temporary_database::TemporaryDatabase;
 use crate::error::BootstrapResult;
 
 /// A strongly-typed database name for use with lifecycle operations.

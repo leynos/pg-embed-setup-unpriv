@@ -1,11 +1,12 @@
 //! Property tests for pure bootstrap path resolution.
 
+use std::fmt::Display;
+
+use camino::Utf8PathBuf;
+use proptest::{prelude::*, test_runner::TestCaseError};
+
 use super::settings_paths_from_settings;
 use crate::PgEnvCfg;
-use camino::Utf8PathBuf;
-use proptest::prelude::*;
-use proptest::test_runner::TestCaseError;
-use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 struct PathResolutionCase {

@@ -1,8 +1,10 @@
 //! Template database lock coordination for lifecycle operations.
 
-use std::any::Any;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::{
+    any::Any,
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use color_eyre::eyre::eyre;
 use dashmap::DashMap;
@@ -230,8 +232,10 @@ fn template_setup_rollback_error(
 mod tests {
     //! Tests for template lifecycle coordination helpers.
 
-    use std::cell::Cell;
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::{
+        cell::Cell,
+        panic::{AssertUnwindSafe, catch_unwind},
+    };
 
     use color_eyre::eyre::eyre;
 
@@ -246,9 +250,7 @@ mod tests {
         }
     }
 
-    fn bootstrap_error(message: &str) -> BootstrapError {
-        eyre!("{message}").into()
-    }
+    fn bootstrap_error(message: &str) -> BootstrapError { eyre!("{message}").into() }
 
     #[test]
     fn setup_failure_rolls_back_created_template() {

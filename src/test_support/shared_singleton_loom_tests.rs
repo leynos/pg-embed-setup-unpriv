@@ -6,10 +6,16 @@
 //! a torn intermediate state while reusing the same core state-machine logic as
 //! `shared_singleton.rs`.
 
+use loom::{
+    sync::{
+        Arc,
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
+};
+
 use super::shared_singleton_core::{SharedInitState, get_or_try_init_shared};
-use loom::sync::atomic::{AtomicUsize, Ordering};
-use loom::sync::{Arc, Mutex};
-use loom::thread;
 
 const FIRST_FAILURE: usize = 13;
 const CACHED_FAILURE: usize = 17;

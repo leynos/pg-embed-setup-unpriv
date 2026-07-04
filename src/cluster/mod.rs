@@ -64,25 +64,11 @@ mod runtime_mode;
 mod shutdown;
 #[cfg(any(unix, windows))]
 mod shutdown_hook;
-#[cfg(all(
-    any(unix, windows),
-    any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
-))]
-pub use self::shutdown_hook::{
-    PostmasterPid,
-    PostmasterProcess,
-    postmaster_process_is_running,
-    process_is_running,
-    read_postmaster_pid,
-    read_postmaster_process,
-};
 mod startup;
 mod temporary_database;
 mod worker_invoker;
 mod worker_operation;
-#[cfg(all(test, feature = "loom-tests"))]
 mod lifecycle_loom_tests;
-
 use std::ops::Deref;
 
 use tracing::info_span;
