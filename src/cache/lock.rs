@@ -14,6 +14,7 @@ use std::{
 use camino::Utf8Path;
 
 /// Subdirectory within the cache for lock files.
+#[cfg(unix)]
 const LOCKS_SUBDIR: &str = ".locks";
 
 /// Guard that holds a file lock until dropped.
@@ -182,6 +183,7 @@ mod tests {
     #[rstest]
     #[case::exclusive("17.4.0", true)]
     #[case::shared("16.3.0", false)]
+    #[cfg(unix)]
     fn acquire_lock_creates_lock_file(
         cache_fixture: (TempDir, camino::Utf8PathBuf),
         #[case] version: &str,

@@ -1,0 +1,148 @@
+name: Setup local HTTPS server
+description: Generate a local CA and serve a directory over HTTPS on localhost.
+
+inputs:
+  port:
+    description: Local TCP port for the HTTPS server.
+    required: true
+  cert-dir:
+    description: Directory that will receive the generated CA and server certificate.
+    required: true
+  serve-dir:
+    description: Directory to serve over HTTPS.
+    required: true
+
+outputs:
+  ca-certificate:
+    description: Path to the generated CA certificate.
+    value: ${{ steps.start-server.outputs.ca-certificate }}
+  log-path:
+    description: Path to the HTTPS server log file.
+    value: ${{ steps.start-server.outputs.log-path }}
+  server-pid:
+    description: Process ID for the background HTTPS server.
+    value: ${{ steps.start-server.outputs.server-pid }}
+
+runs:
+  using: composite
+  steps:
+    - name: Generate certificates and start HTTPS server
+      id: start-server
+      shell: bash
+      env:
+        CERT_DIR: ${{ inputs.cert-dir }}
+        RELEASE_PORT: ${{ inputs.port }}
+        SERVE_DIR: ${{ inputs.serve-dir }}
+      run: |
+        set -euo pipefail
+
+        rm -rf "$CERT_DIR"
+        mkdir -p "$CERT_DIR"
+
+        cat > "$CERT_DIR/ca.cnf" <<'EOF'
+        [ req ]
+        prompt = no
+        distinguished_name = ca_dn
+        x509_extensions = v3_ca
+        default_md = sha256
+        string_mask = utf8only
+
+        [ ca_dn ]
+        O = pg-embed-setup-unpriv
+        CN = pg local test CA
+
+        [ v3_ca ]
+        subjectKeyIdentifier = hash
+        authorityKeyIdentifier = keyid:always
+        basicConstraints = critical,CA:TRUE,pathlen:0
+        keyUsage = critical,keyCertSign,cRLSign
+        EOF
+        env MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes \
+          -sha256 \
+          -days 1 \
+          -set_serial 1 \
+          -keyout "$CERT_DIR/ca.key" \
+          -out "$CERT_DIR/ca.pem" \
+          -config "$CERT_DIR/ca.cnf"
+
+        cat > "$CERT_DIR/server-req.cnf" <<'EOF'
+        [ req ]
+        prompt = no
+        distinguished_name = server_dn
+        default_md = sha256
+        string_mask = utf8only
+
+        [ server_dn ]
+        O = pg-embed-setup-unpriv
+        CN = 127.0.0.1
+        EOF
+        env MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes \
+          -sha256 \
+          -keyout "$CERT_DIR/server.key" \
+          -out "$CERT_DIR/server.csr" \
+          -config "$CERT_DIR/server-req.cnf"
+
+        cat > "$CERT_DIR/server-ext.cnf" <<'EOF'
+        [ server_cert ]
+        subjectKeyIdentifier = hash
+        authorityKeyIdentifier = keyid,issuer
+        basicConstraints = critical,CA:FALSE
+        subjectAltName = IP:127.0.0.1
+        extendedKeyUsage = serverAuth
+        keyUsage = critical,digitalSignature,keyEncipherment
+        EOF
+        env MSYS_NO_PATHCONV=1 openssl x509 -req \
+          -in "$CERT_DIR/server.csr" \
+          -CA "$CERT_DIR/ca.pem" \
+          -CAkey "$CERT_DIR/ca.key" \
+          -set_serial 2 \
+          -sha256 \
+          -days 1 \
+          -out "$CERT_DIR/server.pem" \
+          -extfile "$CERT_DIR/server-ext.cnf" \
+          -extensions server_cert
+        openssl verify -x509_strict -purpose sslserver \
+          -CAfile "$CERT_DIR/ca.pem" \
+          "$CERT_DIR/server.pem"
+
+        if command -v python3 >/dev/null 2>&1; then
+          python_bin=python3
+        else
+          python_bin=python
+        fi
+
+        log_path="$RUNNER_TEMP/binstall-http.log"
+        CERT_DIR="$CERT_DIR" RELEASE_PORT="$RELEASE_PORT" SERVE_DIR="$SERVE_DIR" \
+          "$python_bin" - <<'PY' >"$log_path" 2>&1 &
+        from functools import partial
+        from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+        from pathlib import Path
+        import os
+        import ssl
+
+        cert_dir = Path(os.environ["CERT_DIR"])
+        serve_dir = Path(os.environ["SERVE_DIR"]).resolve()
+        handler = partial(SimpleHTTPRequestHandler, directory=str(serve_dir))
+        port = int(os.environ["RELEASE_PORT"])
+        server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert_dir / "server.pem", cert_dir / "server.key")
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server.serve_forever()
+        PY
+        server_pid=$!
+
+        for attempt in {1..30}; do
+          if curl --insecure -fsS "https://127.0.0.1:${RELEASE_PORT}/" >/dev/null; then
+            break
+          fi
+          if [[ "$attempt" -eq 30 ]]; then
+            cat "$log_path" >&2
+            exit 1
+          fi
+          sleep 1
+        done
+
+        echo "ca-certificate=$CERT_DIR/ca.pem" >> "$GITHUB_OUTPUT"
+        echo "log-path=$log_path" >> "$GITHUB_OUTPUT"
+        echo "server-pid=$server_pid" >> "$GITHUB_OUTPUT"

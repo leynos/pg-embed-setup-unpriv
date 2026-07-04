@@ -3,9 +3,11 @@
 use std::io::ErrorKind;
 
 use camino::{Utf8Path, Utf8PathBuf};
+#[cfg(unix)]
+use cap_std::fs::{Permissions, PermissionsExt};
 use cap_std::{
     ambient_authority,
-    fs::{Dir, Metadata, Permissions, PermissionsExt},
+    fs::{Dir, Metadata},
 };
 use color_eyre::eyre::{Context, Result};
 use tracing::{error, info, info_span};
@@ -158,6 +160,16 @@ fn set_permissions_inner(
         return Ok(());
     }
 
+    set_permissions_for_platform(path, mode, dir, relative)
+}
+
+#[cfg(unix)]
+fn set_permissions_for_platform(
+    path: &Utf8Path,
+    mode: u32,
+    dir: &Dir,
+    relative: &Utf8PathBuf,
+) -> Result<()> {
     match dir.set_permissions(relative.as_std_path(), Permissions::from_mode(mode)) {
         Ok(()) => {
             log_permissions_applied(path, mode);
@@ -167,6 +179,25 @@ fn set_permissions_inner(
     }
 }
 
+#[cfg(not(unix))]
+fn set_permissions_for_platform(
+    path: &Utf8Path,
+    mode: u32,
+    dir: &Dir,
+    relative: &Utf8PathBuf,
+) -> Result<()> {
+    dir.metadata(relative.as_std_path())
+        .with_context(|| format!("stat {}", path.as_str()))?;
+    info!(
+        target: LOG_TARGET,
+        path = %path,
+        mode_octal = format_args!("{mode:o}"),
+        "skipped POSIX permission application on non-Unix target"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
 fn log_permissions_applied(path: &Utf8Path, mode: u32) {
     info!(
         target: LOG_TARGET,
@@ -176,6 +207,7 @@ fn log_permissions_applied(path: &Utf8Path, mode: u32) {
     );
 }
 
+#[cfg(unix)]
 fn handle_permission_error(path: &Utf8Path, mode: u32, err: std::io::Error) -> Result<()> {
     error!(
         target: LOG_TARGET,
@@ -236,7 +268,11 @@ mod tests {
     use rstest::rstest;
     use tempfile::tempdir;
 
-    use super::{ensure_dir_exists, ensure_existing_path_is_dir, find_existing_ancestor};
+    #[cfg(unix)]
+    use super::ensure_dir_exists;
+    #[cfg(not(unix))]
+    use super::set_permissions;
+    use super::{ensure_existing_path_is_dir, find_existing_ancestor};
 
     /// Test-case container: `create_file` selects file vs directory, and
     /// `error_kind` records the expected `ErrorKind` outcome.
@@ -376,6 +412,30 @@ mod tests {
         assert!(
             target.exists(),
             "directory should still exist after second call"
+        );
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn set_permissions_checks_target_exists_before_skipping_posix_permissions() {
+        let temp = tempdir().expect("tempdir");
+        let base =
+            Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).expect("utf8 tempdir path");
+        let existing = base.join("existing");
+        std::fs::create_dir(&existing).expect("create existing target");
+
+        set_permissions(&existing, 0o700).expect("existing target should skip permissions");
+
+        let missing = base.join("missing");
+        let err = set_permissions(&missing, 0o700)
+            .expect_err("missing target should still return NotFound");
+        let has_not_found = err
+            .chain()
+            .filter_map(|source| source.downcast_ref::<std::io::Error>())
+            .any(|source| source.kind() == ErrorKind::NotFound);
+        assert!(
+            has_not_found,
+            "expected NotFound in error chain for missing target, got {err:?}"
         );
     }
 }

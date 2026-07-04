@@ -1,4 +1,4 @@
-//! End-to-end lifecycle test for the atexit shutdown hook.
+//! End-to-end lifecycle test for the process-exit shutdown hook.
 //!
 //! Verifies that `PostgreSQL` processes do not survive test binary exit when
 //! the shutdown hook is registered. Uses a subprocess pattern: the parent
@@ -6,10 +6,12 @@
 //! hook, writes the postmaster PID to a temp file, then calls
 //! `std::process::exit(0)`. The parent waits for the child to exit and then
 //! confirms the postmaster has also terminated.
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 #[path = "support/cluster_skip.rs"]
 mod cluster_skip;
+#[path = "support/serial.rs"]
+mod serial;
 #[path = "support/skip.rs"]
 mod skip;
 
@@ -17,8 +19,13 @@ use std::{env, fs, path::Path, thread, time::Duration};
 
 use cluster_skip::cluster_skip_message;
 use color_eyre::eyre::{Context, Result, eyre};
-use libc::pid_t;
-use pg_embedded_setup_unpriv::test_support::{process_is_running, read_postmaster_pid};
+use pg_embedded_setup_unpriv::test_support::{
+    PostmasterProcess,
+    postmaster_process_is_running,
+    read_postmaster_process,
+};
+use rstest::rstest;
+use serial::{ScenarioSerialGuard, serial_guard};
 
 /// Environment variable used to signal that this binary is running as the
 /// child subprocess.
@@ -37,11 +44,13 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Spawns a child process that creates a cluster with the shutdown hook,
 /// then verifies the postmaster is stopped after the child exits.
-#[test]
-#[ignore = "requires real PostgreSQL — run with `cargo test -- --ignored`"]
-fn postmaster_exits_after_child_process_with_shutdown_hook() -> Result<()> {
+#[rstest]
+fn postmaster_exits_after_child_process_with_shutdown_hook(
+    serial_guard: ScenarioSerialGuard,
+) -> Result<()> {
+    let _guard = serial_guard;
     let tmp_dir = tempfile::tempdir().context("create temp dir")?;
-    let pid_file = tmp_dir.path().join("postmaster_pid");
+    let pid_file = tmp_dir.path().join("postmaster.pid");
 
     let child_status = spawn_child(&pid_file)?;
 
@@ -49,7 +58,7 @@ fn postmaster_exits_after_child_process_with_shutdown_hook() -> Result<()> {
         return Err(eyre!("child process exited with status {child_status}"));
     }
 
-    // The child writes either a PID or "SKIP" to the temp file.
+    // The child writes either a postmaster identity file or "SKIP" to the temp file.
     // "SKIP" signals that the environment cannot support cluster creation
     // (e.g. missing PostgreSQL binaries).
     let content = fs::read_to_string(&pid_file).context("read PID file from child")?;
@@ -58,11 +67,9 @@ fn postmaster_exits_after_child_process_with_shutdown_hook() -> Result<()> {
         return Ok(());
     }
 
-    let pid: pid_t = content
-        .trim()
-        .parse()
-        .context("parse postmaster PID from child")?;
-    wait_for_postmaster_exit(pid)
+    let postmaster_process = read_postmaster_process(tmp_dir.path())?
+        .ok_or_else(|| eyre!("postmaster process identity not found after child exit"))?;
+    wait_for_postmaster_exit(postmaster_process)
 }
 
 /// Spawns the child subprocess that creates and forgets a cluster.
@@ -79,15 +86,15 @@ fn spawn_child(pid_file: &Path) -> Result<std::process::ExitStatus> {
         .context("spawn child process")
 }
 
-fn wait_for_postmaster_exit(pid: pid_t) -> Result<()> {
+fn wait_for_postmaster_exit(postmaster_process: PostmasterProcess) -> Result<()> {
     let deadline = std::time::Instant::now() + POSTMASTER_EXIT_TIMEOUT;
     loop {
-        if !process_is_running(pid) {
+        if !postmaster_process_is_running(postmaster_process)? {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
             return Err(eyre!(
-                "postmaster (PID {pid}) did not exit within {POSTMASTER_EXIT_TIMEOUT:?}"
+                "postmaster process did not exit within {POSTMASTER_EXIT_TIMEOUT:?}"
             ));
         }
         thread::sleep(POLL_INTERVAL);
@@ -115,7 +122,7 @@ fn should_skip(message: &str, debug: &str) -> bool {
 /// `PostgreSQL` binaries), the child writes "SKIP" to the PID file and
 /// exits cleanly so the parent can detect the soft skip.
 #[test]
-#[ignore = "child subprocess entry point — not a standalone test"]
+#[ignore = "child subprocess entry point - not a standalone test"]
 fn shutdown_hook_lifecycle_child_entry() -> Result<()> {
     let Ok(pid_file_path) = env::var(CHILD_ENV_KEY) else {
         // Not running as the child subprocess — skip silently.
@@ -143,9 +150,8 @@ fn shutdown_hook_lifecycle_child_entry() -> Result<()> {
         .context("register shutdown hook")?;
 
     // Write postmaster PID to the temp file for the parent to verify.
-    let pid = read_postmaster_pid(&handle.settings().data_dir)
-        .ok_or_else(|| eyre!("postmaster.pid not found after cluster start"))?;
-    fs::write(&pid_file_path, pid.to_string()).context("write PID file")?;
+    let source_pid_file = handle.settings().data_dir.join("postmaster.pid");
+    fs::copy(&source_pid_file, &pid_file_path).context("write postmaster identity file")?;
 
     // Forget the guard so Drop doesn't shut down the cluster — the atexit
     // hook is responsible.

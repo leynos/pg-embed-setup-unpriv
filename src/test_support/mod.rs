@@ -30,9 +30,14 @@ pub use errors::{bootstrap_error, privilege_error};
 pub use filesystem::ambient_dir_and_path;
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 pub use filesystem::{CapabilityTempDir, ensure_dir_exists, metadata, set_permissions};
-pub use fixtures::{dummy_environment, dummy_settings, test_runtime};
-#[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
-pub use fixtures::{ensure_worker_env, shared_cluster, shared_cluster_handle};
+pub use fixtures::{
+    dummy_environment,
+    dummy_settings,
+    ensure_worker_env,
+    shared_cluster,
+    shared_cluster_handle,
+    test_runtime,
+};
 #[cfg(not(doc))]
 pub use fixtures::{shared_test_cluster, shared_test_cluster_handle, test_cluster};
 #[cfg(doc)]
@@ -63,7 +68,14 @@ pub use scoped_env::scoped_env;
 pub use worker_env::worker_binary_for_tests;
 
 #[cfg(all(
-    unix,
+    any(unix, windows),
     any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker")
 ))]
-pub use crate::cluster::{process_is_running, read_postmaster_pid};
+pub use crate::cluster::{
+    PostmasterPid,
+    PostmasterProcess,
+    postmaster_process_is_running,
+    process_is_running,
+    read_postmaster_pid,
+    read_postmaster_process,
+};

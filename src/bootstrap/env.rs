@@ -1,8 +1,9 @@
 //! Parses environment variables used by the bootstrapper and surfaces the
 //! resulting configuration for the filesystem preparers.
+#[cfg(unix)]
+use std::ffi::OsString;
 use std::{
     env::{self, VarError},
-    ffi::OsString,
     io::ErrorKind,
     path::PathBuf,
     time::Duration,
@@ -16,24 +17,27 @@ use color_eyre::eyre::Report;
 pub use crate::bootstrap::env_types::TestBootstrapEnvironment;
 pub(super) use crate::bootstrap::env_types::XdgDirs;
 use crate::{
-    bootstrap::{env_types::TimezoneEnv, mode::ExecutionPrivileges},
+    bootstrap::{
+        env_types::TimezoneEnv,
+        mode::{ExecutionPrivileges, root_privilege_drop_supported},
+    },
     error::{BootstrapError, BootstrapErrorKind, BootstrapResult},
     fs::ambient_dir_and_path,
 };
 #[cfg(unix)]
 const WORKER_BINARY_NAME: &str = "pg_worker";
-#[cfg(windows)]
-const WORKER_BINARY_NAME: &str = "pg_worker.exe";
 pub(super) const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_SHUTDOWN_TIMEOUT_SECS: u64 = 600;
 const SHUTDOWN_TIMEOUT_ENV: &str = "PG_SHUTDOWN_TIMEOUT_SECS";
 
+#[cfg(unix)]
 fn discover_worker_from_path() -> BootstrapResult<Option<Utf8PathBuf>> {
     discover_worker_from_path_value(env::var_os("PATH"))
 }
 
 /// Hard-fails on non-UTF-8 PATH entries, skips empty/"." entries, and returns
 /// the first executable match for `WORKER_BINARY_NAME`.
+#[cfg(unix)]
 fn discover_worker_from_path_value(
     path_var: Option<OsString>,
 ) -> BootstrapResult<Option<Utf8PathBuf>> {
@@ -71,9 +75,6 @@ fn is_executable(path: &Utf8Path) -> bool {
         m.permissions().mode() & 0o111 != 0
     })
 }
-
-#[cfg(not(unix))]
-fn is_executable(_path: &Utf8Path) -> bool { true }
 
 /// Common Unix paths where time zone databases may be installed.
 ///
@@ -155,6 +156,10 @@ pub(super) fn shutdown_timeout_from_env() -> BootstrapResult<Duration> {
 pub(super) fn worker_binary_from_env(
     privileges: ExecutionPrivileges,
 ) -> BootstrapResult<Option<Utf8PathBuf>> {
+    if privileges != ExecutionPrivileges::Root || !root_privilege_drop_supported() {
+        return Ok(None);
+    }
+
     if let Some(raw) = env::var_os("PG_EMBEDDED_WORKER") {
         let path = Utf8PathBuf::from_path_buf(PathBuf::from(&raw)).map_err(|_| {
             let invalid_value = raw.to_string_lossy().to_string();
@@ -170,17 +175,10 @@ pub(super) fn worker_binary_from_env(
 
     #[cfg(unix)]
     {
-        if privileges == ExecutionPrivileges::Root {
-            if let Some(worker) = discover_worker_from_path()? {
-                validate_worker_path(&worker)?;
-                return Ok(Some(worker));
-            }
+        if let Some(worker) = discover_worker_from_path()? {
+            validate_worker_path(&worker)?;
+            return Ok(Some(worker));
         }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = privileges;
     }
 
     Ok(None)

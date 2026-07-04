@@ -127,7 +127,7 @@ mod behaviour_tests {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, privileged_unix_platform))]
 mod unix_tests {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 

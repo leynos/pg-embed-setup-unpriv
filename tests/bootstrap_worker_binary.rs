@@ -29,8 +29,21 @@ mod sandbox;
 use pg_worker_helpers::{pg_worker_binary, run_pg_worker};
 use sandbox::TestSandbox;
 
+fn skip_worker_validation_when_unprivileged(test_name: &str) -> bool {
+    if geteuid().is_root() {
+        return false;
+    }
+
+    tracing::warn!("skipping {test_name}: requires root privileges");
+    true
+}
+
 #[test]
 fn bootstrap_fails_when_worker_binary_missing() -> Result<()> {
+    if skip_worker_validation_when_unprivileged("missing worker binary validation") {
+        return Ok(());
+    }
+
     let sandbox = TestSandbox::new("missing-worker-binary")?;
     let missing_worker = sandbox.install_dir().join("nonexistent-worker");
     ensure!(
@@ -60,6 +73,10 @@ fn bootstrap_fails_when_worker_binary_missing() -> Result<()> {
 
 #[test]
 fn bootstrap_fails_when_worker_path_is_directory() -> Result<()> {
+    if skip_worker_validation_when_unprivileged("directory worker path validation") {
+        return Ok(());
+    }
+
     let sandbox = TestSandbox::new("worker-path-directory")?;
     fs::create_dir_all(sandbox.install_dir().as_std_path())?;
 
@@ -84,6 +101,10 @@ fn bootstrap_fails_when_worker_path_is_directory() -> Result<()> {
 
 #[test]
 fn bootstrap_fails_when_worker_binary_not_executable() -> Result<()> {
+    if skip_worker_validation_when_unprivileged("non-executable worker validation") {
+        return Ok(());
+    }
+
     let sandbox = TestSandbox::new("worker-path-non-executable")?;
     fs::create_dir_all(sandbox.install_dir().as_std_path())?;
     let worker_path = sandbox.install_dir().join("pg_worker_stub");
@@ -113,8 +134,7 @@ fn bootstrap_fails_when_worker_binary_not_executable() -> Result<()> {
 
 #[test]
 fn bootstrap_fails_on_non_utf8_path_entry_when_root() -> Result<()> {
-    if !geteuid().is_root() {
-        tracing::warn!("skipping non-utf8 PATH test: requires root privileges");
+    if skip_worker_validation_when_unprivileged("non-utf8 PATH test") {
         return Ok(());
     }
 

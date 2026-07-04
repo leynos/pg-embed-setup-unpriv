@@ -5,8 +5,29 @@
 
 use std::{path::Path, process::Command};
 
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
 use color_eyre::eyre::{Context, eyre};
-use tracing::{info, info_span};
+use tracing::info;
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
+use tracing::info_span;
 
 use crate::{error::BootstrapResult, observability::LOG_TARGET};
 
@@ -229,18 +250,6 @@ cfg_privilege_drop! {
         );
     }
 }
-
-#[cfg(not(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ),
-)))]
-const fn skip_privilege_drop_for_tests() -> bool { false }
 
 #[cfg(all(
     test,

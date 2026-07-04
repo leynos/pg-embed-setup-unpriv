@@ -5,9 +5,12 @@ name: CI
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-test:
-    name: Build and Test (${{ matrix.privilege }})
+    name: Linux Build and Test (${{ matrix.privilege }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -24,10 +27,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@73f02134f6f1c2335326d1b9cdefaddd287bf23e
+        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
       - name: Format
+        if: ${{ matrix.privilege == 'unprivileged' }}
         run: make check-fmt
       - name: Markdown lint
+        if: ${{ matrix.privilege == 'unprivileged' }}
         uses: DavidAnson/markdownlint-cli2-action@30a0e04f1870d58f8d717450cc6134995f993c63
         with:
           globs: |
@@ -35,10 +40,15 @@ jobs:
             !**/target/**
             !**/dist/**
       - name: Setup uv
-        uses: astral-sh/setup-uv@12d13f90bc3a5a1971bebad4beb09a4dfa962e91
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
+        with:
+          enable-cache: false
       - name: Install interrogate
+        if: ${{ matrix.privilege == 'unprivileged' }}
         run: uv tool install interrogate==1.7.0
       - name: Lint
+        if: ${{ matrix.privilege == 'unprivileged' }}
         run: make lint
       - name: Install cargo-nextest
         run: cargo binstall -y cargo-nextest@0.9.122
@@ -49,7 +59,7 @@ jobs:
           cargo nextest run --all-targets --all-features
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/generate-coverage@b61ad14766ae81b830abdaf066eb3d9b6c4f537b
+        uses: leynos/shared-actions/.github/actions/generate-coverage@d0fd973d07088c2120329a93035a5ba91e077014
         with:
           output-path: lcov.info
           format: lcov
@@ -83,8 +93,146 @@ jobs:
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: ${{ env.CS_ACCESS_TOKEN && matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@b61ad14766ae81b830abdaf066eb3d9b6c4f537b
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@d0fd973d07088c2120329a93035a5ba91e077014
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
           installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
+
+  cross-platform-tests:
+    name: Test (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PG_BINARY_CACHE_DIR: ${{ github.workspace }}/.postgres-binary-cache
+      PG_TEST_BACKEND: postgresql_embedded
+      PG_VERSION_REQ: "=17.4.0"
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
+      - name: Restore PostgreSQL binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.PG_BINARY_CACHE_DIR }}
+          key: pg-embedded-postgresql-${{ env.PG_VERSION_REQ }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Install cargo-nextest
+        shell: bash
+        run: cargo binstall -y cargo-nextest@0.9.122
+      - name: Build binaries
+        shell: bash
+        run: >-
+          cargo build
+          --no-default-features
+          --features cluster-unit-tests,async-api
+          --bins
+      - name: Run CLI version smoke test
+        shell: bash
+        env:
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          set -euo pipefail
+
+          binary=target/debug/pg_embedded_setup_unpriv
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            binary="${binary}.exe"
+          fi
+
+          "$binary" --version
+      - name: Test unprivileged surface
+        shell: bash
+        run: >-
+          cargo nextest run
+          --all-targets
+          --no-default-features
+          --features cluster-unit-tests,async-api
+
+  binstall-packaging:
+    name: Binstall (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      RELEASE_PORT: "8765"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
+      - name: Setup uv
+        uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
+        with:
+          enable-cache: false
+      - name: Build cargo-binstall archive
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: >-
+          uv run --script scripts/release_archive.py
+          "$TARGET"
+      - name: Start local HTTPS archive server
+        id: archive-server
+        uses: ./.github/actions/setup-local-https-server
+        with:
+          port: ${{ env.RELEASE_PORT }}
+          cert-dir: ${{ runner.temp }}/binstall-cert
+          serve-dir: dist
+      - name: Install from local cargo-binstall archive
+        shell: bash
+        env:
+          ROOT_CERTIFICATE: ${{ steps.archive-server.outputs.ca-certificate }}
+          RUNNER_OS: ${{ runner.os }}
+          SERVER_PID: ${{ steps.archive-server.outputs.server-pid }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          install_dir="$PWD/.binstall-bin"
+          rm -rf "$install_dir"
+          mkdir -p "$install_dir"
+
+          cargo binstall -y \
+            --manifest-path Cargo.toml \
+            --targets "$TARGET" \
+            --strategies crate-meta-data \
+            --pkg-url "https://127.0.0.1:${RELEASE_PORT}/{ name }-{ target }-v{ version }{ archive-suffix }" \
+            --root-certificates "$ROOT_CERTIFICATE" \
+            --install-path "$install_dir" \
+            --force \
+            pg-embed-setup-unpriv
+
+          binary_ext=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            binary_ext=".exe"
+          fi
+
+          test -f "$install_dir/pg_embedded_setup_unpriv${binary_ext}"
+          test -f "$install_dir/pg_worker${binary_ext}"
+          "$install_dir/pg_embedded_setup_unpriv${binary_ext}" --version

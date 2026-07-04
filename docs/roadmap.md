@@ -10,6 +10,9 @@
   supported on macOS targets; the worker-based path must not be relied on.
 - Behavioural tests that require root privileges should skip on macOS unless a
   future milestone introduces supported privilege management for that platform.
+- Pull-request CI validates the unprivileged surface on
+  `aarch64-apple-darwin`. The release workflow publishes and audits both
+  `aarch64-apple-darwin` and `x86_64-apple-darwin` `cargo binstall` archives.
 
 ### Windows
 
@@ -17,6 +20,13 @@
   the in-process path without requiring `PG_EMBEDDED_WORKER`.
 - Root-only scenarios are expected to skip because privilege dropping is not
   supported on Windows targets.
+- Pull-request CI validates the unprivileged surface and a real
+  `cargo binstall` install-and-run on `x86_64-pc-windows-msvc`.
+- Windows on ARM is not targeted because the upstream PostgreSQL binary archive
+  does not provide `aarch64-pc-windows-msvc` binaries.
+- POSIX file-mode privacy does not apply on Windows. Directory privacy depends
+  on the account's access control lists (ACLs), so callers should choose
+  private runtime and data paths when local account separation matters.
 
 ## 1. Stabilize zero-configuration bootstrap
 
@@ -75,8 +85,9 @@
 - [x] 3.3.1. Confirm Linux root and unprivileged paths through Continuous
   Integration (CI) matrix jobs, and document expected outcomes for macOS and
   Windows in the roadmap appendix.
-- [ ] 3.3.2. Establish guardrails that fail fast on unsupported root scenarios
-  on non-Linux systems, including unit coverage for the error messaging.
+- [x] 3.3.2. Establish guardrails that fail fast on unsupported root scenarios
+  on unsupported Unix targets such as macOS, including unit coverage for the
+  error messaging and CI target checks for macOS and Windows.
 
 ### 3.4 Maintain contributor quality gates
 
