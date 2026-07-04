@@ -103,7 +103,7 @@ _Figure 1: Privilege-detection flow for root and unprivileged bootstrap paths._
   supported.
 - **If running on Windows or other non-Linux, non-root platforms:** privilege
   detection selects the unprivileged in-process path because those platforms do
-  not enter the embedded-postgres root privilege-dropping flow.
+  not enter the `postgresql_embedded` root privilege-dropping flow.
 
 This runtime detection makes the behaviour “fixed per environment” but
 **transparent to the developer** – test code calls the same API in all cases,

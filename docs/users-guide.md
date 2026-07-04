@@ -60,13 +60,13 @@ Troubleshooting guidance:
 
 Tagged releases publish both CLI binaries in `cargo binstall` archives for:
 
-_Table 1: Host release targets for tagged `cargo binstall` archives._
-
 | Operating system | Targets                                                 |
 | ---------------- | ------------------------------------------------------- |
 | Linux            | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` |
 | macOS            | `aarch64-apple-darwin`, `x86_64-apple-darwin`           |
 | Windows          | `x86_64-pc-windows-msvc`                                |
+
+_Table 1: Host release targets for tagged `cargo binstall` archives._
 
 Install the host release with:
 
