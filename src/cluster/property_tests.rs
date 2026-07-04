@@ -83,10 +83,10 @@ fn directory_entry_state_strategy() -> impl Strategy<Value = DirectoryEntryState
 
 fn path_for_case(path_case: PathCase) -> PathBuf {
     let temp_dir = std::env::temp_dir();
-    let temp_root = temp_dir
-        .ancestors()
-        .last()
-        .map_or_else(|| temp_dir.clone(), Path::to_path_buf);
+    let mut temp_root = temp_dir.clone();
+    for ancestor in temp_dir.ancestors() {
+        temp_root = ancestor.to_path_buf();
+    }
 
     match path_case {
         PathCase::Empty => PathBuf::new(),

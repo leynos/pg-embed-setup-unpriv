@@ -83,9 +83,8 @@ jobs:
           cargo nextest run --all-targets --all-features
       - name: Run Loom model tests (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
-        run: >-
-          RUSTFLAGS="-D warnings"
-          cargo test --workspace --all-features --lib -- --ignored
+        timeout-minutes: 10
+        run: make test-loom
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
         uses: leynos/shared-actions/.github/actions/generate-coverage@29eea2635ee0f92e42c05f4cd360b7f1a2f00b12

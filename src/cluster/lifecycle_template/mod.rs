@@ -93,46 +93,8 @@ where
     Drop: FnMut() -> BootstrapResult<()>,
     Setup: FnOnce() -> BootstrapResult<()>,
 {
-    let mut template_created = false;
-    let setup_result = catch_unwind(AssertUnwindSafe(|| {
-        create_template_then_setup(
-            create_database,
-            &mut template_created,
-            drop_database,
-            setup_fn,
-        )
-    }));
-    handle_create_setup_result(setup_result, template_created, drop_database)
-}
-
-fn create_template_then_setup<Create, Drop, Setup>(
-    create_database: &mut Create,
-    template_created: &mut bool,
-    drop_database: &mut Drop,
-    setup_fn: Setup,
-) -> BootstrapResult<()>
-where
-    Create: FnMut() -> BootstrapResult<()>,
-    Drop: FnMut() -> BootstrapResult<()>,
-    Setup: FnOnce() -> BootstrapResult<()>,
-{
     create_database()?;
-    *template_created = true;
     setup_template_or_rollback(setup_fn, drop_database)
-}
-
-fn handle_create_setup_result<Drop>(
-    result: Result<BootstrapResult<()>, Box<dyn Any + Send>>,
-    template_created: bool,
-    drop_database: &mut Drop,
-) -> BootstrapResult<()>
-where
-    Drop: FnMut() -> BootstrapResult<()>,
-{
-    match result {
-        Ok(setup_result) => setup_result,
-        Err(payload) => handle_setup_panic(payload, template_created, drop_database),
-    }
 }
 
 fn setup_template_or_rollback<Drop, Setup>(
@@ -143,9 +105,10 @@ where
     Drop: FnMut() -> BootstrapResult<()>,
     Setup: FnOnce() -> BootstrapResult<()>,
 {
-    match setup_fn() {
-        Ok(()) => Ok(()),
-        Err(setup_error) => rollback_after_setup_error(setup_error, drop_database),
+    match catch_unwind(AssertUnwindSafe(setup_fn)) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(setup_error)) => rollback_after_setup_error(setup_error, drop_database),
+        Err(payload) => resume_or_report_rollback_failure(payload, drop_database),
     }
 }
 
@@ -160,20 +123,6 @@ where
         return Err(template_setup_rollback_error(setup_error, rollback_error));
     }
     Err(setup_error)
-}
-
-fn handle_setup_panic<Drop>(
-    payload: Box<dyn Any + Send>,
-    template_created: bool,
-    drop_database: &mut Drop,
-) -> BootstrapResult<()>
-where
-    Drop: FnMut() -> BootstrapResult<()>,
-{
-    if !template_created {
-        resume_unwind(payload);
-    }
-    resume_or_report_rollback_failure(payload, drop_database)
 }
 
 fn resume_or_report_rollback_failure<Drop>(
