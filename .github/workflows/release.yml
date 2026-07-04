@@ -91,7 +91,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@4711d929aa4461db34af92b72fc174bcca6a1190
+        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
       - name: Setup uv
         uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
         with:
@@ -142,9 +142,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@4711d929aa4461db34af92b72fc174bcca6a1190
-      - name: Install cargo-binstall 1.19.1
-        uses: ./.github/actions/setup-cargo-binstall
+        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
       - name: Download draft release assets
         shell: bash
         env:
@@ -248,9 +246,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@4711d929aa4461db34af92b72fc174bcca6a1190
-      - name: Install cargo-binstall 1.19.1
-        uses: ./.github/actions/setup-cargo-binstall
+        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
       - name: Dry-run published release asset URLs
         run: |
           set -euo pipefail
