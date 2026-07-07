@@ -102,6 +102,21 @@ fn assert_combined_error(error: &BootstrapError, expected_primary: &str, expecte
     );
 }
 
+fn assert_rollback_failure_scenario<F>(setup_body: F, expected_primary: &str)
+where
+    F: FnOnce(&Cell<usize>) -> BootstrapResult<()>,
+{
+    let harness = RollbackHarness::new();
+    let setup_count = Cell::new(0);
+    let outer_result = harness.run_setup(|| setup_body(&setup_count), true);
+    let inner_result = outer_result.expect("rollback failure should not resume a panic");
+    let error = inner_result.expect_err("combined failure should be returned");
+
+    assert_eq!(setup_count.get(), 1);
+    assert!(harness.dropped(), "failed setup should invoke rollback");
+    assert_combined_error(&error, expected_primary, "rollback failed");
+}
+
 #[test]
 fn setup_failure_rolls_back_created_template() {
     let harness = RollbackHarness::new();
@@ -130,21 +145,13 @@ fn setup_failure_rolls_back_created_template() {
 
 #[test]
 fn rollback_failure_preserves_setup_error_context() {
-    let harness = RollbackHarness::new();
-    let setup_count = Cell::new(0);
-    let outer_result = harness.run_setup(
-        || {
+    assert_rollback_failure_scenario(
+        |setup_count| {
             setup_count.set(setup_count.get() + 1);
             Err(bootstrap_error("setup failed"))
         },
-        true,
+        "setup failed",
     );
-    let inner_result = outer_result.expect("setup failure should not panic");
-    let error = inner_result.expect_err("combined setup and rollback failure should be returned");
-
-    assert_eq!(setup_count.get(), 1);
-    assert!(harness.dropped(), "failed setup should invoke rollback");
-    assert_combined_error(&error, "setup failed", "rollback failed");
 }
 
 #[test]
@@ -167,23 +174,13 @@ fn setup_panic_rolls_back_created_template() {
 
 #[test]
 fn setup_panic_reports_rollback_failure() {
-    let harness = RollbackHarness::new();
-    let setup_count = Cell::new(0);
-    let outer_result = harness.run_setup(
-        || {
+    assert_rollback_failure_scenario(
+        |setup_count| {
             setup_count.set(setup_count.get() + 1);
             panic!("setup panic")
         },
-        true,
+        "setup panic",
     );
-    let inner_result =
-        outer_result.expect("rollback failure during setup panic should not resume panic");
-    let error =
-        inner_result.expect_err("rollback failure during setup panic should return an error");
-
-    assert_eq!(setup_count.get(), 1);
-    assert!(harness.dropped(), "panic path should invoke rollback");
-    assert_combined_error(&error, "setup panic", "rollback failed");
 }
 
 #[rstest]
