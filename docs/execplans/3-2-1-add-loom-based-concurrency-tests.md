@@ -45,10 +45,10 @@ command, observe deterministic pass/fail results, and still have the normal
 
 ## Risks
 
-- Risk: Loom cannot safely model `ScopedEnv` because it mutates the real
-  process environment across repeated model runs. Severity: high Likelihood:
-  medium Mitigation: design Loom tests to use empty env change sets and/or
-  inject a test-only environment store so no real env state leaks across runs.
+- Risk: the in-memory fake environment used by Loom can diverge from
+  production `std::env` semantics across repeated model runs. Severity: high
+  Likelihood: medium Mitigation: keep the fake env narrowly scoped, use empty
+  env change sets where possible, and verify that no state leaks across runs.
 
 - Risk: `loom::sync::Mutex` does not provide a `const fn new`, forcing a
   change in how `ENV_LOCK` is initialized. Severity: medium Likelihood: low
@@ -195,11 +195,11 @@ Cover at least one happy path (serialized access) and one unhappy/edge path
 and scoped.
 
 Stage D: Add behavioural tests with rstest-bdd where applicable. If the new
-behaviour can be expressed as observable outcomes, add a `.feature` file and
-step definitions under `tests/` that verify scoped environment serialization
-and restoration. If no meaningful user-visible behaviour exists, explicitly
-record that rationale in the design document instead of adding forced BDD
-coverage.
+behaviour changes user-visible outcomes, add a `.feature` file and step
+definitions under `tests/` that verify scoped environment serialization and
+restoration. If this is only internal test instrumentation, mark BDD coverage
+as not applicable and explicitly record that rationale in the design document
+instead of adding forced coverage.
 
 Stage E: Documentation and roadmap updates. Document how to run Loom tests in
 `docs/developers-guide.md`, update `docs/users-guide.md` only if user-visible
