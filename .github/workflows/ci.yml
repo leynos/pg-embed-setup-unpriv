@@ -93,7 +93,7 @@ jobs:
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: ${{ env.CS_ACCESS_TOKEN && matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@d0fd973d07088c2120329a93035a5ba91e077014
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@d28e04c9ea359650a85d697d1ab3d0be0b5674e7
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
