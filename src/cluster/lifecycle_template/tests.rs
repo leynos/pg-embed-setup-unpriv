@@ -102,85 +102,53 @@ fn assert_combined_error(error: &BootstrapError, expected_primary: &str, expecte
     );
 }
 
-fn assert_rollback_failure_scenario<F>(setup_body: F, expected_primary: &str)
-where
-    F: FnOnce(&Cell<usize>) -> BootstrapResult<()>,
-{
-    let harness = RollbackHarness::new();
-    let setup_count = Cell::new(0);
-    let outer_result = harness.run_setup(|| setup_body(&setup_count), true);
-    let inner_result = outer_result.expect("rollback failure should not resume a panic");
-    let error = inner_result.expect_err("combined failure should be returned");
-
-    assert_eq!(setup_count.get(), 1);
-    assert!(harness.dropped(), "failed setup should invoke rollback");
-    assert_combined_error(&error, expected_primary, "rollback failed");
-}
-
-#[test]
-fn setup_failure_rolls_back_created_template() {
+#[rstest]
+#[case::setup_error_rollback_succeeds(false, false)]
+#[case::setup_error_rollback_fails(true, false)]
+#[case::setup_panic_rollback_succeeds(false, true)]
+#[case::setup_panic_rollback_fails(true, true)]
+fn rollback_scenarios(#[case] rollback_should_fail: bool, #[case] setup_panics: bool) {
     let harness = RollbackHarness::new();
     let setup_count = Cell::new(0);
     let outer_result = harness.run_setup(
         || {
             setup_count.set(setup_count.get() + 1);
+            assert!(!setup_panics, "setup panic");
             Err(bootstrap_error("setup failed"))
         },
-        false,
+        rollback_should_fail,
     );
-    let inner_result = outer_result.expect("setup failure should not panic");
-    let error = inner_result.expect_err("setup failure should be returned");
 
     assert_eq!(setup_count.get(), 1);
-    assert!(
-        error.to_string().contains("setup failed"),
-        "setup error should be preserved, got: {error}"
-    );
-    assert!(
-        !harness.created(),
-        "failed setup should remove the template"
-    );
     assert!(harness.dropped(), "failed setup should invoke rollback");
-}
-
-#[test]
-fn rollback_failure_preserves_setup_error_context() {
-    assert_rollback_failure_scenario(
-        |setup_count| {
-            setup_count.set(setup_count.get() + 1);
-            Err(bootstrap_error("setup failed"))
-        },
-        "setup failed",
-    );
-}
-
-#[test]
-fn setup_panic_rolls_back_created_template() {
-    let harness = RollbackHarness::new();
-    let setup_count = Cell::new(0);
-    let outer_result = harness.run_setup(
-        || {
-            setup_count.set(setup_count.get() + 1);
-            panic!("setup panic")
-        },
-        false,
-    );
-    let _panic = outer_result.expect_err("setup panic should be resumed");
-
-    assert_eq!(setup_count.get(), 1);
-    assert!(!harness.created(), "panic path should remove the template");
-    assert!(harness.dropped(), "panic path should invoke rollback");
-}
-
-#[test]
-fn setup_panic_reports_rollback_failure() {
-    assert_rollback_failure_scenario(
-        |setup_count| {
-            setup_count.set(setup_count.get() + 1);
-            panic!("setup panic")
-        },
-        "setup panic",
-    );
+    match (setup_panics, rollback_should_fail) {
+        (false, false) => {
+            let inner_result = outer_result.expect("setup failure should not panic");
+            let error = inner_result.expect_err("setup failure should be returned");
+            assert!(
+                error.to_string().contains("setup failed"),
+                "setup error should be preserved, got: {error}"
+            );
+            assert!(
+                !harness.created(),
+                "failed setup should remove the template"
+            );
+        }
+        (false, true) => {
+            let inner_result = outer_result.expect("rollback failure should not resume a panic");
+            let error = inner_result.expect_err("combined failure should be returned");
+            assert_combined_error(&error, "setup failed", "rollback failed");
+        }
+        (true, false) => {
+            let _panic = outer_result.expect_err("setup panic should be resumed");
+            assert!(!harness.created(), "panic path should remove the template");
+        }
+        (true, true) => {
+            let inner_result = outer_result.expect("rollback failure should not resume a panic");
+            let error = inner_result.expect_err("combined failure should be returned");
+            assert_combined_error(&error, "setup panic", "rollback failed");
+        }
+    }
 }
 
 #[rstest]

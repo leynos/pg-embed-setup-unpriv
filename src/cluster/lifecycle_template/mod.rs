@@ -129,22 +129,16 @@ fn rollback_after_setup_error<Drop>(
 where
     Drop: FnMut() -> BootstrapResult<()>,
 {
-    if let Err(rollback_error) = drop_database() {
-        log_template_rollback(
-            template_name,
-            false,
-            None,
-            "template setup failed and rollback completed",
-        );
-        return Err(template_setup_rollback_error(setup_error, rollback_error));
-    }
-    log_template_rollback(
+    match rollback_and_log(
         template_name,
-        true,
-        None,
+        drop_database,
         "template setup failed and rollback completed",
-    );
-    Err(setup_error)
+        None,
+        None,
+    ) {
+        Ok(()) => Err(setup_error),
+        Err(rollback_error) => Err(template_setup_rollback_error(setup_error, rollback_error)),
+    }
 }
 
 fn resume_or_report_rollback_failure<Drop>(
@@ -155,25 +149,45 @@ fn resume_or_report_rollback_failure<Drop>(
 where
     Drop: FnMut() -> BootstrapResult<()>,
 {
-    if let Err(rollback_error) = drop_database() {
-        log_template_rollback(
-            template_name,
-            false,
-            Some("converted_to_error"),
-            "template setup panicked and rollback completed",
-        );
-        return Err(template_setup_panic_rollback_error(
+    match rollback_and_log(
+        template_name,
+        drop_database,
+        "template setup panicked and rollback completed",
+        Some("resume_unwind"),
+        Some("converted_to_error"),
+    ) {
+        Ok(()) => resume_unwind(payload),
+        Err(rollback_error) => Err(template_setup_panic_rollback_error(
             payload.as_ref(),
             rollback_error,
-        ));
+        )),
     }
-    log_template_rollback(
-        template_name,
-        true,
-        Some("resume_unwind"),
-        "template setup panicked and rollback completed",
-    );
-    resume_unwind(payload);
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "rollback log metadata is intentionally explicit at the call site"
+)]
+fn rollback_and_log<Drop>(
+    template_name: &str,
+    drop_database: &mut Drop,
+    message: &'static str,
+    success_panic_action: Option<&'static str>,
+    failure_panic_action: Option<&'static str>,
+) -> Result<(), BootstrapError>
+where
+    Drop: FnMut() -> BootstrapResult<()>,
+{
+    match drop_database() {
+        Ok(()) => {
+            log_template_rollback(template_name, true, success_panic_action, message);
+            Ok(())
+        }
+        Err(rollback_error) => {
+            log_template_rollback(template_name, false, failure_panic_action, message);
+            Err(rollback_error)
+        }
+    }
 }
 
 fn log_template_rollback(
