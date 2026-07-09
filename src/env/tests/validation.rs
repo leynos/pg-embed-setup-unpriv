@@ -45,6 +45,10 @@ fn apply_os_rejects_invalid_input_before_lock(
     OsString::from(""),
     Some(OsString::from("value")),
 )])]
+#[case::contains_equals(vec![(
+    OsString::from("THREAD_STATE=INVALID_KEY"),
+    Some(OsString::from("value")),
+)])]
 #[case::key_contains_nul(vec![(
     OsString::from("THREAD_STATE\0INVALID_KEY"),
     Some(OsString::from("value")),
@@ -54,7 +58,7 @@ fn apply_os_rejects_invalid_input_before_lock(
     Some(OsString::from("bad\0value")),
 )])]
 #[serial]
-fn thread_state_rejects_nul_before_lock(#[case] vars: Vec<(OsString, Option<OsString>)>) {
+fn thread_state_rejects_invalid_input_before_lock(#[case] vars: Vec<(OsString, Option<OsString>)>) {
     let mut state = ThreadState::new();
 
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
