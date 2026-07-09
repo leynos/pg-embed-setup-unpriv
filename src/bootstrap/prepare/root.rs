@@ -8,16 +8,16 @@ use std::net::TcpListener;
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, eyre};
-use nix::unistd::{User, fchown};
+use nix::unistd::User;
 use postgresql_embedded::Settings;
 
 use super::{
-    PGPASS_MODE,
     PreparedBootstrap,
     ensure_parents_for_paths,
     log_sanitized_settings,
     prepare_xdg_dirs,
     resolve_settings_paths_for_uid,
+    unix_user::{ensure_install_dir_for_user, ensure_pgpass_for_user},
 };
 use crate::{
     PgEnvCfg,
@@ -102,76 +102,5 @@ pub(super) fn ensure_parent_for_user(path: &Utf8PathBuf, user: &User) -> Bootstr
     if let Some(parent) = path.parent() {
         ensure_dir_for_user(parent, user, 0o755)?;
     }
-    Ok(())
-}
-
-pub(super) fn ensure_install_dir_for_user(path: &Utf8PathBuf, user: &User) -> BootstrapResult<()> {
-    ensure_dir_for_user(path, user, 0o755)?;
-    Ok(())
-}
-
-pub(super) fn ensure_pgpass_for_user(path: &Utf8PathBuf, user: &User) -> BootstrapResult<()> {
-    use cap_std::fs::{OpenOptions, OpenOptionsExt};
-    use nix::sys::stat::{Mode, fchmod};
-
-    // The descriptor-relative lookup anchors path resolution and prevents
-    // ancestor directory swap attacks. O_NOFOLLOW additionally ensures the
-    // final path component is not a symlink.
-    let (dir, relative) = crate::fs::ambient_dir_and_path(path)?;
-    if relative.as_str().is_empty() {
-        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-            "PGPASSFILE cannot point at the root directory"
-        )));
-    }
-    let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .create(false)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    let file = match dir.open_with(relative.as_std_path(), &options) {
-        Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => {
-            return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                "open {} failed: {err}",
-                path.as_str()
-            )));
-        }
-    };
-    let metadata = file.metadata().map_err(|err| {
-        BootstrapError::from(color_eyre::eyre::eyre!(
-            "stat {} failed: {err}",
-            path.as_str()
-        ))
-    })?;
-    if !metadata.is_file() {
-        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-            "PGPASSFILE must reference a regular file: {}",
-            path.as_str()
-        )));
-    }
-
-    let uid = user.uid.as_raw();
-    let gid = user.gid.as_raw();
-
-    fchown(&file, Some(user.uid), Some(user.gid)).map_err(|err| {
-        BootstrapError::from(color_eyre::eyre::eyre!(
-            "fchown {} failed (uid={uid} gid={gid}): {err}",
-            path.as_str()
-        ))
-    })?;
-    let mode = libc::mode_t::try_from(PGPASS_MODE).map_err(|err| {
-        BootstrapError::from(color_eyre::eyre::eyre!(
-            "invalid PGPASSFILE mode 0o{:03o}: {err}",
-            PGPASS_MODE
-        ))
-    })?;
-    fchmod(&file, Mode::from_bits_truncate(mode)).map_err(|err| {
-        BootstrapError::from(color_eyre::eyre::eyre!(
-            "fchmod {} failed (mode=0o{:03o}): {err}",
-            path.as_str(),
-            PGPASS_MODE
-        ))
-    })?;
     Ok(())
 }

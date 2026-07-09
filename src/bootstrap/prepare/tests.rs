@@ -137,7 +137,7 @@ mod unix_tests {
     use nix::unistd::{Uid, User, geteuid};
     use tempfile::tempdir;
 
-    use super::{super::root::ensure_pgpass_for_user, *};
+    use super::{unix_user::ensure_pgpass_for_user, *};
 
     #[test]
     fn ensure_settings_paths_applies_defaults() {

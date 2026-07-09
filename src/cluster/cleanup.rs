@@ -257,4 +257,6 @@ mod tests {
         );
     }
 }
+#[cfg(test)]
+#[path = "property_tests.rs"]
 mod property_tests;
