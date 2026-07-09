@@ -23,6 +23,7 @@ endif
 CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
 MDLINT ?= markdownlint-cli2
+WHITAKER ?= whitaker
 NIXIE ?= nixie
 INTERROGATE ?= interrogate
 PY_DOCSTRING_COVERAGE ?= 100
@@ -57,10 +58,13 @@ release-archive: ## Package release binaries for cargo-binstall
 		$(if $(BUILD_JOBS),--build-jobs "$(BUILD_JOBS)") \
 		$(foreach bin,$(RELEASE_BINARIES),--binary $(bin))
 
-lint: ## Run Clippy with warnings denied
+lint: ## Run Clippy and the Whitaker Dylint suite with warnings denied
 	$(INTERROGATE) --fail-under $(PY_DOCSTRING_COVERAGE) .
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)
 	$(CARGO) clippy $(CLIPPY_FLAGS)
+# --ignore-rust-version: the Whitaker Dylint driver toolchain predates the
+# rust-version of some dependencies; the repo toolchain still enforces MSRV.
+	RUSTFLAGS="-D warnings" $(WHITAKER) --all -- --all-targets --all-features --ignore-rust-version
 
 typecheck: ## Typecheck the workspace
 	$(CARGO) check --workspace --all-targets --all-features $(BUILD_JOBS)
