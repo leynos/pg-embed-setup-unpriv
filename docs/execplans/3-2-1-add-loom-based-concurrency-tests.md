@@ -231,9 +231,11 @@ fails.
    and ensure tests operate on empty env change sets so global env state is
    unchanged across runs.
 
-6. Add or update behavioural tests using rstest-bdd (v0.5.0). If adding new
-   `.feature` files, place them under `tests/features/` and wire up scenario
-   macros in a new or existing `tests/*.rs` file.
+6. Add or update behavioural tests using rstest-bdd (v0.5.0) only if the
+   change introduces user-visible behaviour. Internal test-instrumentation
+   changes such as Loom model coverage do not require new `.feature` files. If
+   new `.feature` files are warranted, place them under `tests/features/` and
+   wire up scenario macros in a new or existing `tests/*.rs` file.
 
 7. Update documentation:
    - Record the Loom-testing decision in
