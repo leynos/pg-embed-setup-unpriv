@@ -1,5 +1,9 @@
 //! Thread-local state and mutex management for scoped environment guards.
 
+#[cfg(test)]
+mod inspection;
+mod validation;
+
 use std::{
     env,
     ffi::OsString,
@@ -129,8 +133,8 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
     {
         let env_vars: Vec<_> = vars.into_iter().collect();
         for (key, value) in &env_vars {
-            Self::validate_env_key(key);
-            Self::validate_env_value(value.as_ref());
+            validation::validate_env_key(key);
+            validation::validate_env_value(value.as_ref());
         }
 
         self.acquire_lock_if_needed();
@@ -193,74 +197,6 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         saved
     }
 
-    /// Reject environment keys that `std::env` cannot mutate safely.
-    fn validate_env_key(key: &OsString) {
-        assert!(
-            !key.is_empty(),
-            "ScopedEnv received an empty environment variable name"
-        );
-        assert!(
-            !Self::contains_nul(key),
-            "ScopedEnv received an environment variable name containing NUL"
-        );
-        assert!(
-            !Self::contains_equals(key),
-            "ScopedEnv received an environment variable name containing '='"
-        );
-    }
-
-    /// Reject environment values that would make `std::env::set_var` panic.
-    fn validate_env_value(value: Option<&OsString>) {
-        if let Some(env_value) = value {
-            assert!(
-                !Self::contains_nul(env_value),
-                "ScopedEnv received an environment variable value containing NUL"
-            );
-        }
-    }
-
-    /// Detect `=` in Unix environment keys without lossy conversion.
-    #[cfg(unix)]
-    fn contains_equals(key: &OsString) -> bool {
-        use std::os::unix::ffi::OsStrExt;
-
-        key.as_os_str().as_bytes().contains(&b'=')
-    }
-
-    /// Detect `=` in Windows environment keys using wide units.
-    #[cfg(windows)]
-    fn contains_equals(key: &OsString) -> bool {
-        use std::os::windows::ffi::OsStrExt;
-
-        key.as_os_str()
-            .encode_wide()
-            .any(|value| value == u16::from(b'='))
-    }
-
-    /// Detect `=` in environment keys on fallback platforms.
-    #[cfg(not(any(unix, windows)))]
-    fn contains_equals(key: &OsString) -> bool { key.to_string_lossy().contains('=') }
-
-    /// Detect NUL bytes in Unix environment keys or values.
-    #[cfg(unix)]
-    fn contains_nul(value: &OsString) -> bool {
-        use std::os::unix::ffi::OsStrExt;
-
-        value.as_os_str().as_bytes().contains(&b'\0')
-    }
-
-    /// Detect NUL units in Windows environment keys or values.
-    #[cfg(windows)]
-    fn contains_nul(value: &OsString) -> bool {
-        use std::os::windows::ffi::OsStrExt;
-
-        value.as_os_str().encode_wide().any(|unit| unit == 0)
-    }
-
-    /// Detect NUL characters in environment values on fallback platforms.
-    #[cfg(not(any(unix, windows)))]
-    fn contains_nul(value: &OsString) -> bool { value.to_string_lossy().contains('\0') }
-
     /// Apply one variable mutation and return the value that must be restored.
     fn apply_single_var(
         guard: &mut L::Guard,
@@ -268,13 +204,11 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         new_value: Option<OsString>,
     ) -> Option<OsString> {
         debug_assert!(
-            !key.is_empty() && !Self::contains_nul(key) && !Self::contains_equals(key),
+            validation::is_valid_env_key(key),
             "invalid env var name: {key:?}"
         );
         debug_assert!(
-            new_value
-                .as_ref()
-                .is_none_or(|value| !Self::contains_nul(value)),
+            validation::is_valid_env_value(new_value.as_ref()),
             "invalid env var value for {key:?}"
         );
         let previous = L::var_os(guard, key);
@@ -399,38 +333,6 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         };
         guard
     }
-}
-
-#[cfg(all(test, feature = "loom-tests"))]
-impl<L: EnvLockOps> ThreadStateCore<L> {
-    /// Return the current per-thread recursive scope depth.
-    pub(crate) const fn depth(&self) -> usize { self.depth }
-
-    /// Report whether all tracked scope entries have been restored.
-    pub(crate) fn is_stack_empty(&self) -> bool { self.stack.is_empty() }
-
-    /// Report whether this thread currently owns the backend lock.
-    pub(crate) const fn has_lock(&self) -> bool { self.lock.is_some() }
-
-    /// Inspect the held lock guard during Loom-only model assertions.
-    pub(crate) fn with_lock_guard<R>(&self, inspect: impl FnOnce(&L::Guard) -> R) -> R {
-        let Some(guard) = self.lock.as_ref() else {
-            panic!("ScopedEnv should hold the mutex during active inspection");
-        };
-        inspect(guard)
-    }
-}
-
-#[cfg(test)]
-impl ThreadState {
-    /// Return the current test-visible recursive scope depth.
-    pub const fn depth(&self) -> usize { self.inner.depth }
-
-    /// Report whether test-visible state has no tracked scopes.
-    pub fn is_stack_empty(&self) -> bool { self.inner.stack.is_empty() }
-
-    /// Report whether test-visible state currently holds `ENV_LOCK`.
-    pub const fn has_lock(&self) -> bool { self.inner.lock.is_some() }
 }
 
 /// Restore saved environment values in reverse application order.
