@@ -22,6 +22,7 @@ use crate::test_support::capture_info_logs;
 
 mod corruption;
 mod thread_helpers;
+mod validation;
 
 use corruption::{
     CorruptionCase,
@@ -60,6 +61,7 @@ fn recovers_from_poisoned_lock() {
     assert!(env::var("POISON_TEST").is_err());
 }
 
+/// Verifies nested scopes restore the outer value after the inner drops.
 #[test]
 #[serial]
 fn allows_reentrant_scopes() {
@@ -77,6 +79,7 @@ fn allows_reentrant_scopes() {
     assert!(env::var("NESTED_TEST").is_err());
 }
 
+/// Verifies the process lock remains held until the final nested scope exits.
 #[test]
 #[serial]
 fn keeps_lock_until_last_scope_drops() {
@@ -103,6 +106,7 @@ fn keeps_lock_until_last_scope_drops() {
     assert!(env::var("SCOPE_TEST").is_err());
 }
 
+/// Verifies a second thread blocks until the first scoped guard releases.
 #[test]
 #[serial]
 fn serialises_env_across_threads() {
@@ -184,20 +188,7 @@ fn serialises_env_across_threads() {
     drop(restore_env);
 }
 
-#[test]
-#[serial]
-fn apply_os_rejects_invalid_keys() {
-    let result = panic::catch_unwind(|| {
-        let invalid = vec![(OsString::from("INVALID=KEY"), Some(OsString::from("value")))];
-        let _guard = ScopedEnv::apply_os(invalid);
-    });
-
-    assert!(
-        result.is_err(),
-        "apply_os must reject environment names containing '='"
-    );
-}
-
+/// Verifies invalid scope exits restore state without panicking.
 #[test]
 #[serial]
 fn thread_state_recovers_from_invalid_index() {
@@ -220,6 +211,7 @@ fn thread_state_recovers_from_invalid_index() {
     assert_env_lock_released();
 }
 
+/// Verifies corrupted scope state restores the environment and releases locks.
 #[rstest]
 #[case::corrupt_exit(CorruptionCase {
     test_name: "CORRUPT_EXIT",
@@ -264,6 +256,7 @@ fn scoped_env_recovers_from_corrupt_exit(#[case] case: CorruptionCase) {
     });
 }
 
+/// Set an environment variable while holding `ENV_LOCK`.
 fn set_env_var_locked(key: &OsStr, value: &OsStr) {
     let _guard = ENV_LOCK
         .lock()
@@ -271,6 +264,7 @@ fn set_env_var_locked(key: &OsStr, value: &OsStr) {
     set_env_var_unlocked(key, value);
 }
 
+/// Set an environment variable when the caller already holds `ENV_LOCK`.
 fn set_env_var_unlocked(key: &OsStr, value: &OsStr) {
     unsafe {
         // SAFETY: These helpers are only called from #[serial] tests, all
@@ -282,6 +276,7 @@ fn set_env_var_unlocked(key: &OsStr, value: &OsStr) {
     }
 }
 
+/// Remove an environment variable when the caller already holds `ENV_LOCK`.
 fn remove_env_var_unlocked(key: &OsStr) {
     unsafe {
         // SAFETY: These helpers are only called from #[serial] tests, all
@@ -293,6 +288,7 @@ fn remove_env_var_unlocked(key: &OsStr) {
     }
 }
 
+/// Assert that thread-local scoped environment state has fully reset.
 fn assert_thread_state_reset() {
     THREAD_STATE.with(|cell| {
         let state = cell.borrow();
@@ -302,6 +298,7 @@ fn assert_thread_state_reset() {
     });
 }
 
+/// Assert that `ENV_LOCK` can be acquired within a bounded timeout.
 fn assert_env_lock_released() {
     let deadline = Instant::now() + Duration::from_secs(1);
     loop {
@@ -322,6 +319,7 @@ fn assert_env_lock_released() {
     }
 }
 
+/// Verifies scoped environment application and restoration logs are emitted.
 #[cfg(feature = "cluster-unit-tests")]
 #[test]
 #[serial]

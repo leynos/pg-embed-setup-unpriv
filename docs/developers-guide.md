@@ -122,6 +122,20 @@ three bounds jointly constrain the search space so the suite stays tractable.
 Changing any of them requires justification, and may need matching CI timeout
 adjustments.
 
+Production and Loom both route `ScopedEnv` environment access through the same
+guard-aware `EnvLockOps` boundary. `lock_env_mutex` acquires the lock guard,
+`ensure_lock_is_clean` verifies the lock before a new outer scope uses it, and
+`var_os`, `set_var`, and `remove_var` all receive the held guard so reads,
+writes, and removals stay tied to the acquired environment lock. Production's
+`StdEnvLock` delegates that single contract to `std::env` while holding
+`ENV_LOCK`; Loom swaps in an in-memory fake environment map rather than
+mutating the real process environment. This lets the model checker validate
+`ScopedEnv` serialization, re-entrant depth tracking, non-empty backup/restore
+bookkeeping, spawn-while-held acquisition, asymmetric scope lifetimes, and
+panic-path thread-local cleanup. Loom still cannot instrument the actual
+`std::env` syscalls used by production; the standard serial environment tests
+cover those OS-level mutations.
+
 ## Further reading
 
 - `tests/e2e_postgresql_embedded_diesel.rs` – example of combining the helper

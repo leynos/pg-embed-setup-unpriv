@@ -1,5 +1,9 @@
 //! Thread-local state and mutex management for scoped environment guards.
 
+#[cfg(test)]
+mod inspection;
+mod validation;
+
 use std::{
     env,
     ffi::OsString,
@@ -13,8 +17,16 @@ pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 pub(crate) trait EnvLockOps {
     type Guard: 'static;
 
+    /// Acquire the environment lock and return the guard that authorizes access.
     fn lock_env_mutex() -> Self::Guard;
+    /// Clear or verify lock poison before a new outer scope acquires it.
     fn ensure_lock_is_clean();
+    /// Read an environment variable while the caller holds the lock guard.
+    fn var_os(guard: &Self::Guard, key: &OsString) -> Option<OsString>;
+    /// Set an environment variable while the caller holds the lock guard.
+    fn set_var(guard: &mut Self::Guard, key: &OsString, value: OsString);
+    /// Remove an environment variable while the caller holds the lock guard.
+    fn remove_var(guard: &mut Self::Guard, key: &OsString);
 }
 
 #[derive(Debug)]
@@ -23,12 +35,14 @@ pub(crate) struct StdEnvLock;
 impl EnvLockOps for StdEnvLock {
     type Guard = MutexGuard<'static, ()>;
 
+    /// Acquire `ENV_LOCK`, recovering the guard if a previous holder panicked.
     fn lock_env_mutex() -> Self::Guard {
         ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Clear `ENV_LOCK` poison so future scoped environment use can proceed.
     fn ensure_lock_is_clean() {
         if ENV_LOCK.is_poisoned() {
             tracing::warn!(
@@ -36,6 +50,27 @@ impl EnvLockOps for StdEnvLock {
                 "ENV_LOCK was poisoned; clearing poison and proceeding"
             );
             ENV_LOCK.clear_poison();
+        }
+    }
+
+    /// Delegate locked reads to `std::env::var_os`.
+    fn var_os(_guard: &Self::Guard, key: &OsString) -> Option<OsString> { env::var_os(key) }
+
+    /// Delegate locked writes to `std::env::set_var`.
+    fn set_var(_guard: &mut Self::Guard, key: &OsString, value: OsString) {
+        unsafe {
+            // SAFETY: `ENV_LOCK` serialises changes. Drop restores recorded
+            // values before releasing the lock.
+            env::set_var(key, value);
+        }
+    }
+
+    /// Delegate locked removals to `std::env::remove_var`.
+    fn remove_var(_guard: &mut Self::Guard, key: &OsString) {
+        unsafe {
+            // SAFETY: `ENV_LOCK` serialises changes. Drop restores recorded
+            // values before releasing the lock.
+            env::remove_var(key);
         }
     }
 }
@@ -59,12 +94,14 @@ pub(crate) struct ThreadState {
 }
 
 impl ThreadState {
+    /// Create empty thread-local scoped environment state.
     pub const fn new() -> Self {
         Self {
             inner: ThreadStateCore::new(),
         }
     }
 
+    /// Enter a new scope and return the stack index used to exit it.
     pub fn enter_scope<I>(&mut self, vars: I) -> usize
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
@@ -72,6 +109,7 @@ impl ThreadState {
         self.inner.enter_scope(vars)
     }
 
+    /// Exit a previously entered scope by stack index.
     pub fn exit_scope(&mut self, index: usize) { self.inner.exit_scope(index); }
 }
 
@@ -79,6 +117,7 @@ impl ThreadState {
 pub(crate) type ThreadStateInner<L> = ThreadStateCore<L>;
 
 impl<L: EnvLockOps> ThreadStateCore<L> {
+    /// Create empty scoped environment state for the supplied lock backend.
     pub const fn new() -> Self {
         Self {
             depth: 0,
@@ -87,15 +126,22 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Validate input, acquire the outer lock if needed, and apply variables.
     pub fn enter_scope<I>(&mut self, vars: I) -> usize
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
     {
+        let env_vars: Vec<_> = vars.into_iter().collect();
+        for (key, value) in &env_vars {
+            validation::validate_env_key(key);
+            validation::validate_env_value(value.as_ref());
+        }
+
         self.acquire_lock_if_needed();
 
         self.depth += 1;
 
-        let saved = self.apply_env_vars(vars);
+        let saved = self.apply_env_vars(env_vars);
 
         let index = self.stack.len();
         self.stack.push(GuardState {
@@ -105,6 +151,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         index
     }
 
+    /// Mark a scope finished and restore any now-uncovered environment state.
     pub fn exit_scope(&mut self, index: usize) {
         if self.depth == 0 {
             self.force_restore_and_reset("ScopedEnv drop without matching apply", None);
@@ -121,6 +168,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Acquire the backend lock for the first active scope on this thread.
     fn acquire_lock_if_needed(&mut self) {
         if self.depth > 0 {
             return;
@@ -135,74 +183,43 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         self.lock = Some(guard);
     }
 
-    fn apply_env_vars<I>(&self, vars: I) -> Vec<(OsString, Option<OsString>)>
+    /// Apply requested variables and return their previous values in order.
+    fn apply_env_vars<I>(&mut self, vars: I) -> Vec<(OsString, Option<OsString>)>
     where
         I: IntoIterator<Item = (OsString, Option<OsString>)>,
     {
-        assert!(
-            self.lock.is_some(),
-            "ScopedEnv must hold the mutex before mutating the environment",
-        );
+        let guard = self.guard_mut("ScopedEnv must hold the mutex before mutating the environment");
         let mut saved = Vec::new();
         for (key, new_value) in vars {
-            Self::validate_env_key(&key);
-            let previous = Self::apply_single_var(&key, new_value);
+            let previous = Self::apply_single_var(guard, &key, new_value);
             saved.push((key, previous));
         }
         saved
     }
 
-    fn validate_env_key(key: &OsString) {
-        assert!(
-            !key.is_empty(),
-            "ScopedEnv received an empty environment variable name"
-        );
-        assert!(
-            !Self::contains_equals(key),
-            "ScopedEnv received an environment variable name containing '='"
-        );
-    }
-
-    #[cfg(unix)]
-    fn contains_equals(key: &OsString) -> bool {
-        use std::os::unix::ffi::OsStrExt;
-
-        key.as_os_str().as_bytes().contains(&b'=')
-    }
-
-    #[cfg(windows)]
-    fn contains_equals(key: &OsString) -> bool {
-        use std::os::windows::ffi::OsStrExt;
-
-        key.as_os_str()
-            .encode_wide()
-            .any(|value| value == u16::from(b'='))
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    fn contains_equals(key: &OsString) -> bool { key.to_string_lossy().contains('=') }
-
-    fn apply_single_var(key: &OsString, new_value: Option<OsString>) -> Option<OsString> {
+    /// Apply one variable mutation and return the value that must be restored.
+    fn apply_single_var(
+        guard: &mut L::Guard,
+        key: &OsString,
+        new_value: Option<OsString>,
+    ) -> Option<OsString> {
         debug_assert!(
-            !key.is_empty() && !Self::contains_equals(key),
+            validation::is_valid_env_key(key),
             "invalid env var name: {key:?}"
         );
-        let previous = env::var_os(key);
+        debug_assert!(
+            validation::is_valid_env_value(new_value.as_ref()),
+            "invalid env var value for {key:?}"
+        );
+        let previous = L::var_os(guard, key);
         match new_value {
-            Some(value) => unsafe {
-                // SAFETY: `ENV_LOCK` serialises changes. Drop restores
-                // recorded values before releasing the lock.
-                env::set_var(key, value);
-            },
-            None => unsafe {
-                // SAFETY: `ENV_LOCK` serialises changes. Drop restores
-                // recorded values before releasing the lock.
-                env::remove_var(key);
-            },
+            Some(value) => L::set_var(guard, key, value),
+            None => L::remove_var(guard, key),
         }
         previous
     }
 
+    /// Mark a stack entry finished and report whether restoration can continue.
     fn finish_scope(&mut self, index: usize) -> bool {
         {
             let Some(state) = self.stack.get_mut(index) else {
@@ -220,6 +237,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         true
     }
 
+    /// Restore contiguous finished scopes from the top of the stack.
     fn restore_finished_scopes(&mut self) {
         if self.stack.last().is_some_and(|state| state.finished) {
             self.ensure_lock_for_restore();
@@ -229,10 +247,14 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
                 self.stack.push(guard_state);
                 break;
             }
-            restore_saved(guard_state.saved);
+            let guard = self.guard_mut(
+                "ScopedEnv must hold the mutex before restoring finished environment scopes",
+            );
+            restore_saved::<L>(guard, guard_state.saved);
         }
     }
 
+    /// Drop the backend lock after the outermost scope has restored everything.
     fn release_outermost_lock(&mut self) {
         debug_assert!(
             self.stack.is_empty(),
@@ -245,6 +267,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Restore all tracked scopes and reset depth after corrupted scope order.
     fn force_restore_and_reset(&mut self, reason: &str, index: Option<usize>) {
         self.log_corruption(reason, index);
         if self.stack.is_empty() {
@@ -260,6 +283,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         self.reset_depth_and_unlock();
     }
 
+    /// Emit diagnostic context for corrupted scoped environment state.
     fn log_corruption(&self, reason: &str, index: Option<usize>) {
         let depth = self.depth;
         let stack_len = self.stack.len();
@@ -274,6 +298,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         );
     }
 
+    /// Ensure restoration has a lock guard even after corrupted state.
     fn ensure_lock_for_restore(&mut self) {
         if self.lock.is_none() {
             L::ensure_lock_is_clean();
@@ -281,46 +306,41 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
         }
     }
 
+    /// Restore every saved scope regardless of finished-stack ordering.
     fn restore_all_scopes(&mut self) {
         if self.stack.is_empty() {
             return;
         }
         self.ensure_lock_for_restore();
         while let Some(state) = self.stack.pop() {
-            restore_saved(state.saved);
+            let guard = self.guard_mut("ScopedEnv must hold the mutex before restoring all scopes");
+            restore_saved::<L>(guard, state.saved);
         }
     }
 
+    /// Reset recursion depth and release the backend lock if present.
     fn reset_depth_and_unlock(&mut self) {
         self.depth = 0;
         if let Some(guard) = self.lock.take() {
             drop(guard);
         }
     }
+
+    /// Return the mutable lock guard or panic with the caller's context.
+    fn guard_mut(&mut self, context: &str) -> &mut L::Guard {
+        let Some(guard) = self.lock.as_mut() else {
+            panic!("{context}");
+        };
+        guard
+    }
 }
 
-#[cfg(test)]
-impl ThreadState {
-    pub const fn depth(&self) -> usize { self.inner.depth }
-
-    pub fn is_stack_empty(&self) -> bool { self.inner.stack.is_empty() }
-
-    pub const fn has_lock(&self) -> bool { self.inner.lock.is_some() }
-}
-
-fn restore_saved(saved: Vec<(OsString, Option<OsString>)>) {
+/// Restore saved environment values in reverse application order.
+fn restore_saved<L: EnvLockOps>(guard: &mut L::Guard, saved: Vec<(OsString, Option<OsString>)>) {
     for (key, value) in saved.into_iter().rev() {
         match value {
-            Some(previous) => unsafe {
-                // SAFETY: restoration still holds `ENV_LOCK`, so no other
-                // mutations can observe intermediate states.
-                env::set_var(&key, previous);
-            },
-            None => unsafe {
-                // SAFETY: restoration still holds `ENV_LOCK`, so no other
-                // mutations can observe intermediate states.
-                env::remove_var(&key);
-            },
+            Some(previous) => L::set_var(guard, &key, previous),
+            None => L::remove_var(guard, &key),
         }
     }
 }
