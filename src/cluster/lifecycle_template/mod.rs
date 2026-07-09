@@ -133,8 +133,7 @@ where
         template_name,
         drop_database,
         "template setup failed and rollback completed",
-        None,
-        None,
+        false,
     ) {
         Ok(()) => Err(setup_error),
         Err(rollback_error) => Err(template_setup_rollback_error(setup_error, rollback_error)),
@@ -153,8 +152,7 @@ where
         template_name,
         drop_database,
         "template setup panicked and rollback completed",
-        Some("resume_unwind"),
-        Some("converted_to_error"),
+        true,
     ) {
         Ok(()) => resume_unwind(payload),
         Err(rollback_error) => Err(template_setup_panic_rollback_error(
@@ -164,20 +162,20 @@ where
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "rollback log metadata is intentionally explicit at the call site"
-)]
 fn rollback_and_log<Drop>(
     template_name: &str,
     drop_database: &mut Drop,
     message: &'static str,
-    success_panic_action: Option<&'static str>,
-    failure_panic_action: Option<&'static str>,
+    is_panic_path: bool,
 ) -> Result<(), BootstrapError>
 where
     Drop: FnMut() -> BootstrapResult<()>,
 {
+    let (success_panic_action, failure_panic_action) = if is_panic_path {
+        (Some("resume_unwind"), Some("converted_to_error"))
+    } else {
+        (None, None)
+    };
     match drop_database() {
         Ok(()) => {
             log_template_rollback(template_name, true, success_panic_action, message);
