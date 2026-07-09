@@ -171,23 +171,26 @@ fn env_with_non_executable_worker(sandbox: &TestSandbox) -> Result<ScopedEnvVars
 
 /// Routes the runtime and data directories at mode-0o000 directories.
 fn env_with_denied_dirs(sandbox: &TestSandbox) -> Result<ScopedEnvVars> {
-    let mut vars = sandbox.env_without_timezone();
-    let runtime = sandbox.install_dir().join("denied-runtime");
-    let data = sandbox.install_dir().join("denied-data");
-    create_dir_with_mode(&runtime, 0o000)?;
-    create_dir_with_mode(&data, 0o000)?;
-    override_env_path(&mut vars, "PG_RUNTIME_DIR", runtime.as_ref());
-    override_env_path(&mut vars, "PG_DATA_DIR", data.as_ref());
-    Ok(vars)
+    env_with_prepared_dirs(sandbox, "denied", |path| create_dir_with_mode(path, 0o000))
 }
 
 /// Routes the runtime and data directories at read-only directories.
 fn env_with_read_only_dirs(sandbox: &TestSandbox) -> Result<ScopedEnvVars> {
+    env_with_prepared_dirs(sandbox, "readonly", prepare_read_only_dir)
+}
+
+/// Routes the runtime and data directories at directories prepared by
+/// `prepare`, named `<prefix>-runtime` and `<prefix>-data`.
+fn env_with_prepared_dirs(
+    sandbox: &TestSandbox,
+    prefix: &str,
+    prepare: impl Fn(&Utf8PathBuf) -> Result<()>,
+) -> Result<ScopedEnvVars> {
     let mut vars = sandbox.env_without_timezone();
-    let runtime = sandbox.install_dir().join("readonly-runtime");
-    let data = sandbox.install_dir().join("readonly-data");
-    prepare_read_only_dir(&runtime)?;
-    prepare_read_only_dir(&data)?;
+    let runtime = sandbox.install_dir().join(format!("{prefix}-runtime"));
+    let data = sandbox.install_dir().join(format!("{prefix}-data"));
+    prepare(&runtime)?;
+    prepare(&data)?;
     override_env_path(&mut vars, "PG_RUNTIME_DIR", runtime.as_ref());
     override_env_path(&mut vars, "PG_DATA_DIR", data.as_ref());
     Ok(vars)
