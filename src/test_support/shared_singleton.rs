@@ -88,6 +88,7 @@ fn initialise_shared_cluster_handle()
             // Attach worker guard to cluster guard, then leak it.
             // The guard manages shutdown; leaking it means the cluster
             // runs for the process lifetime.
+            log_shared_cluster_handle_initialized();
             let guarded = cluster_guard.with_worker_guard(worker_guard);
             leak_shared_handle_after_shutdown_hook(
                 handle,
@@ -96,6 +97,7 @@ fn initialise_shared_cluster_handle()
             )
         }
         Err(err) => {
+            log_shared_cluster_handle_initialization_failed(&err);
             // Store error info for subsequent callers to retrieve.
             let stored = Arc::new(BootstrapError::new(
                 err.kind(),
@@ -108,6 +110,7 @@ fn initialise_shared_cluster_handle()
 }
 
 fn cached_shared_handle_error(original_err: &Arc<BootstrapError>) -> BootstrapError {
+    log_cached_shared_handle_error(original_err);
     let report = color_eyre::eyre::eyre!(
         "shared cluster initialisation previously failed: {:?}",
         original_err
@@ -124,6 +127,7 @@ where
     Register: FnOnce(&ClusterHandle) -> BootstrapResult<()>,
 {
     if let Err(err) = register_shutdown_hook(&handle) {
+        log_shared_handle_shutdown_hook_failed(&err);
         let stored = Arc::new(BootstrapError::new(
             err.kind(),
             color_eyre::eyre::eyre!("shutdown hook registration failed: {:?}", err),
@@ -135,7 +139,46 @@ where
     // registration fails, `guarded` drops here and stops the cluster.
     std::mem::forget(guarded);
 
+    log_shared_handle_leaked();
     Ok(Box::leak(Box::new(handle)))
+}
+
+fn log_shared_cluster_handle_initialized() {
+    tracing::debug!(
+        target: crate::observability::LOG_TARGET,
+        "shared cluster handle initialized"
+    );
+}
+
+fn log_shared_cluster_handle_initialization_failed(err: &BootstrapError) {
+    tracing::error!(
+        target: crate::observability::LOG_TARGET,
+        error = ?err,
+        "shared cluster handle initialization failed"
+    );
+}
+
+fn log_cached_shared_handle_error(original_err: &Arc<BootstrapError>) {
+    tracing::debug!(
+        target: crate::observability::LOG_TARGET,
+        error = ?original_err,
+        "replaying cached shared cluster initialization failure"
+    );
+}
+
+fn log_shared_handle_shutdown_hook_failed(err: &BootstrapError) {
+    tracing::error!(
+        target: crate::observability::LOG_TARGET,
+        error = ?err,
+        "shared cluster shutdown hook registration failed; dropping guard"
+    );
+}
+
+fn log_shared_handle_leaked() {
+    tracing::debug!(
+        target: crate::observability::LOG_TARGET,
+        "shared cluster shutdown hook registered; leaking handle"
+    );
 }
 // ============================================================================
 // Legacy shared cluster singleton (for backward compatibility)

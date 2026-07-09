@@ -139,19 +139,33 @@ Add template database cloning and concurrency-safe template creation.
 
 ### 3.2. Concurrent-safe template creation
 
-- [ ] **3.2.1.** Add `dashmap` dependency (`dashmap = "6"`) to `Cargo.toml`
+- [x] **3.2.1.** Add `dashmap` dependency (`dashmap = "6"`) to `Cargo.toml`
 
-- [ ] **3.2.2.** Implement
-      `ensure_template_exists<F>(name, setup_fn) -> BootstrapResult<()>`
-  - [ ] Use `DashMap<String, Mutex<()>>` for per-template locking.
-  - [ ] Acquire lock before checking existence.
-  - [ ] Call `setup_fn` only if template does not exist.
-  - [ ] Release lock after setup completes.
+- [x] **3.2.2.** Implement the template creation seam used by
+      `TestClusterConnection::ensure_template_exists`
+  - [x] Use `StdTemplateLocks` and `TemplateLockOps` with
+        `DashMap<String, Arc<Mutex<()>>>` for per-template locking.
+  - [x] Expose `STD_TEMPLATE_LOCKS`, `TemplateCreationOps`, and
+        `ensure_template_exists_with_lock` internally so production code and
+        Loom tests share the same coordination path.
+  - [x] Acquire the per-template lock before checking existence.
+  - [x] Call `TemplateCreationOps::setup_fn` only if the template does not
+        exist and creation succeeds.
+  - [x] Release the lock after setup or rollback completes.
 
-- [ ] **3.2.3.** Add unit tests
-  - [ ] Test `ensure_template_exists` only calls setup once.
-  - [ ] Test concurrent calls are serialized (no duplicate setup).
-  - [ ] Test setup function errors are propagated.
+- [x] **3.2.3.** Add unit tests
+  - [x] Test rollback after setup failure.
+  - [x] Test rollback failure preserves setup-error context.
+  - [x] Test rollback after setup panic, including successful panic resume and
+        rollback-failure conversion to `BootstrapError`.
+  - [x] Test creation panic does not roll back a template that this invocation
+        did not create.
+
+Concurrency safety is additionally verified by Loom model checks in
+`src/cluster/lifecycle_loom_tests.rs`:
+`same_template_setup_runs_once_under_race` and
+`different_template_setups_do_not_deadlock`. Run these under the `loom-tests`
+feature as documented in `docs/developers-guide.md`.
 
 - [ ] **3.2.4.** Add behavioural tests
   - [ ] Test full template workflow (create, migrate, clone).
@@ -160,8 +174,13 @@ Add template database cloning and concurrency-safe template creation.
 **Files:**
 
 - `Cargo.toml` — add `dashmap` dependency
-- `src/cluster/connection.rs` — add `ensure_template_exists`
-- `tests/template_concurrency.rs` — concurrency tests
+- `src/cluster/lifecycle_template/mod.rs` — per-template lock seam,
+  `TemplateCreationOps`, `ensure_template_exists_with_lock`, and rollback
+  helpers
+- `src/cluster/lifecycle_template/tests.rs` — rollback unit tests
+- `src/cluster/lifecycle.rs` — production
+  `TestClusterConnection::ensure_template_exists` integration
+- `src/cluster/lifecycle_loom_tests.rs` — Loom concurrency tests
 
 ### 3.3. Migration directory hashing
 

@@ -79,11 +79,17 @@ where
             return Ok(());
         }
 
-        create_and_setup_template(&mut create_database, &mut drop_database, setup_fn)
+        create_and_setup_template(
+            template_name,
+            &mut create_database,
+            &mut drop_database,
+            setup_fn,
+        )
     })
 }
 
 fn create_and_setup_template<Create, Drop, Setup>(
+    template_name: &str,
     create_database: &mut Create,
     drop_database: &mut Drop,
     setup_fn: Setup,
@@ -94,10 +100,11 @@ where
     Setup: FnOnce() -> BootstrapResult<()>,
 {
     create_database()?;
-    setup_template_or_rollback(setup_fn, drop_database)
+    setup_template_or_rollback(template_name, setup_fn, drop_database)
 }
 
 fn setup_template_or_rollback<Drop, Setup>(
+    template_name: &str,
     setup_fn: Setup,
     drop_database: &mut Drop,
 ) -> BootstrapResult<()>
@@ -107,12 +114,15 @@ where
 {
     match catch_unwind(AssertUnwindSafe(setup_fn)) {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(setup_error)) => rollback_after_setup_error(setup_error, drop_database),
-        Err(payload) => resume_or_report_rollback_failure(payload, drop_database),
+        Ok(Err(setup_error)) => {
+            rollback_after_setup_error(template_name, setup_error, drop_database)
+        }
+        Err(payload) => resume_or_report_rollback_failure(template_name, payload, drop_database),
     }
 }
 
 fn rollback_after_setup_error<Drop>(
+    template_name: &str,
     setup_error: BootstrapError,
     drop_database: &mut Drop,
 ) -> BootstrapResult<()>
@@ -120,12 +130,15 @@ where
     Drop: FnMut() -> BootstrapResult<()>,
 {
     if let Err(rollback_error) = drop_database() {
+        log_setup_error_rollback(template_name, false);
         return Err(template_setup_rollback_error(setup_error, rollback_error));
     }
+    log_setup_error_rollback(template_name, true);
     Err(setup_error)
 }
 
 fn resume_or_report_rollback_failure<Drop>(
+    template_name: &str,
     payload: Box<dyn Any + Send>,
     drop_database: &mut Drop,
 ) -> BootstrapResult<()>
@@ -133,12 +146,37 @@ where
     Drop: FnMut() -> BootstrapResult<()>,
 {
     if let Err(rollback_error) = drop_database() {
+        log_setup_panic_rollback(template_name, false, "converted_to_error");
         return Err(template_setup_panic_rollback_error(
             payload.as_ref(),
             rollback_error,
         ));
     }
+    log_setup_panic_rollback(template_name, true, "resume_unwind");
     resume_unwind(payload);
+}
+
+fn log_setup_error_rollback(template_name: &str, rollback_succeeded: bool) {
+    tracing::warn!(
+        target: crate::observability::LOG_TARGET,
+        template_name,
+        rollback_succeeded,
+        "template setup failed and rollback completed"
+    );
+}
+
+fn log_setup_panic_rollback(
+    template_name: &str,
+    rollback_succeeded: bool,
+    panic_action: &'static str,
+) {
+    tracing::warn!(
+        target: crate::observability::LOG_TARGET,
+        template_name,
+        rollback_succeeded,
+        panic_action,
+        "template setup panicked and rollback completed"
+    );
 }
 
 fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
