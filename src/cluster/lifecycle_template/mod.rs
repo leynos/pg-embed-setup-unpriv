@@ -130,10 +130,20 @@ where
     Drop: FnMut() -> BootstrapResult<()>,
 {
     if let Err(rollback_error) = drop_database() {
-        log_setup_error_rollback(template_name, false);
+        log_template_rollback(
+            template_name,
+            false,
+            None,
+            "template setup failed and rollback completed",
+        );
         return Err(template_setup_rollback_error(setup_error, rollback_error));
     }
-    log_setup_error_rollback(template_name, true);
+    log_template_rollback(
+        template_name,
+        true,
+        None,
+        "template setup failed and rollback completed",
+    );
     Err(setup_error)
 }
 
@@ -146,36 +156,38 @@ where
     Drop: FnMut() -> BootstrapResult<()>,
 {
     if let Err(rollback_error) = drop_database() {
-        log_setup_panic_rollback(template_name, false, "converted_to_error");
+        log_template_rollback(
+            template_name,
+            false,
+            Some("converted_to_error"),
+            "template setup panicked and rollback completed",
+        );
         return Err(template_setup_panic_rollback_error(
             payload.as_ref(),
             rollback_error,
         ));
     }
-    log_setup_panic_rollback(template_name, true, "resume_unwind");
+    log_template_rollback(
+        template_name,
+        true,
+        Some("resume_unwind"),
+        "template setup panicked and rollback completed",
+    );
     resume_unwind(payload);
 }
 
-fn log_setup_error_rollback(template_name: &str, rollback_succeeded: bool) {
-    tracing::warn!(
-        target: crate::observability::LOG_TARGET,
-        template_name,
-        rollback_succeeded,
-        "template setup failed and rollback completed"
-    );
-}
-
-fn log_setup_panic_rollback(
+fn log_template_rollback(
     template_name: &str,
     rollback_succeeded: bool,
-    panic_action: &'static str,
+    panic_action: Option<&'static str>,
+    message: &'static str,
 ) {
     tracing::warn!(
         target: crate::observability::LOG_TARGET,
         template_name,
         rollback_succeeded,
         panic_action,
-        "template setup panicked and rollback completed"
+        "{message}"
     );
 }
 
