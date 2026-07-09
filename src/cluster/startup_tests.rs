@@ -65,54 +65,58 @@ fn utf8_path(path: std::path::PathBuf, context: &str) -> Result<Utf8PathBuf> {
 }
 
 #[fixture]
-fn root_setup_paths() -> Arc<RootSetupPaths> {
-    let tempdir_guard = tempdir().expect("tempdir should be created");
-    let base = utf8_path(tempdir_guard.path().to_path_buf(), "tempdir")
-        .expect("tempdir path should be UTF-8");
+fn root_setup_paths() -> Result<Arc<RootSetupPaths>> {
+    let tempdir_guard = tempdir()?;
+    let base = utf8_path(tempdir_guard.path().to_path_buf(), "tempdir")?;
     let install_dir = base.join("install");
     let data_dir = base.join("data");
     let scoped_cache_home = base.join("scoped-cache-home");
     let host_cache_home = base.join("host-cache-home");
     let cache_dir = base.join("cache");
 
-    fs::create_dir_all(install_dir.as_std_path()).expect("install dir should be created");
-    fs::create_dir_all(data_dir.as_std_path()).expect("data dir should be created");
-    fs::create_dir_all(cache_dir.as_std_path()).expect("cache dir should be created");
+    fs::create_dir_all(install_dir.as_std_path())?;
+    fs::create_dir_all(data_dir.as_std_path())?;
+    fs::create_dir_all(cache_dir.as_std_path())?;
 
-    Arc::new(RootSetupPaths {
+    Ok(Arc::new(RootSetupPaths {
         _tempdir: tempdir_guard,
         install_dir,
         data_dir,
         scoped_cache_home,
         host_cache_home,
         cache_dir,
-    })
+    }))
 }
 
 #[fixture]
-fn root_bootstrap(root_setup_paths: Arc<RootSetupPaths>) -> TestBootstrapSettings {
+fn root_bootstrap(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<TestBootstrapSettings> {
+    let root_setup_paths = root_setup_paths_res?;
     let mut bootstrap = dummy_settings(ExecutionPrivileges::Root);
     configure_root_bootstrap(
         &mut bootstrap,
         &root_setup_paths.install_dir,
         &root_setup_paths.data_dir,
         &root_setup_paths.scoped_cache_home,
-    );
-    bootstrap
+    )?;
+    Ok(bootstrap)
 }
 
 #[fixture]
-fn operations_hook(root_setup_paths: Arc<RootSetupPaths>) -> OperationsHookContext {
+fn operations_hook(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<OperationsHookContext> {
+    let root_setup_paths = root_setup_paths_res?;
     let operations = Arc::new(Mutex::new(Vec::new()));
     let recorded_operations = Arc::clone(&operations);
     let hook_guard = install_run_root_operation_hook(move |_, _, operation| {
         recorded_operations
             .lock()
-            .expect("operation mutex poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(operation.as_str().to_owned());
         Ok(())
-    })
-    .expect("run_root_operation_hook should install");
+    })?;
     let env_guard = scoped_env([
         (OsString::from("PG_BINARY_CACHE_DIR"), None),
         (
@@ -121,65 +125,66 @@ fn operations_hook(root_setup_paths: Arc<RootSetupPaths>) -> OperationsHookConte
         ),
     ]);
 
-    OperationsHookContext {
+    Ok(OperationsHookContext {
         operations,
         host_cache_home: root_setup_paths.host_cache_home.clone(),
         _hook_guard: hook_guard,
         _env_guard: env_guard,
-    }
+    })
 }
 
 #[fixture]
-fn temp_base_paths() -> TempBasePaths {
-    let tempdir_guard = tempdir().expect("tempdir should be created");
-    let base = utf8_path(tempdir_guard.path().to_path_buf(), "tempdir")
-        .expect("tempdir path should be valid UTF-8");
-    TempBasePaths {
+fn temp_base_paths() -> Result<TempBasePaths> {
+    let tempdir_guard = tempdir()?;
+    let base = utf8_path(tempdir_guard.path().to_path_buf(), "tempdir")?;
+    Ok(TempBasePaths {
         _tempdir: tempdir_guard,
         base,
-    }
+    })
 }
 
 #[fixture]
-fn cache_population_paths(temp_base_paths: TempBasePaths) -> CachePopulationPaths {
+fn cache_population_paths(
+    #[from(temp_base_paths)] temp_base_paths_res: Result<TempBasePaths>,
+) -> Result<CachePopulationPaths> {
     let TempBasePaths {
         _tempdir: tempdir_guard,
         base,
-    } = temp_base_paths;
+    } = temp_base_paths_res?;
     let install_dir = base.join("install").join(TEST_POSTGRES_VERSION);
     let data_dir = base.join("data");
     let cache_dir = base.join("cache");
-    fs::create_dir_all(install_dir.join("bin").as_std_path())
-        .expect("install bin dir should be created");
-    fs::create_dir_all(data_dir.as_std_path()).expect("data dir should be created");
-    fs::create_dir_all(cache_dir.as_std_path()).expect("cache dir should be created");
+    fs::create_dir_all(install_dir.join("bin").as_std_path())?;
+    fs::create_dir_all(data_dir.as_std_path())?;
+    fs::create_dir_all(cache_dir.as_std_path())?;
     let marker_path = cache_dir.join(TEST_POSTGRES_VERSION).join(".complete");
 
-    CachePopulationPaths {
+    Ok(CachePopulationPaths {
         _tempdir: tempdir_guard,
         install_dir,
         data_dir,
         cache_dir,
         marker_path,
-    }
+    })
 }
 
 #[fixture]
-fn runtime_error_paths(temp_base_paths: TempBasePaths) -> RuntimeErrorPaths {
+fn runtime_error_paths(
+    #[from(temp_base_paths)] temp_base_paths_res: Result<TempBasePaths>,
+) -> Result<RuntimeErrorPaths> {
     let TempBasePaths {
         _tempdir: tempdir_guard,
         base,
-    } = temp_base_paths;
+    } = temp_base_paths_res?;
     let install_file = base.join("install-file");
     let data_dir = base.join("data");
-    fs::write(install_file.as_std_path(), b"not-a-directory")
-        .expect("invalid install file should be written");
-    fs::create_dir_all(data_dir.as_std_path()).expect("data dir should be created");
-    RuntimeErrorPaths {
+    fs::write(install_file.as_std_path(), b"not-a-directory")?;
+    fs::create_dir_all(data_dir.as_std_path())?;
+    Ok(RuntimeErrorPaths {
         _tempdir: tempdir_guard,
         install_file,
         data_dir,
-    }
+    })
 }
 
 fn configure_root_bootstrap(
@@ -187,17 +192,17 @@ fn configure_root_bootstrap(
     install_dir: &Utf8Path,
     data_dir: &Utf8Path,
     scoped_cache_home: &Utf8Path,
-) {
+) -> Result<()> {
     let runtime_dir = install_dir.join("run");
     bootstrap.settings.installation_dir = install_dir.to_path_buf().into_std_path_buf();
     bootstrap.settings.data_dir = data_dir.to_path_buf().into_std_path_buf();
     let exact_version = format!("={TEST_POSTGRES_VERSION}");
-    bootstrap.settings.version =
-        VersionReq::parse(&exact_version).expect("valid exact version requirement");
+    bootstrap.settings.version = VersionReq::parse(&exact_version)?;
     bootstrap.environment.home = install_dir.to_path_buf();
     bootstrap.environment.xdg_cache_home = scoped_cache_home.to_path_buf();
     bootstrap.environment.xdg_runtime_dir = runtime_dir;
     bootstrap.environment.pgpass_file = install_dir.join(".pgpass");
+    Ok(())
 }
 
 fn create_complete_cache_entry(cache_home: &Utf8PathBuf, version: &str) -> Result<()> {
@@ -213,9 +218,11 @@ fn create_complete_cache_entry(cache_home: &Utf8PathBuf, version: &str) -> Resul
 #[rstest]
 #[serial(worker_hook)]
 fn setup_postgres_only_resolves_cache_before_scoped_env_and_runs_setup_only(
-    root_bootstrap: TestBootstrapSettings,
-    operations_hook: OperationsHookContext,
+    #[from(root_bootstrap)] root_bootstrap_res: Result<TestBootstrapSettings>,
+    #[from(operations_hook)] operations_hook_res: Result<OperationsHookContext>,
 ) -> Result<()> {
+    let root_bootstrap = root_bootstrap_res?;
+    let operations_hook = operations_hook_res?;
     let observed_xdg_cache_home = std::env::var("XDG_CACHE_HOME").ok();
     ensure!(
         observed_xdg_cache_home.as_deref() == Some(operations_hook.host_cache_home.as_str()),
@@ -273,10 +280,13 @@ fn setup_postgres_only_resolves_cache_before_scoped_env_and_runs_setup_only(
 #[rstest]
 #[serial(worker_hook)]
 fn setup_lifecycle_invokes_setup_operation_only(
-    root_setup_paths: Arc<RootSetupPaths>,
-    root_bootstrap: TestBootstrapSettings,
-    operations_hook: OperationsHookContext,
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+    #[from(root_bootstrap)] root_bootstrap_res: Result<TestBootstrapSettings>,
+    #[from(operations_hook)] operations_hook_res: Result<OperationsHookContext>,
 ) -> Result<()> {
+    let root_setup_paths = root_setup_paths_res?;
+    let root_bootstrap = root_bootstrap_res?;
+    let operations_hook = operations_hook_res?;
     let env_vars = root_bootstrap.environment.to_env();
     let cache_config = BinaryCacheConfig::with_dir(root_setup_paths.cache_dir.clone());
     let runtime = test_runtime()?;
@@ -300,9 +310,11 @@ fn setup_lifecycle_invokes_setup_operation_only(
 #[rstest]
 #[serial(worker_hook)]
 fn setup_with_privileges_root_dispatches_setup_only(
-    mut root_bootstrap: TestBootstrapSettings,
-    operations_hook: OperationsHookContext,
+    #[from(root_bootstrap)] root_bootstrap_res: Result<TestBootstrapSettings>,
+    #[from(operations_hook)] operations_hook_res: Result<OperationsHookContext>,
 ) -> Result<()> {
+    let mut root_bootstrap = root_bootstrap_res?;
+    let operations_hook = operations_hook_res?;
     let env_vars = root_bootstrap.environment.to_env();
     let runtime = test_runtime()?;
     setup_with_privileges(
@@ -325,8 +337,9 @@ fn setup_with_privileges_root_dispatches_setup_only(
 
 #[rstest]
 fn populate_cache_on_miss_only_populates_on_cache_miss(
-    cache_population_paths: CachePopulationPaths,
+    #[from(cache_population_paths)] cache_population_paths_res: Result<CachePopulationPaths>,
 ) -> Result<()> {
+    let cache_population_paths = cache_population_paths_res?;
     let mut bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
     bootstrap.settings.installation_dir = cache_population_paths
         .install_dir
@@ -351,8 +364,9 @@ fn populate_cache_on_miss_only_populates_on_cache_miss(
 
 #[rstest]
 fn setup_postgres_only_inside_runtime_returns_recoverable_error(
-    runtime_error_paths: RuntimeErrorPaths,
+    #[from(runtime_error_paths)] runtime_error_paths_res: Result<RuntimeErrorPaths>,
 ) -> Result<()> {
+    let runtime_error_paths = runtime_error_paths_res?;
     let mut bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
     bootstrap.settings.installation_dir = runtime_error_paths.install_file.into_std_path_buf();
     bootstrap.settings.data_dir = runtime_error_paths.data_dir.into_std_path_buf();

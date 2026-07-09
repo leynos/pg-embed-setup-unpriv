@@ -220,6 +220,7 @@ pub fn shared_test_cluster_handle() -> &'static ClusterHandle {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for test-support fixtures.
     use rstest::rstest;
 
     use super::*;

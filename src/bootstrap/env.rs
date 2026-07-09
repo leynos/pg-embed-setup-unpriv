@@ -116,41 +116,48 @@ pub fn find_timezone_dir() -> Option<&'static Utf8Path> {
 }
 pub(super) fn shutdown_timeout_from_env() -> BootstrapResult<Duration> {
     match env::var(SHUTDOWN_TIMEOUT_ENV) {
-        Ok(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                    "{SHUTDOWN_TIMEOUT_ENV} is present but empty"
-                )));
-            }
-
-            let seconds: u64 = trimmed.parse().map_err(|err| {
-                BootstrapError::from(color_eyre::eyre::eyre!(
-                    "failed to parse {SHUTDOWN_TIMEOUT_ENV} from '{trimmed}': {err}"
-                ))
-            })?;
-
-            if seconds == 0 {
-                return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                    "{SHUTDOWN_TIMEOUT_ENV} must be at least 1 second (received {trimmed})"
-                )));
-            }
-
-            if seconds > MAX_SHUTDOWN_TIMEOUT_SECS {
-                return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                    "{SHUTDOWN_TIMEOUT_ENV} must be {MAX_SHUTDOWN_TIMEOUT_SECS} seconds or less \
-                     (received {trimmed})"
-                )));
-            }
-
-            Ok(Duration::from_secs(seconds))
-        }
+        Ok(raw) => parse_shutdown_timeout(raw.trim()),
         Err(VarError::NotPresent) => Ok(DEFAULT_SHUTDOWN_TIMEOUT),
         Err(VarError::NotUnicode(value)) => Err(BootstrapError::from(color_eyre::eyre::eyre!(
             "{SHUTDOWN_TIMEOUT_ENV} must contain a valid UTF-8 value (received {:?})",
             value
         ))),
     }
+}
+
+/// Parses a trimmed `PG_SHUTDOWN_TIMEOUT_SECS` value into a duration.
+fn parse_shutdown_timeout(trimmed: &str) -> BootstrapResult<Duration> {
+    if trimmed.is_empty() {
+        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
+            "{SHUTDOWN_TIMEOUT_ENV} is present but empty"
+        )));
+    }
+
+    let seconds: u64 = trimmed.parse().map_err(|err| {
+        BootstrapError::from(color_eyre::eyre::eyre!(
+            "failed to parse {SHUTDOWN_TIMEOUT_ENV} from '{trimmed}': {err}"
+        ))
+    })?;
+
+    validate_shutdown_timeout_secs(seconds, trimmed)
+}
+
+/// Validates that the parsed timeout lies within the supported range.
+fn validate_shutdown_timeout_secs(seconds: u64, trimmed: &str) -> BootstrapResult<Duration> {
+    if seconds == 0 {
+        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
+            "{SHUTDOWN_TIMEOUT_ENV} must be at least 1 second (received {trimmed})"
+        )));
+    }
+
+    if seconds > MAX_SHUTDOWN_TIMEOUT_SECS {
+        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
+            "{SHUTDOWN_TIMEOUT_ENV} must be {MAX_SHUTDOWN_TIMEOUT_SECS} seconds or less (received \
+             {trimmed})"
+        )));
+    }
+
+    Ok(Duration::from_secs(seconds))
 }
 
 pub(super) fn worker_binary_from_env(

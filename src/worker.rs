@@ -199,6 +199,7 @@ impl Serialize for PlainSecret {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for worker secret handling.
     use super::PlainSecret;
 
     #[test]

@@ -219,6 +219,7 @@ pub(super) fn resolve_installed_dir(settings: &Settings) -> Option<std::path::Pa
 
 #[cfg(test)]
 mod tests {
+    //! Tests for cluster installation handling.
     use std::fs;
 
     use super::*;

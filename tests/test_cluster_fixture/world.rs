@@ -123,62 +123,74 @@ pub(super) fn env_for_profile(
             let missing_dir = sandbox.install_dir().join("missing-tz");
             Ok(sandbox.env_with_timezone_override(missing_dir.as_ref()))
         }
-        FixtureEnvProfile::MissingWorkerBinary => {
-            let mut vars = sandbox.env_without_timezone();
-            let fake_worker = sandbox
-                .install_dir()
-                .join("missing-worker")
-                .join("pg_worker");
-            override_env_os(
-                &mut vars,
-                "PG_EMBEDDED_WORKER",
-                Some(OsString::from(fake_worker.as_str())),
-            );
-            Ok(vars)
-        }
-        FixtureEnvProfile::NonExecutableWorkerBinary => {
-            let mut vars = sandbox.env_without_timezone();
-            let worker_dir = sandbox.install_dir().join("non-exec-worker");
-            let worker_path = worker_dir.join("pg_worker");
-            std::fs::create_dir_all(worker_dir.as_std_path())
-                .with_context(|| format!("create non-exec worker dir at {worker_dir}"))?;
-            fs::write(worker_path.as_std_path(), "#!/bin/sh\nexit 0\n")
-                .with_context(|| format!("write stub worker at {worker_path}"))?;
-            cap_fs::set_permissions(worker_path.as_ref(), 0o644)
-                .with_context(|| format!("strip execution bit from {worker_path}"))?;
-            override_env_os(
-                &mut vars,
-                "PG_EMBEDDED_WORKER",
-                Some(OsString::from(worker_path.as_str())),
-            );
-            Ok(vars)
-        }
-        FixtureEnvProfile::PermissionDenied => {
-            let mut vars = sandbox.env_without_timezone();
-            let runtime = sandbox.install_dir().join("denied-runtime");
-            let data = sandbox.install_dir().join("denied-data");
-            create_dir_with_mode(&runtime, 0o000)?;
-            create_dir_with_mode(&data, 0o000)?;
-            override_env_path(&mut vars, "PG_RUNTIME_DIR", runtime.as_ref());
-            override_env_path(&mut vars, "PG_DATA_DIR", data.as_ref());
-            Ok(vars)
-        }
-        FixtureEnvProfile::ReadOnlyFilesystem => {
-            let mut vars = sandbox.env_without_timezone();
-            let runtime = sandbox.install_dir().join("readonly-runtime");
-            let data = sandbox.install_dir().join("readonly-data");
-            prepare_read_only_dir(&runtime)?;
-            prepare_read_only_dir(&data)?;
-            override_env_path(&mut vars, "PG_RUNTIME_DIR", runtime.as_ref());
-            override_env_path(&mut vars, "PG_DATA_DIR", data.as_ref());
-            Ok(vars)
-        }
+        FixtureEnvProfile::MissingWorkerBinary => Ok(env_with_missing_worker(sandbox)),
+        FixtureEnvProfile::NonExecutableWorkerBinary => env_with_non_executable_worker(sandbox),
+        FixtureEnvProfile::PermissionDenied => env_with_denied_dirs(sandbox),
+        FixtureEnvProfile::ReadOnlyFilesystem => env_with_read_only_dirs(sandbox),
         FixtureEnvProfile::InvalidConfiguration => {
             let mut vars = sandbox.env_without_timezone();
             override_env_os(&mut vars, "PG_PORT", Some(OsString::from("not-a-port")));
             Ok(vars)
         }
     }
+}
+/// Points `PG_EMBEDDED_WORKER` at a worker path that does not exist.
+fn env_with_missing_worker(sandbox: &TestSandbox) -> ScopedEnvVars {
+    let mut vars = sandbox.env_without_timezone();
+    let fake_worker = sandbox
+        .install_dir()
+        .join("missing-worker")
+        .join("pg_worker");
+    override_env_os(
+        &mut vars,
+        "PG_EMBEDDED_WORKER",
+        Some(OsString::from(fake_worker.as_str())),
+    );
+    vars
+}
+
+/// Stages a stub worker without the execution bit and points the environment
+/// at it.
+fn env_with_non_executable_worker(sandbox: &TestSandbox) -> Result<ScopedEnvVars> {
+    let mut vars = sandbox.env_without_timezone();
+    let worker_dir = sandbox.install_dir().join("non-exec-worker");
+    let worker_path = worker_dir.join("pg_worker");
+    std::fs::create_dir_all(worker_dir.as_std_path())
+        .with_context(|| format!("create non-exec worker dir at {worker_dir}"))?;
+    fs::write(worker_path.as_std_path(), "#!/bin/sh\nexit 0\n")
+        .with_context(|| format!("write stub worker at {worker_path}"))?;
+    cap_fs::set_permissions(worker_path.as_ref(), 0o644)
+        .with_context(|| format!("strip execution bit from {worker_path}"))?;
+    override_env_os(
+        &mut vars,
+        "PG_EMBEDDED_WORKER",
+        Some(OsString::from(worker_path.as_str())),
+    );
+    Ok(vars)
+}
+
+/// Routes the runtime and data directories at mode-0o000 directories.
+fn env_with_denied_dirs(sandbox: &TestSandbox) -> Result<ScopedEnvVars> {
+    let mut vars = sandbox.env_without_timezone();
+    let runtime = sandbox.install_dir().join("denied-runtime");
+    let data = sandbox.install_dir().join("denied-data");
+    create_dir_with_mode(&runtime, 0o000)?;
+    create_dir_with_mode(&data, 0o000)?;
+    override_env_path(&mut vars, "PG_RUNTIME_DIR", runtime.as_ref());
+    override_env_path(&mut vars, "PG_DATA_DIR", data.as_ref());
+    Ok(vars)
+}
+
+/// Routes the runtime and data directories at read-only directories.
+fn env_with_read_only_dirs(sandbox: &TestSandbox) -> Result<ScopedEnvVars> {
+    let mut vars = sandbox.env_without_timezone();
+    let runtime = sandbox.install_dir().join("readonly-runtime");
+    let data = sandbox.install_dir().join("readonly-data");
+    prepare_read_only_dir(&runtime)?;
+    prepare_read_only_dir(&data)?;
+    override_env_path(&mut vars, "PG_RUNTIME_DIR", runtime.as_ref());
+    override_env_path(&mut vars, "PG_DATA_DIR", data.as_ref());
+    Ok(vars)
 }
 
 fn create_dir_with_mode(path: &Utf8PathBuf, mode: u32) -> Result<()> {

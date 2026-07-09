@@ -147,9 +147,10 @@ fn concurrent_register_shutdown_hook_calls_share_singleton() -> Result<()> {
             .collect::<Vec<_>>();
 
         for handle in handles {
-            handle
-                .join()
-                .expect("registration thread should not panic")?;
+            match handle.join() {
+                Ok(result) => result?,
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
         }
         Ok::<(), crate::error::BootstrapError>(())
     })?;

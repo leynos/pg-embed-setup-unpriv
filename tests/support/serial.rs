@@ -119,25 +119,26 @@ fn acquire_scenario_guard() -> MutexGuard<'static, ()> {
 fn acquire_process_lock() -> ProcessLock {
     let target_dir =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| PathBuf::from("target"), PathBuf::from);
-    std::fs::create_dir_all(&target_dir).unwrap_or_else(|err| {
+    if let Err(err) = std::fs::create_dir_all(&target_dir) {
         panic!(
             "failed to create target dir for scenario lock at {}: {err}",
             target_dir.display()
         );
-    });
+    }
     let lock_path = target_dir.join("pg-embed-setup-unpriv.serial.lock");
-    let lock_file = OpenOptions::new()
+    let open_result = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&lock_path)
-        .unwrap_or_else(|err| {
-            panic!(
-                "failed to open scenario lock file at {}: {err}",
-                lock_path.display()
-            );
-        });
+        .open(&lock_path);
+    let lock_file = match open_result {
+        Ok(file) => file,
+        Err(err) => panic!(
+            "failed to open scenario lock file at {}: {err}",
+            lock_path.display()
+        ),
+    };
     // SAFETY: The file descriptor obtained from `lock_file.as_raw_fd()` is valid
     // because `lock_file` was opened via `OpenOptions::open` and remains owned by
     // this scope until after the `flock` call completes. No other code moves or

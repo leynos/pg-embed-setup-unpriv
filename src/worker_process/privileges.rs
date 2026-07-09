@@ -264,6 +264,7 @@ cfg_privilege_drop! {
     feature = "cluster-unit-tests"
 ))]
 mod tests {
+    //! Tests for worker process privilege handling.
     use std::process::Command;
 
     use tempfile::NamedTempFile;

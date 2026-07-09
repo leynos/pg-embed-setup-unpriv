@@ -22,7 +22,9 @@ fn with_worker_guard_restores_environment() {
     const KEY: &str = "PG_EMBEDDED_WORKER_GUARD_TEST";
     let baseline = std::env::var(KEY).ok();
     let guard = scoped_env(vec![(OsString::from(KEY), Some(OsString::from("guarded")))]);
-    let cluster = dummy_cluster().with_worker_guard(Some(guard));
+    let cluster = dummy_cluster()
+        .expect("dummy cluster")
+        .with_worker_guard(Some(guard));
     assert_eq!(
         std::env::var(KEY).as_deref(),
         Ok("guarded"),
@@ -42,11 +44,10 @@ fn with_worker_guard_restores_environment() {
     }
 }
 
-fn dummy_cluster() -> TestCluster {
+fn dummy_cluster() -> std::io::Result<TestCluster> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
-        .build()
-        .expect("test runtime");
+        .build()?;
     let span = info_span!(target: LOG_TARGET, "test_cluster");
     let bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
     let env_vars = bootstrap.environment.to_env();
@@ -64,5 +65,5 @@ fn dummy_cluster() -> TestCluster {
         _cluster_span: span,
     };
 
-    TestCluster { handle, guard }
+    Ok(TestCluster { handle, guard })
 }

@@ -40,6 +40,7 @@ pub fn create_partial_data_dir(data_dir: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for partial data directory scaffolding.
     use tempfile::tempdir;
 
     use super::*;

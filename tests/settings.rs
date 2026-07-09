@@ -190,6 +190,7 @@ mod cap_fs;
 
 #[cfg(all(unix, feature = "cluster-unit-tests", privileged_unix_platform,))]
 mod dir_accessible_tests {
+    //! Unix permission checks for directory accessibility validation.
     use cap_fs::{CapabilityTempDir, metadata};
     use cap_std::fs::{MetadataExt, PermissionsExt};
     use color_eyre::eyre::{Context, ensure};
