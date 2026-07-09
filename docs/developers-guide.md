@@ -148,6 +148,7 @@ bounding ancestor traversal to the snapshot length, and validates both
 termination and Job Object assignment decisions against a reused-descendant-PID
 case. The serial lock tests cover missing, partial, malformed, and stale owner
 states around the grace window.
+
 ## Further reading
 
 - `tests/e2e_postgresql_embedded_diesel.rs` – example of combining the helper
