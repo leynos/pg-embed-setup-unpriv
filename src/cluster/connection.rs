@@ -155,6 +155,7 @@ impl TestClusterConnection {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for cluster connection settings.
     use std::time::Duration;
 
     use postgresql_embedded::Settings;

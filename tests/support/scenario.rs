@@ -13,5 +13,8 @@ use color_eyre::eyre::Result;
 /// assert_eq!(value, 42);
 /// ```
 pub fn expect_fixture<T>(fixture: Result<T>, label: &str) -> T {
-    fixture.unwrap_or_else(|err| panic!("{label} fixture failed: {err:?}"))
+    match fixture {
+        Ok(value) => value,
+        Err(err) => panic!("{label} fixture failed: {err:?}"),
+    }
 }

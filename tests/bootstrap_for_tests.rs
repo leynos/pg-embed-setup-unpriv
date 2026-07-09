@@ -91,26 +91,32 @@ impl BootstrapWorld {
     fn handle_outcome(&mut self, outcome: Result<TestBootstrapSettings, Report>) -> Result<()> {
         match outcome {
             Ok(settings) => {
-                self.record_settings(settings);
-                if let Some(stored_settings) = self.settings.as_ref() {
-                    let expected = EnvSnapshot::from_environment(&stored_settings.environment);
-                    self.record_expected_env(expected);
-                }
+                self.handle_success(settings);
                 Ok(())
             }
-            Err(err) => {
-                let message = err.to_string();
-                let debug = format!("{err:?}");
-                if let Some(reason) =
-                    skip_message("SKIP-BOOTSTRAP-FOR-TESTS", &message, Some(&debug))
-                {
-                    self.mark_skip(reason);
-                    Ok(())
-                } else {
-                    self.record_error(message.clone());
-                    Err(eyre!(message))
-                }
-            }
+            Err(err) => self.handle_failure(&err),
+        }
+    }
+
+    /// Records successful bootstrap settings and the expected environment.
+    fn handle_success(&mut self, settings: TestBootstrapSettings) {
+        self.record_settings(settings);
+        if let Some(stored_settings) = self.settings.as_ref() {
+            let expected = EnvSnapshot::from_environment(&stored_settings.environment);
+            self.record_expected_env(expected);
+        }
+    }
+
+    /// Distinguishes skip requests from genuine bootstrap failures.
+    fn handle_failure(&mut self, err: &Report) -> Result<()> {
+        let message = err.to_string();
+        let debug = format!("{err:?}");
+        if let Some(reason) = skip_message("SKIP-BOOTSTRAP-FOR-TESTS", &message, Some(&debug)) {
+            self.mark_skip(reason);
+            Ok(())
+        } else {
+            self.record_error(message.clone());
+            Err(eyre!(message))
         }
     }
 

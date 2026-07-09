@@ -166,6 +166,7 @@ fn validate_version(version: &str) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for cache lock acquisition.
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
 
@@ -173,11 +174,11 @@ mod tests {
 
     /// Fixture providing a temporary cache directory as a UTF-8 path.
     #[fixture]
-    fn cache_fixture() -> (TempDir, camino::Utf8PathBuf) {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let cache_dir =
-            camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).expect("utf8 path");
-        (temp, cache_dir)
+    fn cache_fixture() -> io::Result<(TempDir, camino::Utf8PathBuf)> {
+        let temp = tempfile::tempdir()?;
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf())
+            .map_err(|path| io::Error::other(format!("non-UTF-8 temp path: {}", path.display())))?;
+        Ok((temp, cache_dir))
     }
 
     #[rstest]
@@ -185,11 +186,11 @@ mod tests {
     #[case::shared("16.3.0", false)]
     #[cfg(unix)]
     fn acquire_lock_creates_lock_file(
-        cache_fixture: (TempDir, camino::Utf8PathBuf),
+        cache_fixture: io::Result<(TempDir, camino::Utf8PathBuf)>,
         #[case] version: &str,
         #[case] exclusive: bool,
     ) {
-        let (temp, cache_dir) = cache_fixture;
+        let (temp, cache_dir) = cache_fixture.expect("cache fixture");
         let _lock = if exclusive {
             CacheLock::acquire_exclusive(&cache_dir, version).expect("acquire lock")
         } else {
@@ -204,8 +205,10 @@ mod tests {
     }
 
     #[rstest]
-    fn multiple_shared_locks_can_coexist(cache_fixture: (TempDir, camino::Utf8PathBuf)) {
-        let (_temp, cache_dir) = cache_fixture;
+    fn multiple_shared_locks_can_coexist(
+        cache_fixture: io::Result<(TempDir, camino::Utf8PathBuf)>,
+    ) {
+        let (_temp, cache_dir) = cache_fixture.expect("cache fixture");
 
         let lock1 = CacheLock::acquire_shared(&cache_dir, "17.4.0").expect("acquire lock 1");
         let lock2 = CacheLock::acquire_shared(&cache_dir, "17.4.0").expect("acquire lock 2");
@@ -216,8 +219,10 @@ mod tests {
     }
 
     #[rstest]
-    fn different_versions_have_separate_locks(cache_fixture: (TempDir, camino::Utf8PathBuf)) {
-        let (_temp, cache_dir) = cache_fixture;
+    fn different_versions_have_separate_locks(
+        cache_fixture: io::Result<(TempDir, camino::Utf8PathBuf)>,
+    ) {
+        let (_temp, cache_dir) = cache_fixture.expect("cache fixture");
 
         let lock1 = CacheLock::acquire_exclusive(&cache_dir, "17.4.0").expect("acquire lock 1");
         let lock2 = CacheLock::acquire_exclusive(&cache_dir, "16.3.0").expect("acquire lock 2");
@@ -235,10 +240,10 @@ mod tests {
     #[case::parent_in_path_exclusive("../17.4.0")]
     #[case::absolute_path_exclusive("/etc/passwd")]
     fn acquire_rejects_invalid_version_strings(
-        cache_fixture: (TempDir, camino::Utf8PathBuf),
+        cache_fixture: io::Result<(TempDir, camino::Utf8PathBuf)>,
         #[case] invalid_version: &str,
     ) {
-        let (_temp, cache_dir) = cache_fixture;
+        let (_temp, cache_dir) = cache_fixture.expect("cache fixture");
 
         let exclusive_err = CacheLock::acquire_exclusive(&cache_dir, invalid_version)
             .expect_err("acquire_exclusive should reject invalid version");

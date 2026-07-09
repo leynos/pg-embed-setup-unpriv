@@ -79,6 +79,7 @@ pub fn override_env_path(vars: &mut ScopedEnvVars, key: impl AsRef<OsStr>, value
 
 #[cfg(test)]
 mod tests {
+    //! Smoke tests for the environment isolation helpers.
     use super::*;
 
     #[test]

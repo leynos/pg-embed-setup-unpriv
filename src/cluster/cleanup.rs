@@ -209,6 +209,7 @@ fn warn_cleanup_removal_failure(
 
 #[cfg(test)]
 mod tests {
+    //! Tests for cluster cleanup behaviour.
     use std::fs;
 
     use postgresql_embedded::Settings;

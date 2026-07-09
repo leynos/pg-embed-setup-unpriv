@@ -107,6 +107,7 @@ fn resolve_from_home() -> Option<Utf8PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for cache configuration parsing.
     use std::ffi::OsString;
 
     use rstest::rstest;
@@ -153,9 +154,7 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    fn platform_path(path: &str) -> Utf8PathBuf {
-        Utf8PathBuf::from_path_buf(PathBuf::from(path)).expect("test path should be valid UTF-8")
-    }
+    fn platform_path(path: &str) -> Utf8PathBuf { Utf8PathBuf::from(path) }
 
     fn platform_cache_path(cache_home: &str) -> Utf8PathBuf {
         platform_path(cache_home).join(CACHE_SUBDIR)

@@ -179,6 +179,7 @@ impl Drop for TemporaryDatabase {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for temporary database handling.
     use super::*;
 
     #[test]

@@ -1,0 +1,50 @@
+# Whitaker Dylint suite configuration.
+#
+# The crate's whole purpose is ambient filesystem and process setup for
+# embedded PostgreSQL as an unprivileged user: it prepares data directories,
+# adjusts ownership and permissions, and stages worker binaries in
+# world-readable locations before any capability handle can exist. Routing
+# that work through cap-std would invert the crate's design, so the library,
+# the worker binaries, and the integration test crates that exercise the
+# ambient behaviour are documented ambient boundaries (see leynos/netsuke#410
+# for the estate precedent).
+[no_std_fs_operations]
+excluded_crates = [
+    # Library crate: ambient filesystem/process setup is the crate's purpose.
+    "pg_embedded_setup_unpriv",
+    # Privileged worker binary: performs ambient ownership and cleanup work.
+    "pg_worker",
+    # Dev-only hang-simulation worker used by shutdown tests.
+    "pg_worker_hang",
+    # Integration test crates: they exercise the ambient bootstrap surface
+    # directly and share the ambient test-support modules under tests/support
+    # (test support utilities are a sanctioned exclusion category).
+    "bootstrap_for_tests",
+    "bootstrap_privileges",
+    "bootstrap_worker_binary",
+    "cli",
+    "cluster_handle_send",
+    "cluster_split_constructors",
+    "database_lifecycle",
+    "data_dir_recovery",
+    "e2e_postgresql_embedded_diesel",
+    "localized_diagnostics",
+    "observability",
+    "recovery_integration",
+    "settings",
+    "settings_logging",
+    "settings_snapshot_roundtrip",
+    "shared_cluster_handle_failure",
+    "shared_cluster_handle_success",
+    "shutdown_hook",
+    "shutdown_hook_lifecycle",
+    "shutdown_timeout",
+    "test_cluster",
+    "test_cluster_async",
+    "test_cluster_behaviour",
+    "test_cluster_fixture",
+    "test_cluster_connection",
+    "test_cluster_drop",
+    "ui",
+    "worker_process",
+]

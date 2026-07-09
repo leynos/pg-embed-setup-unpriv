@@ -139,6 +139,7 @@ fn join_path(base: &Path, relative: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for file hashing helpers.
     use std::fs;
 
     use tempfile::TempDir;

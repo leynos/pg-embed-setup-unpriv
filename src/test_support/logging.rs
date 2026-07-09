@@ -158,6 +158,7 @@ fn decode_logs(bytes: Vec<u8>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for log-capture helpers.
     use tracing::info_span;
 
     use super::{capture_debug_logs, capture_info_logs_with_spans, capture_warn_logs, decode_logs};

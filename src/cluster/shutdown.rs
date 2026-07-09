@@ -367,6 +367,7 @@ pub(super) fn warn_stop_timeout(timeout_secs: u64, context: &str) {
 
 #[cfg(all(test, feature = "cluster-unit-tests"))]
 mod tests {
+    //! Tests for cluster shutdown behaviour.
     use rstest::rstest;
 
     use super::*;

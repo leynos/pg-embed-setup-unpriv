@@ -3,6 +3,7 @@
 use super::*;
 
 mod sanitized_settings {
+    //! Tests for sanitized settings logging.
     use std::{collections::HashMap, time::Duration};
 
     use color_eyre::eyre::{Result, ensure};
@@ -78,6 +79,7 @@ mod sanitized_settings {
 }
 
 mod behaviour_tests {
+    //! Behavioural tests for bootstrap preparation.
     use std::ffi::OsString;
 
     use tempfile::tempdir;
@@ -129,12 +131,13 @@ mod behaviour_tests {
 
 #[cfg(all(unix, privileged_unix_platform))]
 mod unix_tests {
+    //! Unix-specific permission tests for bootstrap preparation.
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     use nix::unistd::{Uid, User, geteuid};
     use tempfile::tempdir;
 
-    use super::*;
+    use super::{super::root::ensure_pgpass_for_user, *};
 
     #[test]
     fn ensure_settings_paths_applies_defaults() {
