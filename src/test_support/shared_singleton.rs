@@ -295,8 +295,10 @@ mod tests {
         );
         assert!(
             was_dropped.load(Ordering::SeqCst),
-            "guard must drop on registration failure so postmaster.pid is removed and no orphaned \
-             PostgreSQL process remains"
+            concat!(
+                "guard must drop on registration failure so postmaster.pid is removed ",
+                "and no orphaned PostgreSQL process remains"
+            )
         );
     }
 }
