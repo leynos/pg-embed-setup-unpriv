@@ -83,9 +83,9 @@ impl RollbackHarness {
 }
 
 #[fixture]
+#[rustfmt::skip]
 fn locks() -> NoopLocks {
-    let locks = NoopLocks::new();
-    std::convert::identity(locks)
+    NoopLocks::new()
 }
 
 fn bootstrap_error(message: &str) -> BootstrapError { eyre!("{message}").into() }
