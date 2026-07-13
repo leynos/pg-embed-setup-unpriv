@@ -23,12 +23,15 @@ jobs:
       BUILD_PROFILE: debug
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       WHITAKER_INSTALLER_VERSION: '0.2.5'
+      # Embedded-Postgres tests run slower under cold coverage
+      # instrumentation than the default 600s cargo wall-clock cap.
+      RUN_RUST_CARGO_WAIT_TIMEOUT: '1800'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
+        uses: leynos/shared-actions/.github/actions/setup-rust@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
       - name: Format
         if: ${{ matrix.privilege == 'unprivileged' }}
         run: make check-fmt
@@ -80,12 +83,13 @@ jobs:
           cargo nextest run --all-targets --all-features
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/generate-coverage@d0fd973d07088c2120329a93035a5ba91e077014
+        uses: leynos/shared-actions/.github/actions/generate-coverage@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
         with:
           output-path: lcov.info
           format: lcov
           features: dev-worker
           with-default-features: "false"
+          with-ratchet: 'true'
       - name: Loom Concurrency Tests (non-blocking)
         if: ${{ always() && matrix.privilege == 'unprivileged' }}
         run: make test-loom
@@ -110,15 +114,18 @@ jobs:
               "$@"
           }
           run_as_root make test
-      - name: Upload coverage data to CodeScene
-        env:
-          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        if: ${{ env.CS_ACCESS_TOKEN && matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@d28e04c9ea359650a85d697d1ab3d0be0b5674e7
-        with:
-          format: lcov
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
-          installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
+      # A `mode: check` step is deliberately not wired in here: CodeScene
+      # only accepts `cs-coverage upload` for analysed branches (main),
+      # so the previous unguarded default-mode step would be rejected on
+      # every pull request once CS_ACCESS_TOKEN is set. Main-branch
+      # coverage is uploaded from coverage-main.yml instead. The
+      # changed-line `check` gate needs a per-project CodeScene gates
+      # configuration that has not been enabled for this project yet
+      # (see the estate rollout notes for the byte-identical failure on
+      # ddlint and chutoro). Add the check step in a fast-follow PR once
+      # coverage-main.yml has uploaded to main at least once and the
+      # gate is confirmed to resolve, or once CodeScene confirms the
+      # project's coverage gate is enabled.
 
   cross-platform-tests:
     name: Test (${{ matrix.target }})
@@ -145,7 +152,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
+        uses: leynos/shared-actions/.github/actions/setup-rust@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
       - name: Restore PostgreSQL binary cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
@@ -205,7 +212,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@d0fd973d07088c2120329a93035a5ba91e077014
+        uses: leynos/shared-actions/.github/actions/setup-rust@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
       - name: Setup uv
         uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
         with:

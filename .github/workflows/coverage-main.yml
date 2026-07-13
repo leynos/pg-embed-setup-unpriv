@@ -1,0 +1,50 @@
+name: Coverage (main)
+
+# CodeScene accepts `cs-coverage upload` only for analysed branches, so
+# main-branch coverage is uploaded here on push; pull requests do not
+# run a changed-line gate yet (see the comment in ci.yml on the
+# `mode: check` step deferral). This workflow also advances the
+# coverage ratchet baseline: caches saved on main are readable by every
+# pull-request run, so the baseline written here is the one the PR
+# ratchet check compares against.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  coverage-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      BUILD_PROFILE: debug
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Embedded-Postgres tests run slower under cold coverage
+      # instrumentation than the default 600s cargo wall-clock cap.
+      RUN_RUST_CARGO_WAIT_TIMEOUT: '1800'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
+      - name: Generate coverage
+        uses: leynos/shared-actions/.github/actions/generate-coverage@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
+        with:
+          output-path: lcov.info
+          format: lcov
+          features: dev-worker
+          with-default-features: "false"
+          with-ratchet: 'true'
+      - name: Upload coverage data to CodeScene
+        env:
+          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+        if: env.CS_ACCESS_TOKEN != ''
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
+        with:
+          format: lcov
+          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
