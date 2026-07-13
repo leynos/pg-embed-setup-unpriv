@@ -118,6 +118,26 @@ fn cached_shared_handle_error(original_err: &Arc<BootstrapError>) -> BootstrapEr
     BootstrapError::new(original_err.kind(), report)
 }
 
+fn register_shutdown_hook_or_fail<T, Register>(
+    target: &T,
+    register_shutdown_hook: Register,
+    failure_message: &'static str,
+) -> Result<(), (Arc<BootstrapError>, BootstrapError)>
+where
+    Register: FnOnce(&T) -> BootstrapResult<()>,
+{
+    if let Err(err) = register_shutdown_hook(target) {
+        log_shared_cluster_error(&err, failure_message);
+        let stored = Arc::new(BootstrapError::new(
+            err.kind(),
+            color_eyre::eyre::eyre!("shutdown hook registration failed: {:?}", err),
+        ));
+        return Err((stored, err));
+    }
+
+    Ok(())
+}
+
 fn leak_shared_handle_after_shutdown_hook<Guard, Register>(
     handle: ClusterHandle,
     guarded: Guard,
@@ -126,17 +146,11 @@ fn leak_shared_handle_after_shutdown_hook<Guard, Register>(
 where
     Register: FnOnce(&ClusterHandle) -> BootstrapResult<()>,
 {
-    if let Err(err) = register_shutdown_hook(&handle) {
-        log_shared_cluster_error(
-            &err,
-            "shared cluster shutdown hook registration failed; dropping guard",
-        );
-        let stored = Arc::new(BootstrapError::new(
-            err.kind(),
-            color_eyre::eyre::eyre!("shutdown hook registration failed: {:?}", err),
-        ));
-        return Err((stored, err));
-    }
+    register_shutdown_hook_or_fail(
+        &handle,
+        register_shutdown_hook,
+        "shared cluster shutdown hook registration failed; dropping guard",
+    )?;
 
     // Leak the guard only after the process-exit hook is armed. If hook
     // registration fails, `guarded` drops here and stops the cluster.
@@ -284,17 +298,11 @@ fn leak_shared_cluster_after_shutdown_hook<Cluster, Register>(
 where
     Register: FnOnce(&Cluster) -> BootstrapResult<()>,
 {
-    if let Err(err) = register_shutdown_hook(&cluster) {
-        log_shared_cluster_error(
-            &err,
-            "shared cluster shutdown hook registration failed; dropping cluster",
-        );
-        let stored = Arc::new(BootstrapError::new(
-            err.kind(),
-            color_eyre::eyre::eyre!("shutdown hook registration failed: {:?}", err),
-        ));
-        return Err((stored, err));
-    }
+    register_shutdown_hook_or_fail(
+        &cluster,
+        register_shutdown_hook,
+        "shared cluster shutdown hook registration failed; dropping cluster",
+    )?;
 
     let leaked = Box::leak(Box::new(cluster));
     log_shared_cluster_event("shared cluster shutdown hook registered; leaking cluster");
