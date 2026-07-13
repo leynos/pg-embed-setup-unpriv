@@ -85,9 +85,7 @@ fn path_for_case(path_case: PathCase) -> PathBuf {
     let temp_dir = std::env::temp_dir();
     let temp_root = temp_dir
         .ancestors()
-        .last()
-        .expect("ancestors() always yields at least the path itself")
-        .to_path_buf();
+        .fold(temp_dir.clone(), |_, ancestor| ancestor.to_path_buf());
 
     match path_case {
         PathCase::Empty => PathBuf::new(),
