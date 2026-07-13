@@ -236,6 +236,10 @@ mod unix_tests {
             .expect("PGPASSFILE FIFO validation must not block without a writer");
         worker.join().expect("pgpass preparation worker");
 
-        assert!(result.is_err(), "PGPASSFILE must be a regular file");
+        let err = result.expect_err("PGPASSFILE FIFO validation should fail");
+        assert!(
+            err.to_string().contains("must reference a regular file"),
+            "expected regular-file rejection, got: {err}"
+        );
     }
 }
