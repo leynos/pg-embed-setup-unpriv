@@ -251,6 +251,9 @@ fn sorted_configuration_keys(settings: &Settings) -> Vec<&str> {
     keys.sort_unstable();
     keys
 }
-
+#[cfg(test)]
+mod property_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(all(unix, privileged_unix_platform))]
+mod unix_user;

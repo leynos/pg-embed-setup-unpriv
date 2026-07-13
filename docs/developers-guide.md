@@ -12,6 +12,9 @@ consumer-facing guidance.
   `TestCluster` teardown, demonstrating that no orphaned processes remain.
 - Behavioural tests driven by `rstest-bdd` exercise both privilege branches to
   guard against regressions in ownership or permission handling.
+- Property tests exercise lifecycle invariants that do not depend on a
+  particular thread schedule, including repeated cleanup, partial setup
+  cleanup, cleanup-mode relationships, and pure bootstrap path preparation.
 - Behavioural suites coordinate via a shared lock file on Unix and an atomic
   lock directory on non-Unix platforms, so concurrent test binaries do not
   contend over PostgreSQL setup or cache directories. The non-Unix lock keeps a
@@ -82,6 +85,48 @@ Linux, macOS, and Windows using cargo-binstall 1.19.1. The release workflow
 audits published asset URLs with the same pinned cargo-binstall bootstrap
 before the draft release is published.
 
+## Lifecycle verification
+
+`proptest` cases run as part of the default unit suite and protect the
+schedule-independent lifecycle guarantees. These cover idempotent cleanup,
+cleanup after partial setup, dangerous cleanup path rejection, cleanup-mode
+relationships, and deterministic bootstrap path preparation.
+
+Loom-based checks are opt-in and only compile when the `loom-tests` feature is
+enabled. The Loom tests are marked `#[ignore]`, and `make test` keeps them
+dormant: the nextest run uses `--all-features`, while the follow-up
+`cargo test` run disables default features (enabling `dev-worker` only). CI
+runs the ignored library Loom models explicitly. Run the same suite locally
+with:
+
+```sh
+make test-loom
+```
+
+The Loom models cover the schedule-sensitive lifecycle paths: scoped
+environment state, per-template database creation, shared singleton
+initialisation, and shutdown-hook registration.
+
+The scheduler budget in `src/env/loom_tests.rs` currently uses
+`max_threads = 3`, `max_branches = 64`, and `preemption_bound = Some(3)`. The
+three bounds jointly constrain the search space so the suite stays tractable.
+Changing any of them requires justification, and may need matching CI timeout
+adjustments.
+
+Production and Loom both route `ScopedEnv` environment access through the same
+guard-aware `EnvLockOps` boundary. `lock_env_mutex` acquires the lock guard,
+`ensure_lock_is_clean` verifies the lock before a new outer scope uses it, and
+`var_os`, `set_var`, and `remove_var` all receive the held guard so reads,
+writes, and removals stay tied to the acquired environment lock. Production's
+`StdEnvLock` delegates that single contract to `std::env` while holding
+`ENV_LOCK`; Loom swaps in an in-memory fake environment map rather than
+mutating the real process environment. This lets the model checker validate
+`ScopedEnv` serialization, re-entrant depth tracking, non-empty backup/restore
+bookkeeping, spawn-while-held acquisition, asymmetric scope lifetimes, and
+panic-path thread-local cleanup. Loom still cannot instrument the actual
+`std::env` syscalls used by production; the standard serial environment tests
+cover those OS-level mutations.
+
 ## Windows shutdown hook
 
 Windows shared-cluster cleanup uses a platform-specific shutdown hook rather
@@ -103,38 +148,6 @@ bounding ancestor traversal to the snapshot length, and validates both
 termination and Job Object assignment decisions against a reused-descendant-PID
 case. The serial lock tests cover missing, partial, malformed, and stale owner
 states around the grace window.
-
-## Loom concurrency tests
-
-Loom-based checks for `ScopedEnv` are opt-in and only compile when the
-`loom-tests` feature is enabled. The Loom tests are marked `#[ignore]`, and
-`make test` keeps them dormant: the nextest run uses `--all-features`, while
-the follow-up `cargo nextest run` disables default features (enabling
-`dev-worker` only). Run the Loom suite locally with:
-
-```sh
-make test-loom
-```
-
-The scheduler budget in `src/env/loom_tests.rs` currently uses
-`max_threads = 3`, `max_branches = 64`, and `preemption_bound = Some(3)`. The
-three bounds jointly constrain the search space so the suite stays tractable.
-Changing any of them requires justification, and may need matching CI timeout
-adjustments.
-
-Production and Loom both route `ScopedEnv` environment access through the same
-guard-aware `EnvLockOps` boundary. `lock_env_mutex` acquires the lock guard,
-`ensure_lock_is_clean` verifies the lock before a new outer scope uses it, and
-`var_os`, `set_var`, and `remove_var` all receive the held guard so reads,
-writes, and removals stay tied to the acquired environment lock. Production's
-`StdEnvLock` delegates that single contract to `std::env` while holding
-`ENV_LOCK`; Loom swaps in an in-memory fake environment map rather than
-mutating the real process environment. This lets the model checker validate
-`ScopedEnv` serialization, re-entrant depth tracking, non-empty backup/restore
-bookkeeping, spawn-while-held acquisition, asymmetric scope lifetimes, and
-panic-path thread-local cleanup. Loom still cannot instrument the actual
-`std::env` syscalls used by production; the standard serial environment tests
-cover those OS-level mutations.
 
 ## Further reading
 

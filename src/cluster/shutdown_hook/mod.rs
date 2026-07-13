@@ -314,5 +314,7 @@ fn postmaster_process_is_running_for_shutdown(process: platform::PostmasterProce
     })
 }
 
+#[cfg(all(test, feature = "loom-tests"))]
+mod loom_tests;
 #[cfg(all(test, feature = "cluster-unit-tests"))]
 mod tests;

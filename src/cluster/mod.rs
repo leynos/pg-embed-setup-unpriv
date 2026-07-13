@@ -57,6 +57,7 @@ mod guard;
 mod handle;
 mod installation;
 mod lifecycle;
+mod lifecycle_template;
 pub(crate) mod panic_utils;
 mod runtime;
 mod runtime_mode;
@@ -75,6 +76,8 @@ pub use self::shutdown_hook::{
     read_postmaster_pid,
     read_postmaster_process,
 };
+#[cfg(all(test, feature = "loom-tests"))]
+mod lifecycle_loom_tests;
 mod startup;
 mod temporary_database;
 mod worker_invoker;
