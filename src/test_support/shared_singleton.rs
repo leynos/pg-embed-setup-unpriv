@@ -88,7 +88,7 @@ fn initialise_shared_cluster_handle()
             // Attach worker guard to cluster guard, then leak it.
             // The guard manages shutdown; leaking it means the cluster
             // runs for the process lifetime.
-            log_shared_cluster_handle_initialized();
+            log_shared_cluster_event("shared cluster handle initialized");
             let guarded = cluster_guard.with_worker_guard(worker_guard);
             leak_shared_handle_after_shutdown_hook(
                 handle,
@@ -97,7 +97,7 @@ fn initialise_shared_cluster_handle()
             )
         }
         Err(err) => {
-            log_shared_cluster_handle_initialization_failed(&err);
+            log_shared_cluster_error(&err, "shared cluster handle initialization failed");
             // Store error info for subsequent callers to retrieve.
             let stored = Arc::new(BootstrapError::new(
                 err.kind(),
@@ -127,7 +127,10 @@ where
     Register: FnOnce(&ClusterHandle) -> BootstrapResult<()>,
 {
     if let Err(err) = register_shutdown_hook(&handle) {
-        log_shared_handle_shutdown_hook_failed(&err);
+        log_shared_cluster_error(
+            &err,
+            "shared cluster shutdown hook registration failed; dropping guard",
+        );
         let stored = Arc::new(BootstrapError::new(
             err.kind(),
             color_eyre::eyre::eyre!("shutdown hook registration failed: {:?}", err),
@@ -139,22 +142,22 @@ where
     // registration fails, `guarded` drops here and stops the cluster.
     std::mem::forget(guarded);
 
-    log_shared_handle_leaked();
+    log_shared_cluster_event("shared cluster shutdown hook registered; leaking handle");
     Ok(Box::leak(Box::new(handle)))
 }
 
-fn log_shared_cluster_handle_initialized() {
+fn log_shared_cluster_event(message: &'static str) {
     tracing::debug!(
         target: crate::observability::LOG_TARGET,
-        "shared cluster handle initialized"
+        "{message}"
     );
 }
 
-fn log_shared_cluster_handle_initialization_failed(err: &BootstrapError) {
+fn log_shared_cluster_error(err: &BootstrapError, message: &'static str) {
     tracing::error!(
         target: crate::observability::LOG_TARGET,
         error = ?err,
-        "shared cluster handle initialization failed"
+        "{message}"
     );
 }
 
@@ -166,20 +169,6 @@ fn log_cached_shared_handle_error(original_err: &Arc<BootstrapError>) {
     );
 }
 
-fn log_shared_handle_shutdown_hook_failed(err: &BootstrapError) {
-    tracing::error!(
-        target: crate::observability::LOG_TARGET,
-        error = ?err,
-        "shared cluster shutdown hook registration failed; dropping guard"
-    );
-}
-
-fn log_shared_handle_leaked() {
-    tracing::debug!(
-        target: crate::observability::LOG_TARGET,
-        "shared cluster shutdown hook registered; leaking handle"
-    );
-}
 // ============================================================================
 // Legacy shared cluster singleton (for backward compatibility)
 // ============================================================================
@@ -269,11 +258,16 @@ pub fn shared_cluster() -> BootstrapResult<&'static TestCluster> {
 fn initialise_shared_cluster() -> Result<SharedClusterPtr, (Arc<BootstrapError>, BootstrapError)> {
     let worker_guard = ensure_worker_env();
     match TestCluster::new() {
-        Ok(new_cluster) => leak_shared_cluster_after_shutdown_hook(
-            new_cluster.with_worker_guard(worker_guard),
-            |cluster| cluster.handle.register_shutdown_on_exit(),
-        ),
+        Ok(new_cluster) => {
+            log_shared_cluster_event("shared cluster initialized");
+            leak_shared_cluster_after_shutdown_hook(
+                new_cluster.with_worker_guard(worker_guard),
+                |cluster| cluster.handle.register_shutdown_on_exit(),
+            )
+            .map(SharedClusterPtr)
+        }
         Err(err) => {
+            log_shared_cluster_error(&err, "shared cluster initialization failed");
             let stored = Arc::new(BootstrapError::new(
                 err.kind(),
                 color_eyre::eyre::eyre!("bootstrap failed: {:?}", err),
@@ -283,14 +277,18 @@ fn initialise_shared_cluster() -> Result<SharedClusterPtr, (Arc<BootstrapError>,
     }
 }
 
-fn leak_shared_cluster_after_shutdown_hook<Register>(
-    cluster: TestCluster,
+fn leak_shared_cluster_after_shutdown_hook<Cluster, Register>(
+    cluster: Cluster,
     register_shutdown_hook: Register,
-) -> Result<SharedClusterPtr, (Arc<BootstrapError>, BootstrapError)>
+) -> Result<*const Cluster, (Arc<BootstrapError>, BootstrapError)>
 where
-    Register: FnOnce(&TestCluster) -> BootstrapResult<()>,
+    Register: FnOnce(&Cluster) -> BootstrapResult<()>,
 {
     if let Err(err) = register_shutdown_hook(&cluster) {
+        log_shared_cluster_error(
+            &err,
+            "shared cluster shutdown hook registration failed; dropping cluster",
+        );
         let stored = Arc::new(BootstrapError::new(
             err.kind(),
             color_eyre::eyre::eyre!("shutdown hook registration failed: {:?}", err),
@@ -298,8 +296,9 @@ where
         return Err((stored, err));
     }
 
-    let leaked: &'static TestCluster = Box::leak(Box::new(cluster));
-    Ok(SharedClusterPtr(std::ptr::from_ref::<TestCluster>(leaked)))
+    let leaked = Box::leak(Box::new(cluster));
+    log_shared_cluster_event("shared cluster shutdown hook registered; leaking cluster");
+    Ok(std::ptr::from_ref(leaked))
 }
 
 #[cfg(test)]
@@ -342,6 +341,27 @@ mod tests {
                 "guard must drop on registration failure so postmaster.pid is removed ",
                 "and no orphaned PostgreSQL process remains"
             )
+        );
+    }
+
+    #[test]
+    fn registration_failure_drops_guard_instead_of_leaking_shared_cluster() {
+        let was_dropped = Arc::new(AtomicBool::new(false));
+        let cluster = DropProbe(Arc::clone(&was_dropped));
+
+        let result = leak_shared_cluster_after_shutdown_hook(cluster, |_| {
+            Err(BootstrapError::from(color_eyre::eyre::eyre!(
+                "injected shutdown hook failure"
+            )))
+        });
+
+        assert!(
+            result.is_err(),
+            "shared-cluster initialisation should fail when shutdown hook registration fails"
+        );
+        assert!(
+            was_dropped.load(Ordering::SeqCst),
+            "cluster must drop when shutdown hook registration fails"
         );
     }
 }

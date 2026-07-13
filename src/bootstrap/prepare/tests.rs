@@ -132,9 +132,17 @@ mod behaviour_tests {
 #[cfg(all(unix, privileged_unix_platform))]
 mod unix_tests {
     //! Unix-specific permission tests for bootstrap preparation.
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::{
+        os::unix::fs::{MetadataExt, PermissionsExt},
+        sync::mpsc,
+        thread,
+        time::Duration,
+    };
 
-    use nix::unistd::{Uid, User, geteuid};
+    use nix::{
+        sys::stat::Mode,
+        unistd::{Uid, User, geteuid},
+    };
     use tempfile::tempdir;
 
     use super::{unix_user::ensure_pgpass_for_user, *};
@@ -205,5 +213,29 @@ mod unix_tests {
         assert_eq!(observed_mode, PGPASS_MODE);
         assert_eq!(metadata.uid(), user.uid.as_raw());
         assert_eq!(metadata.gid(), user.gid.as_raw());
+    }
+
+    #[test]
+    fn ensure_pgpass_for_user_rejects_fifo_without_blocking() {
+        let sandbox = tempdir().expect("pgpass sandbox");
+        let path = sandbox.path().join(".pgpass");
+        nix::unistd::mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR).expect("create pgpass FIFO");
+        let user = User::from_uid(geteuid())
+            .expect("resolve current user")
+            .expect("current user should exist");
+        let utf8_path = Utf8PathBuf::from_path_buf(path).expect("pgpass path utf8");
+        let (sender, receiver) = mpsc::channel();
+
+        let worker = thread::spawn(move || {
+            sender
+                .send(ensure_pgpass_for_user(&utf8_path, &user))
+                .expect("send pgpass preparation result");
+        });
+        let result = receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("PGPASSFILE FIFO validation must not block without a writer");
+        worker.join().expect("pgpass preparation worker");
+
+        assert!(result.is_err(), "PGPASSFILE must be a regular file");
     }
 }

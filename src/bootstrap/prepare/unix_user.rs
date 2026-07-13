@@ -70,7 +70,7 @@ fn open_pgpass_for_user(
     options
         .read(true)
         .create(false)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
     let file = match dir.open_with(relative.as_std_path(), &options) {
         Ok(file) => file,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
