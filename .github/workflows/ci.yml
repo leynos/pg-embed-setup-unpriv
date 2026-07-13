@@ -83,7 +83,7 @@ jobs:
           cargo nextest run --all-targets --all-features
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/generate-coverage@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
+        uses: leynos/shared-actions/.github/actions/generate-coverage@29eea2635ee0f92e42c05f4cd360b7f1a2f00b12
         with:
           output-path: lcov.info
           format: lcov
