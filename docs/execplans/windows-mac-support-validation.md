@@ -1879,9 +1879,9 @@ Revision 5 (2026-06-28), after the latest review-finding validation. What
 changed and why:
 
 - Verified the new inline and outside-diff comments against the current branch.
-  The synchronous-test documentation fragment, Cargo wrapper parsing, Windows
-  Job Object root-assignment gating, non-Unix serial-lock module structure, and
-  CLI argument pre-scan findings were still valid and were fixed.
+  The synchronous-test documentation fragment, Cargo wrapper parsing,
+  Windows Job Object root-assignment gating, non-Unix serial-lock module
+  structure, and CLI argument pre-scan findings were still valid and were fixed.
 - Updated `scripts/release_archive.py` so wrapper-style Cargo commands are
   tokenized before path classification, preserving absolute wrapper paths and
   retaining the existing unquoted Windows executable-path behaviour.
@@ -1959,8 +1959,8 @@ comments. What changed and why:
   environment variable instead of interpolating it directly into the build
   command.
 - Changed shutdown-hook postmaster readers to return explicit
-  `BootstrapResult<Option<_>>` values, so missing PID files remain absence
-  while file I/O and malformed PID data are logged as failures.
+  `BootstrapResult<Option<_>>` values, so missing PID files remain absence while
+  file I/O and malformed PID data are logged as failures.
 - Refactored the shutdown callback to clone the shutdown work item and release
   the global mutex before process lookup, shutdown requests, polling, forceful
   cleanup, and data-directory cleanup.
@@ -1972,9 +1972,9 @@ comments. What changed and why:
 
 Validation recorded for this pass: release archive pytest via `uv`,
 `make check-fmt`, `make lint`, `make test`, `git diff --check`, and an attempted
-`coderabbit review --agent`. The CodeRabbit CLI connected and began analysis
-but then produced no output for several minutes, so only that stuck review
-process was terminated after the deterministic gates had passed.
+`coderabbit review --agent`. The CodeRabbit CLI connected and began analysis but
+then produced no output for several minutes, so only that stuck review process
+was terminated after the deterministic gates had passed.
 
 Revision 9 (2026-06-29), after observing the hosted CodeScene follow-up. What
 changed and why:
@@ -2037,9 +2037,9 @@ comment. What changed and why:
 - Verified that `manifest_version` already used a full structured NumPy-style
   docstring, but other public functions in `scripts/release_archive.py` still
   had summary-only docstrings.
-- Expanded the public function documentation in `scripts/release_archive.py`
-  with `Parameters`, `Returns`, `Raises`, and `Examples` sections where
-  applicable, while leaving private helpers as single-line summaries.
+- Expanded the public function documentation in `scripts/release_archive.py` with
+  `Parameters`, `Returns`, `Raises`, and `Examples` sections where applicable,
+  while leaving private helpers as single-line summaries.
 
 Validation recorded for this pass: release archive pytest via `uv`,
 `python -m py_compile scripts/release_archive.py`, `make check-fmt`,
@@ -2082,9 +2082,8 @@ and why:
   trybuild test-support export check to bind `read_postmaster_pid` to its exact
   public function signature.
 
-Validation recorded for this pass:
-`python -m py_compile scripts/release_archive.py`, release archive pytest via
-`uv`,
+Validation recorded for this pass: `python -m py_compile
+scripts/release_archive.py`, release archive pytest via `uv`,
 `cargo test --test cli help_flag_prints_configuration_surface_without_bootstrap`,
 `make check-fmt`, `make lint`, `make markdownlint`, `git diff --check`, and
 `CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`.
@@ -2102,15 +2101,16 @@ comments. What changed and why:
   backslashes can be interpreted by POSIX tokenisation, while preserving the
   existing Unix wrapper and whole-path fallback ordering.
 
-Validation recorded for this pass:
-`python -m py_compile scripts/release_archive.py`, release archive pytest via
-`uv`, and `git diff --check`.
+Validation recorded for this pass: `python -m py_compile
+scripts/release_archive.py`, release archive pytest via `uv`, and
+`git diff --check`.
 
 Revision 16 (2026-06-29), after verifying the latest review batch. What changed
 and why:
 
 - Routed the release archive workflow target through a `TARGET` environment
-  variable so the shell command no longer interpolates `matrix.target` directly.
+  variable so the shell command no longer interpolates `matrix.target`
+  directly.
 - Confirmed the Windows cargo-wrapper ordering was already addressed, then
   added the remaining malformed-quote handling so bad `--cargo` values exit
   through a user-facing `SystemExit` path rather than a traceback.
@@ -2124,10 +2124,10 @@ and why:
   the same `shutdown_hook_test_support.rs` imports/signature bindings without
   running the slow isolated trybuild compile on Windows.
 
-Validation recorded for this pass:
-`python -m py_compile scripts/release_archive.py`, release archive pytest via
-`uv`, `cargo test --features dev-worker --test ui`, `make check-fmt`,
-`make lint`, `make markdownlint`, `git diff --check`, and
+Validation recorded for this pass: `python -m py_compile
+scripts/release_archive.py`, release archive pytest via `uv`,
+`cargo test --features dev-worker --test ui`, `make check-fmt`, `make lint`,
+`make markdownlint`, `git diff --check`, and
 `CARGO_BUILD_JOBS=1 NEXTEST_TEST_THREADS=1 make test`.
 
 Revision 17 (2026-07-04), after re-checking the shared CI action baseline. What
@@ -2160,6 +2160,6 @@ again. What changed and why:
   SHA `d0fd973d07088c2120329a93035a5ba91e077014`, including `setup-rust`,
   coverage upload, CodeScene upload, and the Dependabot reusable workflow.
 - Re-examined the local `setup-cargo-binstall` composite action. The current
-  shared `setup-rust` action installs and verifies `cargo-binstall` `1.19.1` by
-  default, so the local composite action and its explicit workflow steps are no
-  longer necessary.
+  shared `setup-rust` action installs and verifies `cargo-binstall` `1.19.1`
+  by default, so the local composite action and its explicit workflow steps are
+  no longer necessary.
