@@ -279,70 +279,89 @@ mod tests {
 
     use super::*;
 
-    fn current_user() -> User {
-        User::from_uid(getuid())
-            .expect("query current user")
-            .expect("current user has a passwd entry")
-    }
+    fn current_user() -> Option<User> { User::from_uid(getuid()).ok().flatten() }
 
-    fn utf8(path: &std::path::Path) -> &Utf8Path {
-        Utf8Path::from_path(path).expect("temp path is UTF-8")
-    }
+    fn utf8(path: &std::path::Path) -> Option<&Utf8Path> { Utf8Path::from_path(path) }
 
-    fn mode_of(path: &Utf8Path) -> u32 {
-        std::fs::metadata(path)
-            .expect("stat directory")
-            .permissions()
-            .mode()
-            & 0o777
+    fn mode_of(path: &Utf8Path) -> std::io::Result<u32> {
+        Ok(std::fs::metadata(path)?.permissions().mode() & 0o777)
     }
 
     #[test]
     fn make_dir_accessible_creates_world_readable_directory() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let dir = utf8(temp.path()).join("install");
-        make_dir_accessible(&dir, &current_user()).expect("make_dir_accessible");
+        let dir = utf8(temp.path())
+            .expect("temp path is UTF-8")
+            .join("install");
+        make_dir_accessible(
+            &dir,
+            &current_user().expect("current user has a passwd entry"),
+        )
+        .expect("make_dir_accessible");
         assert!(dir.is_dir(), "directory should exist");
-        assert_eq!(mode_of(&dir), 0o755, "expected world-readable permissions");
+        assert_eq!(
+            mode_of(&dir).expect("stat directory"),
+            0o755,
+            "expected world-readable permissions"
+        );
     }
 
     #[test]
     fn make_data_dir_private_clamps_permissions_to_owner_only() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let dir = utf8(temp.path()).join("data");
-        make_data_dir_private(&dir, &current_user()).expect("make_data_dir_private");
+        let dir = utf8(temp.path()).expect("temp path is UTF-8").join("data");
+        make_data_dir_private(
+            &dir,
+            &current_user().expect("current user has a passwd entry"),
+        )
+        .expect("make_data_dir_private");
         assert!(dir.is_dir(), "directory should exist");
-        assert_eq!(mode_of(&dir), 0o700, "expected owner-only permissions");
+        assert_eq!(
+            mode_of(&dir).expect("stat directory"),
+            0o700,
+            "expected owner-only permissions"
+        );
     }
 
     #[test]
     fn ensure_dir_for_user_is_idempotent() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let dir = utf8(temp.path()).join("nested/child");
-        let user = current_user();
+        let dir = utf8(temp.path())
+            .expect("temp path is UTF-8")
+            .join("nested/child");
+        let user = current_user().expect("current user has a passwd entry");
         ensure_dir_for_user(&dir, &user, 0o750).expect("first call");
         ensure_dir_for_user(&dir, &user, 0o750).expect("second call");
-        assert_eq!(mode_of(&dir), 0o750);
+        assert_eq!(mode_of(&dir).expect("stat directory"), 0o750);
     }
 
     #[test]
     fn ensure_tree_owned_by_user_walks_nested_entries() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let root = utf8(temp.path());
+        let root = utf8(temp.path()).expect("temp path is UTF-8");
         let nested = root.join("a/b");
         std::fs::create_dir_all(nested.as_std_path()).expect("create nested dirs");
         std::fs::write(nested.join("file.txt").as_std_path(), b"data").expect("write file");
         std::fs::write(root.join("top.txt").as_std_path(), b"data").expect("write top file");
 
-        ensure_tree_owned_by_user(root, &current_user()).expect("chown tree to self");
+        ensure_tree_owned_by_user(
+            root,
+            &current_user().expect("current user has a passwd entry"),
+        )
+        .expect("chown tree to self");
     }
 
     #[test]
     fn ensure_tree_owned_by_user_ignores_missing_root() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let missing = utf8(temp.path()).join("does-not-exist");
-        ensure_tree_owned_by_user(&missing, &current_user())
-            .expect("missing root should be treated as an empty tree");
+        let missing = utf8(temp.path())
+            .expect("temp path is UTF-8")
+            .join("does-not-exist");
+        ensure_tree_owned_by_user(
+            &missing,
+            &current_user().expect("current user has a passwd entry"),
+        )
+        .expect("missing root should be treated as an empty tree");
     }
 
     #[test]

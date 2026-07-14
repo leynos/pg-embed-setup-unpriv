@@ -79,12 +79,8 @@ mod tests {
 
     use super::*;
 
-    #[expect(
-        clippy::expect_used,
-        reason = "test setup helper; a failure writing the fixture pid file should fail the test"
-    )]
-    fn write_pid_file(dir: &Path, contents: &str) {
-        std::fs::write(dir.join("postmaster.pid"), contents).expect("write pid file");
+    fn write_pid_file(dir: &Path, contents: &str) -> std::io::Result<()> {
+        std::fs::write(dir.join("postmaster.pid"), contents)
     }
 
     #[test]
@@ -100,7 +96,7 @@ mod tests {
     #[test]
     fn read_postmaster_pid_returns_none_when_first_line_blank() {
         let temp = tempfile::tempdir().expect("tempdir");
-        write_pid_file(temp.path(), "   \n/data\n");
+        write_pid_file(temp.path(), "   \n/data\n").expect("write pid file");
         assert!(
             read_postmaster_pid(temp.path())
                 .expect("blank line")
@@ -111,7 +107,7 @@ mod tests {
     #[test]
     fn read_postmaster_pid_parses_leading_pid() {
         let temp = tempfile::tempdir().expect("tempdir");
-        write_pid_file(temp.path(), "4242\n/var/lib/pgdata\n1700000000\n");
+        write_pid_file(temp.path(), "4242\n/var/lib/pgdata\n1700000000\n").expect("write pid file");
         assert_eq!(
             read_postmaster_pid(temp.path()).expect("valid pid file"),
             Some(4242),
@@ -121,7 +117,7 @@ mod tests {
     #[test]
     fn read_postmaster_pid_rejects_malformed_pid() {
         let temp = tempfile::tempdir().expect("tempdir");
-        write_pid_file(temp.path(), "not-a-pid\n/data\n");
+        write_pid_file(temp.path(), "not-a-pid\n/data\n").expect("write pid file");
         assert!(
             read_postmaster_pid(temp.path()).is_err(),
             "malformed pid errors"
@@ -131,7 +127,7 @@ mod tests {
     #[test]
     fn read_postmaster_process_reads_identity() {
         let temp = tempfile::tempdir().expect("tempdir");
-        write_pid_file(temp.path(), "5150\n/var/lib/pgdata\n");
+        write_pid_file(temp.path(), "5150\n/var/lib/pgdata\n").expect("write pid file");
         assert_eq!(
             read_postmaster_process(temp.path()).expect("valid pid file"),
             Some(5150),
@@ -141,7 +137,7 @@ mod tests {
     #[test]
     fn read_postmaster_process_returns_none_when_empty() {
         let temp = tempfile::tempdir().expect("tempdir");
-        write_pid_file(temp.path(), "\n");
+        write_pid_file(temp.path(), "\n").expect("write pid file");
         assert!(
             read_postmaster_process(temp.path())
                 .expect("empty pid file")

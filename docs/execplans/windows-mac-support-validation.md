@@ -2038,9 +2038,8 @@ comment. What changed and why:
   docstring, but other public functions in `scripts/release_archive.py` still
   had summary-only docstrings.
 - Expanded the public function documentation in `scripts/release_archive.py`
-  with
-  `Parameters`, `Returns`, `Raises`, and `Examples` sections where applicable,
-  while leaving private helpers as single-line summaries.
+  with `Parameters`, `Returns`, `Raises`, and `Examples` sections where
+  applicable, while leaving private helpers as single-line summaries.
 
 Validation recorded for this pass: release archive pytest via `uv`,
 `python -m py_compile scripts/release_archive.py`, `make check-fmt`,

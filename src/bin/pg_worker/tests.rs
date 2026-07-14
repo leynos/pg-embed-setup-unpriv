@@ -130,12 +130,9 @@ fn recover_removes_partial_initialization(temp_data_dir: TempDataDirResult) -> R
     ensure(!p.exists(), "partial dir should be removed by recovery")
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test setup helper; a non-UTF-8 temp path should fail the test"
-)]
-fn utf8(path: &std::path::Path) -> Utf8PathBuf {
-    Utf8PathBuf::from_path_buf(path.to_path_buf()).expect("temp path is UTF-8")
+fn utf8(path: &std::path::Path) -> R<Utf8PathBuf> {
+    Utf8PathBuf::from_path_buf(path.to_path_buf())
+        .map_err(|p| format!("non-UTF-8 temp path: {}", p.display()).into())
 }
 
 fn settings_with(install: &Utf8Path, pgpass: &Utf8Path, data: &Utf8Path) -> Settings {
@@ -147,20 +144,16 @@ fn settings_with(install: &Utf8Path, pgpass: &Utf8Path, data: &Utf8Path) -> Sett
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test setup helper; a failure writing the worker config should fail the test"
-)]
 fn write_config(
     dir: &Utf8Path,
     settings: &Settings,
     env: Vec<(String, Option<String>)>,
-) -> Utf8PathBuf {
-    let payload = WorkerPayload::new(settings, env).expect("build payload");
-    let bytes = serde_json::to_vec(&payload).expect("serialise payload");
+) -> R<Utf8PathBuf> {
+    let payload = WorkerPayload::new(settings, env)?;
+    let bytes = serde_json::to_vec(&payload)?;
     let path = dir.join("config.json");
-    fs::write(path.as_std_path(), bytes).expect("write config");
-    path
+    fs::write(path.as_std_path(), bytes)?;
+    Ok(path)
 }
 
 #[rstest]
@@ -259,7 +252,7 @@ fn execute_cleanup_removes_existing_directories(temp_data_dir: TempDataDirResult
 #[test]
 fn execute_cleanup_removes_install_and_root() -> R {
     let temp = tempdir()?;
-    let root = utf8(temp.path());
+    let root = utf8(temp.path())?;
     let install = root.join("install");
     let install_root = root.join("install/secrets");
     let data = root.join("data");
@@ -272,7 +265,7 @@ fn execute_cleanup_removes_install_and_root() -> R {
 #[test]
 fn is_dir_empty_reports_contents() -> R {
     let temp = tempdir()?;
-    let root = utf8(temp.path());
+    let root = utf8(temp.path())?;
     ensure(is_dir_empty(&root)?, "fresh dir should be empty")?;
     fs::write(root.join("file"), "x")?;
     ensure(!is_dir_empty(&root)?, "populated dir should not be empty")
@@ -317,13 +310,13 @@ fn stop_missing_pid_is_ok_matches_absent_pid(#[case] message: &str, #[case] expe
 #[test]
 fn load_payload_roundtrips_written_config() -> R {
     let temp = tempdir()?;
-    let root = utf8(temp.path());
+    let root = utf8(temp.path())?;
     let settings = settings_with(
         &root.join("install"),
         &root.join("install/.pgpass"),
         &root.join("data"),
     );
-    let cfg = write_config(&root, &settings, Vec::new());
+    let cfg = write_config(&root, &settings, Vec::new())?;
     let payload = load_payload(&cfg).map_err(|e| e.to_string())?;
     let restored = payload
         .settings
@@ -335,7 +328,7 @@ fn load_payload_roundtrips_written_config() -> R {
 #[test]
 fn load_payload_rejects_missing_file() -> R {
     let temp = tempdir()?;
-    let missing = utf8(temp.path()).join("absent.json");
+    let missing = utf8(temp.path())?.join("absent.json");
     let err = load_payload(&missing).err().ok_or("expected error")?;
     ensure(
         matches!(err, WorkerError::ConfigRead(_)),
@@ -346,7 +339,7 @@ fn load_payload_rejects_missing_file() -> R {
 #[test]
 fn load_payload_rejects_invalid_json() -> R {
     let temp = tempdir()?;
-    let root = utf8(temp.path());
+    let root = utf8(temp.path())?;
     let cfg = root.join("config.json");
     fs::write(cfg.as_std_path(), b"not json")?;
     let err = load_payload(&cfg).err().ok_or("expected error")?;
@@ -359,7 +352,7 @@ fn load_payload_rejects_invalid_json() -> R {
 #[test]
 fn run_worker_cleanup_removes_data_dir_and_applies_environment() -> R {
     let temp = tempdir()?;
-    let root = utf8(temp.path());
+    let root = utf8(temp.path())?;
     let data = root.join("data");
     fs::create_dir_all(data.join("base"))?;
     let env_key = "PG_WORKER_CLEANUP_ENV";
@@ -368,7 +361,7 @@ fn run_worker_cleanup_removes_data_dir_and_applies_environment() -> R {
         &root,
         &settings,
         vec![(env_key.to_owned(), Some("on".to_owned()))],
-    );
+    )?;
 
     let args = ["pg_worker", "cleanup", cfg.as_str()].map(OsString::from);
     run_worker(args.into_iter()).map_err(|e| e.to_string())?;
@@ -383,14 +376,14 @@ fn run_worker_cleanup_removes_data_dir_and_applies_environment() -> R {
 #[test]
 fn run_worker_cleanup_full_removes_install_tree() -> R {
     let temp = tempdir()?;
-    let root = utf8(temp.path());
+    let root = utf8(temp.path())?;
     let data = root.join("data");
     let install = root.join("install");
     let secrets = install.join("secrets");
     fs::create_dir_all(&data)?;
     fs::create_dir_all(&secrets)?;
     let settings = settings_with(&install, &secrets.join(".pgpass"), &data);
-    let cfg = write_config(&root, &settings, Vec::new());
+    let cfg = write_config(&root, &settings, Vec::new())?;
 
     let args = ["pg_worker", "cleanup-full", cfg.as_str()].map(OsString::from);
     run_worker(args.into_iter()).map_err(|e| e.to_string())?;

@@ -23,17 +23,12 @@ use super::{
 use crate::{bootstrap::mode::ExecutionPrivileges, env::ScopedEnv};
 
 #[cfg(all(unix, not(target_os = "macos")))]
-#[expect(
-    clippy::expect_used,
-    reason = "test setup helper; a failure staging the fixture binary should fail the test"
-)]
-fn write_executable(path: &std::path::Path) {
-    std::fs::write(path, b"#!/bin/sh\nexit 0\n").expect("write worker binary");
-    let mut perms = std::fs::metadata(path)
-        .expect("stat worker binary")
-        .permissions();
+fn write_executable(path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::write(path, b"#!/bin/sh\nexit 0\n")?;
+    let mut perms = std::fs::metadata(path)?.permissions();
     perms.set_mode(0o755);
-    std::fs::set_permissions(path, perms).expect("chmod worker binary");
+    std::fs::set_permissions(path, perms)?;
+    Ok(())
 }
 
 #[test]
@@ -141,7 +136,7 @@ fn prepare_timezone_env_rejects_missing_tzdir() {
 fn worker_binary_from_env_accepts_executable_override() {
     let temp = tempfile::tempdir().expect("tempdir");
     let worker = temp.path().join("pg_worker");
-    write_executable(&worker);
+    write_executable(&worker).expect("stage executable fixture");
     let _guard = ScopedEnv::apply(&[(
         String::from("PG_EMBEDDED_WORKER"),
         Some(worker.to_str().expect("utf8 path").to_owned()),
@@ -196,7 +191,7 @@ fn worker_binary_from_env_discovers_worker_on_path() {
     let temp = tempfile::tempdir().expect("tempdir");
     let bin_dir = temp.path().join("bin");
     std::fs::create_dir_all(&bin_dir).expect("create bin dir");
-    write_executable(&bin_dir.join(WORKER_BINARY_NAME));
+    write_executable(&bin_dir.join(WORKER_BINARY_NAME)).expect("stage executable fixture");
 
     let path_value = std::env::join_paths([bin_dir.clone()])
         .expect("join PATH")
