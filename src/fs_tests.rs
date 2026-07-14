@@ -8,9 +8,48 @@ use tempfile::tempdir;
 
 #[cfg(unix)]
 use super::ensure_dir_exists;
-#[cfg(not(unix))]
-use super::set_permissions;
-use super::{ensure_existing_path_is_dir, find_existing_ancestor};
+use super::{ensure_existing_path_is_dir, find_existing_ancestor, set_permissions};
+
+#[cfg(unix)]
+#[test]
+fn set_permissions_applies_mode_to_existing_directory() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let temp = tempdir().expect("tempdir");
+    let base = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).expect("utf8 tempdir path");
+    let dir = base.join("perm");
+    ensure_dir_exists(&dir).expect("create dir");
+
+    set_permissions(&dir, 0o750).expect("apply permissions");
+
+    let mode = std::fs::metadata(dir.as_std_path())
+        .expect("stat dir")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o750);
+}
+
+#[cfg(unix)]
+#[test]
+fn set_permissions_is_noop_for_ambient_root() {
+    set_permissions(Utf8Path::new("/"), 0o755).expect("root permission update should be a no-op");
+}
+
+#[cfg(unix)]
+#[test]
+fn set_permissions_errors_for_missing_target() {
+    let temp = tempdir().expect("tempdir");
+    let base = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).expect("utf8 tempdir path");
+    let missing = base.join("missing");
+
+    let err = set_permissions(&missing, 0o700).expect_err("missing target should error");
+    let has_not_found = err
+        .chain()
+        .filter_map(|source| source.downcast_ref::<std::io::Error>())
+        .any(|source| source.kind() == ErrorKind::NotFound);
+    assert!(has_not_found, "expected NotFound in chain, got {err:?}");
+}
 
 /// Test-case container: `create_file` selects file vs directory, and
 /// `error_kind` records the expected `ErrorKind` outcome.

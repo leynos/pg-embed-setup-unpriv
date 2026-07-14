@@ -235,3 +235,54 @@ fn pointer_file_written_to_target_dir() -> color_eyre::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn is_worker_binary_accepts_regular_worker_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("pg_worker");
+    fs::write(&path, b"x").expect("write worker file");
+    assert!(
+        is_worker_binary(&path),
+        "a regular pg_worker file is accepted"
+    );
+}
+
+#[test]
+fn is_worker_binary_rejects_dep_files_and_non_workers() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let dep_file = dir.path().join("pg_worker.d");
+    fs::write(&dep_file, b"x").expect("write dep file");
+    assert!(
+        !is_worker_binary(&dep_file),
+        "dependency files are rejected"
+    );
+
+    let other = dir.path().join("something-else");
+    fs::write(&other, b"x").expect("write other file");
+    assert!(!is_worker_binary(&other), "non-worker names are rejected");
+
+    let missing = dir.path().join("pg_worker");
+    assert!(!is_worker_binary(&missing), "missing files are rejected");
+}
+
+#[test]
+fn find_staging_directory_returns_no_target_without_profile() {
+    let (staged, target) = find_staging_directory(std::path::Path::new("/no/profile/pg_worker"));
+    assert!(
+        staged.starts_with(std::env::temp_dir()),
+        "staged dir should live under the temp directory"
+    );
+    assert_eq!(target, None, "no profile directory should be discovered");
+}
+
+#[test]
+fn find_staging_directory_handles_custom_profile_under_deps() {
+    let (_staged, target) =
+        find_staging_directory(std::path::Path::new("/build/custom/deps/pg_worker-a1b2"));
+    assert_eq!(
+        target,
+        Some(PathBuf::from("/build/custom")),
+        "the deps parent should be treated as the profile directory"
+    );
+}

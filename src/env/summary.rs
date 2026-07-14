@@ -75,3 +75,86 @@ fn write_truncation_suffix(truncated: &mut String, remaining: usize) {
         "writing truncated summary should be infallible"
     );
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for bounded environment change summaries.
+
+    use super::*;
+
+    #[test]
+    fn returns_input_unchanged_when_within_limit() {
+        let changes = "PG_HOST=localhost,PG_PORT=5432";
+        assert_eq!(
+            truncate_env_changes_summary(changes, MAX_ENV_CHANGES_SUMMARY_LEN, 2),
+            changes,
+        );
+    }
+
+    #[test]
+    fn appends_remaining_count_when_truncated_on_comma_boundary() {
+        // The last comma sits in the latter half of `max_len`, so the cut
+        // point snaps back to it and the omitted entries are counted.
+        let summary = truncate_env_changes_summary("aaaa,bbbb,cccc,dddd", 10, 4);
+        assert!(
+            summary.starts_with("aaaa,bbbb"),
+            "expected retained prefix, got {summary:?}"
+        );
+        assert!(
+            summary.contains("+ 2 more"),
+            "expected omitted-count suffix, got {summary:?}"
+        );
+    }
+
+    #[test]
+    fn inserts_separator_before_remaining_count_when_cut_mid_entry() {
+        // The only comma is in the first half of `max_len`, so the cut point
+        // falls mid-entry and a ", " separator precedes the suffix.
+        let summary = truncate_env_changes_summary("aa,bbbbbbbbbbbb,cc", 8, 3);
+        assert!(
+            summary.contains(", + 1 more"),
+            "expected separated omitted-count suffix, got {summary:?}"
+        );
+    }
+
+    #[test]
+    fn appends_ellipsis_when_all_entries_shown_but_truncated() {
+        // A single oversized entry is truncated without dropping any entry, so
+        // the helper signals the cut with an ellipsis rather than a count.
+        let summary = truncate_env_changes_summary(&"a".repeat(20), 10, 1);
+        assert!(
+            summary.ends_with("..."),
+            "expected trailing ellipsis, got {summary:?}"
+        );
+        assert!(
+            !summary.contains("more"),
+            "unexpected count suffix: {summary:?}"
+        );
+    }
+
+    #[test]
+    fn keeps_full_cut_when_only_comma_is_in_first_half() {
+        // The comma at index 2 is discarded because it is not past the midpoint
+        // of `max_len`, exercising the `filter(..).unwrap_or(cut)` fallback.
+        let summary = truncate_env_changes_summary("ab,cccccccccccc", 10, 2);
+        assert!(
+            summary.starts_with("ab,ccccccc"),
+            "expected retained prefix without snapping to early comma, got {summary:?}"
+        );
+        assert!(
+            summary.ends_with("..."),
+            "expected ellipsis when all entries shown, got {summary:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_duplicate_trailing_ellipsis() {
+        // Input already ending in "..." must not gain a second ellipsis.
+        let input = format!("{}...", "x".repeat(20));
+        let summary = truncate_env_changes_summary(&input, 12, 1);
+        assert!(
+            !summary.ends_with("......"),
+            "ellipsis should not be duplicated, got {summary:?}"
+        );
+    }
+}

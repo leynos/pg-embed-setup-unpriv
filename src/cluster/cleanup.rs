@@ -256,6 +256,45 @@ mod tests {
             "installation directory presence should match cleanup mode",
         );
     }
+
+    #[test]
+    fn full_cleanup_removes_installation_root_under_install_dir() {
+        let sandbox = tempdir().expect("tempdir");
+        let install_dir = sandbox.path().join("install");
+        let install_root = install_dir.join("secrets");
+        let data_dir = sandbox.path().join("data");
+        fs::create_dir_all(&install_root).expect("create install root");
+        fs::create_dir_all(&data_dir).expect("create data dir");
+
+        let settings = Settings {
+            data_dir,
+            installation_dir: install_dir.clone(),
+            password_file: install_root.join(".pgpass"),
+            ..Settings::default()
+        };
+
+        cleanup_in_process(CleanupMode::Full, &settings, "install-root-test");
+
+        assert!(!install_dir.exists(), "installation dir should be removed");
+        assert!(
+            !install_root.exists(),
+            "installation root should be removed too"
+        );
+    }
+
+    #[test]
+    fn cleanup_refuses_to_remove_dangerous_root_path() {
+        // A filesystem-root data dir must be refused rather than removed.
+        let settings = Settings {
+            data_dir: std::path::PathBuf::from("/"),
+            ..Settings::default()
+        };
+        cleanup_in_process(CleanupMode::DataOnly, &settings, "dangerous-test");
+        assert!(
+            std::path::Path::new("/").exists(),
+            "root path must never be removed",
+        );
+    }
 }
 #[cfg(test)]
 #[path = "property_tests.rs"]

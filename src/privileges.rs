@@ -264,3 +264,96 @@ where
     ))
     .into())
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for privilege-management helpers.
+    //!
+    //! These exercise the ownership and permission helpers by chowning to the
+    //! *current* user, which is permitted without elevated privileges, so the
+    //! logic is covered without requiring root.
+
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use nix::unistd::{User, getuid};
+
+    use super::*;
+
+    fn current_user() -> User {
+        User::from_uid(getuid())
+            .expect("query current user")
+            .expect("current user has a passwd entry")
+    }
+
+    fn utf8(path: &std::path::Path) -> &Utf8Path {
+        Utf8Path::from_path(path).expect("temp path is UTF-8")
+    }
+
+    fn mode_of(path: &Utf8Path) -> u32 {
+        std::fs::metadata(path)
+            .expect("stat directory")
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[test]
+    fn make_dir_accessible_creates_world_readable_directory() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = utf8(temp.path()).join("install");
+        make_dir_accessible(&dir, &current_user()).expect("make_dir_accessible");
+        assert!(dir.is_dir(), "directory should exist");
+        assert_eq!(mode_of(&dir), 0o755, "expected world-readable permissions");
+    }
+
+    #[test]
+    fn make_data_dir_private_clamps_permissions_to_owner_only() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = utf8(temp.path()).join("data");
+        make_data_dir_private(&dir, &current_user()).expect("make_data_dir_private");
+        assert!(dir.is_dir(), "directory should exist");
+        assert_eq!(mode_of(&dir), 0o700, "expected owner-only permissions");
+    }
+
+    #[test]
+    fn ensure_dir_for_user_is_idempotent() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = utf8(temp.path()).join("nested/child");
+        let user = current_user();
+        ensure_dir_for_user(&dir, &user, 0o750).expect("first call");
+        ensure_dir_for_user(&dir, &user, 0o750).expect("second call");
+        assert_eq!(mode_of(&dir), 0o750);
+    }
+
+    #[test]
+    fn ensure_tree_owned_by_user_walks_nested_entries() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = utf8(temp.path());
+        let nested = root.join("a/b");
+        std::fs::create_dir_all(nested.as_std_path()).expect("create nested dirs");
+        std::fs::write(nested.join("file.txt").as_std_path(), b"data").expect("write file");
+        std::fs::write(root.join("top.txt").as_std_path(), b"data").expect("write top file");
+
+        ensure_tree_owned_by_user(root, &current_user()).expect("chown tree to self");
+    }
+
+    #[test]
+    fn ensure_tree_owned_by_user_ignores_missing_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing = utf8(temp.path()).join("does-not-exist");
+        ensure_tree_owned_by_user(&missing, &current_user())
+            .expect("missing root should be treated as an empty tree");
+    }
+
+    #[test]
+    fn nobody_uid_is_non_root() {
+        assert!(nobody_uid().as_raw() > 0, "nobody must not map to root");
+    }
+
+    #[test]
+    fn default_paths_for_derive_install_and_data_dirs() {
+        let (install, data) = default_paths_for(Uid::from_raw(4321));
+        assert_eq!(install.as_str(), "/var/tmp/pg-embed-4321/install");
+        assert_eq!(data.as_str(), "/var/tmp/pg-embed-4321/data");
+    }
+}

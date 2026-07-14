@@ -365,7 +365,7 @@ pub(super) fn warn_stop_timeout(timeout_secs: u64, context: &str) {
     );
 }
 
-#[cfg(all(test, feature = "cluster-unit-tests"))]
+#[cfg(test)]
 mod tests {
     //! Tests for cluster shutdown behaviour.
     use rstest::rstest;
@@ -382,6 +382,14 @@ mod tests {
         || warn_stop_failure("ctx", &"boom"),
         "failed to stop embedded postgres instance"
     )]
+    #[case::async_drop(
+        || warn_async_drop_without_stop("ctx"),
+        "dropped without calling stop_async()"
+    )]
+    #[case::no_runtime(
+        || error_no_runtime_for_cleanup("ctx"),
+        "no async runtime available for cleanup"
+    )]
     fn warning_functions_emit_expected_logs(
         #[case] action: fn(),
         #[case] expected_substring: &str,
@@ -389,7 +397,103 @@ mod tests {
         let (logs, ()) = capture_warn_logs(action);
         assert!(
             logs.iter().any(|line| line.contains(expected_substring)),
-            "expected warning containing '{expected_substring}', got {logs:?}"
+            "expected log containing '{expected_substring}', got {logs:?}"
         );
+    }
+
+    #[test]
+    fn stop_context_reports_version_and_data_dir() {
+        let settings = Settings::default();
+        let context = stop_context(&settings);
+        assert!(
+            context.contains("version") && context.contains("data_dir"),
+            "expected version and data_dir in context, got: {context}"
+        );
+    }
+
+    mod worker_managed {
+        //! Worker-managed drop tests that intercept privileged operations with a
+        //! test hook, so no real `pg_worker` binary or root privileges are needed.
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        use serial_test::serial;
+
+        use super::super::*;
+        use crate::{
+            ExecutionPrivileges,
+            test_support::{dummy_settings, install_run_root_operation_hook, test_runtime},
+        };
+
+        #[test]
+        #[serial(worker_hook)]
+        fn stop_worker_managed_reports_hook_failure() {
+            let runtime = test_runtime().expect("runtime");
+            let bootstrap = dummy_settings(ExecutionPrivileges::Root);
+            let env_vars = bootstrap.environment.to_env();
+            let _guard = install_run_root_operation_hook(|_, _, _| {
+                Err(crate::error::BootstrapError::from(color_eyre::eyre::eyre!(
+                    "hook stop failure"
+                )))
+            })
+            .expect("install hook");
+
+            let result =
+                stop_worker_managed_with_runtime(&runtime, &bootstrap, &env_vars, "stop-test");
+            assert!(result.is_err(), "hook failure should propagate");
+        }
+
+        #[test]
+        #[serial(worker_hook)]
+        fn drop_sync_cluster_worker_managed_invokes_stop_hook() {
+            let runtime = test_runtime().expect("runtime");
+            let bootstrap = dummy_settings(ExecutionPrivileges::Root);
+            let env_vars = bootstrap.environment.to_env();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let hook_calls = Arc::clone(&calls);
+            let _guard = install_run_root_operation_hook(move |_, _, _| {
+                hook_calls.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            })
+            .expect("install hook");
+
+            let mut postgres = None;
+            drop_sync_cluster(
+                &runtime,
+                DropContext {
+                    is_managed_via_worker: true,
+                    postgres: &mut postgres,
+                    bootstrap: &bootstrap,
+                    env_vars: &env_vars,
+                    context: "drop-test",
+                },
+            );
+
+            assert!(
+                calls.load(Ordering::Relaxed) >= 1,
+                "worker stop hook should be invoked at least once"
+            );
+        }
+
+        #[test]
+        fn drop_sync_cluster_in_process_without_handle_is_noop() {
+            let runtime = test_runtime().expect("runtime");
+            let bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
+            let env_vars = bootstrap.environment.to_env();
+            let mut postgres = None;
+            // No postgres handle and not worker-managed: shutdown is a no-op.
+            drop_sync_cluster(
+                &runtime,
+                DropContext {
+                    is_managed_via_worker: false,
+                    postgres: &mut postgres,
+                    bootstrap: &bootstrap,
+                    env_vars: &env_vars,
+                    context: "noop-test",
+                },
+            );
+        }
     }
 }

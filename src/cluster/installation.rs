@@ -239,4 +239,94 @@ mod tests {
         refresh_worker_port(&mut bootstrap).expect("refresh worker port");
         assert_eq!(bootstrap.settings.port, 54321);
     }
+
+    #[test]
+    fn parse_port_reads_fourth_line() {
+        let contents = "12345\n/data\n1700000000\n5544\n";
+        assert_eq!(
+            parse_port_from_pid_contents(contents, Path::new("postmaster.pid")),
+            Some(5544),
+        );
+    }
+
+    #[test]
+    fn parse_port_returns_none_for_missing_or_unparseable_line() {
+        assert_eq!(
+            parse_port_from_pid_contents("12345\n/data\n", Path::new("p.pid")),
+            None,
+            "too few lines should yield None"
+        );
+        assert_eq!(
+            parse_port_from_pid_contents("1\n2\n3\nnot-a-port\n", Path::new("p.pid")),
+            None,
+            "unparseable port line should yield None",
+        );
+    }
+
+    #[test]
+    fn read_postmaster_port_returns_none_when_file_absent() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing = temp.path().join("postmaster.pid");
+        assert_eq!(
+            read_postmaster_port(&missing).expect("absent pid file is not an error"),
+            None,
+        );
+    }
+
+    #[test]
+    fn refresh_worker_port_is_noop_for_unprivileged() {
+        let mut bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
+        bootstrap.settings.port = 4321;
+        refresh_worker_port(&mut bootstrap).expect("unprivileged refresh is a no-op");
+        assert_eq!(bootstrap.settings.port, 4321, "port must be left unchanged");
+    }
+
+    #[test]
+    fn refresh_installation_dir_is_noop_for_unprivileged() {
+        let mut bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
+        let original = bootstrap.settings.installation_dir.clone();
+        refresh_worker_installation_dir(&mut bootstrap);
+        assert_eq!(bootstrap.settings.installation_dir, original);
+    }
+
+    #[test]
+    fn resolve_installed_dir_prefers_direct_bin_directory() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("bin")).expect("create bin");
+        let settings = Settings {
+            installation_dir: temp.path().to_path_buf(),
+            ..Settings::default()
+        };
+        assert_eq!(
+            resolve_installed_dir(&settings).as_deref(),
+            Some(temp.path()),
+        );
+    }
+
+    #[test]
+    fn resolve_installed_dir_picks_highest_versioned_subdir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("16.0.0/bin")).expect("create 16 bin");
+        fs::create_dir_all(temp.path().join("17.0.0/bin")).expect("create 17 bin");
+        let settings = Settings {
+            installation_dir: temp.path().to_path_buf(),
+            ..Settings::default()
+        };
+        let resolved = resolve_installed_dir(&settings).expect("a versioned dir is resolved");
+        assert_eq!(
+            resolved.file_name().and_then(|n| n.to_str()),
+            Some("17.0.0"),
+            "the highest version should win",
+        );
+    }
+
+    #[test]
+    fn resolve_installed_dir_returns_none_without_candidates() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let settings = Settings {
+            installation_dir: temp.path().to_path_buf(),
+            ..Settings::default()
+        };
+        assert_eq!(resolve_installed_dir(&settings), None);
+    }
 }

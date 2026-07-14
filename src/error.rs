@@ -158,4 +158,61 @@ mod tests {
             "expected '{inner_message}' in display, got: {display}"
         );
     }
+
+    #[test]
+    fn bootstrap_error_kind_defaults_to_other() {
+        assert_eq!(BootstrapErrorKind::default(), BootstrapErrorKind::Other);
+    }
+
+    #[test]
+    fn bootstrap_error_preserves_kind_and_into_report() {
+        let err = BootstrapError::new(
+            BootstrapErrorKind::WorkerBinaryMissing,
+            eyre!("worker gone"),
+        );
+        assert_eq!(err.kind(), BootstrapErrorKind::WorkerBinaryMissing);
+        assert!(err.into_report().to_string().contains("worker gone"));
+    }
+
+    #[test]
+    fn bootstrap_error_from_privilege_error_is_other() {
+        let privilege = PrivilegeError::from(eyre!("no privileges"));
+        let err = BootstrapError::from(privilege);
+        assert_eq!(err.kind(), BootstrapErrorKind::Other);
+        assert!(err.to_string().contains("no privileges"));
+    }
+
+    #[test]
+    fn bootstrap_error_from_config_error_is_other() {
+        let config = ConfigError::from(eyre!("bad config"));
+        let err = BootstrapError::from(config);
+        assert_eq!(err.kind(), BootstrapErrorKind::Other);
+        assert!(err.to_string().contains("bad config"));
+    }
+
+    #[rstest]
+    #[case::bootstrap(
+        |report| PgEmbeddedError::Bootstrap(BootstrapError::new(
+            BootstrapErrorKind::WorkerBinaryPathNonUtf8,
+            report,
+        )),
+        BootstrapErrorKind::WorkerBinaryPathNonUtf8,
+    )]
+    #[case::privilege(
+        |report| PgEmbeddedError::Privilege(PrivilegeError::from(report)),
+        BootstrapErrorKind::Other,
+    )]
+    #[case::config(
+        |report| PgEmbeddedError::Config(ConfigError::from(report)),
+        BootstrapErrorKind::Other,
+    )]
+    fn bootstrap_error_from_pg_embedded_error_maps_each_variant(
+        #[case] constructor: fn(Report) -> PgEmbeddedError,
+        #[case] expected_kind: BootstrapErrorKind,
+    ) {
+        let pg_err = constructor(eyre!("inner detail"));
+        let err = BootstrapError::from(pg_err);
+        assert_eq!(err.kind(), expected_kind);
+        assert!(err.to_string().contains("inner detail"));
+    }
 }

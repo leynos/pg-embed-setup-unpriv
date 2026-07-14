@@ -104,3 +104,63 @@ pub(super) fn ensure_parent_for_user(path: &Utf8PathBuf, user: &User) -> Bootstr
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for root bootstrap port allocation.
+
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case("", "127.0.0.1")]
+    #[case("/var/run/pg.sock", "127.0.0.1")]
+    #[case("db.internal", "db.internal")]
+    fn root_bind_host_falls_back_for_socket_or_empty(#[case] host: &str, #[case] expected: &str) {
+        let settings = Settings {
+            host: host.to_owned(),
+            ..Settings::default()
+        };
+        assert_eq!(root_bind_host(&settings), expected);
+    }
+
+    #[test]
+    fn ensure_root_port_allocates_when_zero() {
+        let mut settings = Settings {
+            host: String::new(),
+            port: 0,
+            ..Settings::default()
+        };
+        ensure_root_port(&mut settings).expect("allocate ephemeral port");
+        assert!(settings.port > 0, "an ephemeral port should be assigned");
+    }
+
+    #[test]
+    fn ensure_root_port_keeps_existing_port() {
+        let mut settings = Settings {
+            port: 5599,
+            ..Settings::default()
+        };
+        ensure_root_port(&mut settings).expect("existing port retained");
+        assert_eq!(settings.port, 5599);
+    }
+
+    #[test]
+    fn ensure_parent_for_user_creates_missing_parent() {
+        // Ownership is assigned to the current user, which needs no privilege.
+        let user = User::from_uid(nix::unistd::getuid())
+            .expect("query current user")
+            .expect("current user has a passwd entry");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let base = camino::Utf8Path::from_path(temp.path()).expect("utf8 tempdir");
+        let child = base.join("parent/child");
+
+        ensure_parent_for_user(&child, &user).expect("prepare parent directory");
+
+        assert!(
+            base.join("parent").is_dir(),
+            "the parent directory should be created"
+        );
+    }
+}

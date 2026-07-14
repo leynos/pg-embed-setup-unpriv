@@ -92,6 +92,32 @@ fn root_operations_delegate_to_hook() -> Result<()> {
 }
 
 #[test]
+fn timeout_error_mentions_elapsed_duration() {
+    let err = timeout_error("bootstrap", std::time::Duration::from_secs(3));
+    assert!(
+        err.to_string().contains("timed out after"),
+        "expected timeout wording, got: {err}"
+    );
+}
+
+#[test]
+fn unprivileged_operation_propagates_inner_error() -> Result<()> {
+    let runtime = test_runtime()?;
+    let bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
+    let env_vars = bootstrap.environment.to_env();
+    let invoker = WorkerInvoker::new(&runtime, &bootstrap, &env_vars);
+
+    let result = invoker.invoke(WorkerOperation::Setup, async {
+        Err::<(), postgresql_embedded::Error>(postgresql_embedded::Error::DatabaseStopError(
+            "boom".to_owned(),
+        ))
+    });
+
+    ensure!(result.is_err(), "in-process errors should propagate");
+    Ok(())
+}
+
+#[test]
 #[serial(worker_hook)]
 fn installing_hook_twice_errors() -> Result<()> {
     let _guard = install_run_root_operation_hook(|_, _, _| Ok(())).map_err(|err| eyre!(err))?;

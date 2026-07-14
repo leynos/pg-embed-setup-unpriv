@@ -261,7 +261,6 @@ cfg_privilege_drop! {
         target_os = "openbsd",
         target_os = "dragonfly",
     ),
-    feature = "cluster-unit-tests"
 ))]
 mod tests {
     //! Tests for worker process privilege handling.
@@ -289,5 +288,39 @@ mod tests {
             }),
             "expected skip log entry, got {logs:?}"
         );
+    }
+
+    #[test]
+    fn skip_toggle_tracks_nested_guards() {
+        assert!(!skip_privilege_drop_for_tests(), "toggle starts disabled");
+        let outer = disable_privilege_drop_for_tests();
+        assert!(skip_privilege_drop_for_tests(), "outer guard enables skip");
+        let inner = disable_privilege_drop_for_tests();
+        assert!(skip_privilege_drop_for_tests(), "inner guard keeps skip");
+        drop(inner);
+        assert!(
+            skip_privilege_drop_for_tests(),
+            "skip remains while outer guard is held"
+        );
+        drop(outer);
+        assert!(
+            !skip_privilege_drop_for_tests(),
+            "skip clears once all guards drop"
+        );
+    }
+
+    #[test]
+    fn resolve_nobody_ids_returns_unprivileged_account() {
+        let (uid, gid) = resolve_nobody_ids().expect("resolve nobody account");
+        assert!(uid > 0, "nobody uid must not be root");
+        assert!(gid > 0, "nobody gid must not be root");
+    }
+
+    #[test]
+    fn configure_pre_exec_registers_without_running_closure() {
+        // Registering the pre-exec hook must not execute it; the closure only
+        // runs immediately before a real `exec`, which this test never triggers.
+        let mut command = Command::new("true");
+        configure_pre_exec(&mut command, 65534, 65534);
     }
 }

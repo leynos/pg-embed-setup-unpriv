@@ -318,3 +318,70 @@ fn postmaster_process_is_running_for_shutdown(process: platform::PostmasterProce
 mod loom_tests;
 #[cfg(all(test, feature = "cluster-unit-tests"))]
 mod tests;
+
+#[cfg(all(test, unix))]
+mod exit_hook_tests {
+    //! Tests for the process-exit hook that do not require a live postmaster.
+    //!
+    //! `nextest` runs each test in its own process, so the singleton
+    //! `SHUTDOWN_STATE` starts empty for every case and registering a real
+    //! `atexit` handler cannot leak across tests.
+    use std::time::Duration;
+
+    use postgresql_embedded::Settings;
+
+    use super::*;
+    use crate::CleanupMode;
+
+    #[test]
+    fn absent_process_reports_not_running() {
+        assert!(
+            !postmaster_process_is_running_for_shutdown(0),
+            "a non-positive pid must not be reported as running"
+        );
+    }
+
+    #[test]
+    fn wait_for_exit_returns_true_for_absent_process() {
+        assert!(
+            wait_for_exit(0, Duration::from_millis(20)),
+            "an already-absent process should be treated as exited"
+        );
+    }
+
+    #[test]
+    fn shutdown_work_is_none_before_registration() {
+        assert!(
+            shutdown_work().is_none(),
+            "no work should be available before registration"
+        );
+    }
+
+    #[test]
+    fn stop_postmaster_returns_for_absent_process() {
+        let work = ShutdownWork {
+            settings: Settings::default(),
+            shutdown_timeout: Duration::from_millis(20),
+            cleanup_mode: CleanupMode::None,
+        };
+        // The process is absent, so shutdown returns without forceful escalation.
+        stop_postmaster(0, &work);
+    }
+
+    #[test]
+    fn register_shutdown_hook_is_idempotent() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let settings = Settings {
+            data_dir: temp.path().to_path_buf(),
+            ..Settings::default()
+        };
+        register_shutdown_hook(
+            settings.clone(),
+            Duration::from_millis(20),
+            CleanupMode::None,
+        )
+        .expect("first registration succeeds");
+        register_shutdown_hook(settings, Duration::from_millis(20), CleanupMode::None)
+            .expect("duplicate registration is a no-op");
+    }
+}
