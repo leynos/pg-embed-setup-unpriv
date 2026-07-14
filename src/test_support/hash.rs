@@ -161,6 +161,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn lower_hex_digit_encodes_every_nibble() {
+        let encoded: String = (0..16).map(lower_hex_digit).collect();
+
+        assert_eq!(encoded, "0123456789abcdef");
+    }
+
+    #[test]
     fn hash_directory_produces_consistent_results() {
         let temp = TempDir::new().expect("tempdir");
         fs::write(temp.path().join("file1.sql"), "CREATE TABLE a;").expect("write");
@@ -189,17 +196,15 @@ mod tests {
     }
 
     #[test]
-    fn hash_directory_is_64_hex_chars() {
+    fn hash_directory_matches_expected_lowercase_hex() {
         let temp = TempDir::new().expect("tempdir");
         fs::write(temp.path().join("test.sql"), "SELECT 1;").expect("write");
 
         let hash = hash_directory(temp.path()).expect("hash");
 
-        assert_eq!(hash.len(), 64, "SHA-256 hex should be 64 characters");
-        assert!(
-            hash.chars()
-                .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character)),
-            "hash should be lowercase hex"
+        assert_eq!(
+            hash,
+            "2af7c3691c5edf7203fbf813e5396bb448399a842ef79e83d622251dfd89f9c8"
         );
     }
 
