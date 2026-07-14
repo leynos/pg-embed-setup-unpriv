@@ -63,6 +63,29 @@ CI installs the pinned `interrogate==1.7.0` uv tool before running `make lint`.
 Keep the Makefile and workflow versions aligned when updating the
 docstring-coverage policy.
 
+## Spelling policy
+
+Run `make spelling` to enforce en-GB-oxendict spelling with Typos 1.48.0 and
+the companion phrase checker. Typos scans tracked Markdown, including hidden
+paths, while the phrase checker scans all tracked UTF-8 text so prohibited
+forms such as `hand-written` cannot hide in source comments or tests.
+
+The tracked `typos.toml` is generated from the shared estate dictionary and
+the narrow repository policy in `typos.local.toml`; never edit the generated
+file by hand. Run `make spelling-config-write` to invoke the exact,
+commit-pinned `typos-config-builder`, refresh the untracked shared-dictionary
+cache only when its authority is newer, and write deterministic output. Run
+`make spelling-config` to verify cache and generated-config drift.
+
+Repository exceptions belong in `typos.local.toml` as narrow exact or
+full-line patterns. Preserve upstream APIs, command-line options, formal
+terminology and fixtures without adding broad accepted words that could hide
+ordinary prose mistakes.
+
+`make nixie` validates the repository's Mermaid diagrams. CI installs
+Nixie 1.1.0 and caches Merman CLI 0.7.0, compiling Merman with an isolated Rust
+1.95.0 toolchain so the product's pinned nightly toolchain remains unchanged.
+
 ## Release process
 
 Tagging a release with `v*` triggers `.github/workflows/release.yml`. The
@@ -105,7 +128,7 @@ make test-loom
 
 The Loom models cover the schedule-sensitive lifecycle paths: scoped
 environment state, per-template database creation, shared singleton
-initialisation, and shutdown-hook registration.
+initialization, and shutdown-hook registration.
 
 The scheduler budget in `src/env/loom_tests.rs` currently uses
 `max_threads = 3`, `max_branches = 64`, and `preemption_bound = Some(3)`. The

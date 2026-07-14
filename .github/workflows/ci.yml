@@ -22,6 +22,7 @@ jobs:
       CARGO_TERM_COLOR: always
       BUILD_PROFILE: debug
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MERMAN_CLI_VERSION: '0.7.0'
       WHITAKER_INSTALLER_VERSION: '0.2.5'
       # Embedded-Postgres tests run slower under cold coverage
       # instrumentation than the default 600s cargo wall-clock cap.
@@ -43,11 +44,16 @@ jobs:
             **/*.md
             !**/target/**
             !**/dist/**
+            !**/.uv-cache/**
+            !**/.uv-tools/**
       - name: Setup uv
         if: ${{ matrix.privilege == 'unprivileged' }}
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
         with:
           enable-cache: false
+      - name: Enforce en-GB-oxendict spelling
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        run: make spelling
       - name: Install interrogate
         if: ${{ matrix.privilege == 'unprivileged' }}
         run: uv tool install interrogate==1.7.0
@@ -74,6 +80,26 @@ jobs:
       - name: Lint
         if: ${{ matrix.privilege == 'unprivileged' }}
         run: make lint
+      - name: Set up isolated Rust for Merman
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        run: rustup toolchain install 1.95.0 --profile minimal
+      - name: Cache Merman
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        id: cache-merman
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cargo/bin/merman-cli
+          key: merman-cli-${{ runner.os }}-${{ runner.arch }}-${{ env.MERMAN_CLI_VERSION }}
+      - name: Install Mermaid validation tools
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        run: |
+          uv tool install nixie-cli==1.1.0
+          if [[ "${{ steps.cache-merman.outputs.cache-hit }}" != 'true' ]]; then
+            cargo +1.95.0 install merman-cli --version "=${MERMAN_CLI_VERSION}" --locked
+          fi
+      - name: Validate Mermaid diagrams
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        run: make nixie
       - name: Install cargo-nextest
         run: cargo binstall -y cargo-nextest@0.9.122
       - name: Test with all features (unprivileged)

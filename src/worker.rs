@@ -53,7 +53,7 @@ use serde_with::{DisplayFromStr, DurationSeconds, serde_as};
 
 use crate::error::BootstrapError;
 
-/// Serialised representation of [`Settings`] for subprocess helpers.
+/// Serialized representation of [`Settings`] for subprocess helpers.
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SettingsSnapshot {

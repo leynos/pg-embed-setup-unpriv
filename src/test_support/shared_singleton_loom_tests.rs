@@ -22,14 +22,14 @@ const CACHED_FAILURE: usize = 17;
 
 struct LoomSharedState {
     state: Mutex<SharedInitState<usize, usize>>,
-    initialisations: AtomicUsize,
+    initializations: AtomicUsize,
 }
 
 impl LoomSharedState {
     fn new() -> Self {
         Self {
-            state: Mutex::new(SharedInitState::Uninitialised),
-            initialisations: AtomicUsize::new(0),
+            state: Mutex::new(SharedInitState::Uninitialized),
+            initializations: AtomicUsize::new(0),
         }
     }
 
@@ -41,7 +41,7 @@ impl LoomSharedState {
         get_or_try_init_shared(
             &mut state,
             || {
-                self.initialisations.fetch_add(1, Ordering::SeqCst);
+                self.initializations.fetch_add(1, Ordering::SeqCst);
                 Ok(7)
             },
             |cached| *cached,
@@ -56,7 +56,7 @@ impl LoomSharedState {
         get_or_try_init_shared(
             &mut state,
             || {
-                self.initialisations.fetch_add(1, Ordering::SeqCst);
+                self.initializations.fetch_add(1, Ordering::SeqCst);
                 Err((CACHED_FAILURE, FIRST_FAILURE))
             },
             |cached| *cached,
@@ -77,7 +77,7 @@ where
 
 #[test]
 #[ignore = "requires Loom model checking"]
-fn shared_singleton_initialises_once_for_concurrent_callers() {
+fn shared_singleton_initializes_once_for_concurrent_callers() {
     run_loom_model(|| {
         let state = Arc::new(LoomSharedState::new());
         let first = Arc::clone(&state);
@@ -95,13 +95,13 @@ fn shared_singleton_initialises_once_for_concurrent_callers() {
 
         assert_eq!(first_result, Ok(7));
         assert_eq!(second_result, Ok(7));
-        assert_eq!(state.initialisations.load(Ordering::SeqCst), 1);
+        assert_eq!(state.initializations.load(Ordering::SeqCst), 1);
     });
 }
 
 #[test]
 #[ignore = "requires Loom model checking"]
-fn shared_singleton_caches_failed_initialisation() {
+fn shared_singleton_caches_failed_initialization() {
     run_loom_model(|| {
         let state = Arc::new(LoomSharedState::new());
         let first = Arc::clone(&state);
@@ -118,7 +118,7 @@ fn shared_singleton_caches_failed_initialisation() {
         };
 
         assert_cached_failure_translation(first_result, second_result);
-        assert_eq!(state.initialisations.load(Ordering::SeqCst), 1);
+        assert_eq!(state.initializations.load(Ordering::SeqCst), 1);
     });
 }
 

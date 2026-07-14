@@ -104,7 +104,7 @@ pub(super) type FixtureWorldFixture = Result<RefCell<FixtureWorld>>;
 pub(super) fn borrow_world(world: &FixtureWorldFixture) -> Result<&RefCell<FixtureWorld>> {
     world
         .as_ref()
-        .map_err(|err| eyre!(format!("fixture world failed to initialise: {err}")))
+        .map_err(|err| eyre!(format!("fixture world failed to initialize: {err}")))
 }
 
 #[fixture]

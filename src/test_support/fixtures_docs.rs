@@ -30,7 +30,7 @@ pub fn test_cluster() -> TestCluster { runtime_fixtures::test_cluster() }
 /// `rstest` fixture that yields a reference to the shared [`TestCluster`].
 ///
 /// This fixture provides access to a process-global cluster that is
-/// initialised once and reused across all tests in the same binary. Use this
+/// initialized once and reused across all tests in the same binary. Use this
 /// when tests can share a cluster and create per-test databases for isolation.
 ///
 /// # Panics
@@ -57,7 +57,7 @@ pub fn shared_test_cluster() -> &'static TestCluster { runtime_fixtures::shared_
 /// `rstest` fixture that yields a reference to the shared [`ClusterHandle`].
 ///
 /// This fixture provides access to a process-global handle that is
-/// initialised once and reused across all tests in the same binary. The handle
+/// initialized once and reused across all tests in the same binary. The handle
 /// is `Send + Sync`, making it suitable for rstest timeouts and other
 /// thread-safe contexts.
 ///

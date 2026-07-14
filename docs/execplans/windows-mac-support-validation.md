@@ -108,7 +108,7 @@ blocker set must be observed, not predicted.
 - Interface: if any public API signature, trait bound, or exported item must
   change (beyond adding platform-conditional `cfg` attributes to existing
   items, or removing a confirmed-dead dependency), stop and escalate.
-- Dependencies: if a new runtime dependency beyond reorganising or removing the
+- Dependencies: if a new runtime dependency beyond reorganizing or removing the
   existing `nix`/`xdg`/`openssl-sys` declarations is required, or if a build
   tool (for example Perl or NASM on the Windows runner) cannot be provisioned
   by the existing `setup-rust` action, stop and escalate.
@@ -138,7 +138,7 @@ blocker set must be observed, not predicted.
 
 ## Risks
 
-The first survey for this plan mis-read the tree and named `shutdown_hook` as
+The first survey for this plan misread the tree and named `shutdown_hook` as
 the primary compile blocker; it is in fact already gated. The risk register
 below has since been re-grounded by Milestone 0 and updated as mitigations were
 implemented.
@@ -628,7 +628,7 @@ implemented.
   `/tmp/nixie-binstall-packaging-ci-fixes-windows-mac-support-validation.out`.
 - [x] (2026-06-26T01:28:12Z) CodeRabbit reviewed the combined
   Linux/macOS/Windows packaging CI fixes after the full local gate set passed
-  and after the required randomised backoff for the free CLI rate limit.
+  and after the required randomized backoff for the free CLI rate limit.
   `coderabbit review --agent --light --type uncommitted` completed with
   `status=review_completed` and `findings=0`, so there are no CodeRabbit
   concerns to clear before committing and pushing the corrective patch.
@@ -718,7 +718,7 @@ implemented.
 - [x] (2026-06-26T02:14:28Z) User approved continuing with four more approaches
   for the remaining macOS `binstall` validation failure. Approach 1 replaces
   the ad hoc one-line OpenSSL root/server certificate generation with explicit
-  config files, a non-empty organisation in both subjects, fixed short serial
+  config files, a non-empty organization in both subjects, fixed short serial
   numbers, explicit CA/server X.509v3 extensions, and an
   `openssl verify -x509_strict -purpose sslserver` check before the local HTTPS
   server starts. Local Linux real-install validation still passes with
@@ -726,7 +726,7 @@ implemented.
   passed before CodeRabbit review: `actionlint`, `make fmt`, `make check-fmt`,
   `make lint`, `make test`, `make markdownlint`, `make nixie`, and
   `git diff --check`. The first CodeRabbit attempt hit the free CLI rate limit,
-  so the mandated randomised backoff ran for `52` minutes before retrying. The
+  so the mandated randomized backoff ran for `52` minutes before retrying. The
   retry completed with `status=review_completed` and `findings=0`. Evidence:
   `/tmp/actionlint-binstall-explicit-cert-windows-mac-support-validation.out`,
   `/tmp/explicit-cert-strict-verify-windows-mac-support-validation.out`,
@@ -875,7 +875,7 @@ implemented.
   `28215731121`; the release-time asset audit is implemented and will execute
   against real assets on the next release tag.
 - [x] Milestone 5: update README, users' guide, roadmap appendix (and close
-  item 3.3.2), and the design doc; run all commit gateways; finalise.
+  item 3.3.2), and the design doc; run all commit gateways; finalize.
 
 ## Surprises & discoveries
 
@@ -1160,7 +1160,7 @@ implemented.
 - Decision: re-ground the entire library-portability analysis against current
   HEAD before implementing Milestone 1, treating the Risk register as a
   hypothesis list until Milestone 0's real cross-compile confirms it.
-  Rationale: the first survey mis-read the `shutdown_hook` gating; confidence
+  Rationale: the first survey misread the `shutdown_hook` gating; confidence
   levels were asserted without a real `cargo check --target`. Date/Author:
   2026-06-25, planning agent (incorporating Logisphere review).
 - Decision: there is no Windows `shutdown_hook` *compilation* work; instead
@@ -1532,7 +1532,7 @@ list. If it exceeds the Milestone 1 scope tolerance, stop and escalate.
 
 Scope is whatever Milestone 0 observed; the tasks below are the expected set.
 
-1. Reorganise dependencies in `Cargo.toml`: move `nix` to
+1. Reorganize dependencies in `Cargo.toml`: move `nix` to
    `[target.'cfg(unix)'.dependencies]`; remove the dead direct `xdg`
    dependency; remove the direct vendored `openssl-sys` dependency; keep
    `postgresql_embedded` on native TLS because the `rustls` attempt required
@@ -1670,7 +1670,7 @@ inspection).
 Go/no-go: the real install-and-run passes on all three OSes at PR time, and the
 release audit passes against the real assets.
 
-### Milestone 5 — Documentation and finalisation
+### Milestone 5 — Documentation and finalization
 
 Update the README install section to a platform/target matrix stating macOS
 (arm64 and x86-64) and Windows (x86-64) support, the `cargo binstall` command,
@@ -1760,7 +1760,7 @@ safe. If archive naming is wrong, fix the metadata/packaging and re-run; no
 production state is mutated by validation. Keep the working tree clean: remove
 `/tmp` logs and any throwaway tags or `workflow_dispatch` artefacts after use.
 
-## Artifacts and notes
+## Artefacts and notes
 
 Capture as the work produces them: the Milestone 0 cross-compile transcripts;
 the first green Windows and macOS nextest runs; the orphan-detection test
@@ -2098,7 +2098,7 @@ comments. What changed and why:
   was stale.
 - Moved the Windows wrapper command parser ahead of POSIX `shlex.split()` so
   Windows `.exe` wrapper commands with arguments are recognized before
-  backslashes can be interpreted by POSIX tokenisation, while preserving the
+  backslashes can be interpreted by POSIX tokenization, while preserving the
   existing Unix wrapper and whole-path fallback ordering.
 
 Validation recorded for this pass: `python -m py_compile

@@ -462,7 +462,7 @@ If a mistake is made, use `git checkout tests/support/pg_worker.rs` to restore
 the file to its original state and start over. No destructive operations are
 performed outside the git working tree.
 
-## Artifacts and notes
+## Artefacts and notes
 
 Include the most important transcripts, diffs, or snippets as indented
 examples. Keep them concise and focused on what proves success.

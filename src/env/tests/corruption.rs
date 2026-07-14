@@ -2,7 +2,7 @@
 //!
 //! Provides fixtures and utilities for exercising `ScopedEnv` recovery when
 //! thread-local state is corrupted (invalid scope exits and out-of-order guard
-//! drops). These helpers are used by the parameterised `rstest` cases in
+//! drops). These helpers are used by the parameterized `rstest` cases in
 //! `mod.rs`.
 
 use std::{ffi::OsString, panic};

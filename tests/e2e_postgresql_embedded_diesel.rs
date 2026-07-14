@@ -166,7 +166,7 @@ fn bootstrap_postgres_environment(config: &TestConfig) -> Result<Option<Bootstra
                     tracing::warn!("Skipping e2e postgres test: {message}");
                     return Ok(None);
                 }
-                return Err(err).wrap_err("initialise postgres environment");
+                return Err(err).wrap_err("initialize postgres environment");
             }
 
             let cfg = PgEnvCfg::load().wrap_err("reload pg settings from environment")?;
@@ -297,7 +297,7 @@ fn build_runtime() -> Result<Runtime> {
     Builder::new_current_thread()
         .enable_all()
         .build()
-        .wrap_err("initialise tokio runtime for postgresql-embedded e2e test")
+        .wrap_err("initialize tokio runtime for postgresql-embedded e2e test")
 }
 
 fn start_postgres(

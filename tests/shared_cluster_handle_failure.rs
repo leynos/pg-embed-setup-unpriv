@@ -1,4 +1,4 @@
-//! Tests that `shared_cluster_handle()` caches failed initialisation.
+//! Tests that `shared_cluster_handle()` caches failed initialization.
 //!
 //! This test file runs in its own process (Cargo compiles each `tests/*.rs`
 //! file as a separate binary), ensuring the global `OnceLock` state is isolated
@@ -72,12 +72,12 @@ fn verify_cached_error_message(error: &BootstrapError) {
 }
 
 /// Verifies that `shared_cluster_handle()` caches the error from a failed
-/// initialisation attempt and returns the same error on subsequent calls.
+/// initialization attempt and returns the same error on subsequent calls.
 ///
 /// This test forces bootstrap failure by setting TZDIR to a non-existent
 /// directory, which causes timezone validation to fail.
 #[test]
-fn caches_failed_initialisation() {
+fn caches_failed_initialization() {
     // Force bootstrap failure by pointing TZDIR to a non-existent directory.
     let _env_guard = setup_failing_environment();
 

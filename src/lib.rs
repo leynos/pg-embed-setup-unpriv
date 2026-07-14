@@ -2,7 +2,7 @@
 //! privileges.
 //!
 //! The library owns the lifecycle for configuring paths, permissions, and
-//! process identity so the bundled `PostgreSQL` binaries can initialise safely
+//! process identity so the bundled `PostgreSQL` binaries can initialize safely
 //! under an unprivileged account.
 
 mod bootstrap;

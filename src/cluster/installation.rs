@@ -103,7 +103,7 @@ async fn read_postmaster_port_with_retry_async(pid_path: &Path) -> BootstrapResu
 /// Reads the port from a postmaster.pid file (async).
 ///
 /// Returns `Ok(None)` for retryable conditions: file not found, missing port line,
-/// or unparseable port value. Returns `Err` only for unexpected I/O errors.
+/// or unparsable port value. Returns `Err` only for unexpected I/O errors.
 #[cfg(feature = "async-api")]
 async fn read_postmaster_port_async(pid_path: &Path) -> BootstrapResult<Option<u16>> {
     let Some(contents) = read_pid_file_contents_async(pid_path).await? else {
@@ -135,7 +135,7 @@ async fn read_pid_file_contents_async(pid_path: &Path) -> BootstrapResult<Option
 /// Reads the port from a postmaster.pid file.
 ///
 /// Returns `Ok(None)` for retryable conditions: file not found, missing port line,
-/// or unparseable port value. Returns `Err` only for unexpected I/O errors.
+/// or unparsable port value. Returns `Err` only for unexpected I/O errors.
 fn read_postmaster_port(pid_path: &Path) -> BootstrapResult<Option<u16>> {
     let Some(contents) = read_pid_file_contents(pid_path)? else {
         return Ok(None);

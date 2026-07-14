@@ -113,9 +113,9 @@ fn recover_skips_empty_dir(temp_data_dir: TempDataDirResult) -> R {
 
 /// Validates the recovery scenario from issue #80: a partial data directory
 /// (missing `global/pg_filenode.map`) is detected as invalid and removed,
-/// allowing fresh initialisation to proceed.
+/// allowing fresh initialization to proceed.
 #[rstest]
-fn recover_removes_partial_initialisation(temp_data_dir: TempDataDirResult) -> R {
+fn recover_removes_partial_initialization(temp_data_dir: TempDataDirResult) -> R {
     let (_, p) = temp_data_dir?;
     // Create a partial data directory using the shared helper
     create_partial_data_dir(p.as_std_path())?;

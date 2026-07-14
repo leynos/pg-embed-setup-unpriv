@@ -18,7 +18,7 @@ pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
 /// Top-level error exposed by the crate.
 #[derive(Debug, Error)]
 pub enum PgEmbeddedError {
-    /// Indicates bootstrap initialisation failed.
+    /// Indicates bootstrap initialization failed.
     #[error("bootstrap failed: {0}")]
     Bootstrap(#[from] BootstrapError),
     /// Indicates privilege management failed.
@@ -29,7 +29,7 @@ pub enum PgEmbeddedError {
     Config(#[from] ConfigError),
 }
 
-/// Categorises bootstrap failures so callers can branch on structured errors.
+/// Categorizes bootstrap failures so callers can branch on structured errors.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub enum BootstrapErrorKind {
     /// Represents errors without a more specific semantic meaning.

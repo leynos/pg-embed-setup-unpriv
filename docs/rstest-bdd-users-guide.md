@@ -80,7 +80,7 @@ The feature file lives within the crate (commonly under `tests/features/`). The
 path to this file will be referenced by the `#[scenario]` macro in the test
 code.
 
-### Internationalised scenarios
+### Internationalized scenarios
 
 `rstest-bdd` reads the optional `# language: <code>` directive that appears at
 the top of a feature file. When you specify a locale the parser uses that
@@ -661,7 +661,7 @@ Projects that prefer to work with raw rows can declare the argument as
 the same project, allowing incremental adoption of typed tables.
 
 A derive macro removes the boilerplate when mapping headers to fields. Annotate
-the struct with `#[derive(DataTableRow)]` and customise behaviour via field
+the struct with `#[derive(DataTableRow)]` and customize behaviour via field
 attributes:
 
 - `#[datatable(rename_all = "kebab-case")]` applies a casing rule to unnamed

@@ -226,7 +226,7 @@ impl TestClusterConnection {
     /// Ensures a template database exists, creating it if necessary.
     ///
     /// Uses per-template locking to prevent concurrent creation attempts when
-    /// multiple tests race to initialise the same template. The `setup_fn` is
+    /// multiple tests race to initialize the same template. The `setup_fn` is
     /// called only if the template does not already exist.
     ///
     /// # Errors

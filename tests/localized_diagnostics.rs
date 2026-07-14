@@ -1,4 +1,4 @@
-//! Ensures Fluent localisation assets from `rstest-bdd` load on the test hosts.
+//! Ensures Fluent localization assets from `rstest-bdd` load on the test hosts.
 
 use std::{cell::RefCell, env};
 
@@ -56,7 +56,7 @@ fn then_localized_diagnostics(world: &LocalizedWorldFixture) -> Result<()> {
     let world_ref = borrow_world(world)?.borrow();
     ensure!(
         world_ref.locale_loaded && world_ref.scenario_exercised,
-        "localised diagnostics must load before the scenario assertions run",
+        "localized diagnostics must load before the scenario assertions run",
     );
     Ok(())
 }

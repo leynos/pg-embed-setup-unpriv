@@ -15,12 +15,12 @@ def run_act(
     job: str = "selftest",
     event_path: Path = EVENT,
     *,
-    artifact_dir: Path,
+    artefact_dir: Path,
 ) -> tuple[int, Path, str]:
     """Run an `act` pull request job and return its exit code, artefacts, and logs."""
     if shutil.which("act") is None:
         pytest.skip("act CLI not installed")
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    artefact_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         "act",
         "pull_request",
@@ -31,7 +31,7 @@ def run_act(
         "-P",
         "ubuntu-latest=catthehacker/ubuntu:act-latest",
         "--artifact-server-path",
-        str(artifact_dir),
+        str(artefact_dir),
         "--json",
         "-b",
     ]
@@ -47,15 +47,15 @@ def run_act(
         stdout = err.stdout or ""
         stderr = err.stderr or ""
         logs = f"{stdout}\n{stderr}"
-        return 124, artifact_dir, f"act timed out after 600s\n{logs}"
+        return 124, artefact_dir, f"act timed out after 600s\n{logs}"
     logs = f"{completed.stdout}\n{completed.stderr}"
-    return completed.returncode, artifact_dir, logs
+    return completed.returncode, artefact_dir, logs
 
 
 def test_workflow_produces_expected_artefact_and_logs(tmp_path: Path) -> None:
     """Verify the self-test workflow writes its result artefact and greeting log."""
-    artifact_dir = tmp_path / "act-artifacts"
-    code, artdir, logs = run_act(artifact_dir=artifact_dir)
+    artefact_dir = tmp_path / "act-artefacts"
+    code, artdir, logs = run_act(artefact_dir=artefact_dir)
     assert code == 0, f"act failed:\n{logs}"
 
     files = list(artdir.rglob("result*/result.json"))

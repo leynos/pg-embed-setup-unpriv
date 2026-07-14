@@ -27,7 +27,7 @@ use loom::{
 /// Models that independent threads cannot overlap active environment scopes.
 #[test]
 #[ignore = "requires Loom model checking"]
-fn scoped_env_serialises_concurrent_scopes() {
+fn scoped_env_serializes_concurrent_scopes() {
     run_loom_model(|| {
         let active_counter = Arc::new(AtomicUsize::new(0));
         let mut handles = Vec::new();
@@ -41,7 +41,7 @@ fn scoped_env_serialises_concurrent_scopes() {
                 let previous = active_clone.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(
                     previous, 0,
-                    "ScopedEnv must serialise concurrent environment scopes"
+                    "ScopedEnv must serialize concurrent environment scopes"
                 );
                 let current = active_clone.fetch_sub(1, Ordering::SeqCst);
                 assert_eq!(current, 1, "ScopedEnv must release the scope cleanly");

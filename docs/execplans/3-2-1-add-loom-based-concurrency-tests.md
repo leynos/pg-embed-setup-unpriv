@@ -283,7 +283,7 @@ its scheduling bounds or scope first rather than silencing failures. If feature
 gating causes unexpected build failures, revert to the last clean commit and
 re-apply the change in smaller increments.
 
-## Artifacts and Notes
+## Artefacts and Notes
 
 Capture any relevant test logs in `/tmp/*.log` files created via `tee` and
 summarize the pass/fail state in the final report.

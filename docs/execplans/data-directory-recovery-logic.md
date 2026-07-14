@@ -499,7 +499,7 @@ No destructive operations are performed during implementation. The actual
 directory reset operation only happens during test execution in a temporary
 directory managed by `tempfile`, which is cleaned up automatically.
 
-## Artifacts and Notes
+## Artefacts and Notes
 
 Key code snippets for reference:
 

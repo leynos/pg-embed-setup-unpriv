@@ -9,15 +9,15 @@
 /// State machine for fallible lazy singleton initialization.
 pub(super) enum SharedInitState<T, C> {
     /// Not yet initialized.
-    Uninitialised,
+    Uninitialized,
     /// Successfully initialized with the cached value.
-    Initialised(T),
+    Initialized(T),
     /// Initialization failed; stores the cached failure details.
     Failed(C),
 }
 
 /// Result type returned by a first-attempt initializer.
-pub(super) type InitialiserResult<T, C, E> = Result<T, (C, E)>;
+pub(super) type InitializerResult<T, C, E> = Result<T, (C, E)>;
 
 /// Resolves a shared singleton state, initializing it at most once.
 pub(super) fn get_or_try_init_shared<T, C, E, Init, CachedError>(
@@ -27,15 +27,15 @@ pub(super) fn get_or_try_init_shared<T, C, E, Init, CachedError>(
 ) -> Result<T, E>
 where
     T: Copy,
-    Init: FnOnce() -> InitialiserResult<T, C, E>,
+    Init: FnOnce() -> InitializerResult<T, C, E>,
     CachedError: FnOnce(&C) -> E,
 {
     match state {
-        SharedInitState::Initialised(value) => Ok(*value),
+        SharedInitState::Initialized(value) => Ok(*value),
         SharedInitState::Failed(cached) => Err(cached_error(cached)),
-        SharedInitState::Uninitialised => match init() {
+        SharedInitState::Uninitialized => match init() {
             Ok(value) => {
-                *state = SharedInitState::Initialised(value);
+                *state = SharedInitState::Initialized(value);
                 Ok(value)
             }
             Err((cached, err)) => {
