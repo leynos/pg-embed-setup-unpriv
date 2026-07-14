@@ -362,7 +362,7 @@ assert!(std::ptr::eq(cluster, cluster2));
 | `test_cluster`        | Tests that modify cluster-level settings or state |
 | `shared_test_cluster` | Tests that only need database-level isolation     |
 
-_Table 1: Fixture selection for `pg-embed-setup-unpriv` test clusters._
+_Table 2: Fixture selection for `pg-embed-setup-unpriv` test clusters._
 
 The shared cluster is particularly effective when combined with template
 databases (see "Database lifecycle management" below) to reduce per-test
@@ -538,7 +538,7 @@ The following table reports approximate benchmark results from one development
 test environment. Treat the timings as environment-dependent guidance rather
 than guaranteed performance figures.
 
-_Table 2: Performance comparison for test isolation approaches._
+_Table 3: Performance comparison for test isolation approaches._
 
 | Approach                       | Bootstrap | Per-test overhead | Isolation |
 | ------------------------------ | --------- | ----------------- | --------- |
