@@ -41,7 +41,21 @@ pub fn hash_directory(dir_path: impl AsRef<Path>) -> BootstrapResult<String> {
     hash_directory_recursive(&dir, base, Path::new(""), &mut hasher)?;
 
     let result = hasher.finalize();
-    Ok(format!("{result:x}"))
+    let mut encoded = String::with_capacity(result.len() * 2);
+    for byte in result {
+        encoded.push(lower_hex_digit(byte >> 4));
+        encoded.push(lower_hex_digit(byte & 0x0f));
+    }
+    Ok(encoded)
+}
+
+fn lower_hex_digit(nibble: u8) -> char {
+    debug_assert!(nibble < 16);
+    if nibble < 10 {
+        char::from(b'0' + nibble)
+    } else {
+        char::from(b'a' + nibble - 10)
+    }
 }
 
 fn hash_directory_recursive(
@@ -183,8 +197,9 @@ mod tests {
 
         assert_eq!(hash.len(), 64, "SHA-256 hex should be 64 characters");
         assert!(
-            hash.chars().all(|c| c.is_ascii_hexdigit()),
-            "hash should be hex"
+            hash.chars()
+                .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character)),
+            "hash should be lowercase hex"
         );
     }
 
