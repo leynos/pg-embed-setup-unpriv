@@ -125,7 +125,7 @@ jobs:
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: ${{ matrix.privilege == 'unprivileged' && github.event_name == 'pull_request' && env.CS_ACCESS_TOKEN != '' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@dfddcb6cf53a2583e55bf0c3536c01ed1f67dc16
         with:
           format: lcov
           mode: check
