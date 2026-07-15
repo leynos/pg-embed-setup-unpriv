@@ -62,10 +62,11 @@ pub(crate) fn render_failure_for_tests(context: &str, output: &Output) -> Bootst
 mod tests {
     //! Unit tests for worker output truncation and error rendering.
 
-    use std::process::Output;
-
     use color_eyre::eyre::eyre;
 
+    // `Output` is re-exported from the parent module via the glob import below;
+    // it is only referenced by the Unix-only helper, so it is not imported
+    // separately to avoid an unused import on non-Unix targets.
     use super::*;
 
     #[cfg(unix)]
