@@ -63,7 +63,7 @@ pub fn dummy_environment() -> TestBootstrapEnvironment {
     }
 }
 
-/// Synthesises bootstrap settings for unit tests targeting the invoker logic.
+/// Synthesizes bootstrap settings for unit tests targeting the invoker logic.
 ///
 /// # Examples
 /// ```rust

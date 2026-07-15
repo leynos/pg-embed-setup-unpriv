@@ -3,8 +3,8 @@
 //! This test verifies that when the `pg_worker` binary is invoked with a partial
 //! data directory (missing `global/pg_filenode.map`), the recovery logic:
 //! 1. Detects the partial directory as invalid
-//! 2. Removes it to allow fresh initialisation
-//! 3. Successfully initialises a new data directory with both `PG_VERSION` and
+//! 2. Removes it to allow fresh initialization
+//! 3. Successfully initializes a new data directory with both `PG_VERSION` and
 //!    `global/pg_filenode.map` present
 //!
 //! This requires real `PostgreSQL` binaries from `postgresql_embedded` and
@@ -59,7 +59,7 @@ fn chown_recursive(path: &std::path::Path, uid: Uid, gid: Gid) -> Result<()> {
 
 /// Issue #80: Validates that `pg_worker` detects a partial data directory
 /// (missing `global/pg_filenode.map`), removes it via recovery, and then
-/// performs fresh initialisation that creates both `PG_VERSION` and
+/// performs fresh initialization that creates both `PG_VERSION` and
 /// `global/pg_filenode.map`.
 ///
 /// This is a true end-to-end test using real `PostgreSQL` binaries.
@@ -139,7 +139,7 @@ fn partial_data_dir_recovery_then_fresh_init(local_serial_guard: ScenarioLocalGu
             .map_err(|e| eyre!("worker setup failed: {e}"))
     })?;
 
-    // Verify fresh initialisation succeeded: both files should now exist
+    // Verify fresh initialization succeeded: both files should now exist
     ensure!(
         data_dir.join("PG_VERSION").exists(),
         "PG_VERSION should exist after fresh init"

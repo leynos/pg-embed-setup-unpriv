@@ -156,7 +156,7 @@ pub type DatabaseWorldFixture = Result<RefCell<DatabaseWorld>>;
 pub fn borrow_world(world: &DatabaseWorldFixture) -> Result<&RefCell<DatabaseWorld>> {
     world
         .as_ref()
-        .map_err(|err| eyre!(format!("database world failed to initialise: {err}")))
+        .map_err(|err| eyre!(format!("database world failed to initialize: {err}")))
 }
 
 /// Execute a database operation, capturing any error in the specified field.

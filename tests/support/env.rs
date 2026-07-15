@@ -40,14 +40,14 @@ where
 ///
 /// The guard relies on the library's re-entrant [`ScopedEnv`] implementation, so
 /// nested scopes on the same thread share the mutex whilst recording the outer
-/// state. Scopes on different threads still serialise to avoid interleaving
+/// state. Scopes on different threads still serialize to avoid interleaving
 /// process-level environment mutations.
 pub fn apply_env(vars: ScopedEnvVars) -> ScopedEnvGuard { test_support::scoped_env(vars) }
 
 /// Runs `body` with the provided environment variables temporarily set.
 ///
 /// The guard restores any pre-existing values when `body` returns, ensuring tests do
-/// not leak environment configuration across scenarios. A global mutex serialises
+/// not leak environment configuration across scenarios. A global mutex serializes
 /// access so concurrent tests cannot interleave environment mutations. Calls on the
 /// same thread are re-entrant, enabling helpers to compose without risking
 /// deadlocks.

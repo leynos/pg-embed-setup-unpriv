@@ -109,7 +109,7 @@ fn keeps_lock_until_last_scope_drops() {
 /// Verifies a second thread blocks until the first scoped guard releases.
 #[test]
 #[serial]
-fn serialises_env_across_threads() {
+fn serializes_env_across_threads() {
     let key = "THREAD_SCOPE_TEST";
     let restore_env = RestoreEnv {
         key: String::from(key),

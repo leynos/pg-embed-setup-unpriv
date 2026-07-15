@@ -1,7 +1,7 @@
 //! Shared cluster singleton implementations.
 //!
 //! This module provides thread-safe singleton patterns for shared test clusters.
-//! The clusters are initialised lazily on first access and persist for the entire
+//! The clusters are initialized lazily on first access and persist for the entire
 //! process lifetime.
 
 use std::sync::{Arc, Mutex, OnceLock};
@@ -22,9 +22,9 @@ use crate::{
 
 /// Global state for the shared cluster handle singleton.
 ///
-/// Uses `OnceLock<Mutex<...>>` to support fallible initialisation whilst
+/// Uses `OnceLock<Mutex<...>>` to support fallible initialization whilst
 /// maintaining thread-safe singleton semantics. The `Mutex` protects
-/// initialisation; once complete, the pointer is stable.
+/// initialization; once complete, the pointer is stable.
 ///
 /// The handle is leaked to obtain a `'static` reference for the entire
 /// process lifetime.
@@ -32,7 +32,7 @@ static SHARED_CLUSTER_HANDLE: OnceLock<Mutex<SharedHandleState>> = OnceLock::new
 type SharedHandleState = SharedInitState<&'static ClusterHandle, Arc<BootstrapError>>;
 /// Returns a reference to the shared cluster handle.
 ///
-/// The cluster is initialised lazily on first access using [`OnceLock`] for
+/// The cluster is initialized lazily on first access using [`OnceLock`] for
 /// thread-safe singleton semantics. Subsequent calls return the same handle
 /// instance, eliminating per-test bootstrap overhead.
 ///
@@ -43,14 +43,14 @@ type SharedHandleState = SharedInitState<&'static ClusterHandle, Arc<BootstrapEr
 /// # Errors
 ///
 /// Returns a [`BootstrapError`] if the cluster cannot be started. Once
-/// initialisation fails, subsequent calls return an error with the same
+/// initialization fails, subsequent calls return an error with the same
 /// [`BootstrapErrorKind`](crate::error::BootstrapErrorKind) and a message
 /// indicating the previous failure.
 ///
 /// # Thread Safety
 ///
 /// This function is safe to call from multiple threads concurrently. The first
-/// caller to reach the initialisation path will bootstrap the cluster while
+/// caller to reach the initialization path will bootstrap the cluster while
 /// other callers wait.
 ///
 /// # Examples
@@ -69,18 +69,18 @@ type SharedHandleState = SharedInitState<&'static ClusterHandle, Arc<BootstrapEr
 /// # }
 /// ```
 pub fn shared_cluster_handle() -> BootstrapResult<&'static ClusterHandle> {
-    let mutex = SHARED_CLUSTER_HANDLE.get_or_init(|| Mutex::new(SharedInitState::Uninitialised));
+    let mutex = SHARED_CLUSTER_HANDLE.get_or_init(|| Mutex::new(SharedInitState::Uninitialized));
     let mut guard = mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     get_or_try_init_shared(
         &mut guard,
-        initialise_shared_cluster_handle,
+        initialize_shared_cluster_handle,
         cached_shared_handle_error,
     )
 }
 
-fn initialise_shared_cluster_handle()
+fn initialize_shared_cluster_handle()
 -> Result<&'static ClusterHandle, (Arc<BootstrapError>, BootstrapError)> {
     let worker_guard = ensure_worker_env();
     match TestCluster::new_split() {
@@ -112,7 +112,7 @@ fn initialise_shared_cluster_handle()
 fn cached_shared_handle_error(original_err: &Arc<BootstrapError>) -> BootstrapError {
     log_cached_shared_handle_error(original_err);
     let report = color_eyre::eyre::eyre!(
-        "shared cluster initialisation previously failed: {:?}",
+        "shared cluster initialization previously failed: {:?}",
         original_err
     );
     BootstrapError::new(original_err.kind(), report)
@@ -189,7 +189,7 @@ fn log_cached_shared_handle_error(original_err: &Arc<BootstrapError>) {
 
 /// Global state for the legacy shared cluster singleton.
 ///
-/// Uses `OnceLock<Mutex<...>>` to support fallible initialisation whilst
+/// Uses `OnceLock<Mutex<...>>` to support fallible initialization whilst
 /// maintaining thread-safe singleton semantics.
 static SHARED_CLUSTER: OnceLock<Mutex<SharedClusterState>> = OnceLock::new();
 
@@ -199,7 +199,7 @@ type SharedClusterState = SharedInitState<SharedClusterPtr, Arc<BootstrapError>>
 ///
 /// Required because `TestCluster` is `!Send` (contains `ScopedEnv` with
 /// `PhantomData<Rc<()>>`). The pointer is safe to share across threads because:
-/// 1. The cluster is only initialised once and never moved.
+/// 1. The cluster is only initialized once and never moved.
 /// 2. All access goes through immutable references.
 /// 3. The cluster's public API is thread-safe (database operations use independent connections).
 #[derive(Clone, Copy)]
@@ -215,7 +215,7 @@ unsafe impl Sync for SharedClusterPtr {}
 
 /// Returns a reference to the shared test cluster.
 ///
-/// The cluster is initialised lazily on first access using [`OnceLock`] for
+/// The cluster is initialized lazily on first access using [`OnceLock`] for
 /// thread-safe singleton semantics. Subsequent calls return the same cluster
 /// instance, eliminating per-test bootstrap overhead.
 ///
@@ -229,14 +229,14 @@ unsafe impl Sync for SharedClusterPtr {}
 /// # Errors
 ///
 /// Returns a [`BootstrapError`] if the cluster cannot be started. Once
-/// initialisation fails, subsequent calls return an error with the same
+/// initialization fails, subsequent calls return an error with the same
 /// [`BootstrapErrorKind`](crate::error::BootstrapErrorKind) and a message
 /// indicating the previous failure.
 ///
 /// # Thread Safety
 ///
 /// This function is safe to call from multiple threads concurrently. The first
-/// caller to reach the initialisation path will bootstrap the cluster while
+/// caller to reach the initialization path will bootstrap the cluster while
 /// other callers wait. All callers receive the same cluster reference.
 ///
 /// # Examples
@@ -255,13 +255,13 @@ unsafe impl Sync for SharedClusterPtr {}
 /// # }
 /// ```
 pub fn shared_cluster() -> BootstrapResult<&'static TestCluster> {
-    let mutex = SHARED_CLUSTER.get_or_init(|| Mutex::new(SharedClusterState::Uninitialised));
+    let mutex = SHARED_CLUSTER.get_or_init(|| Mutex::new(SharedClusterState::Uninitialized));
     let mut guard = mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let ptr = get_or_try_init_shared(
         &mut guard,
-        initialise_shared_cluster,
+        initialize_shared_cluster,
         cached_shared_handle_error,
     )?;
 
@@ -269,7 +269,7 @@ pub fn shared_cluster() -> BootstrapResult<&'static TestCluster> {
     Ok(unsafe { &*ptr.0 })
 }
 
-fn initialise_shared_cluster() -> Result<SharedClusterPtr, (Arc<BootstrapError>, BootstrapError)> {
+fn initialize_shared_cluster() -> Result<SharedClusterPtr, (Arc<BootstrapError>, BootstrapError)> {
     let worker_guard = ensure_worker_env();
     match TestCluster::new() {
         Ok(new_cluster) => {
@@ -341,7 +341,7 @@ mod tests {
 
         assert!(
             result.is_err(),
-            "shared-handle initialisation should fail when shutdown hook registration fails"
+            "shared-handle initialization should fail when shutdown hook registration fails"
         );
         assert!(
             was_dropped.load(Ordering::SeqCst),
@@ -365,7 +365,7 @@ mod tests {
 
         assert!(
             result.is_err(),
-            "shared-cluster initialisation should fail when shutdown hook registration fails"
+            "shared-cluster initialization should fail when shutdown hook registration fails"
         );
         assert!(
             was_dropped.load(Ordering::SeqCst),

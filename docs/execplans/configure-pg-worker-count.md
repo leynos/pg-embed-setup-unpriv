@@ -188,7 +188,7 @@ issue and rerun the same command. If a configuration change causes tests to
 fail, revert only that setting and rerun the tests to confirm the regression is
 isolated before escalating.
 
-## Artifacts and notes
+## Artefacts and notes
 
 Keep a short record of key outputs (for example, `SHOW` results or process
 counts) in the PR description or commit message body to demonstrate the change

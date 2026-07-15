@@ -132,7 +132,7 @@ fn extract_data_dir(settings: &postgresql_embedded::Settings) -> Result<Utf8Path
 **Rationale**:
 
 - Settings uses `std::path::PathBuf` but the helpers use `Utf8Path`
-- Centralises the conversion logic
+- Centralizes the conversion logic
 - Returns a `Result` for proper error handling when data_dir is not valid UTF-8
 
 ### 4. Imports
@@ -151,7 +151,7 @@ use tracing::info;
 
 ### 5. Flow diagram
 
-The following diagram summarises the `ensure_postgres_started` control flow.
+The following diagram summarizes the `ensure_postgres_started` control flow.
 
 ```mermaid
 flowchart TD

@@ -255,7 +255,7 @@ All commands in this plan are re-runnable. If a command fails, fix the
 underlying issue and re-run the same command. Use `git status` and `git diff`
 to verify only the intended changes are present before committing.
 
-## Artifacts and notes
+## Artefacts and notes
 
 Expected files to change (no new files):
 

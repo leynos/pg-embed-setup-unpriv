@@ -1,0 +1,36 @@
+# Repository-specific quotations and machine interfaces.
+
+schema = 1
+
+[oxford]
+stems = []
+
+[words]
+accepted = []
+
+[words.corrections]
+
+[patterns]
+ignore = [
+  # Cargo and third-party Rust APIs retain their exact upstream spelling.
+  '\bCARGO_TERM_COLOR\b',
+  '\bcolor_eyre\b',
+  '\binstall_color_eyre\b',
+  '#\[tokio::test\(flavor = "current_thread"\)\]',
+  # GitHub requires this exact pull-request event list.
+  'types: \[opened, reopened, synchronize, labeled, ready_for_review\]',
+  # Preserve formal third-party values and deliberately invalid fixture text.
+  'whitelist_categories=\("Ll", "Lu", "Nd"\)',
+  '"SELEC 1"',
+  'Als een BDD-validatie draait',
+  # PostgreSQL uses "system catalog" as a formal term.
+  'system\s+catalog',
+  # Act exposes this exact command-line option.
+  '(?m)^        "--artifact-server-path",$',
+]
+
+[files]
+exclude = [
+  # Preserve the historical ExecPlan filename after correcting its prose.
+  "docs/execplans/issue-60-5-lifecycle-behavior-helpers.md",
+]

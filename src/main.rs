@@ -1,4 +1,4 @@
-//! Downloads the specified `PostgreSQL` distribution, initialises the data
+//! Downloads the specified `PostgreSQL` distribution, initializes the data
 //! directory via `initdb`, and prepares a platform-appropriate test cluster.
 //!
 //! The server is **not** started — the installation is left ready for
@@ -9,7 +9,7 @@
 
 use clap::Parser;
 
-const CLI_ABOUT: &str = "Initialises postgresql_embedded clusters with platform-appropriate setup";
+const CLI_ABOUT: &str = "Initializes postgresql_embedded clusters with platform-appropriate setup";
 
 const CONFIGURATION_HELP: &str = concat!(
     "Configuration is read from environment variables:\n",

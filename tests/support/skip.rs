@@ -1,6 +1,6 @@
 //! Shared skip heuristics for integration tests.
 //!
-//! These helpers centralise the set of failure signatures that should result in
+//! These helpers centralize the set of failure signatures that should result in
 //! a soft skip rather than a hard assertion failure. Keeping the substrings and
 //! formatting logic here ensures new tests can inherit the same defensive
 //! behaviour without duplicating arrays of magic strings.
@@ -47,7 +47,7 @@ pub(crate) fn skip_message(prefix: &str, message: &str, debug: Option<&str>) -> 
         .iter()
         .find(|(needle, _)| {
             // Case-insensitive comparison so skip detection is resilient to
-            // platform-specific capitalisation in error messages.
+            // platform-specific capitalization in error messages.
             let needle_lc = needle.to_ascii_lowercase();
             message_lc.contains(&needle_lc) || debug_lc.contains(&needle_lc)
         })

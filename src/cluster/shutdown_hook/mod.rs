@@ -54,7 +54,7 @@ enum ShutdownRegistrationState {
     Registered(Box<RegisteredShutdownState>),
 }
 
-/// Initialisation guard for the atexit callback.
+/// Initialization guard for the atexit callback.
 ///
 /// Uses an explicit state machine rather than `OnceLock` so registration can
 /// be rolled back if preflight or `libc::atexit` registration fails, avoiding a
@@ -191,7 +191,7 @@ fn register_atexit() -> BootstrapResult<()> {
     // SAFETY: `shutdown_callback` is an `extern "C"` function with no parameters
     // and no return value, matching the signature required by `atexit(3)`.
     // The function accesses only the `SHUTDOWN_STATE` static which is
-    // initialised above and remains valid for the lifetime of the process.
+    // initialized above and remains valid for the lifetime of the process.
     let rc = unsafe { libc::atexit(shutdown_callback) };
     if rc != 0 {
         return Err(color_eyre::eyre::eyre!("libc::atexit registration failed (rc={rc})").into());

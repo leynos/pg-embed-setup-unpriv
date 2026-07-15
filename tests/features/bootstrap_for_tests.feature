@@ -1,6 +1,6 @@
 Feature: bootstrap_for_tests helper
   The helper prepares PostgreSQL settings and environment defaults so tests
-  can initialise clusters without manual configuration.
+  can initialize clusters without manual configuration.
 
   Scenario: Bootstrapping without time zone overrides
     Given a bootstrap sandbox for tests

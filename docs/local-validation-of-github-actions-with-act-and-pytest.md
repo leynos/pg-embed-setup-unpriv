@@ -110,9 +110,9 @@ def run_act(
     job: str = "selftest",
     event_path: Path = EVENT,
     *,
-    artifact_dir: Path,
+    artefact_dir: Path,
 ) -> tuple[int, Path, str]:
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    artefact_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         "act",
         "pull_request",
@@ -123,18 +123,18 @@ def run_act(
         "-P",
         "ubuntu-latest=catthehacker/ubuntu:act-latest",
         "--artifact-server-path",
-        str(artifact_dir),
+        str(artefact_dir),
         "--json",  # machine-parseable log stream
         "-b",  # bind-mount repo as workspace (preserves side effects)
     ]
     completed = subprocess.run(cmd, text=True, capture_output=True)
     logs = completed.stdout + "\n" + completed.stderr
-    return completed.returncode, artifact_dir, logs
+    return completed.returncode, artefact_dir, logs
 
 
 def test_workflow_produces_expected_artefact_and_logs(tmp_path: Path) -> None:
-    artifact_dir = tmp_path / "act-artifacts"
-    code, artdir, logs = run_act(artifact_dir=artifact_dir)
+    artefact_dir = tmp_path / "act-artefacts"
+    code, artdir, logs = run_act(artefact_dir=artefact_dir)
     assert code == 0, f"act failed:\n{logs}"
 
     # Assert artefact presence and contents
@@ -172,11 +172,11 @@ record, replay, and verify loop:
    from cmd_mox import CmdMox
 
    def test_record(tmp_path: Path) -> None:
-       artifact_dir = tmp_path / "act-artifacts"
+       artefact_dir = tmp_path / "act-artefacts"
        with CmdMox() as mox:
            gh = mox.spy("gh").passthrough()
            mox.replay()
-           code, _, logs = run_act(artifact_dir=artifact_dir)
+           code, _, logs = run_act(artefact_dir=artefact_dir)
            assert code == 0, logs
            mox.verify()
            assert gh.call_count == 1
@@ -187,7 +187,7 @@ record, replay, and verify loop:
 
    ```python
    def test_replay(tmp_path: Path, cmd_mox) -> None:
-       artifact_dir = tmp_path / "act-artifacts"
+       artefact_dir = tmp_path / "act-artefacts"
        cmd_mox.mock("gh").with_args(
            "release",
            "view",
@@ -195,7 +195,7 @@ record, replay, and verify loop:
            "tagName",
        ).returns(stdout='{"tagName":"v9.9.9"}\n')
        cmd_mox.replay()
-       code, _, logs = run_act(artifact_dir=artifact_dir)
+       code, _, logs = run_act(artefact_dir=artefact_dir)
        assert code == 0, logs
        cmd_mox.verify()
    ```

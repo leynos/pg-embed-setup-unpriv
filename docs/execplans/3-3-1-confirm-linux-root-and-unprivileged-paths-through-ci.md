@@ -225,7 +225,7 @@ and reapply the edits with a smaller matrix or a simpler privilege strategy. If
 tests become flaky, isolate the scenario or run with serial execution and
 record the decision in the design document.
 
-## Artifacts and notes
+## Artefacts and notes
 
 Capture key command outputs in `/tmp/*-$(get-project)-$(git branch --show).out`
 files, so failures can be reviewed after truncated command output. Include any

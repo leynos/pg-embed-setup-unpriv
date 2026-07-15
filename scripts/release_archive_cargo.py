@@ -94,7 +94,7 @@ def build_release_binaries(spec: ReleaseBuildSpecLike) -> None:
 
 def _cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
     """Return the executable and wrapper arguments represented by `cargo`."""
-    stripped_cargo = _normalise_cargo_command(cargo)
+    stripped_cargo = _normalize_cargo_command(cargo)
     if windows_wrapper := _windows_wrapper_program_and_args(stripped_cargo):
         return windows_wrapper
     return _resolve_cargo_program_and_args(
@@ -103,7 +103,7 @@ def _cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
     )
 
 
-def _normalise_cargo_command(cargo: str) -> str:
+def _normalize_cargo_command(cargo: str) -> str:
     """Return a stripped, non-empty Cargo command string."""
     stripped_cargo = cargo.strip()
     if not stripped_cargo:

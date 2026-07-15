@@ -1,7 +1,7 @@
 //! Thread coordination helpers for cross-thread environment tests.
 //!
 //! Provides the drop guards and spawn routines used by
-//! `serialises_env_across_threads` to exercise cross-thread ordering.
+//! `serializes_env_across_threads` to exercise cross-thread ordering.
 
 use std::{
     env,
@@ -36,7 +36,7 @@ impl Drop for ReleaseOnDrop {
 /// # Panic safety
 ///
 /// `RestoreEnv::drop` acquires `ENV_LOCK`, so callers must ensure the lock is
-/// not held when a `RestoreEnv` is dropped. In `serialises_env_across_threads`
+/// not held when a `RestoreEnv` is dropped. In `serializes_env_across_threads`
 /// this is enforced by calling `assert_env_lock_released()` before letting the
 /// `RestoreEnv` go out of scope. Alternatively, if spawned threads panic due to
 /// channel closure, the panic unwinds and drops their guards, releasing
@@ -58,7 +58,7 @@ impl Drop for RestoreEnv {
     }
 }
 
-/// Channels and synchronisation primitives for the outer guard thread.
+/// Channels and synchronization primitives for the outer guard thread.
 pub(super) struct ThreadAChannels {
     /// Barrier used to co-ordinate with other threads.
     pub(super) barrier: Arc<Barrier>,
@@ -110,7 +110,7 @@ pub(super) fn spawn_inner_guard_thread(
 }
 
 /// Spawn a thread that applies a scoped environment variable and waits on
-/// synchronisation primitives.
+/// synchronization primitives.
 ///
 /// # Parameters
 ///

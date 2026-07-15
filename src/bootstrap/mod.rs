@@ -85,14 +85,14 @@ pub struct TestBootstrapSettings {
 }
 
 /// Bootstraps an embedded `PostgreSQL` instance, downloads the distribution,
-/// and initialises the data directory via `initdb`.
+/// and initializes the data directory via `initdb`.
 ///
 /// The server is **not** started — the resulting installation is ready for
 /// subsequent use by [`TestCluster`](crate::TestCluster) or other tools.
 ///
 /// The function honours the following environment variables when present:
 /// - `PG_RUNTIME_DIR`: Overrides the `PostgreSQL` installation directory.
-/// - `PG_DATA_DIR`: Overrides the data directory used for initialisation.
+/// - `PG_DATA_DIR`: Overrides the data directory used for initialization.
 /// - `PG_SUPERUSER`: Sets the superuser account name.
 /// - `PG_PASSWORD`: Supplies the superuser password.
 ///

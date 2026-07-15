@@ -59,7 +59,7 @@ impl EnvLockOps for StdEnvLock {
     /// Delegate locked writes to `std::env::set_var`.
     fn set_var(_guard: &mut Self::Guard, key: &OsString, value: OsString) {
         unsafe {
-            // SAFETY: `ENV_LOCK` serialises changes. Drop restores recorded
+            // SAFETY: `ENV_LOCK` serializes changes. Drop restores recorded
             // values before releasing the lock.
             env::set_var(key, value);
         }
@@ -68,7 +68,7 @@ impl EnvLockOps for StdEnvLock {
     /// Delegate locked removals to `std::env::remove_var`.
     fn remove_var(_guard: &mut Self::Guard, key: &OsString) {
         unsafe {
-            // SAFETY: `ENV_LOCK` serialises changes. Drop restores recorded
+            // SAFETY: `ENV_LOCK` serializes changes. Drop restores recorded
             // values before releasing the lock.
             env::remove_var(key);
         }
@@ -176,7 +176,7 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
 
         assert!(
             self.lock.is_none(),
-            "ScopedEnv depth desynchronised: mutex still held",
+            "ScopedEnv depth desynchronized: mutex still held",
         );
         L::ensure_lock_is_clean();
         let guard = L::lock_env_mutex();

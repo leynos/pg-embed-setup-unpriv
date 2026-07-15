@@ -54,7 +54,7 @@ ID:
   sequence diagram highlights the privilege detection and the branching between
   the root and unprivileged bootstrap paths, showing how the privileged route
   prepares directories for `nobody`, hands control to the worker subprocess,
-  and performs the same environment normalisation as the in-process branch.
+  and performs the same environment normalization as the in-process branch.
 
 ```mermaid
 sequenceDiagram
@@ -352,7 +352,7 @@ essentially one line in the test setup.
   preparation.
 - Extended the `loom-tests` suite beyond `ScopedEnv` to model-check
   race-sensitive lifecycle paths: per-template database creation, shared
-  singleton initialisation, and shutdown-hook registration.
+  singleton initialization, and shutdown-hook registration.
 - Continuous Integration runs the ignored library Loom models explicitly with
   `cargo test --features "loom-tests" --lib -- --ignored`, while the
   property tests continue to run in the ordinary unit suite.

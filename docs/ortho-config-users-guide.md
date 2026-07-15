@@ -47,7 +47,7 @@ behaviour end-to-end.
 
 Run `make test` to execute the example’s coverage. The unit suite uses `rstest`
 fixtures to exercise parsing, validation, and command planning across
-parameterised edge-cases (conflicting delivery modes, blank salutations, and
+parameterized edge-cases (conflicting delivery modes, blank salutations, and
 custom punctuation). Behavioural coverage comes from the `cucumber-rs` runner in
 `tests/cucumber.rs`, which spawns the compiled binary inside a temporary
 working directory, layers `.hello_world.toml` defaults via `cap-std`, and sets

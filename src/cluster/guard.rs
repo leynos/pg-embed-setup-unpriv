@@ -164,7 +164,7 @@ impl ClusterGuard {
     /// Returns true if shutdown should be skipped.
     ///
     /// Shutdown is skipped if the cluster was already stopped (e.g., via
-    /// `stop_async()`) or if the postgres handle was never initialised.
+    /// `stop_async()`) or if the postgres handle was never initialized.
     const fn should_skip_shutdown(&self) -> bool {
         self.postgres.is_none() && !self.is_managed_via_worker
     }

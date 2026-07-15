@@ -80,7 +80,7 @@ fn dummy_handle() -> ClusterHandle {
 /// Note: This test intentionally creates its own handle inside the closure
 /// rather than using the `dummy_handle` fixture. Using a fixture would store
 /// that handle in the `OnceLock` on first run; subsequent test runs (rstest
-/// parameterisation or parallel execution) would then test against a stale
+/// parameterization or parallel execution) would then test against a stale
 /// cached value instead of the fixture-provided one, producing misleading
 /// test results.
 #[test]
@@ -93,7 +93,7 @@ fn cluster_handle_works_with_oncelock() {
     });
 
     // Second access returns the same instance
-    let handle2 = SHARED.get().expect("should be initialised");
+    let handle2 = SHARED.get().expect("should be initialized");
     assert!(
         std::ptr::eq(handle, handle2),
         "OnceLock should return the same handle instance"
@@ -171,18 +171,18 @@ fn cluster_guard_is_not_send_documented() {
 // ============================================================================
 
 // Note: Testing `shared_cluster_handle()` caching directly in this file is
-// problematic because the function uses a global `OnceLock`. Once initialised,
+// problematic because the function uses a global `OnceLock`. Once initialized,
 // the state cannot be reset, and calling it here would interfere with other
 // tests that use the shared cluster.
 //
 // **Explicit caching tests exist in separate test binaries** (Cargo compiles
 // each `tests/*.rs` as its own binary, providing natural `OnceLock` isolation):
 //
-// - `tests/shared_cluster_handle_success.rs`: Verifies that successful initialisation is cached.
+// - `tests/shared_cluster_handle_success.rs`: Verifies that successful initialization is cached.
 //   Calls `shared_cluster_handle()` three times and asserts pointer equality (`std::ptr::eq`) on
 //   returned handles.
 //
-// - `tests/shared_cluster_handle_failure.rs`: Verifies that failed initialisation is cached.
+// - `tests/shared_cluster_handle_failure.rs`: Verifies that failed initialization is cached.
 //   Injects failure by setting `TZDIR` to a non-existent path, then calls `shared_cluster_handle()`
 //   three times and asserts that returned errors have identical `BootstrapErrorKind` and contain
 //   "previously failed" in the message.

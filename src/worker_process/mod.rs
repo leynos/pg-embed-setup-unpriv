@@ -1,6 +1,6 @@
 //! Coordinates subprocess worker invocations for privileged cluster actions.
 //!
-//! The helpers serialise worker payloads, prepare commands, and enforce timeouts
+//! The helpers serialize worker payloads, prepare commands, and enforce timeouts
 //! so `TestCluster` can remain focused on orchestration logic.
 
 mod output;
@@ -82,7 +82,7 @@ pub struct WorkerRequestArgs<'a> {
     /// Filesystem path to the worker binary that will execute the requested
     /// privileged operation.
     pub worker: &'a Utf8Path,
-    /// Cluster configuration that is serialised into the worker payload so the
+    /// Cluster configuration that is serialized into the worker payload so the
     /// child process can bootstrap itself consistently with the parent.
     pub settings: &'a Settings,
     /// Environment variable overrides propagated to the worker to reproduce the
@@ -101,7 +101,7 @@ pub(crate) struct WorkerRequest<'a> {
     /// Filesystem path to the worker binary that will execute the requested
     /// privileged operation.
     worker: &'a Utf8Path,
-    /// Cluster configuration that is serialised into the worker payload so the
+    /// Cluster configuration that is serialized into the worker payload so the
     /// child process can bootstrap itself consistently with the parent.
     settings: &'a Settings,
     /// Environment variable overrides propagated to the worker to reproduce the
@@ -157,7 +157,7 @@ impl<'a> WorkerRequest<'a> {
 /// Executes the worker binary for a privileged cluster operation with
 /// timeout-aware error handling.
 ///
-/// The helper serialises the request payload, drops privileges where
+/// The helper serializes the request payload, drops privileges where
 /// applicable, and runs the worker command whilst enforcing the configured
 /// timeout. Failures bubble up as [`BootstrapError`] with truncated stdout and
 /// stderr to keep diagnostics readable.
@@ -165,7 +165,7 @@ impl<'a> WorkerRequest<'a> {
 /// # Errors
 ///
 /// Returns an error when:
-/// - the worker payload cannot be created, serialised, or flushed to disk;
+/// - the worker payload cannot be created, serialized, or flushed to disk;
 /// - the worker command cannot be spawned or its output cannot be collected;
 /// - the worker exceeds the configured timeout and must be terminated; or
 /// - the worker exits unsuccessfully, in which case the captured output is surfaced for context.
@@ -259,7 +259,7 @@ impl<'a> WorkerProcess<'a> {
     fn write_payload(&self) -> BootstrapResult<TempPath> {
         let payload = WorkerPayload::new(self.request.settings, self.request.env_vars.to_vec())?;
         let mut file = NamedTempFile::new().context("failed to create worker payload file")?;
-        to_writer(&mut file, &payload).context("failed to serialise worker payload")?;
+        to_writer(&mut file, &payload).context("failed to serialize worker payload")?;
         file.flush().context("failed to flush worker payload")?;
         Ok(file.into_temp_path())
     }
