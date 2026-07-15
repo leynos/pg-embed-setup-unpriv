@@ -276,6 +276,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
 
     use nix::unistd::{User, getuid};
+    use rstest::rstest;
 
     use super::*;
 
@@ -287,39 +288,36 @@ mod tests {
         Ok(std::fs::metadata(path)?.permissions().mode() & 0o777)
     }
 
-    #[test]
-    fn make_dir_accessible_creates_world_readable_directory() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let dir = utf8(temp.path())
-            .expect("temp path is UTF-8")
-            .join("install");
-        make_dir_accessible(
-            &dir,
-            &current_user().expect("current user has a passwd entry"),
-        )
-        .expect("make_dir_accessible");
-        assert!(dir.is_dir(), "directory should exist");
-        assert_eq!(
-            mode_of(&dir).expect("stat directory"),
-            0o755,
-            "expected world-readable permissions"
-        );
+    // Named wrapper functions monomorphise the generic helpers to a bare
+    // function pointer whose borrow lifetimes stay late-bound (higher-ranked),
+    // so they coerce to the case parameter type. A turbofish such as
+    // `make_dir_accessible::<&Utf8Path>`, or an inline closure, would instead
+    // fix the `dir` lifetime and fail to coerce.
+    fn apply_world_readable(dir: &Utf8Path, user: &User) -> PrivilegeResult<()> {
+        make_dir_accessible(dir, user)
     }
 
-    #[test]
-    fn make_data_dir_private_clamps_permissions_to_owner_only() {
+    fn apply_owner_only(dir: &Utf8Path, user: &User) -> PrivilegeResult<()> {
+        make_data_dir_private(dir, user)
+    }
+
+    #[rstest]
+    #[case::world_readable(apply_world_readable, "install", 0o755)]
+    #[case::owner_only(apply_owner_only, "data", 0o700)]
+    fn directory_permission_helper_sets_expected_mode(
+        #[case] helper: fn(&Utf8Path, &User) -> PrivilegeResult<()>,
+        #[case] subdir: &str,
+        #[case] expected_mode: u32,
+    ) {
         let temp = tempfile::tempdir().expect("tempdir");
-        let dir = utf8(temp.path()).expect("temp path is UTF-8").join("data");
-        make_data_dir_private(
-            &dir,
-            &current_user().expect("current user has a passwd entry"),
-        )
-        .expect("make_data_dir_private");
+        let dir = utf8(temp.path()).expect("temp path is UTF-8").join(subdir);
+        let user = current_user().expect("current user has a passwd entry");
+        helper(&dir, &user).expect("apply directory permissions");
         assert!(dir.is_dir(), "directory should exist");
         assert_eq!(
             mode_of(&dir).expect("stat directory"),
-            0o700,
-            "expected owner-only permissions"
+            expected_mode,
+            "unexpected directory mode"
         );
     }
 
