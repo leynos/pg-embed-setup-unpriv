@@ -161,7 +161,7 @@ fn rollback_shutdown_registration() {
     SHUTDOWN_STATE_CHANGED.notify_all();
 }
 
-#[cfg(all(test, feature = "cluster-unit-tests"))]
+#[cfg(all(test, any(unix, feature = "cluster-unit-tests")))]
 fn reset_shutdown_registration_for_tests() {
     let mut guard = SHUTDOWN_STATE
         .lock()
@@ -323,12 +323,16 @@ mod tests;
 mod exit_hook_tests {
     //! Tests for the process-exit hook that do not require a live postmaster.
     //!
-    //! `nextest` runs each test in its own process, so the singleton
-    //! `SHUTDOWN_STATE` starts empty for every case and registering a real
-    //! `atexit` handler cannot leak across tests.
+    //! The cases that touch the singleton `SHUTDOWN_STATE` share the
+    //! `shutdown_hook_state` serial key and reset the registration to `Empty`,
+    //! so they stay isolated even under `cargo test` (which, unlike `nextest`,
+    //! runs the whole binary in one process). The reset also neutralises the
+    //! real `atexit` handler that registration installs, since the callback
+    //! finds no work.
     use std::time::Duration;
 
     use postgresql_embedded::Settings;
+    use serial_test::serial;
 
     use super::*;
     use crate::CleanupMode;
@@ -350,7 +354,9 @@ mod exit_hook_tests {
     }
 
     #[test]
+    #[serial(shutdown_hook_state)]
     fn shutdown_work_is_none_before_registration() {
+        reset_shutdown_registration_for_tests();
         assert!(
             shutdown_work().is_none(),
             "no work should be available before registration"
@@ -369,8 +375,10 @@ mod exit_hook_tests {
     }
 
     #[test]
-    fn register_shutdown_hook_is_idempotent() {
-        let temp = tempfile::tempdir().expect("tempdir");
+    #[serial(shutdown_hook_state)]
+    fn register_shutdown_hook_is_idempotent() -> color_eyre::Result<()> {
+        reset_shutdown_registration_for_tests();
+        let temp = tempfile::tempdir()?;
         let settings = Settings {
             data_dir: temp.path().to_path_buf(),
             ..Settings::default()
@@ -379,9 +387,11 @@ mod exit_hook_tests {
             settings.clone(),
             Duration::from_millis(20),
             CleanupMode::None,
-        )
-        .expect("first registration succeeds");
-        register_shutdown_hook(settings, Duration::from_millis(20), CleanupMode::None)
-            .expect("duplicate registration is a no-op");
+        )?;
+        register_shutdown_hook(settings, Duration::from_millis(20), CleanupMode::None)?;
+        // Leave the singleton empty so later cases (and the installed atexit
+        // callback) observe no registration.
+        reset_shutdown_registration_for_tests();
+        Ok(())
     }
 }

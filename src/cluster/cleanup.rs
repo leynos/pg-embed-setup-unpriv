@@ -210,13 +210,16 @@ fn warn_cleanup_removal_failure(
 #[cfg(test)]
 mod tests {
     //! Tests for cluster cleanup behaviour.
-    use std::fs;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     use postgresql_embedded::Settings;
     use rstest::rstest;
     use tempfile::tempdir;
 
-    use super::cleanup_in_process;
+    use super::{cleanup_in_process, is_dangerous_cleanup_path, should_remove_install_root};
     use crate::CleanupMode;
 
     #[rstest]
@@ -257,43 +260,41 @@ mod tests {
         );
     }
 
-    #[test]
-    fn full_cleanup_removes_installation_root_under_install_dir() {
-        let sandbox = tempdir().expect("tempdir");
-        let install_dir = sandbox.path().join("install");
-        let install_root = install_dir.join("secrets");
-        let data_dir = sandbox.path().join("data");
-        fs::create_dir_all(&install_root).expect("create install root");
-        fs::create_dir_all(&data_dir).expect("create data dir");
-
+    // The installation root is only ever removed when it lives under the
+    // installation directory, so removing the installation directory always
+    // cascades to it. That makes filesystem state an unreliable oracle for the
+    // dedicated installation-root branch, so assert the decision directly; this
+    // fails if `should_remove_install_root` stops guarding the branch.
+    #[rstest]
+    #[case::nested_under_install("/opt/pg/install", "/opt/pg/install/secrets", true)]
+    #[case::equal_to_install("/opt/pg/install", "/opt/pg/install", false)]
+    #[case::outside_install("/opt/pg/install", "/elsewhere/secrets", false)]
+    #[case::parent_dir_traversal("/opt/pg/install", "/opt/pg/install/../evil", false)]
+    fn should_remove_install_root_classifies_parent(
+        #[case] install: &str,
+        #[case] parent: &str,
+        #[case] expected: bool,
+    ) {
         let settings = Settings {
-            data_dir,
-            installation_dir: install_dir.clone(),
-            password_file: install_root.join(".pgpass"),
+            installation_dir: PathBuf::from(install),
             ..Settings::default()
         };
-
-        cleanup_in_process(CleanupMode::Full, &settings, "install-root-test");
-
-        assert!(!install_dir.exists(), "installation dir should be removed");
-        assert!(
-            !install_root.exists(),
-            "installation root should be removed too"
+        assert_eq!(
+            should_remove_install_root(Path::new(parent), &settings),
+            expected,
+            "unexpected installation-root removal decision",
         );
     }
 
-    #[test]
-    fn cleanup_refuses_to_remove_dangerous_root_path() {
-        // A filesystem-root data dir must be refused rather than removed.
-        let settings = Settings {
-            data_dir: std::path::PathBuf::from("/"),
-            ..Settings::default()
-        };
-        cleanup_in_process(CleanupMode::DataOnly, &settings, "dangerous-test");
-        assert!(
-            std::path::Path::new("/").exists(),
-            "root path must never be removed",
-        );
+    // Validate the dangerous-path guard directly rather than driving
+    // `cleanup_in_process` against the real filesystem root; the test fails if
+    // the guard ever stops flagging `/` or an empty path.
+    #[rstest]
+    #[case::filesystem_root("/", true)]
+    #[case::empty("", true)]
+    #[case::ordinary("/var/tmp/pg-embed-data", false)]
+    fn is_dangerous_cleanup_path_flags_root_and_empty(#[case] path: &str, #[case] expected: bool) {
+        assert_eq!(is_dangerous_cleanup_path(Path::new(path)), expected);
     }
 }
 #[cfg(test)]

@@ -6,7 +6,7 @@ use std::{
     os::unix::ffi::OsStrExt,
 };
 
-use pg_embedded_setup_unpriv::test_support::create_partial_data_dir;
+use pg_embedded_setup_unpriv::test_support::{create_partial_data_dir, scoped_env};
 use rstest::{fixture, rstest};
 use tempfile::{TempDir, tempdir};
 
@@ -117,16 +117,9 @@ fn recover_skips_empty_dir(temp_data_dir: TempDataDirResult) -> R {
 #[rstest]
 fn recover_removes_partial_initialization(temp_data_dir: TempDataDirResult) -> R {
     let (_, p) = temp_data_dir?;
-    // Create a partial data directory using the shared helper
     create_partial_data_dir(p.as_std_path())?;
-
-    // Verify the directory is detected as invalid (missing marker)
     ensure(!has_valid_data_dir(&p)?, "partial dir should be invalid")?;
-
-    // Recovery should remove the partial directory
     recover_invalid_data_dir(&p)?;
-
-    // After recovery, the directory should be gone
     ensure(!p.exists(), "partial dir should be removed by recovery")
 }
 
@@ -208,20 +201,15 @@ fn extract_dirs_return_paths_from_settings() -> R {
 }
 
 #[rstest]
-// pgpass nested under the install dir yields the nested parent.
-#[case(
+#[case::nested_under_install(
     "/opt/pg/install",
     "/opt/pg/install/secrets/.pgpass",
     Some("/opt/pg/install/secrets")
 )]
-// pgpass directly in the install dir is treated as already covered.
-#[case("/opt/pg/install", "/opt/pg/install/.pgpass", None)]
-// pgpass outside the install dir is not a root to remove.
-#[case("/opt/pg/install", "/elsewhere/.pgpass", None)]
-// a parent-dir traversal is rejected defensively.
-#[case("/opt/pg/install", "/opt/pg/install/../evil/.pgpass", None)]
-// pgpass at the filesystem root has no meaningful parent to remove.
-#[case("/opt/pg/install", "/.pgpass", None)]
+#[case::directly_in_install("/opt/pg/install", "/opt/pg/install/.pgpass", None)]
+#[case::outside_install("/opt/pg/install", "/elsewhere/.pgpass", None)]
+#[case::parent_dir_traversal("/opt/pg/install", "/opt/pg/install/../evil/.pgpass", None)]
+#[case::filesystem_root("/opt/pg/install", "/.pgpass", None)]
 fn extract_install_root_classifies_password_file(
     #[case] install: &str,
     #[case] pgpass: &str,
@@ -275,8 +263,15 @@ fn is_dir_empty_reports_contents() -> R {
 fn apply_worker_environment_sets_and_removes_variables() -> R {
     let set_key = "PG_WORKER_TEST_SET_VAR";
     let unset_key = "PG_WORKER_TEST_UNSET_VAR";
-    // SAFETY: nextest isolates each test in its own process.
-    unsafe { std::env::set_var(unset_key, "pre-existing") };
+    // The shared guard seeds `unset_key`, restores both variables on drop, and
+    // serialises env access, avoiding unguarded process-env mutation.
+    let _env_guard = scoped_env(vec![
+        (OsString::from(set_key), None),
+        (
+            OsString::from(unset_key),
+            Some(OsString::from("pre-existing")),
+        ),
+    ]);
     let environment = vec![
         (set_key.to_owned(), Some(PlainSecret::from("applied"))),
         (unset_key.to_owned(), None),
@@ -356,6 +351,8 @@ fn run_worker_cleanup_removes_data_dir_and_applies_environment() -> R {
     let data = root.join("data");
     fs::create_dir_all(data.join("base"))?;
     let env_key = "PG_WORKER_CLEANUP_ENV";
+    // Restore the worker-applied variable on drop and serialise env access.
+    let _env_guard = scoped_env(vec![(OsString::from(env_key), None)]);
     let settings = settings_with(&root.join("install"), &root.join("install/.pgpass"), &data);
     let cfg = write_config(
         &root,

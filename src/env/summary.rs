@@ -149,12 +149,11 @@ mod tests {
 
     #[test]
     fn does_not_duplicate_trailing_ellipsis() {
-        // Input already ending in "..." must not gain a second ellipsis.
-        let input = format!("{}...", "x".repeat(20));
-        let summary = truncate_env_changes_summary(&input, 12, 1);
-        assert!(
-            !summary.ends_with("......"),
-            "ellipsis should not be duplicated, got {summary:?}"
-        );
+        // The retained prefix already ends in "...", so the guard must skip
+        // appending a second ellipsis. The input exceeds the limit and is cut
+        // exactly at the existing ellipsis ("abcdefgh..."), which is the branch
+        // an input whose ellipsis is truncated away would never reach.
+        let summary = truncate_env_changes_summary("abcdefgh...trailing", 11, 1);
+        assert_eq!(summary, "abcdefgh...");
     }
 }
