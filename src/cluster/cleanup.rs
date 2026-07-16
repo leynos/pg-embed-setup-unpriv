@@ -287,14 +287,32 @@ mod tests {
     }
 
     // Validate the dangerous-path guard directly rather than driving
-    // `cleanup_in_process` against the real filesystem root; the test fails if
-    // the guard ever stops flagging `/` or an empty path.
-    #[rstest]
-    #[case::filesystem_root("/", true)]
-    #[case::empty("", true)]
-    #[case::ordinary("/var/tmp/pg-embed-data", false)]
-    fn is_dangerous_cleanup_path_flags_root_and_empty(#[case] path: &str, #[case] expected: bool) {
-        assert_eq!(is_dangerous_cleanup_path(Path::new(path)), expected);
+    // `cleanup_in_process` against the real filesystem root. The root is
+    // resolved at runtime because a literal "/" is not an absolute path on
+    // Windows; the test fails if the guard stops flagging the root or an empty
+    // path.
+    #[test]
+    fn is_dangerous_cleanup_path_flags_root_and_empty() {
+        assert!(
+            is_dangerous_cleanup_path(Path::new("")),
+            "an empty path must be flagged as dangerous"
+        );
+
+        let root = std::env::current_dir()
+            .expect("resolve current dir")
+            .ancestors()
+            .last()
+            .expect("an absolute directory has a root ancestor")
+            .to_path_buf();
+        assert!(
+            is_dangerous_cleanup_path(&root),
+            "filesystem root {root:?} must be flagged as dangerous"
+        );
+
+        assert!(
+            !is_dangerous_cleanup_path(Path::new("data/pg-embed")),
+            "an ordinary relative path must not be flagged"
+        );
     }
 }
 #[cfg(test)]
