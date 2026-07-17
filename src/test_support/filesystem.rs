@@ -247,6 +247,20 @@ mod tests {
         ensure_dir_exists(&nested).expect("ensure nested dir");
         assert!(nested.exists(), "nested dir should be created");
         set_permissions(&nested, 0o750).expect("apply permissions");
+
+        // `set_permissions` applies an absolute mode (not umask-masked), so the
+        // resulting directory must carry exactly the requested bits. The
+        // non-Unix wrapper is a documented no-op, so only assert on Unix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(nested.as_std_path())
+                .expect("stat nested dir")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o750, "set_permissions should apply the exact mode");
+        }
     }
 
     #[test]

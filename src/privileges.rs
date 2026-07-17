@@ -279,6 +279,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::test_support::capture_info_logs;
 
     fn current_user() -> Option<User> { User::from_uid(getuid()).ok().flatten() }
 
@@ -342,11 +343,21 @@ mod tests {
         std::fs::write(nested.join("file.txt").as_std_path(), b"data").expect("write file");
         std::fs::write(root.join("top.txt").as_std_path(), b"data").expect("write top file");
 
-        ensure_tree_owned_by_user(
-            root,
-            &current_user().expect("current user has a passwd entry"),
-        )
-        .expect("chown tree to self");
+        // Ownership is reassigned to the current user, so it does not visibly
+        // change on disk. Observe the traversal instead via the summary log,
+        // which reports the number of chowned entries: the four descendants
+        // `a`, `a/b`, `a/b/file.txt`, and `top.txt`. This fails if traversal is
+        // skipped or nested entries are missed.
+        let user = current_user().expect("current user has a passwd entry");
+        let (logs, result) = capture_info_logs(|| ensure_tree_owned_by_user(root, &user));
+        result.expect("chown tree to self");
+        assert!(
+            logs.iter().any(|line| {
+                line.contains("ensured tree ownership for user")
+                    && line.contains("updated_entries=4")
+            }),
+            "expected all four nested entries to be chowned, got logs: {logs:?}"
+        );
     }
 
     #[test]

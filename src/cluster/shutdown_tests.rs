@@ -51,6 +51,7 @@ mod worker_managed {
 
     use super::super::*;
     use crate::{
+        CleanupMode,
         ExecutionPrivileges,
         test_support::{dummy_settings, install_run_root_operation_hook, test_runtime},
     };
@@ -77,7 +78,11 @@ mod worker_managed {
     #[serial(worker_hook)]
     fn drop_sync_cluster_worker_managed_invokes_stop_hook() -> color_eyre::Result<()> {
         let runtime = test_runtime()?;
-        let bootstrap = dummy_settings(ExecutionPrivileges::Root);
+        let mut bootstrap = dummy_settings(ExecutionPrivileges::Root);
+        // Disable the follow-up cleanup operation so only the single stop
+        // invocation reaches the hook; this pins the drop path to exactly one
+        // stop call rather than tolerating duplicates.
+        bootstrap.cleanup_mode = CleanupMode::None;
         let env_vars = bootstrap.environment.to_env();
         let calls = Arc::new(AtomicUsize::new(0));
         let hook_calls = Arc::clone(&calls);
@@ -99,9 +104,10 @@ mod worker_managed {
             },
         );
 
+        let count = calls.load(Ordering::Relaxed);
         color_eyre::eyre::ensure!(
-            calls.load(Ordering::Relaxed) >= 1,
-            "worker stop hook should be invoked at least once"
+            count == 1,
+            "worker-managed drop must invoke the stop hook exactly once, got {count}"
         );
         Ok(())
     }

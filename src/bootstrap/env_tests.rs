@@ -97,13 +97,18 @@ fn find_timezone_dir_returns_existing_candidate() {
 
 #[test]
 fn prepare_timezone_env_defaults_zone_to_utc() {
-    let _guard = ScopedEnv::apply(&[(String::from("TZ"), None), (String::from("TZDIR"), None)]);
-    // Only assert when a timezone database is discoverable in the environment.
-    if find_timezone_dir().is_some() {
-        let tz = prepare_timezone_env().expect("timezone env prepared");
-        assert_eq!(tz.zone, "UTC");
-        assert!(tz.dir.is_some(), "discovered TZDIR should be populated");
-    }
+    // Provide an explicit TZDIR so the call never depends on host tzdata (it
+    // errors when no zoneinfo directory is discoverable), letting the UTC
+    // default be asserted unconditionally.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let tzdir = temp.path().to_str().expect("utf8 tempdir");
+    let _guard = ScopedEnv::apply(&[
+        (String::from("TZ"), None),
+        (String::from("TZDIR"), Some(tzdir.to_owned())),
+    ]);
+    let tz = prepare_timezone_env().expect("timezone env prepared");
+    assert_eq!(tz.zone, "UTC", "an unset TZ must default the zone to UTC");
+    assert_eq!(tz.dir.as_deref().map(camino::Utf8Path::as_str), Some(tzdir));
 }
 
 #[test]
