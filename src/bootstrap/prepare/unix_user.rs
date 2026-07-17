@@ -170,13 +170,34 @@ mod tests {
     //! do freely, so the fchown/fchmod paths are covered without elevated
     //! privileges.
 
-    use std::os::unix::fs::PermissionsExt as _;
+    use std::{ffi::CString, os::unix::fs::PermissionsExt as _, path::PathBuf};
 
-    use nix::unistd::{User, getuid};
+    use nix::unistd::{User, getegid, geteuid};
 
     use super::*;
 
-    fn current_user() -> Option<User> { User::from_uid(getuid()).ok().flatten() }
+    /// Builds a synthetic `User` owned by the current process, avoiding any
+    /// passwd/NSS lookup (which can be absent in minimal containers). Only the
+    /// effective UID/GID matter for the chown-to-self ownership tests; the
+    /// remaining fields carry deterministic placeholders.
+    fn current_user() -> User {
+        User {
+            name: String::from("pg-embed-test"),
+            passwd: CString::default(),
+            uid: geteuid(),
+            gid: getegid(),
+            #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
+            gecos: CString::default(),
+            dir: PathBuf::from("/nonexistent"),
+            shell: PathBuf::from("/nonexistent"),
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            class: CString::default(),
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            change: 0,
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            expire: 0,
+        }
+    }
 
     fn utf8(path: &std::path::Path) -> Option<Utf8PathBuf> {
         Utf8PathBuf::from_path_buf(path.to_path_buf()).ok()
@@ -188,11 +209,7 @@ mod tests {
         let dir = utf8(temp.path())
             .expect("temp path is UTF-8")
             .join("install");
-        ensure_install_dir_for_user(
-            &dir,
-            &current_user().expect("current user has a passwd entry"),
-        )
-        .expect("prepare install dir");
+        ensure_install_dir_for_user(&dir, &current_user()).expect("prepare install dir");
         assert!(dir.is_dir(), "install directory should exist");
     }
 
@@ -204,11 +221,7 @@ mod tests {
             .join(".pgpass");
         std::fs::write(pgpass.as_std_path(), b"host:5432:db:user:secret\n").expect("write pgpass");
 
-        ensure_pgpass_for_user(
-            &pgpass,
-            &current_user().expect("current user has a passwd entry"),
-        )
-        .expect("prepare pgpass");
+        ensure_pgpass_for_user(&pgpass, &current_user()).expect("prepare pgpass");
 
         let mode = std::fs::metadata(pgpass.as_std_path())
             .expect("stat pgpass")
@@ -227,20 +240,13 @@ mod tests {
         // The parent exists but the file does not, so preparation is a no-op.
         std::fs::create_dir_all(pgpass.parent().expect("parent").as_std_path())
             .expect("create parent");
-        ensure_pgpass_for_user(
-            &pgpass,
-            &current_user().expect("current user has a passwd entry"),
-        )
-        .expect("absent pgpass is a no-op");
+        ensure_pgpass_for_user(&pgpass, &current_user()).expect("absent pgpass is a no-op");
     }
 
     #[test]
     fn ensure_pgpass_rejects_root_path() {
-        let err = ensure_pgpass_for_user(
-            &Utf8PathBuf::from("/"),
-            &current_user().expect("current user has a passwd entry"),
-        )
-        .expect_err("root pgpass path must be rejected");
+        let err = ensure_pgpass_for_user(&Utf8PathBuf::from("/"), &current_user())
+            .expect_err("root pgpass path must be rejected");
         assert!(
             err.to_string().contains("root directory"),
             "expected root-path rejection, got: {err}"
@@ -254,11 +260,8 @@ mod tests {
             .expect("temp path is UTF-8")
             .join("not-a-file");
         std::fs::create_dir(dir_path.as_std_path()).expect("create dir");
-        let err = ensure_pgpass_for_user(
-            &dir_path,
-            &current_user().expect("current user has a passwd entry"),
-        )
-        .expect_err("directory pgpass must be rejected");
+        let err = ensure_pgpass_for_user(&dir_path, &current_user())
+            .expect_err("directory pgpass must be rejected");
         assert!(
             err.to_string().contains("regular file"),
             "expected regular-file rejection, got: {err}"
