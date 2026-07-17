@@ -23,7 +23,7 @@ jobs:
       BUILD_PROFILE: debug
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MERMAN_CLI_VERSION: '0.7.0'
-      WHITAKER_INSTALLER_VERSION: '0.2.5'
+      WHITAKER_INSTALLER_VERSION: '0.2.6'
       # Embedded-Postgres tests run slower under cold coverage
       # instrumentation than the default 600s cargo wall-clock cap.
       RUN_RUST_CARGO_WAIT_TIMEOUT: '1800'
