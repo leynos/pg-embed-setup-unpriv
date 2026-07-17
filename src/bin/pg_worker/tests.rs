@@ -6,7 +6,7 @@ use std::{
     os::unix::ffi::OsStrExt,
 };
 
-use pg_embedded_setup_unpriv::test_support::{create_partial_data_dir, scoped_env};
+use pg_embedded_setup_unpriv::test_support::create_partial_data_dir;
 use rstest::{fixture, rstest};
 use tempfile::{TempDir, tempdir};
 
@@ -123,41 +123,21 @@ fn recover_removes_partial_initialization(temp_data_dir: TempDataDirResult) -> R
     ensure(!p.exists(), "partial dir should be removed by recovery")
 }
 
-fn utf8(path: &std::path::Path) -> R<Utf8PathBuf> {
-    Utf8PathBuf::from_path_buf(path.to_path_buf())
-        .map_err(|p| format!("non-UTF-8 temp path: {}", p.display()).into())
-}
-
-fn settings_with(install: &Utf8Path, pgpass: &Utf8Path, data: &Utf8Path) -> Settings {
-    Settings {
-        installation_dir: install.as_std_path().to_path_buf(),
-        password_file: pgpass.as_std_path().to_path_buf(),
-        data_dir: data.as_std_path().to_path_buf(),
-        ..Settings::default()
-    }
-}
-
-fn write_config(
-    dir: &Utf8Path,
-    settings: &Settings,
-    env: Vec<(String, Option<String>)>,
-) -> R<Utf8PathBuf> {
-    let payload = WorkerPayload::new(settings, env)?;
-    let bytes = serde_json::to_vec(&payload)?;
-    let path = dir.join("config.json");
-    fs::write(path.as_std_path(), bytes)?;
-    Ok(path)
-}
-
 #[rstest]
-#[case("setup")]
-#[case("start")]
-#[case("stop")]
-#[case("cleanup")]
-#[case("cleanup-full")]
-fn operation_parses_known_verbs(#[case] verb: &str) -> R {
-    Operation::parse(OsStr::new(verb)).map_err(|e| format!("expected {verb} to parse: {e}"))?;
-    Ok(())
+#[case("setup", "Setup")]
+#[case("start", "Start")]
+#[case("stop", "Stop")]
+#[case("cleanup", "Cleanup")]
+#[case("cleanup-full", "CleanupFull")]
+fn operation_parses_known_verbs(#[case] verb: &str, #[case] expected: &str) -> R {
+    // `Operation` derives only `Debug`, so compare the variant's debug name to
+    // ensure the verb maps to the correct operation, not merely that it parses.
+    let op =
+        Operation::parse(OsStr::new(verb)).map_err(|e| format!("expected {verb} to parse: {e}"))?;
+    ensure(
+        format!("{op:?}") == expected,
+        "verb mapped to the wrong operation",
+    )
 }
 
 #[test]
@@ -184,209 +164,5 @@ fn parse_args_requires_operation_and_config() -> R {
     ensure(
         missing_cfg.to_string().contains("missing config path"),
         "wrong missing-cfg msg",
-    )
-}
-
-#[test]
-fn extract_dirs_return_paths_from_settings() -> R {
-    let install = Utf8Path::new("/opt/pg/install");
-    let pgpass = Utf8Path::new("/opt/pg/install/.pgpass");
-    let data = Utf8Path::new("/opt/pg/data");
-    let settings = settings_with(install, pgpass, data);
-    ensure(extract_data_dir(&settings)? == data, "data mismatch")?;
-    ensure(
-        extract_install_dir(&settings)? == install,
-        "install mismatch",
-    )
-}
-
-#[rstest]
-#[case::nested_under_install(
-    "/opt/pg/install",
-    "/opt/pg/install/secrets/.pgpass",
-    Some("/opt/pg/install/secrets")
-)]
-#[case::directly_in_install("/opt/pg/install", "/opt/pg/install/.pgpass", None)]
-#[case::outside_install("/opt/pg/install", "/elsewhere/.pgpass", None)]
-#[case::parent_dir_traversal("/opt/pg/install", "/opt/pg/install/../evil/.pgpass", None)]
-#[case::filesystem_root("/opt/pg/install", "/.pgpass", None)]
-fn extract_install_root_classifies_password_file(
-    #[case] install: &str,
-    #[case] pgpass: &str,
-    #[case] expected: Option<&str>,
-) -> R {
-    let install_dir = Utf8Path::new(install);
-    let settings = settings_with(
-        install_dir,
-        Utf8Path::new(pgpass),
-        Utf8Path::new("/opt/pg/data"),
-    );
-    let resolved = extract_install_root(&settings, install_dir)?;
-    let resolved_str = resolved.as_deref().map(Utf8Path::as_str);
-    ensure(
-        resolved_str == expected,
-        "unexpected install-root classification",
-    )
-}
-
-#[rstest]
-fn execute_cleanup_removes_existing_directories(temp_data_dir: TempDataDirResult) -> R {
-    let (_temp, data) = temp_data_dir?;
-    fs::create_dir_all(data.join("base"))?;
-    execute_cleanup(&data, None, None)?;
-    ensure(!data.exists(), "data dir should be removed")
-}
-
-#[test]
-fn execute_cleanup_removes_install_and_root() -> R {
-    let temp = tempdir()?;
-    let root = utf8(temp.path())?;
-    let install = root.join("install");
-    let install_root = root.join("install/secrets");
-    let data = root.join("data");
-    fs::create_dir_all(&data)?;
-    fs::create_dir_all(&install_root)?;
-    execute_cleanup(&data, Some(&install), Some(&install_root))?;
-    ensure(!data.exists() && !install.exists(), "all dirs removed")
-}
-
-#[test]
-fn is_dir_empty_reports_contents() -> R {
-    let temp = tempdir()?;
-    let root = utf8(temp.path())?;
-    ensure(is_dir_empty(&root)?, "fresh dir should be empty")?;
-    fs::write(root.join("file"), "x")?;
-    ensure(!is_dir_empty(&root)?, "populated dir should not be empty")
-}
-
-#[test]
-fn apply_worker_environment_sets_and_removes_variables() -> R {
-    let set_key = "PG_WORKER_TEST_SET_VAR";
-    let unset_key = "PG_WORKER_TEST_UNSET_VAR";
-    // The shared guard seeds `unset_key`, restores both variables on drop, and
-    // serialises env access, avoiding unguarded process-env mutation.
-    let _env_guard = scoped_env(vec![
-        (OsString::from(set_key), None),
-        (
-            OsString::from(unset_key),
-            Some(OsString::from("pre-existing")),
-        ),
-    ]);
-    let environment = vec![
-        (set_key.to_owned(), Some(PlainSecret::from("applied"))),
-        (unset_key.to_owned(), None),
-    ];
-    apply_worker_environment(&environment);
-    ensure(
-        std::env::var(set_key).as_deref() == Ok("applied"),
-        "set var not applied",
-    )?;
-    ensure(std::env::var(unset_key).is_err(), "unset var not removed")
-}
-
-#[test]
-fn build_runtime_constructs_current_thread_runtime() -> R {
-    let runtime = build_runtime().map_err(|e| e.to_string())?;
-    let answer = runtime.block_on(async { 21 + 21 });
-    ensure(answer == 42, "runtime should execute futures")
-}
-
-#[rstest]
-#[case("postmaster.pid does not exist", true)]
-#[case("some other stop failure", false)]
-fn stop_missing_pid_is_ok_matches_absent_pid(#[case] message: &str, #[case] expected: bool) -> R {
-    let err = postgresql_embedded::Error::DatabaseStopError(message.to_owned());
-    ensure(
-        stop_missing_pid_is_ok(&err) == expected,
-        "unexpected pid classification",
-    )
-}
-
-#[test]
-fn load_payload_roundtrips_written_config() -> R {
-    let temp = tempdir()?;
-    let root = utf8(temp.path())?;
-    let settings = settings_with(
-        &root.join("install"),
-        &root.join("install/.pgpass"),
-        &root.join("data"),
-    );
-    let cfg = write_config(&root, &settings, Vec::new())?;
-    let payload = load_payload(&cfg).map_err(|e| e.to_string())?;
-    let restored = payload
-        .settings
-        .into_settings()
-        .map_err(|e| e.to_string())?;
-    ensure(restored.data_dir == settings.data_dir, "data dir roundtrip")
-}
-
-#[test]
-fn load_payload_rejects_missing_file() -> R {
-    let temp = tempdir()?;
-    let missing = utf8(temp.path())?.join("absent.json");
-    let err = load_payload(&missing).err().ok_or("expected error")?;
-    ensure(
-        matches!(err, WorkerError::ConfigRead(_)),
-        "expected ConfigRead error",
-    )
-}
-
-#[test]
-fn load_payload_rejects_invalid_json() -> R {
-    let temp = tempdir()?;
-    let root = utf8(temp.path())?;
-    let cfg = root.join("config.json");
-    fs::write(cfg.as_std_path(), b"not json")?;
-    let err = load_payload(&cfg).err().ok_or("expected error")?;
-    ensure(
-        matches!(err, WorkerError::ConfigParse(_)),
-        "expected ConfigParse error",
-    )
-}
-
-#[test]
-fn run_worker_cleanup_removes_data_dir_and_applies_environment() -> R {
-    let temp = tempdir()?;
-    let root = utf8(temp.path())?;
-    let data = root.join("data");
-    fs::create_dir_all(data.join("base"))?;
-    let env_key = "PG_WORKER_CLEANUP_ENV";
-    // Restore the worker-applied variable on drop and serialise env access.
-    let _env_guard = scoped_env(vec![(OsString::from(env_key), None)]);
-    let settings = settings_with(&root.join("install"), &root.join("install/.pgpass"), &data);
-    let cfg = write_config(
-        &root,
-        &settings,
-        vec![(env_key.to_owned(), Some("on".to_owned()))],
-    )?;
-
-    let args = ["pg_worker", "cleanup", cfg.as_str()].map(OsString::from);
-    run_worker(args.into_iter()).map_err(|e| e.to_string())?;
-
-    ensure(!data.exists(), "cleanup should remove the data dir")?;
-    ensure(
-        std::env::var(env_key).as_deref() == Ok("on"),
-        "worker environment should be applied",
-    )
-}
-
-#[test]
-fn run_worker_cleanup_full_removes_install_tree() -> R {
-    let temp = tempdir()?;
-    let root = utf8(temp.path())?;
-    let data = root.join("data");
-    let install = root.join("install");
-    let secrets = install.join("secrets");
-    fs::create_dir_all(&data)?;
-    fs::create_dir_all(&secrets)?;
-    let settings = settings_with(&install, &secrets.join(".pgpass"), &data);
-    let cfg = write_config(&root, &settings, Vec::new())?;
-
-    let args = ["pg_worker", "cleanup-full", cfg.as_str()].map(OsString::from);
-    run_worker(args.into_iter()).map_err(|e| e.to_string())?;
-
-    ensure(
-        !data.exists() && !install.exists(),
-        "cleanup-full should remove data and install trees",
     )
 }

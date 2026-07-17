@@ -397,5 +397,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 #[cfg(all(test, unix, feature = "dev-worker"))]
+#[path = "pg_worker/config_tests.rs"]
+mod config_tests;
+#[cfg(all(test, unix, feature = "dev-worker"))]
 #[path = "pg_worker/tests.rs"]
 mod tests;

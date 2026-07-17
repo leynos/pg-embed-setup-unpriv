@@ -1,4 +1,5 @@
 //! Tests for cluster shutdown behaviour.
+use postgresql_embedded::VersionReq;
 use rstest::rstest;
 
 use super::*;
@@ -31,12 +32,15 @@ fn warning_functions_emit_expected_logs(#[case] action: fn(), #[case] expected_s
 
 #[test]
 fn stop_context_reports_version_and_data_dir() {
-    let settings = Settings::default();
+    // Use distinctive values so the assertion fails if either is omitted,
+    // reordered, or mislabelled, unlike a bare substring check.
+    let settings = Settings {
+        version: VersionReq::parse("=17.0.0").expect("valid version requirement"),
+        data_dir: std::path::PathBuf::from("/tmp/pg-ctx-test"),
+        ..Settings::default()
+    };
     let context = stop_context(&settings);
-    assert!(
-        context.contains("version") && context.contains("data_dir"),
-        "expected version and data_dir in context, got: {context}"
-    );
+    assert_eq!(context, "version =17.0.0, data_dir /tmp/pg-ctx-test");
 }
 
 mod worker_managed {

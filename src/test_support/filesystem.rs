@@ -265,10 +265,15 @@ mod tests {
 
     #[test]
     fn resolve_env_path_reads_present_and_absent_variables() {
-        let _guard = crate::env::ScopedEnv::apply(&[(
-            String::from("PG_EMBEDDED_TEST_TMPDIR"),
-            Some(String::from("/tmp/cov-env-path")),
-        )]);
+        let _guard = crate::env::ScopedEnv::apply(&[
+            (
+                String::from("PG_EMBEDDED_TEST_TMPDIR"),
+                Some(String::from("/tmp/cov-env-path")),
+            ),
+            // Explicitly clear the absent key for the scope so the None branch
+            // holds even if the ambient environment happens to define it.
+            (String::from("PG_EMBEDDED_TEST_DEFINITELY_UNSET"), None),
+        ]);
         let resolved = resolve_env_path("PG_EMBEDDED_TEST_TMPDIR")
             .expect("resolve present var")
             .expect("present var yields a path");

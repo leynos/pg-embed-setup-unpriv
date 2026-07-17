@@ -53,11 +53,18 @@ Run the complete lint gate before committing changes:
 make lint
 ```
 
-`make lint` runs three tiers in order, each gating the next:
+`make lint` runs four tiers in order, each gating the next:
 
 1. `interrogate --fail-under 100 .` — Python docstring coverage at 100%.
 2. `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS` set to deny warnings.
 3. `cargo clippy --all-targets --all-features -- -D warnings`.
+4. `$(WHITAKER) --all -- --all-targets --all-features`, the Whitaker Dylint
+   suite, with `RUSTFLAGS="-D warnings"` denying lint warnings. Key lints
+   include `module_max_lines` (a 400-line cap per module) and
+   `no_expect_outside_tests` (bans `.expect()`/`.unwrap()` outside test-only
+   code). `dylint.toml` whitelists `serial_test`'s `#[serial]` attribute via
+   `[no_expect_outside_tests] additional_test_attributes = ["serial"]`, so
+   `.expect(...)` stays permitted inside `#[serial]`-annotated test functions.
 
 CI installs the pinned `interrogate==1.7.0` uv tool before running `make lint`.
 Keep the Makefile and workflow versions aligned when updating the
