@@ -147,10 +147,17 @@ fn build_runtime_constructs_current_thread_runtime() -> R {
 #[case("postmaster.pid does not exist", true)]
 #[case("some other stop failure", false)]
 fn stop_missing_pid_is_ok_matches_absent_pid(#[case] message: &str, #[case] expected: bool) -> R {
-    let err = postgresql_embedded::Error::DatabaseStopError(message.to_owned());
+    // `stop_missing_pid_is_ok` accepts both `DatabaseStopError` and `IoError`,
+    // so exercise both so the oracle fails if either accepted arm regresses.
+    let database_err = postgresql_embedded::Error::DatabaseStopError(message.to_owned());
     ensure(
-        stop_missing_pid_is_ok(&err) == expected,
-        "unexpected pid classification",
+        stop_missing_pid_is_ok(&database_err) == expected,
+        "unexpected DatabaseStopError pid classification",
+    )?;
+    let io_err = postgresql_embedded::Error::IoError(message.to_owned());
+    ensure(
+        stop_missing_pid_is_ok(&io_err) == expected,
+        "unexpected IoError pid classification",
     )
 }
 

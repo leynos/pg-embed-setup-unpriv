@@ -74,7 +74,15 @@ mod worker_managed {
         .map_err(|err| color_eyre::eyre::eyre!(err))?;
 
         let result = stop_worker_managed_with_runtime(&runtime, &bootstrap, &env_vars, "stop-test");
-        color_eyre::eyre::ensure!(result.is_err(), "hook failure should propagate");
+        let err = result
+            .err()
+            .ok_or_else(|| color_eyre::eyre::eyre!("hook failure should propagate"))?;
+        // Assert on the hook's message so the test proves the installed hook was
+        // exercised, not merely that some unrelated failure occurred.
+        color_eyre::eyre::ensure!(
+            err.to_string().contains("hook stop failure"),
+            "expected the installed hook's error to propagate, got: {err}"
+        );
         Ok(())
     }
 
