@@ -19,9 +19,9 @@ use crate::{CleanupMode, test_support::capture_warn_logs};
 /// Registration mutates the process-wide `SHUTDOWN_STATE`; without this guard an
 /// early return (via `?` or a failed `ensure!`) would leave the state
 /// `Registered` and leak into later tests and the real `atexit` callback.
-struct ResetRegistrationGuard;
+struct ShutdownRegistrationResetGuard;
 
-impl Drop for ResetRegistrationGuard {
+impl Drop for ShutdownRegistrationResetGuard {
     fn drop(&mut self) { reset_shutdown_registration_for_tests(); }
 }
 
@@ -75,7 +75,7 @@ fn register_shutdown_hook_is_idempotent() -> color_eyre::Result<()> {
     // Guarantee the singleton is cleared even if an assertion below returns
     // early, so the leaked `Registered` state cannot reach later tests or the
     // real `atexit` callback.
-    let _reset_guard = ResetRegistrationGuard;
+    let _reset_guard = ShutdownRegistrationResetGuard;
     let first_dir = tempfile::tempdir()?;
     let second_dir = tempfile::tempdir()?;
     let first = Settings {
