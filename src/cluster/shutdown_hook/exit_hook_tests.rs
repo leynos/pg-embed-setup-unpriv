@@ -12,7 +12,18 @@ use postgresql_embedded::Settings;
 use serial_test::serial;
 
 use super::*;
-use crate::CleanupMode;
+use crate::{CleanupMode, test_support::capture_warn_logs};
+
+/// Resets the shutdown-hook singleton on scope exit.
+///
+/// Registration mutates the process-wide `SHUTDOWN_STATE`; without this guard an
+/// early return (via `?` or a failed `ensure!`) would leave the state
+/// `Registered` and leak into later tests and the real `atexit` callback.
+struct ResetRegistrationGuard;
+
+impl Drop for ResetRegistrationGuard {
+    fn drop(&mut self) { reset_shutdown_registration_for_tests(); }
+}
 
 #[test]
 fn absent_process_reports_not_running() {
@@ -48,13 +59,23 @@ fn stop_postmaster_returns_for_absent_process() {
         cleanup_mode: CleanupMode::None,
     };
     // The process is absent, so shutdown returns without forceful escalation.
-    stop_postmaster(0, &work);
+    let (logs, ()) = capture_warn_logs(|| stop_postmaster(0, &work));
+    assert!(
+        !logs
+            .iter()
+            .any(|line| line.contains("escalating to forceful termination")),
+        "an absent process must not trigger forceful escalation, got {logs:?}"
+    );
 }
 
 #[test]
 #[serial(shutdown_hook_state)]
 fn register_shutdown_hook_is_idempotent() -> color_eyre::Result<()> {
     reset_shutdown_registration_for_tests();
+    // Guarantee the singleton is cleared even if an assertion below returns
+    // early, so the leaked `Registered` state cannot reach later tests or the
+    // real `atexit` callback.
+    let _reset_guard = ResetRegistrationGuard;
     let first_dir = tempfile::tempdir()?;
     let second_dir = tempfile::tempdir()?;
     let first = Settings {
@@ -85,8 +106,7 @@ fn register_shutdown_hook_is_idempotent() -> color_eyre::Result<()> {
         "the first cleanup mode must be preserved"
     );
 
-    // Leave the singleton empty so later cases (and the installed atexit
-    // callback) observe no registration.
-    reset_shutdown_registration_for_tests();
+    // `_reset_guard` clears the singleton on drop so later cases (and the
+    // installed atexit callback) observe no registration.
     Ok(())
 }

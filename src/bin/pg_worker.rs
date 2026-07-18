@@ -24,11 +24,16 @@ use {
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(unix)]
+#[path = "pg_worker/cleanup.rs"]
+mod cleanup;
+#[cfg(unix)]
 #[path = "../cleanup_helpers.rs"]
 mod cleanup_helpers;
 #[cfg(unix)]
 #[path = "pg_worker/removal.rs"]
 mod removal;
+#[cfg(unix)]
+use cleanup::execute_cleanup;
 /// Marker file that indicates a valid `PostgreSQL` data directory.
 ///
 /// This path is created by `initdb` during successful initialization and is used
@@ -320,37 +325,6 @@ async fn execute_stop(pg: &mut PostgreSQL) -> Result<(), WorkerError> {
         Ok(()) => Ok(()),
         Err(e) if stop_missing_pid_is_ok(&e) => Ok(()),
         Err(e) => Err(WorkerError::PostgresOperation(format!("stop failed: {e}"))),
-    }
-}
-
-#[cfg(unix)]
-fn collect_removal_error(failures: &mut Vec<String>, path: &Utf8Path, label: &str) {
-    if let Err(err) = removal::remove_dir_all_if_exists(path, label) {
-        failures.push(err);
-    }
-}
-
-#[cfg(unix)]
-fn execute_cleanup(
-    data_dir: &Utf8Path,
-    install_dir: Option<&Utf8Path>,
-    install_root: Option<&Utf8Path>,
-) -> Result<(), WorkerError> {
-    let mut failures = Vec::new();
-    collect_removal_error(&mut failures, data_dir, "data");
-    if let Some(path) = install_dir {
-        collect_removal_error(&mut failures, path, "installation");
-    }
-    if let Some(path) = install_root {
-        let is_already_removed = install_dir.is_some_and(|install_path| install_path == path);
-        if !is_already_removed {
-            collect_removal_error(&mut failures, path, "installation-root");
-        }
-    }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(WorkerError::CleanupFailed(failures.join("; ")))
     }
 }
 

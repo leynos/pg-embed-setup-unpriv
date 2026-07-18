@@ -183,5 +183,13 @@ mod tests {
     fn prepare_process_exit_failsafe_returns_state() {
         let _failsafe = prepare_process_exit_failsafe(Some(1234));
         let _none_failsafe = prepare_process_exit_failsafe(None);
+        // The Unix failsafe is an intentional no-op: assert it stays zero-sized
+        // so a future change that smuggles in observable state (and would need
+        // real teardown) fails here rather than silently regressing.
+        assert_eq!(
+            core::mem::size_of::<ProcessExitFailsafe>(),
+            0,
+            "the Unix ProcessExitFailsafe must remain a zero-sized no-op marker"
+        );
     }
 }

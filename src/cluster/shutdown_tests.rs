@@ -117,10 +117,21 @@ mod worker_managed {
     }
 
     #[test]
-    fn drop_sync_cluster_in_process_without_handle_is_noop() {
-        let runtime = test_runtime().expect("runtime");
+    #[serial(worker_hook)]
+    fn drop_sync_cluster_in_process_without_handle_is_noop() -> color_eyre::Result<()> {
+        let runtime = test_runtime()?;
         let bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
         let env_vars = bootstrap.environment.to_env();
+        // Count privileged-operation invocations to prove the no-op path never
+        // reaches the worker stop/cleanup hook.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let hook_calls = Arc::clone(&calls);
+        let _guard = install_run_root_operation_hook(move |_, _, _| {
+            hook_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        })
+        .map_err(|err| color_eyre::eyre::eyre!(err))?;
+
         let mut postgres = None;
         // No postgres handle and not worker-managed: shutdown is a no-op.
         drop_sync_cluster(
@@ -133,5 +144,12 @@ mod worker_managed {
                 context: "noop-test",
             },
         );
+
+        let count = calls.load(Ordering::Relaxed);
+        color_eyre::eyre::ensure!(
+            count == 0,
+            "the no-op drop path must not invoke the root-operation hook, got {count}"
+        );
+        Ok(())
     }
 }
