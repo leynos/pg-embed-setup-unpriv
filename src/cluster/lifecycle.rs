@@ -371,3 +371,22 @@ impl TestClusterConnection {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the `DatabaseName` newtype.
+
+    use super::DatabaseName;
+
+    #[test]
+    fn database_name_constructors_agree() {
+        let from_new = DatabaseName::new("analytics");
+        let from_str: DatabaseName = "analytics".into();
+        let from_string: DatabaseName = String::from("analytics").into();
+
+        assert_eq!(from_new.as_str(), "analytics");
+        assert_eq!(from_new, from_str);
+        assert_eq!(from_str, from_string);
+        assert_eq!(AsRef::<str>::as_ref(&from_string), "analytics");
+    }
+}

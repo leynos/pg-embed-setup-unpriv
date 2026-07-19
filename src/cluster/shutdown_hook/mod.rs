@@ -161,7 +161,7 @@ fn rollback_shutdown_registration() {
     SHUTDOWN_STATE_CHANGED.notify_all();
 }
 
-#[cfg(all(test, feature = "cluster-unit-tests"))]
+#[cfg(all(test, any(unix, feature = "cluster-unit-tests")))]
 fn reset_shutdown_registration_for_tests() {
     let mut guard = SHUTDOWN_STATE
         .lock()
@@ -318,3 +318,7 @@ fn postmaster_process_is_running_for_shutdown(process: platform::PostmasterProce
 mod loom_tests;
 #[cfg(all(test, feature = "cluster-unit-tests"))]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "exit_hook_tests.rs"]
+mod exit_hook_tests;

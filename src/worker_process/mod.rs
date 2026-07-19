@@ -390,3 +390,7 @@ impl<'a> WorkerProcess<'a> {
         Ok(())
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "tests.rs"]
+mod tests;

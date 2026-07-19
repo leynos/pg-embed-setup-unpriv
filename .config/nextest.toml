@@ -12,6 +12,13 @@ global-timeout = "10m"
 filter = "binary(=settings)"
 slow-timeout = { period = "30s", terminate-after = 1, grace-period = "5s" }
 
+# The `ui` binary is a trybuild test: it compiles the whole crate afresh in a
+# scratch directory, which can exceed the default 180s on cold, slow runners
+# (notably macOS). Allow it more headroom while staying under `global-timeout`.
+[[profile.default.overrides]]
+filter = "binary(=ui)"
+slow-timeout = { period = "360s", terminate-after = 1, grace-period = "5s" }
+
 [test-groups]
 serial = { max-threads = 1 }
 

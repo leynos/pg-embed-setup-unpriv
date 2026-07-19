@@ -57,3 +57,97 @@ pub(super) fn truncate_output(text: Cow<'_, str>) -> String {
 pub(crate) fn render_failure_for_tests(context: &str, output: &Output) -> BootstrapError {
     render_failure(context, output)
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for worker output truncation and error rendering.
+
+    use color_eyre::eyre::eyre;
+
+    // `Output` is re-exported from the parent module via the glob import below;
+    // it is only referenced by the Unix-only helper, so it is not imported
+    // separately to avoid an unused import on non-Unix targets.
+    use super::*;
+
+    #[cfg(unix)]
+    fn output_with(stdout: &[u8], stderr: &[u8]) -> Output {
+        use std::os::unix::process::ExitStatusExt as _;
+        Output {
+            status: std::process::ExitStatus::from_raw(1),
+            stdout: stdout.to_vec(),
+            stderr: stderr.to_vec(),
+        }
+    }
+
+    #[test]
+    fn truncate_output_returns_short_text_unchanged() {
+        let text = "short output";
+        assert_eq!(truncate_output(Cow::Borrowed(text)), text);
+    }
+
+    #[test]
+    fn truncate_output_keeps_text_at_exact_limit() {
+        let text = "x".repeat(OUTPUT_CHAR_LIMIT);
+        let rendered = truncate_output(Cow::Owned(text.clone()));
+        assert_eq!(rendered, text);
+        assert!(!rendered.ends_with(TRUNCATION_SUFFIX));
+    }
+
+    #[test]
+    fn truncate_output_appends_suffix_when_over_limit() {
+        let text = "y".repeat(OUTPUT_CHAR_LIMIT + 10);
+        // Capture the expected prefix before `text` is moved into the call.
+        let expected_prefix: String = text.chars().take(OUTPUT_CHAR_LIMIT).collect();
+        let rendered = truncate_output(Cow::Owned(text));
+        assert!(rendered.ends_with(TRUNCATION_SUFFIX));
+        // The retained content must be the first OUTPUT_CHAR_LIMIT characters of
+        // the original text, not merely padding of the right length.
+        let actual_prefix: String = rendered.chars().take(OUTPUT_CHAR_LIMIT).collect();
+        assert_eq!(actual_prefix, expected_prefix);
+        assert_eq!(
+            rendered.chars().count(),
+            OUTPUT_CHAR_LIMIT + TRUNCATION_SUFFIX.chars().count(),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn render_failure_includes_context_and_streams() {
+        let output = output_with(b"the-stdout", b"the-stderr");
+        let err = render_failure("setup failed", &output);
+        let message = err.to_string();
+        assert!(
+            message.contains("setup failed"),
+            "context missing: {message}"
+        );
+        assert!(message.contains("the-stdout"), "stdout missing: {message}");
+        assert!(message.contains("the-stderr"), "stderr missing: {message}");
+    }
+
+    #[test]
+    fn combine_errors_reports_primary_and_cleanup() {
+        let primary = BootstrapError::from(eyre!("primary boom"));
+        let cleanup = BootstrapError::from(eyre!("cleanup boom"));
+        let combined = combine_errors(primary, cleanup);
+        let message = combined.to_string();
+        assert!(
+            message.contains("primary boom"),
+            "primary missing: {message}"
+        );
+        assert!(
+            message.contains("cleanup boom"),
+            "cleanup missing: {message}"
+        );
+        assert!(
+            message.contains("Secondary failure whilst removing worker payload"),
+            "secondary annotation missing: {message}"
+        );
+    }
+
+    #[test]
+    fn append_error_context_appends_detail_and_error() {
+        let mut message = String::from("base");
+        append_error_context(&mut message, "extra detail", &"the-error", "; fallback");
+        assert_eq!(message, "base; extra detail: the-error");
+    }
+}

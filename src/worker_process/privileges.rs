@@ -261,33 +261,89 @@ cfg_privilege_drop! {
         target_os = "openbsd",
         target_os = "dragonfly",
     ),
-    feature = "cluster-unit-tests"
 ))]
 mod tests {
     //! Tests for worker process privilege handling.
     use std::process::Command;
 
+    use color_eyre::eyre::ensure;
+    use serial_test::serial;
     use tempfile::NamedTempFile;
 
     use super::*;
     use crate::test_support::capture_info_logs;
 
+    // All tests that flip the process-global `SKIP_PRIVILEGE_DROP` counter share
+    // the `privilege_drop_toggle` serial key so the exact-count assertions in
+    // `skip_toggle_tracks_nested_guards` are never raced by a concurrent guard.
+
     #[test]
-    fn skip_guard_logs_observability() {
-        let payload = NamedTempFile::new().expect("payload file");
+    #[serial(privilege_drop_toggle)]
+    fn skip_guard_logs_observability() -> color_eyre::Result<()> {
+        let payload = NamedTempFile::new()?;
         let mut command = Command::new("true");
         let guard = disable_privilege_drop_for_tests();
 
         let (logs, result) = capture_info_logs(|| apply(payload.path(), &mut command));
         drop(guard);
 
-        assert!(result.is_ok(), "privilege drop skip should succeed");
-        assert!(
+        ensure!(result.is_ok(), "privilege drop skip should succeed");
+        ensure!(
             logs.iter().any(|line| {
                 line.contains("skipping privilege drop for tests")
                     && line.contains(&format!("{}", payload.path().display()))
             }),
             "expected skip log entry, got {logs:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[serial(privilege_drop_toggle)]
+    fn skip_toggle_tracks_nested_guards() {
+        assert!(!skip_privilege_drop_for_tests(), "toggle starts disabled");
+        let outer = disable_privilege_drop_for_tests();
+        assert!(skip_privilege_drop_for_tests(), "outer guard enables skip");
+        let inner = disable_privilege_drop_for_tests();
+        assert!(skip_privilege_drop_for_tests(), "inner guard keeps skip");
+        drop(inner);
+        assert!(
+            skip_privilege_drop_for_tests(),
+            "skip remains while outer guard is held"
+        );
+        drop(outer);
+        assert!(
+            !skip_privilege_drop_for_tests(),
+            "skip clears once all guards drop"
+        );
+    }
+
+    #[test]
+    fn resolve_nobody_ids_returns_unprivileged_account() {
+        let (uid, gid) = resolve_nobody_ids().expect("resolve nobody account");
+        assert!(uid > 0, "nobody uid must not be root");
+        assert!(gid > 0, "nobody gid must not be root");
+    }
+
+    #[test]
+    fn configure_pre_exec_demotion_hook_fails_spawn_when_unprivileged() {
+        // The installed pre-exec hook demotes credentials before `exec`. As an
+        // unprivileged process, demoting to uid/gid 0 must fail (EPERM) inside
+        // the hook, which makes `spawn()` return an error. A no-op
+        // `configure_pre_exec` would instead let `true` spawn successfully, so
+        // this test fails if the hook is not installed and executed.
+        //
+        // Skip under root, where demotion to uid 0 succeeds and the hook cannot
+        // fail.
+        if nix::unistd::geteuid().is_root() {
+            return;
+        }
+
+        let mut command = Command::new("true");
+        configure_pre_exec(&mut command, 0, 0);
+        assert!(
+            command.spawn().is_err(),
+            "pre-exec demotion to uid 0 must fail for an unprivileged process"
         );
     }
 }

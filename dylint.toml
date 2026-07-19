@@ -8,6 +8,11 @@
 # the worker binaries, and the integration test crates that exercise the
 # ambient behaviour are documented ambient boundaries (see leynos/netsuke#410
 # for the estate precedent).
+[no_expect_outside_tests]
+# `serial_test`'s `#[serial]` marks functions that Whitaker should treat as
+# tests, so `.expect(...)` inside them stays permitted.
+additional_test_attributes = ["serial"]
+
 [no_std_fs_operations]
 excluded_crates = [
     # Library crate: ambient filesystem/process setup is the crate's purpose.

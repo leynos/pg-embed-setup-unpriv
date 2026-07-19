@@ -264,3 +264,7 @@ where
     ))
     .into())
 }
+
+#[cfg(test)]
+#[path = "privileges_tests.rs"]
+mod tests;

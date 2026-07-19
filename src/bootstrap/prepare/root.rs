@@ -104,3 +104,100 @@ pub(super) fn ensure_parent_for_user(path: &Utf8PathBuf, user: &User) -> Bootstr
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for root bootstrap port allocation.
+
+    use std::{ffi::CString, os::unix::fs::MetadataExt, path::PathBuf};
+
+    use nix::unistd::{getegid, geteuid};
+    use rstest::rstest;
+
+    use super::*;
+
+    /// Builds a synthetic `User` for the current identity without a passwd
+    /// lookup, so ownership tests run in minimal containers that lack an NSS
+    /// entry for the current UID.
+    fn current_user() -> User {
+        User {
+            name: String::from("pg-embed-test"),
+            passwd: CString::default(),
+            uid: geteuid(),
+            gid: getegid(),
+            #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
+            gecos: CString::default(),
+            dir: PathBuf::from("/nonexistent"),
+            shell: PathBuf::from("/nonexistent"),
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            class: CString::default(),
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            change: 0,
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            expire: 0,
+        }
+    }
+
+    #[rstest]
+    #[case("", "127.0.0.1")]
+    #[case("/var/run/pg.sock", "127.0.0.1")]
+    #[case("db.internal", "db.internal")]
+    fn root_bind_host_falls_back_for_socket_or_empty(#[case] host: &str, #[case] expected: &str) {
+        let settings = Settings {
+            host: host.to_owned(),
+            ..Settings::default()
+        };
+        assert_eq!(root_bind_host(&settings), expected);
+    }
+
+    #[test]
+    fn ensure_root_port_allocates_when_zero() {
+        let mut settings = Settings {
+            host: String::new(),
+            port: 0,
+            ..Settings::default()
+        };
+        ensure_root_port(&mut settings).expect("allocate ephemeral port");
+        assert!(settings.port > 0, "an ephemeral port should be assigned");
+    }
+
+    #[test]
+    fn ensure_root_port_keeps_existing_port() {
+        let mut settings = Settings {
+            port: 5599,
+            ..Settings::default()
+        };
+        ensure_root_port(&mut settings).expect("existing port retained");
+        assert_eq!(settings.port, 5599);
+    }
+
+    #[test]
+    fn ensure_parent_for_user_creates_missing_parent() {
+        // Ownership is assigned to the current user, which needs no privilege.
+        // Use a synthetic identity to avoid a passwd lookup that fails in
+        // minimal containers lacking an NSS entry for the current UID.
+        let user = current_user();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let base = camino::Utf8Path::from_path(temp.path()).expect("utf8 tempdir");
+        let child = base.join("parent/child");
+
+        ensure_parent_for_user(&child, &user).expect("prepare parent directory");
+
+        let parent = base.join("parent");
+        assert!(parent.is_dir(), "the parent directory should be created");
+
+        // The directory must be owned by the requested user, not merely created:
+        // a chown to the wrong UID/GID would otherwise pass silently.
+        let metadata = std::fs::metadata(parent.as_std_path()).expect("parent directory metadata");
+        assert_eq!(
+            metadata.uid(),
+            user.uid.as_raw(),
+            "parent directory should be owned by the requested user"
+        );
+        assert_eq!(
+            metadata.gid(),
+            user.gid.as_raw(),
+            "parent directory should be group-owned by the requested user"
+        );
+    }
+}

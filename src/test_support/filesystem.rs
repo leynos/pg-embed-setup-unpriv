@@ -220,3 +220,70 @@ impl Drop for CapabilityTempDir {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for capability-aware filesystem test helpers.
+
+    use super::*;
+
+    #[test]
+    fn capability_temp_dir_creates_and_cleans_up() {
+        let temp = CapabilityTempDir::new("cov-cap").expect("create capability tempdir");
+        let path = temp.path().to_path_buf();
+        assert!(path.exists(), "temp dir should exist while held");
+        assert!(
+            metadata(&path).expect("stat temp dir").is_dir(),
+            "temp dir metadata should report a directory"
+        );
+        drop(temp);
+        assert!(!path.exists(), "temp dir should be removed on drop");
+    }
+
+    #[test]
+    fn ensure_dir_and_set_permissions_wrappers_operate() {
+        let temp = CapabilityTempDir::new("cov-wrap").expect("create capability tempdir");
+        let nested = temp.path().join("nested/child");
+        ensure_dir_exists(&nested).expect("ensure nested dir");
+        assert!(nested.exists(), "nested dir should be created");
+        set_permissions(&nested, 0o750).expect("apply permissions");
+
+        // `set_permissions` applies an absolute mode (not umask-masked), so the
+        // resulting directory must carry exactly the requested bits. The
+        // non-Unix wrapper is a documented no-op, so only assert on Unix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(nested.as_std_path())
+                .expect("stat nested dir")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o750, "set_permissions should apply the exact mode");
+        }
+    }
+
+    #[test]
+    fn resolve_env_path_reads_present_and_absent_variables() {
+        let _guard = crate::env::ScopedEnv::apply(&[
+            (
+                String::from("PG_EMBEDDED_TEST_TMPDIR"),
+                Some(String::from("/tmp/cov-env-path")),
+            ),
+            // Explicitly clear the absent key for the scope so the None branch
+            // holds even if the ambient environment happens to define it.
+            (String::from("PG_EMBEDDED_TEST_DEFINITELY_UNSET"), None),
+        ]);
+        let resolved = resolve_env_path("PG_EMBEDDED_TEST_TMPDIR")
+            .expect("resolve present var")
+            .expect("present var yields a path");
+        assert_eq!(resolved.as_str(), "/tmp/cov-env-path");
+
+        assert!(
+            resolve_env_path("PG_EMBEDDED_TEST_DEFINITELY_UNSET")
+                .expect("resolve absent var")
+                .is_none(),
+            "absent var should resolve to None"
+        );
+    }
+}

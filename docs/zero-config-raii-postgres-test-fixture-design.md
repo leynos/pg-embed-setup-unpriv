@@ -354,8 +354,8 @@ essentially one line in the test setup.
   race-sensitive lifecycle paths: per-template database creation, shared
   singleton initialization, and shutdown-hook registration.
 - Continuous Integration runs the ignored library Loom models explicitly with
-  `cargo test --features "loom-tests" --lib -- --ignored`, while the
-  property tests continue to run in the ordinary unit suite.
+  `cargo test --features "loom-tests" --lib -- --ignored`, while the property
+  tests continue to run in the ordinary unit suite.
 
 ### Implementation update (2026-06-26): Windows and macOS validation
 

@@ -117,15 +117,52 @@ fn recover_skips_empty_dir(temp_data_dir: TempDataDirResult) -> R {
 #[rstest]
 fn recover_removes_partial_initialization(temp_data_dir: TempDataDirResult) -> R {
     let (_, p) = temp_data_dir?;
-    // Create a partial data directory using the shared helper
     create_partial_data_dir(p.as_std_path())?;
-
-    // Verify the directory is detected as invalid (missing marker)
     ensure(!has_valid_data_dir(&p)?, "partial dir should be invalid")?;
-
-    // Recovery should remove the partial directory
     recover_invalid_data_dir(&p)?;
-
-    // After recovery, the directory should be gone
     ensure(!p.exists(), "partial dir should be removed by recovery")
+}
+
+#[rstest]
+#[case("setup", "Setup")]
+#[case("start", "Start")]
+#[case("stop", "Stop")]
+#[case("cleanup", "Cleanup")]
+#[case("cleanup-full", "CleanupFull")]
+fn operation_parses_known_verbs(#[case] verb: &str, #[case] expected: &str) -> R {
+    // `Operation` derives only `Debug`, so compare the variant's debug name to
+    // ensure the verb maps to the correct operation, not merely that it parses.
+    let op =
+        Operation::parse(OsStr::new(verb)).map_err(|e| format!("expected {verb} to parse: {e}"))?;
+    ensure(
+        format!("{op:?}") == expected,
+        "verb mapped to the wrong operation",
+    )
+}
+
+#[test]
+fn operation_parse_rejects_unknown_verb() -> R {
+    let err = Operation::parse(OsStr::new("frobnicate"))
+        .err()
+        .ok_or("expected error")?;
+    ensure(err.to_string().contains("unknown operation"), "wrong err")
+}
+
+#[test]
+fn parse_args_requires_operation_and_config() -> R {
+    let missing_op = parse_args(["pg_worker"].map(OsString::from).into_iter())
+        .err()
+        .ok_or("expected missing operation error")?;
+    ensure(
+        missing_op.to_string().contains("missing operation"),
+        "wrong missing-op msg",
+    )?;
+
+    let missing_cfg = parse_args(["pg_worker", "setup"].map(OsString::from).into_iter())
+        .err()
+        .ok_or("expected missing config error")?;
+    ensure(
+        missing_cfg.to_string().contains("missing config path"),
+        "wrong missing-cfg msg",
+    )
 }

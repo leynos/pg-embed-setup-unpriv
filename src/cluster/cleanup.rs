@@ -210,13 +210,16 @@ fn warn_cleanup_removal_failure(
 #[cfg(test)]
 mod tests {
     //! Tests for cluster cleanup behaviour.
-    use std::fs;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     use postgresql_embedded::Settings;
     use rstest::rstest;
     use tempfile::tempdir;
 
-    use super::cleanup_in_process;
+    use super::{cleanup_in_process, is_dangerous_cleanup_path, should_remove_install_root};
     use crate::CleanupMode;
 
     #[rstest]
@@ -254,6 +257,61 @@ mod tests {
             settings.installation_dir.exists(),
             expect_install_exists,
             "installation directory presence should match cleanup mode",
+        );
+    }
+
+    // The installation root is only ever removed when it lives under the
+    // installation directory, so removing the installation directory always
+    // cascades to it. That makes filesystem state an unreliable oracle for the
+    // dedicated installation-root branch, so assert the decision directly; this
+    // fails if `should_remove_install_root` stops guarding the branch.
+    #[rstest]
+    #[case::nested_under_install("/opt/pg/install", "/opt/pg/install/secrets", true)]
+    #[case::equal_to_install("/opt/pg/install", "/opt/pg/install", false)]
+    #[case::outside_install("/opt/pg/install", "/elsewhere/secrets", false)]
+    #[case::parent_dir_traversal("/opt/pg/install", "/opt/pg/install/../evil", false)]
+    fn should_remove_install_root_classifies_parent(
+        #[case] install: &str,
+        #[case] parent: &str,
+        #[case] expected: bool,
+    ) {
+        let settings = Settings {
+            installation_dir: PathBuf::from(install),
+            ..Settings::default()
+        };
+        assert_eq!(
+            should_remove_install_root(Path::new(parent), &settings),
+            expected,
+            "unexpected installation-root removal decision",
+        );
+    }
+
+    // Validate the dangerous-path guard directly rather than driving
+    // `cleanup_in_process` against the real filesystem root. The root is
+    // resolved at runtime because a literal "/" is not an absolute path on
+    // Windows; the test fails if the guard stops flagging the root or an empty
+    // path.
+    #[test]
+    fn is_dangerous_cleanup_path_flags_root_and_empty() {
+        assert!(
+            is_dangerous_cleanup_path(Path::new("")),
+            "an empty path must be flagged as dangerous"
+        );
+
+        let root = std::env::current_dir()
+            .expect("resolve current dir")
+            .ancestors()
+            .last()
+            .expect("an absolute directory has a root ancestor")
+            .to_path_buf();
+        assert!(
+            is_dangerous_cleanup_path(&root),
+            "filesystem root {root:?} must be flagged as dangerous"
+        );
+
+        assert!(
+            !is_dangerous_cleanup_path(Path::new("data/pg-embed")),
+            "an ordinary relative path must not be flagged"
         );
     }
 }

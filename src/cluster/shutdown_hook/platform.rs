@@ -122,3 +122,74 @@ fn send_signal(pid: PostmasterPid, signal: libc::c_int) {
         libc::kill(pid, signal);
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    //! Unit tests for Unix postmaster process controls.
+
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case("123", Some(123))]
+    #[case("  42  ", Some(42))]
+    #[case("0", None)]
+    #[case("-5", None)]
+    #[case("not-a-pid", None)]
+    #[case("", None)]
+    fn parse_pid_accepts_only_positive_integers(
+        #[case] raw: &str,
+        #[case] expected: Option<PostmasterPid>,
+    ) {
+        assert_eq!(parse_pid(raw), expected);
+    }
+
+    #[test]
+    fn parse_postmaster_process_reads_first_line() {
+        let contents = "789\n/var/lib/pgdata\n1700000000\n";
+        assert_eq!(parse_postmaster_process(contents), Some(789));
+        assert_eq!(parse_postmaster_process(""), None);
+    }
+
+    #[test]
+    fn process_is_running_detects_current_process() {
+        let pid = PostmasterPid::try_from(std::process::id()).expect("pid fits pid_t");
+        assert!(
+            process_is_running_for_platform(pid).expect("probe current process"),
+            "the current process must be reported as running"
+        );
+        assert!(
+            !process_is_running_for_platform(0).expect("probe non-positive pid"),
+            "a non-positive pid must never be running"
+        );
+    }
+
+    #[test]
+    fn postmaster_process_is_running_matches_current_process() {
+        let pid = PostmasterPid::try_from(std::process::id()).expect("pid fits pid_t");
+        assert!(postmaster_process_is_running(pid).expect("probe current process"));
+    }
+
+    #[test]
+    fn shutdown_signals_are_noops_for_non_positive_pids() {
+        // These must not signal any real process; a non-positive pid is ignored
+        // by `send_signal`, so the calls are safe.
+        request_shutdown(0);
+        force_shutdown(0);
+    }
+
+    #[test]
+    fn prepare_process_exit_failsafe_returns_state() {
+        let _failsafe = prepare_process_exit_failsafe(Some(1234));
+        let _none_failsafe = prepare_process_exit_failsafe(None);
+        // The Unix failsafe is an intentional no-op: assert it stays zero-sized
+        // so a future change that smuggles in observable state (and would need
+        // real teardown) fails here rather than silently regressing.
+        assert_eq!(
+            core::mem::size_of::<ProcessExitFailsafe>(),
+            0,
+            "the Unix ProcessExitFailsafe must remain a zero-sized no-op marker"
+        );
+    }
+}

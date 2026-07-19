@@ -365,31 +365,6 @@ pub(super) fn warn_stop_timeout(timeout_secs: u64, context: &str) {
     );
 }
 
-#[cfg(all(test, feature = "cluster-unit-tests"))]
-mod tests {
-    //! Tests for cluster shutdown behaviour.
-    use rstest::rstest;
-
-    use super::*;
-    use crate::test_support::capture_warn_logs;
-
-    #[rstest]
-    #[case::timeout(
-        || warn_stop_timeout(5, "ctx"),
-        "stop() timed out after 5s (ctx)"
-    )]
-    #[case::failure(
-        || warn_stop_failure("ctx", &"boom"),
-        "failed to stop embedded postgres instance"
-    )]
-    fn warning_functions_emit_expected_logs(
-        #[case] action: fn(),
-        #[case] expected_substring: &str,
-    ) {
-        let (logs, ()) = capture_warn_logs(action);
-        assert!(
-            logs.iter().any(|line| line.contains(expected_substring)),
-            "expected warning containing '{expected_substring}', got {logs:?}"
-        );
-    }
-}
+#[cfg(test)]
+#[path = "shutdown_tests.rs"]
+mod tests;
