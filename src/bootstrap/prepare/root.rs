@@ -109,7 +109,7 @@ pub(super) fn ensure_parent_for_user(path: &Utf8PathBuf, user: &User) -> Bootstr
 mod tests {
     //! Unit tests for root bootstrap port allocation.
 
-    use std::{ffi::CString, path::PathBuf};
+    use std::{ffi::CString, os::unix::fs::MetadataExt, path::PathBuf};
 
     use nix::unistd::{getegid, geteuid};
     use rstest::rstest;
@@ -183,9 +183,21 @@ mod tests {
 
         ensure_parent_for_user(&child, &user).expect("prepare parent directory");
 
-        assert!(
-            base.join("parent").is_dir(),
-            "the parent directory should be created"
+        let parent = base.join("parent");
+        assert!(parent.is_dir(), "the parent directory should be created");
+
+        // The directory must be owned by the requested user, not merely created:
+        // a chown to the wrong UID/GID would otherwise pass silently.
+        let metadata = std::fs::metadata(parent.as_std_path()).expect("parent directory metadata");
+        assert_eq!(
+            metadata.uid(),
+            user.uid.as_raw(),
+            "parent directory should be owned by the requested user"
+        );
+        assert_eq!(
+            metadata.gid(),
+            user.gid.as_raw(),
+            "parent directory should be group-owned by the requested user"
         );
     }
 }
