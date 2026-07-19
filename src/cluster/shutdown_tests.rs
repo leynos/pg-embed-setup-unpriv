@@ -46,17 +46,22 @@ fn stop_context_reports_version_and_data_dir() {
 mod worker_managed {
     //! Worker-managed drop tests that intercept privileged operations with a
     //! test hook, so no real `pg_worker` binary or root privileges are needed.
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+    use std::{
+        fs,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
 
     use serial_test::serial;
+    use tempfile::tempdir;
 
     use super::super::*;
     use crate::{
         CleanupMode,
         ExecutionPrivileges,
+        cluster::WorkerOperation,
         test_support::{dummy_settings, install_run_root_operation_hook, test_runtime},
     };
 
@@ -66,9 +71,17 @@ mod worker_managed {
         let runtime = test_runtime()?;
         let bootstrap = dummy_settings(ExecutionPrivileges::Root);
         let env_vars = bootstrap.environment.to_env();
-        let _guard = install_run_root_operation_hook(|_, _, _| {
-            Err(crate::error::BootstrapError::from(color_eyre::eyre::eyre!(
+        let _guard = install_run_root_operation_hook(|_, _, operation| {
+            // Only the expected `Stop` operation yields the sentinel message;
+            // any other operation produces a distinct message so the assertion
+            // below fails if the drop/stop path dispatches the wrong operation.
+            let message = if matches!(operation, WorkerOperation::Stop) {
                 "hook stop failure"
+            } else {
+                "unexpected worker operation"
+            };
+            Err(crate::error::BootstrapError::from(color_eyre::eyre::eyre!(
+                "{message}"
             )))
         })
         .map_err(|err| color_eyre::eyre::eyre!(err))?;
@@ -77,11 +90,12 @@ mod worker_managed {
         let err = result
             .err()
             .ok_or_else(|| color_eyre::eyre::eyre!("hook failure should propagate"))?;
-        // Assert on the hook's message so the test proves the installed hook was
-        // exercised, not merely that some unrelated failure occurred.
+        // Assert on the hook's Stop-only sentinel so the test proves the
+        // installed hook was exercised with `WorkerOperation::Stop`, not merely
+        // that some unrelated failure occurred.
         color_eyre::eyre::ensure!(
             err.to_string().contains("hook stop failure"),
-            "expected the installed hook's error to propagate, got: {err}"
+            "expected the installed hook's Stop error to propagate, got: {err}"
         );
         Ok(())
     }
@@ -97,9 +111,17 @@ mod worker_managed {
         bootstrap.cleanup_mode = CleanupMode::None;
         let env_vars = bootstrap.environment.to_env();
         let calls = Arc::new(AtomicUsize::new(0));
+        let stop_calls = Arc::new(AtomicUsize::new(0));
         let hook_calls = Arc::clone(&calls);
-        let _guard = install_run_root_operation_hook(move |_, _, _| {
+        let hook_stop_calls = Arc::clone(&stop_calls);
+        let _guard = install_run_root_operation_hook(move |_, _, operation| {
             hook_calls.fetch_add(1, Ordering::Relaxed);
+            // Track stop dispatches separately so the assertions below prove the
+            // single invocation was `WorkerOperation::Stop`, not some other root
+            // operation dispatched by mistake.
+            if matches!(operation, WorkerOperation::Stop) {
+                hook_stop_calls.fetch_add(1, Ordering::Relaxed);
+            }
             Ok(())
         })
         .map_err(|err| color_eyre::eyre::eyre!(err))?;
@@ -121,6 +143,12 @@ mod worker_managed {
             count == 1,
             "worker-managed drop must invoke the stop hook exactly once, got {count}"
         );
+        let stop_count = stop_calls.load(Ordering::Relaxed);
+        color_eyre::eyre::ensure!(
+            stop_count == 1,
+            "the single invocation must dispatch WorkerOperation::Stop, got {stop_count} stop \
+             call(s) of {count}"
+        );
         Ok(())
     }
 
@@ -128,7 +156,15 @@ mod worker_managed {
     #[serial(worker_hook)]
     fn drop_sync_cluster_in_process_without_handle_is_noop() -> color_eyre::Result<()> {
         let runtime = test_runtime()?;
-        let bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
+        let mut bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
+        // Point the data directory at a real path and arm full cleanup so that
+        // an accidental in-process cleanup on the no-op path would delete it.
+        let sandbox = tempdir()?;
+        let data_dir = sandbox.path().join("data");
+        fs::create_dir_all(&data_dir)?;
+        fs::write(data_dir.join("marker"), b"data")?;
+        bootstrap.settings.data_dir = data_dir.clone();
+        bootstrap.cleanup_mode = CleanupMode::Full;
         let env_vars = bootstrap.environment.to_env();
         // Count privileged-operation invocations to prove the no-op path never
         // reaches the worker stop/cleanup hook.
@@ -157,6 +193,12 @@ mod worker_managed {
         color_eyre::eyre::ensure!(
             count == 0,
             "the no-op drop path must not invoke the root-operation hook, got {count}"
+        );
+        // The in-process cleanup boundary must not have run: the data directory
+        // (and its marker) must survive the no-op drop.
+        color_eyre::eyre::ensure!(
+            data_dir.join("marker").exists(),
+            "the no-op drop path must not perform in-process cleanup"
         );
         Ok(())
     }
