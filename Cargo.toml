@@ -7,7 +7,7 @@ description = "Initializes postgresql_embedded clusters with platform-appropriat
 license = "ISC"
 documentation = "https://docs.rs/pg-embed-setup-unpriv/latest/pg_embedded_setup_unpriv"
 homepage = "https://df12.studio/docs.html"
-repository = "https://github.com/leynos/pg-embedded-setup-unpriv"
+repository = "https://github.com/leynos/pg-embed-setup-unpriv"
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }-v{ version }{ archive-suffix }"
