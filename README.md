@@ -1,5 +1,8 @@
 # pg_embedded_setup_unpriv
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](
+https://deepwiki.com/leynos/pg-embed-setup-unpriv)
+
 *Zero-configuration PostgreSQL test fixtures for Rust—whether you're root or
 not.*
 
