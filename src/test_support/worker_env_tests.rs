@@ -278,8 +278,17 @@ fn find_staging_directory_returns_no_target_without_profile() {
 
 #[test]
 fn find_staging_directory_handles_custom_profile_under_deps() {
-    let (_staged, target) =
+    let (staged, target) =
         find_staging_directory(std::path::Path::new("/build/custom/deps/pg_worker-a1b2"));
+    // A non-standard profile name is intentionally coerced to "unknown" by
+    // `profile_name_to_static`, so the staged directory is `pg-worker-unknown-*`.
+    // Asserting the staged name pins that mapping and fails if the name is
+    // dropped or malformed while the profile directory is still selected.
+    let staged_name = staged.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    assert!(
+        staged_name.starts_with("pg-worker-unknown-"),
+        "staged dir should be named pg-worker-unknown-*, got: {staged_name}"
+    );
     assert_eq!(
         target,
         Some(PathBuf::from("/build/custom")),

@@ -116,7 +116,7 @@ fn apply_worker_environment_sets_and_removes_variables() -> R {
     let set_key = "PG_WORKER_TEST_SET_VAR";
     let unset_key = "PG_WORKER_TEST_UNSET_VAR";
     // The shared guard seeds `unset_key`, restores both variables on drop, and
-    // serialises env access, avoiding unguarded process-env mutation.
+    // serializes env access, avoiding unguarded process-env mutation.
     let _env_guard = scoped_env(vec![
         (OsString::from(set_key), None),
         (
@@ -234,7 +234,7 @@ fn run_worker_cleanup_removes_data_dir_and_applies_environment() -> R {
     let data = root.join("data");
     fs::create_dir_all(data.join("base"))?;
     let env_key = "PG_WORKER_CLEANUP_ENV";
-    // Restore the worker-applied variable on drop and serialise env access.
+    // Restore the worker-applied variable on drop and serialize env access.
     let _env_guard = scoped_env(vec![(OsString::from(env_key), None)]);
     let settings = settings_with(&root.join("install"), &root.join("install/.pgpass"), &data);
     let cfg = write_config(

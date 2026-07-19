@@ -96,8 +96,14 @@ mod tests {
     #[test]
     fn truncate_output_appends_suffix_when_over_limit() {
         let text = "y".repeat(OUTPUT_CHAR_LIMIT + 10);
+        // Capture the expected prefix before `text` is moved into the call.
+        let expected_prefix: String = text.chars().take(OUTPUT_CHAR_LIMIT).collect();
         let rendered = truncate_output(Cow::Owned(text));
         assert!(rendered.ends_with(TRUNCATION_SUFFIX));
+        // The retained content must be the first OUTPUT_CHAR_LIMIT characters of
+        // the original text, not merely padding of the right length.
+        let actual_prefix: String = rendered.chars().take(OUTPUT_CHAR_LIMIT).collect();
+        assert_eq!(actual_prefix, expected_prefix);
         assert_eq!(
             rendered.chars().count(),
             OUTPUT_CHAR_LIMIT + TRUNCATION_SUFFIX.chars().count(),

@@ -109,9 +109,34 @@ pub(super) fn ensure_parent_for_user(path: &Utf8PathBuf, user: &User) -> Bootstr
 mod tests {
     //! Unit tests for root bootstrap port allocation.
 
+    use std::{ffi::CString, path::PathBuf};
+
+    use nix::unistd::{getegid, geteuid};
     use rstest::rstest;
 
     use super::*;
+
+    /// Builds a synthetic `User` for the current identity without a passwd
+    /// lookup, so ownership tests run in minimal containers that lack an NSS
+    /// entry for the current UID.
+    fn current_user() -> User {
+        User {
+            name: String::from("pg-embed-test"),
+            passwd: CString::default(),
+            uid: geteuid(),
+            gid: getegid(),
+            #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
+            gecos: CString::default(),
+            dir: PathBuf::from("/nonexistent"),
+            shell: PathBuf::from("/nonexistent"),
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            class: CString::default(),
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            change: 0,
+            #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly"))]
+            expire: 0,
+        }
+    }
 
     #[rstest]
     #[case("", "127.0.0.1")]
@@ -149,9 +174,9 @@ mod tests {
     #[test]
     fn ensure_parent_for_user_creates_missing_parent() {
         // Ownership is assigned to the current user, which needs no privilege.
-        let user = User::from_uid(nix::unistd::getuid())
-            .expect("query current user")
-            .expect("current user has a passwd entry");
+        // Use a synthetic identity to avoid a passwd lookup that fails in
+        // minimal containers lacking an NSS entry for the current UID.
+        let user = current_user();
         let temp = tempfile::tempdir().expect("tempdir");
         let base = camino::Utf8Path::from_path(temp.path()).expect("utf8 tempdir");
         let child = base.join("parent/child");
