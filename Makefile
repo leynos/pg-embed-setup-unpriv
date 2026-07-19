@@ -35,7 +35,9 @@ MANIFEST_VERSION := $(strip $(shell awk '\
 	}' Cargo.toml))
 VERSION ?= $(MANIFEST_VERSION)
 ifeq ($(strip $(VERSION)),)
-$(error VERSION is empty; set [package].version in Cargo.toml or pass VERSION explicitly)
+# Immediate assignment keeps the read-time fatal error while remaining a
+# plain variable statement that static Makefile parsers can represent.
+VERSION_GUARD := $(error VERSION is empty; set [package].version in Cargo.toml or pass VERSION explicitly)
 endif
 CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
