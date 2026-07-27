@@ -574,7 +574,7 @@ Unprivileged users do not need to install the worker binary.
 
    Expected: All tests pass with no failures.
 
-2. Run linting and formatting checks:
+1. Run linting and formatting checks:
 
    ```bash
    make check-fmt && make lint
@@ -582,7 +582,7 @@ Unprivileged users do not need to install the worker binary.
 
    Expected: No warnings or formatting issues.
 
-3. Test binary builds:
+2. Test binary builds:
 
    ```bash
    cargo build --release --bin pg_worker --bin pg_embedded_setup_unpriv
@@ -591,7 +591,7 @@ Unprivileged users do not need to install the worker binary.
 
    Expected: Both binaries exist.
 
-4. Test PATH-based autodiscovery (requires root):
+3. Test PATH-based autodiscovery (requires root):
 
    ```bash
    # Ensure pg_worker is in PATH
