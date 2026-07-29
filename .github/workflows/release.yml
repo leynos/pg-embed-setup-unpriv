@@ -91,7 +91,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/setup-rust@36eb051a22b8f128c8b0a33d2951c961b156c859
       - name: Setup uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
         with:
@@ -142,7 +142,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/setup-rust@36eb051a22b8f128c8b0a33d2951c961b156c859
       - name: Download draft release assets
         shell: bash
         env:
@@ -246,7 +246,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/setup-rust@36eb051a22b8f128c8b0a33d2951c961b156c859
       - name: Dry-run published release asset URLs
         run: |
           set -euo pipefail
