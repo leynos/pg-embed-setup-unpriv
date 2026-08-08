@@ -121,7 +121,7 @@ name = "settings"
 path = "tests/settings.rs"
 
 [dependencies]
-postgresql_embedded = { version = "0.20.2", features = ["tokio"] }
+postgresql_embedded = { version = "0.21.0", features = ["tokio"] }
 color-eyre = "0.6"
 tokio = { version = "1", features = ["rt", "macros", "time", "fs"] }
 serde = { version = "1", features = ["derive"] }
