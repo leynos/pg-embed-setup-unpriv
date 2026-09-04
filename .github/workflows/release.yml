@@ -119,6 +119,36 @@ jobs:
           uv run --script scripts/release_archive.py
           "$TARGET"
           --release-version "$RELEASE_VERSION"
+      # build-assets checks out the release tag, so the packaging script comes
+      # from the tagged tree while this workflow comes from the default branch.
+      # Tags cut before the script wrote sidecars still need one, so compute
+      # any that are missing here.
+      - name: Ensure checksum sidecars
+        shell: bash
+        working-directory: dist
+        run: |
+          set -euo pipefail
+
+          # Arrays are avoided: expanding an empty array under `set -u`
+          # fails on the Bash 3.2 that macOS runners provide.
+          shopt -s nullglob
+          archives=0
+          for archive in *.tgz; do
+            archives=$((archives + 1))
+            if [ -f "${archive}.sha256" ]; then
+              continue
+            fi
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$archive" > "${archive}.sha256"
+            else
+              shasum --algorithm 256 "$archive" > "${archive}.sha256"
+            fi
+          done
+
+          if [ "$archives" -eq 0 ]; then
+            echo "release_archive.py produced no .tgz archive" >&2
+            exit 1
+          fi
       - name: Upload release archive and checksum sidecar
         shell: bash
         env:

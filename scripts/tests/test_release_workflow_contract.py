@@ -206,6 +206,33 @@ def version_fixture() -> str:
     return "9.9.9"
 
 
+def unresolved_gh_steps(workflow: Path) -> Iterator[str]:
+    """Describe each `gh` step that can resolve neither repository source.
+
+    Parameters
+    ----------
+    workflow : Path
+        Workflow file to inspect.
+
+    Yields
+    ------
+    str
+        A `job <id> step <name>` description of each offending step.
+    """
+    for job_name, job in iter_jobs(workflow):
+        if not job_checks_out(job):
+            yield from _unresolved_gh_steps_in_job(job_name, job)
+
+
+def _unresolved_gh_steps_in_job(
+    job_name: str, job: Mapping[str, typ.Any]
+) -> Iterator[str]:
+    """Describe the `gh` steps of a checkout-free job that lack `GH_REPO`."""
+    for step in job.get("steps", ()):
+        if step_runs_gh(step) and not step_sets_gh_repo(job, step):
+            yield f"job {job_name} step {step.get('name', '<unnamed>')!r}"
+
+
 @pytest.mark.parametrize("workflow", [RELEASE_WORKFLOW, CI_WORKFLOW])
 def test_gh_steps_resolve_the_repository(workflow: Path) -> None:
     """Every `gh` step must have a checkout or an explicit `GH_REPO`.
@@ -214,17 +241,11 @@ def test_gh_steps_resolve_the_repository(workflow: Path) -> None:
     fails with `not a git repository`, which skipped every downstream release
     job before this contract existed.
     """
-    for job_name, job in iter_jobs(workflow):
-        if job_checks_out(job):
-            continue
-        for step in job.get("steps", ()):
-            if not step_runs_gh(step):
-                continue
-            assert step_sets_gh_repo(job, step), (
-                f"{workflow.name} job {job_name} step "
-                f"{step.get('name', '<unnamed>')!r} runs gh without a checkout "
-                "or GH_REPO"
-            )
+    unresolved = list(unresolved_gh_steps(workflow))
+    assert not unresolved, (
+        f"{workflow.name} runs gh without a checkout or GH_REPO in: "
+        + "; ".join(unresolved)
+    )
 
 
 def test_create_release_avoids_verify_tag_without_a_checkout() -> None:
@@ -254,6 +275,25 @@ def test_upload_step_publishes_archives_and_sidecars() -> None:
     run = str(uploads[0]["run"])
     assert "dist/*.tgz" in run
     assert "dist/*.tgz.sha256" in run
+
+
+def test_sidecars_exist_before_the_upload_step() -> None:
+    """A sidecar must be guaranteed before upload, whatever the tag contains.
+
+    `build-assets` checks out the release tag, so the packaging script comes
+    from the tagged tree. Tags cut before the script wrote sidecars would
+    otherwise upload nothing to match the `dist/*.tgz.sha256` glob.
+    """
+    steps = workflow_job(RELEASE_WORKFLOW, "build-assets")["steps"]
+    runs = [str(step.get("run", "")) for step in steps]
+    writes_sidecar = [
+        index for index, run in enumerate(runs) if ".sha256" in run and ">" in run
+    ]
+    uploads = [index for index, run in enumerate(runs) if "gh release upload" in run]
+
+    assert writes_sidecar, "no step guarantees a .sha256 sidecar"
+    assert uploads, "no step uploads release assets"
+    assert min(writes_sidecar) < min(uploads)
 
 
 def test_default_binaries_match_the_manifest_production_binaries() -> None:

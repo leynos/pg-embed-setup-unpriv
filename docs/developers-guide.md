@@ -132,6 +132,12 @@ same reason `create-release` checks tag existence through
 requests `contents: write` even though it only reads, because draft releases
 are invisible to read-scoped tokens.
 
+`build-assets` checks out the release tag, so the packaging script always comes
+from the tagged tree while the workflow itself comes from the default branch.
+The job therefore backfills any missing `.sha256` sidecar before uploading,
+which lets tags cut before sidecar support was added still publish a complete
+asset set.
+
 The release workflow invokes `scripts/release_archive.py` through `uv run`, so
 Python 3.13 and the script dependencies are provisioned explicitly on every
 runner. The script builds the selected production binaries, applies the Windows
