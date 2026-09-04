@@ -31,9 +31,9 @@ MANIFEST = REPO_ROOT / "Cargo.toml"
 SCRIPT_PATH = REPO_ROOT / "scripts" / "release_archive.py"
 sys.path.insert(0, str(SCRIPT_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("release_archive", SCRIPT_PATH)
-assert SPEC is not None
+assert SPEC is not None, f"cannot build an import spec for {SCRIPT_PATH}"
 release_archive = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
+assert SPEC.loader is not None, f"import spec for {SCRIPT_PATH} has no loader"
 sys.modules[SPEC.name] = release_archive
 SPEC.loader.exec_module(release_archive)
 
@@ -254,7 +254,9 @@ def test_create_release_avoids_verify_tag_without_a_checkout() -> None:
     scripts = "\n".join(str(step.get("run", "")) for step in job["steps"])
     if job_checks_out(job):
         pytest.skip("job has a checkout, so --verify-tag can resolve the tag")
-    assert "--verify-tag" not in scripts
+    assert "--verify-tag" not in scripts, (
+        "create-release has no checkout, so --verify-tag cannot resolve the tag"
+    )
     assert "git/ref/tags" in scripts, "tag existence must still be checked"
 
 
@@ -262,7 +264,10 @@ def test_create_release_avoids_verify_tag_without_a_checkout() -> None:
 def test_release_jobs_request_contents_write(job_name: str) -> None:
     """Jobs that create, upload, read draft, or publish assets need write scope."""
     job = workflow_job(RELEASE_WORKFLOW, job_name)
-    assert job.get("permissions", {}).get("contents") == "write"
+    assert job.get("permissions", {}).get("contents") == "write", (
+        f"job {job_name} must request contents: write, found "
+        f"{job.get('permissions', {}).get('contents')!r}"
+    )
 
 
 def test_upload_step_publishes_archives_and_sidecars() -> None:
@@ -273,8 +278,10 @@ def test_upload_step_publishes_archives_and_sidecars() -> None:
     ]
     assert len(uploads) == 1, "expected exactly one release upload step"
     run = str(uploads[0]["run"])
-    assert "dist/*.tgz" in run
-    assert "dist/*.tgz.sha256" in run
+    assert "dist/*.tgz" in run, f"the upload step publishes no archive:\n{run}"
+    assert "dist/*.tgz.sha256" in run, (
+        f"the upload step publishes no checksum sidecar:\n{run}"
+    )
 
 
 def test_sidecars_exist_before_the_upload_step() -> None:
@@ -293,12 +300,17 @@ def test_sidecars_exist_before_the_upload_step() -> None:
 
     assert writes_sidecar, "no step guarantees a .sha256 sidecar"
     assert uploads, "no step uploads release assets"
-    assert min(writes_sidecar) < min(uploads)
+    assert min(writes_sidecar) < min(uploads), (
+        "the sidecar must be guaranteed before the upload step, not after"
+    )
 
 
 def test_default_binaries_match_the_manifest_production_binaries() -> None:
     """The packaged binary set must equal the ungated manifest binaries."""
-    assert set(release_archive.DEFAULT_BINARIES) == set(production_binaries())
+    assert set(release_archive.DEFAULT_BINARIES) == set(production_binaries()), (
+        f"packaged binaries {release_archive.DEFAULT_BINARIES} drifted from the "
+        f"ungated manifest binaries {production_binaries()}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -328,7 +340,10 @@ def test_archive_layout_matches_binstall_metadata(
     archive = build_archive(tmp_path, target, version)
 
     expected_url = render_binstall_template(metadata["pkg-url"], values)
-    assert archive.name == expected_url.rsplit("/", 1)[-1]
+    assert archive.name == expected_url.rsplit("/", 1)[-1], (
+        f"archive {archive.name!r} does not match the rendered pkg-url "
+        f"{expected_url!r}"
+    )
 
     with tarfile.open(archive, "r:gz") as tar:
         members = {member.name for member in tar.getmembers() if member.isfile()}
@@ -336,7 +351,10 @@ def test_archive_layout_matches_binstall_metadata(
         render_binstall_template(metadata["bin-dir"], {**values, "bin": binary})
         for binary in release_archive.DEFAULT_BINARIES
     }
-    assert members == expected_members
+    assert members == expected_members, (
+        f"archive members {sorted(members)} do not match the rendered bin-dir "
+        f"template {sorted(expected_members)}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -353,6 +371,11 @@ def test_archive_sidecar_records_the_archive_digest(
     archive = build_archive(tmp_path, target, version)
     sidecar = release_archive.checksum_sidecar_path(archive)
 
-    assert sidecar.name == f"{archive.name}.sha256"
+    assert sidecar.name == f"{archive.name}.sha256", (
+        f"sidecar {sidecar.name!r} must be named after {archive.name!r}"
+    )
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    assert sidecar.read_bytes() == f"{digest}  {archive.name}\n".encode("ascii")
+    assert sidecar.read_bytes() == f"{digest}  {archive.name}\n".encode("ascii"), (
+        f"sidecar contents {sidecar.read_bytes()!r} are not a sha256sum line "
+        "with a Unix newline"
+    )

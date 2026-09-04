@@ -128,9 +128,9 @@ checkout: they only call the GitHub API. They therefore set
 repository from a git remote and fails with `not a git repository`. For the
 same reason `create-release` checks tag existence through
 `gh api repos/<owner>/<repo>/git/ref/tags/<tag>` rather than
-`gh release create --verify-tag`, which needs a local clone. `audit-draft-assets`
-requests `contents: write` even though it only reads, because draft releases
-are invisible to read-scoped tokens.
+`gh release create --verify-tag`, which needs a local clone.
+`audit-draft-assets` requests `contents: write` even though it only reads,
+because draft releases are invisible to read-scoped tokens.
 
 `build-assets` checks out the release tag, so the packaging script always comes
 from the tagged tree while the workflow itself comes from the default branch.
