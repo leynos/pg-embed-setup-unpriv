@@ -7,7 +7,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     panic,
-    sync::{Arc, Barrier, mpsc},
+    sync::mpsc,
     thread,
 };
 
@@ -105,12 +105,13 @@ impl Drop for ReleaseOnDrop {
 ///
 /// # Panic safety
 ///
-/// `RestoreEnv::drop` acquires `ENV_LOCK`, so callers must ensure the lock is
-/// not held when a `RestoreEnv` is dropped. In `serializes_env_across_threads`
-/// this is enforced by calling `assert_env_lock_released()` before letting the
-/// `RestoreEnv` go out of scope. Alternatively, if spawned threads panic due to
-/// channel closure, the panic unwinds and drops their guards, releasing
-/// `ENV_LOCK` before `RestoreEnv::drop` runs.
+/// `RestoreEnv::drop` acquires `ENV_LOCK`. On the success path
+/// `serializes_env_across_threads` calls `assert_env_lock_released()` first. On
+/// any early return the coordination senders are dropped before the
+/// `RestoreEnv`, because locals drop in reverse declaration order, and every
+/// guard thread waits on a channel rather than a barrier. Each thread therefore
+/// observes a closed channel, returns, and drops its scoped guard, so the lock
+/// is released and this drop blocks only briefly.
 pub(super) struct RestoreEnv {
     pub(super) key: String,
     pub(super) original: Option<OsString>,
@@ -128,10 +129,15 @@ impl Drop for RestoreEnv {
     }
 }
 
-/// Channels and synchronization primitives for the outer guard thread.
+/// Channels used by the outer guard thread to coordinate with the test.
+///
+/// Every wait is on a channel rather than a barrier, so dropping the matching
+/// sender always unblocks the thread. An early return from the test therefore
+/// releases `ENV_LOCK` instead of stranding it, because the senders are dropped
+/// before `RestoreEnv`, which reacquires the lock.
 pub(super) struct ThreadAChannels {
-    /// Barrier used to co-ordinate with other threads.
-    pub(super) barrier: Arc<Barrier>,
+    /// Receiver that gates the thread until the test has observed readiness.
+    pub(super) proceed_rx: mpsc::Receiver<()>,
     /// Sender used to signal readiness after applying the scoped env.
     pub(super) ready_tx: mpsc::Sender<()>,
     /// Receiver used to wait for release before dropping the guard.
@@ -189,7 +195,7 @@ pub(super) fn spawn_inner_guard_thread(
 ///
 /// - `key`: Environment key string to set while the scoped guard is held.
 /// - `channels`: `ThreadAChannels` containing the coordination primitives:
-///   - `barrier`: `Arc<Barrier>` used to co-ordinate with other threads.
+///   - `proceed_rx`: `mpsc::Receiver<()>` awaited after signalling readiness.
 ///   - `ready_tx`: `mpsc::Sender<()>` used to signal readiness after applying.
 ///   - `release_rx`: `mpsc::Receiver<()>` used to wait for release before dropping the guard.
 ///   - `done_tx`: `mpsc::Sender<()>` used to signal completion after the guard is dropped.
@@ -197,8 +203,8 @@ pub(super) fn spawn_inner_guard_thread(
 /// # Behaviour
 ///
 /// Calls `ScopedEnv::apply` to set the env var to "one", sends the ready
-/// signal, waits on the barrier, blocks on `release_rx`, then drops the guard
-/// to restore the environment and signals completion.
+/// signal, waits for the proceed signal, blocks on `release_rx`, then drops the
+/// guard to restore the environment and signals completion.
 ///
 /// # Errors
 ///
@@ -214,22 +220,23 @@ pub(super) fn spawn_inner_guard_thread(
 /// # Examples
 ///
 /// ```ignore
-/// let barrier = Arc::new(Barrier::new(2));
-/// let (ready_tx, _ready_rx) = mpsc::channel();
+/// let (ready_tx, ready_rx) = mpsc::channel();
+/// let (proceed_tx, proceed_rx) = mpsc::channel();
 /// let (_release_tx, release_rx) = mpsc::channel();
 /// let (done_tx, _done_rx) = mpsc::channel();
 ///
 /// let handle = spawn_outer_guard_thread(
 ///     String::from("THREAD_SCOPE_TEST"),
 ///     ThreadAChannels {
-///         barrier: Arc::clone(&barrier),
+///         proceed_rx,
 ///         ready_tx,
 ///         release_rx,
 ///         done_tx,
 ///     },
 /// );
 ///
-/// barrier.wait();
+/// ready_rx.recv()?;
+/// proceed_tx.send(())?;
 /// join_guard_thread(handle)?;
 /// ```
 pub(super) fn spawn_outer_guard_thread(
@@ -237,7 +244,7 @@ pub(super) fn spawn_outer_guard_thread(
     channels: ThreadAChannels,
 ) -> thread::JoinHandle<Result<(), GuardThreadError>> {
     let ThreadAChannels {
-        barrier,
+        proceed_rx,
         ready_tx,
         release_rx,
         done_tx,
@@ -246,7 +253,7 @@ pub(super) fn spawn_outer_guard_thread(
         let guard = ScopedEnv::apply(&[(key, Some(String::from("one")))]);
 
         send_signal(&ready_tx, (), "ready")?;
-        barrier.wait();
+        receive_signal(&proceed_rx, "proceed")?;
         receive_signal(&release_rx, "release")?;
         drop(guard);
         send_signal(&done_tx, (), "completion")

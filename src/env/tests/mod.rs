@@ -4,7 +4,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     panic,
-    sync::{Arc, Barrier, TryLockError, mpsc},
+    sync::{TryLockError, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -136,21 +136,25 @@ fn serializes_env_across_threads() -> Result<(), Box<dyn std::error::Error>> {
     };
     set_env_var_locked(OsStr::new(key), OsStr::new("pre-existing"));
 
+    // These channels are declared after `restore_env`, so they drop before it.
+    // Every guard thread waits on one, so an early return closes the channel,
+    // the thread returns and drops its scoped guard, and `RestoreEnv::drop`
+    // finds `ENV_LOCK` free rather than hanging on it.
     let (ready_tx, ready_rx) = mpsc::channel();
+    let (proceed_tx, proceed_rx) = mpsc::channel();
     let (start_tx, start_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let (attempt_tx, attempt_rx) = mpsc::channel();
     let (acquired_tx, acquired_rx) = mpsc::channel();
     let (done_a_tx, done_a_rx) = mpsc::channel();
     let (done_b_tx, done_b_rx) = mpsc::channel();
-    let barrier = Arc::new(Barrier::new(2));
     // Generous timeout to avoid hanging tests, not to enforce ordering.
     let deadlock_timeout = Duration::from_secs(30);
 
     let thread_a = spawn_outer_guard_thread(
         String::from(key),
         ThreadAChannels {
-            barrier: Arc::clone(&barrier),
+            proceed_rx,
             ready_tx,
             release_rx,
             done_tx: done_a_tx,
@@ -167,7 +171,7 @@ fn serializes_env_across_threads() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     ready_rx.recv_timeout(deadlock_timeout)?;
-    barrier.wait();
+    proceed_tx.send(())?;
 
     let release_guard = ReleaseOnDrop {
         sender: Some(release_tx),
