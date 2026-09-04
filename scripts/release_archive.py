@@ -10,12 +10,13 @@
 
 This script builds the production binaries for a Rust target, stages the
 expected Cargo release outputs, and writes a cargo-binstall-compatible `.tgz`
-archive under the selected distribution directory.
+archive plus its `.sha256` sidecar under the selected distribution directory.
 
 Inputs are the target triple, an optional release version override, an optional
 manifest path, optional Cargo wrapper arguments, and an optional binary list.
 When no binaries are supplied, the default production binary set is packaged.
-The command prints the archive path on success.
+The command prints the archive path on success; the `.sha256` sidecar is
+written beside it under the same distribution directory.
 
 Example
 -------
@@ -46,6 +47,7 @@ from release_archive_staging import (
     ManifestVersionError,
     archive_stem,
     binary_extension,
+    checksum_sidecar_path,  # re-exported for release tooling and contract tests
     copy_release_binaries,
     manifest_version,
     release_binary_path,
@@ -164,7 +166,11 @@ def _selected_release_version(manifest_path: Path, release_version: str | None) 
 
 
 def _run_release_archive(spec: _ReleaseCliSpec) -> None:
-    """Build, stage, and print the release archive path."""
+    """Build, stage, and print the release archive path.
+
+    The `.sha256` sidecar is written beside the archive, so stdout keeps its
+    single-line contract for callers that capture the archive path.
+    """
     repo = spec.manifest_path.resolve().parent
     selected_version = _selected_release_version(spec.manifest_path, spec.release_version)
     binaries = tuple(spec.binary or DEFAULT_BINARIES)
@@ -188,7 +194,7 @@ def main(
     build_jobs: _BuildJobsArg = None,
     binary: _BinaryArg = None,
 ) -> None:
-    """Build and package the cargo-binstall release archive.
+    """Build and package the cargo-binstall release archive and its sidecar.
 
     Parameters
     ----------

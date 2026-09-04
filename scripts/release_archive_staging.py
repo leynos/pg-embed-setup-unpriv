@@ -6,13 +6,15 @@ copies release binaries from Cargo's output tree into the archive layout
 expected by `cargo-binstall`.
 
 Use this module after release binaries have been built. For example,
-`stage_archive(spec)` creates `dist/<package>-<target>-v<version>.tgz` from the
-configured binary list, while `manifest_version(Path("Cargo.toml"))` discovers
-the version used by the CLI entrypoint.
+`stage_archive(spec)` creates `dist/<package>-<target>-v<version>.tgz` plus its
+`.sha256` sidecar from the configured binary list, while
+`manifest_version(Path("Cargo.toml"))` discovers the version used by the CLI
+entrypoint.
 """
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import tarfile
 import tomllib
@@ -24,6 +26,7 @@ from typing import Protocol
 
 PACKAGE_NAME = "pg-embed-setup-unpriv"
 PATH_SEPARATORS = frozenset({"/", "\\"})
+CHECKSUM_SUFFIX = ".sha256"
 
 
 class ReleaseArchiveSpecLike(Protocol):
@@ -274,8 +277,79 @@ def _separator_path_component_violation(value: str, kind: str) -> str | None:
     return None
 
 
+def checksum_sidecar_path(archive_path: Path) -> Path:
+    """Return the checksum sidecar published beside `archive_path`.
+
+    Consumers verify a downloaded asset without a second network round trip, so
+    the sidecar sits next to the archive and keeps the archive's full name.
+
+    Parameters
+    ----------
+    archive_path : Path
+        Release archive whose sidecar path is required.
+
+    Returns
+    -------
+    Path
+        Sidecar path formed by appending `.sha256` to the archive name.
+
+    Examples
+    --------
+    >>> checksum_sidecar_path(Path("dist/pkg-v1.0.0.tgz")).name
+    'pkg-v1.0.0.tgz.sha256'
+    """
+    return archive_path.with_name(f"{archive_path.name}{CHECKSUM_SUFFIX}")
+
+
+def write_archive_checksum(archive_path: Path) -> Path:
+    """Write the `sha256sum`-compatible sidecar for `archive_path`.
+
+    The sidecar records the digest and the bare archive name, so
+    `sha256sum --check` succeeds from the directory holding both files. It is
+    written with a Unix newline on every platform, because the checking tools
+    on the release runners read it verbatim.
+
+    Parameters
+    ----------
+    archive_path : Path
+        Release archive to digest.
+
+    Returns
+    -------
+    Path
+        Path to the written sidecar.
+
+    Raises
+    ------
+    OSError
+        Raised when the archive cannot be read or the sidecar cannot be written.
+
+    Examples
+    --------
+    >>> write_archive_checksum(Path("dist/pkg-v1.0.0.tgz"))  # doctest: +SKIP
+    PosixPath('dist/pkg-v1.0.0.tgz.sha256')
+    """
+    sidecar = checksum_sidecar_path(archive_path)
+    # Bytes, not text: text mode would translate the newline to CRLF on
+    # Windows, and `sha256sum --check` then treats the carriage return as part
+    # of the file name.
+    line = f"{_file_sha256(archive_path)}  {archive_path.name}\n"
+    sidecar.write_bytes(line.encode("ascii"))
+    return sidecar
+
+
+def _file_sha256(path: Path) -> str:
+    """Return the hexadecimal SHA-256 digest of `path`."""
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
 def stage_archive(spec: ReleaseArchiveSpecLike) -> Path:
     """Stage release binaries and return the produced `.tgz` path.
+
+    The archive is always accompanied by its `.sha256` sidecar; publishing one
+    without the other would leave consumers unable to verify the download, so
+    both are written here rather than by separate callers.
 
     Parameters
     ----------
@@ -286,7 +360,8 @@ def stage_archive(spec: ReleaseArchiveSpecLike) -> Path:
     Returns
     -------
     Path
-        Path to the created cargo-binstall `.tgz` archive.
+        Path to the created cargo-binstall `.tgz` archive. The sidecar path is
+        available from `checksum_sidecar_path`.
 
     Raises
     ------
@@ -302,6 +377,7 @@ def stage_archive(spec: ReleaseArchiveSpecLike) -> Path:
     stem = archive_stem(spec.target, spec.version)
     archive_path = spec.dist_dir / f"{stem}.tgz"
     archive_path.unlink(missing_ok=True)
+    checksum_sidecar_path(archive_path).unlink(missing_ok=True)
 
     with TemporaryDirectory(prefix=f"{stem}-") as tmp:
         staging_root = Path(tmp) / stem
@@ -310,6 +386,7 @@ def stage_archive(spec: ReleaseArchiveSpecLike) -> Path:
         with tarfile.open(archive_path, "w:gz", format=tarfile.PAX_FORMAT) as archive:
             archive.add(staging_root, arcname=stem)
 
+    write_archive_checksum(archive_path)
     return archive_path
 
 

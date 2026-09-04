@@ -118,21 +118,48 @@ Tagging a release with `v*` triggers `.github/workflows/release.yml`. The
 workflow creates a draft GitHub release, builds native archives for Linux
 `x86_64`/`aarch64`, macOS Apple Silicon/Intel, and Windows x86-64, then uploads
 `pg-embed-setup-unpriv-{target}-v{version}.tgz` assets containing both
-`pg_embedded_setup_unpriv` and `pg_worker`.
+`pg_embedded_setup_unpriv` and `pg_worker`. Each archive is published alongside
+a `sha256sum`-compatible `.tgz.sha256` sidecar, so consumers can pin and verify
+a download without a second network round trip.
+
+The `create-release` and `publish-release` jobs deliberately run without a
+checkout: they only call the GitHub API. They therefore set
+`GH_REPO: ${{ github.repository }}`, because `gh` otherwise infers the
+repository from a git remote and fails with `not a git repository`. For the
+same reason `create-release` checks tag existence through
+`gh api repos/<owner>/<repo>/git/ref/tags/<tag>` rather than
+`gh release create --verify-tag`, which needs a local clone.
+`audit-draft-assets` requests `contents: write` even though it only reads,
+because draft releases are invisible to read-scoped tokens.
+
+`build-assets` checks out the release tag, so the packaging script always comes
+from the tagged tree while the workflow itself comes from the default branch.
+The job therefore backfills any missing `.sha256` sidecar before uploading,
+which lets tags cut before sidecar support was added still publish a complete
+asset set.
 
 The release workflow invokes `scripts/release_archive.py` through `uv run`, so
 Python 3.13 and the script dependencies are provisioned explicitly on every
 runner. The script builds the selected production binaries, applies the Windows
 `.exe` suffix when staging the archive, rejects path-like `target` and
 `--binary` values before joining filesystem paths, and writes the shared
-`cargo-binstall` `.tgz` layout. `Cargo.toml` exposes matching
-`[package.metadata.binstall]` entries so `cargo binstall pg-embed-setup-unpriv`
-can install those published assets on the supported host triples.
+`cargo-binstall` `.tgz` layout plus its checksum sidecar. `Cargo.toml` exposes
+matching `[package.metadata.binstall]` entries so
+`cargo binstall pg-embed-setup-unpriv` can install those published assets on the
+supported host triples.
 
 Pull-request CI also performs a local `cargo-binstall` install-and-run check on
-Linux, macOS, and Windows using cargo-binstall 1.19.1. The release workflow
-audits published asset URLs with the same pinned cargo-binstall bootstrap
-before the draft release is published.
+Linux, macOS, and Windows using cargo-binstall 1.19.1, verifying the generated
+sidecar on each runner. The release workflow audits published asset URLs with
+the same pinned cargo-binstall bootstrap before the draft release is published,
+and verifies every downloaded sidecar first.
+
+Run `make test-scripts` to exercise the Python release tooling. It covers the
+archive packager and the workflow contract tests in
+`scripts/tests/test_release_workflow_contract.py`, which assert that every
+`gh`-invoking job has a checkout or `GH_REPO`, that release-writing jobs request
+`contents: write`, and that the staged archive name and members render the
+`[package.metadata.binstall]` templates exactly.
 
 ## Lifecycle verification
 
