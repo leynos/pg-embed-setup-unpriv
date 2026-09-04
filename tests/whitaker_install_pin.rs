@@ -64,20 +64,41 @@ fn ci_requests_an_explicit_installer_version() {
     );
 }
 
+/// Report whether a workflow line obtains the installer through Cargo.
+///
+/// Both arms matter: `cargo install` builds the tool from source, and
+/// `cargo binstall` fetches it from a registry without the pinned digest the
+/// shared action verifies.
+fn installs_whitaker_through_cargo(line: &str) -> bool {
+    (line.contains("cargo install") || line.contains("cargo binstall"))
+        && line.contains("whitaker-installer")
+}
+
 #[test]
-fn ci_never_builds_the_whitaker_installer_from_source() {
-    for forbidden in [
-        "cargo install --locked whitaker-installer",
-        "cargo binstall",
+fn the_predicate_rejects_the_step_this_replaced() {
+    for legacy in [
+        r#"cargo binstall --no-confirm --locked "whitaker-installer@${WHITAKER_INSTALLER_VERSION}""#,
+        r#"cargo install --locked whitaker-installer --version "${WHITAKER_INSTALLER_VERSION}""#,
     ] {
         assert!(
-            !CI_WORKFLOW.contains(&format!("{forbidden} whitaker-installer"))
-                && !CI_WORKFLOW.contains(&format!("{forbidden}\" whitaker-installer")),
-            "CI must not obtain whitaker-installer with {forbidden:?}",
+            installs_whitaker_through_cargo(legacy),
+            "the guard must reject {legacy:?}",
         );
     }
+}
+
+#[test]
+fn ci_never_obtains_the_whitaker_installer_through_cargo() {
+    // Comments are skipped in both YAML and shell senses: this file explains
+    // the command it replaced, and naming it must not trip the guard.
+    let offending: Vec<&str> = CI_WORKFLOW
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .filter(|line| installs_whitaker_through_cargo(line))
+        .collect();
+
     assert!(
-        !CI_WORKFLOW.contains("whitaker-installer@"),
-        "CI must not install whitaker-installer from a registry",
+        offending.is_empty(),
+        "CI must not build or fetch whitaker-installer through Cargo: {offending:?}",
     );
 }
