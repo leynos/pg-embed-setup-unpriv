@@ -339,11 +339,20 @@ def test_archive_layout_matches_binstall_metadata(
     assert members == expected_members
 
 
-def test_archive_sidecar_records_the_archive_digest(tmp_path: Path, version: str) -> None:
-    """Each archive gains a `sha256sum`-compatible sidecar naming that archive."""
-    archive = build_archive(tmp_path, "x86_64-unknown-linux-gnu", version)
+@pytest.mark.parametrize(
+    "target", ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+)
+def test_archive_sidecar_records_the_archive_digest(
+    tmp_path: Path, version: str, target: str
+) -> None:
+    """Each archive gains a `sha256sum`-compatible sidecar naming that archive.
+
+    The sidecar must use a Unix newline even for Windows targets; a carriage
+    return becomes part of the file name that `sha256sum --check` looks up.
+    """
+    archive = build_archive(tmp_path, target, version)
     sidecar = release_archive.checksum_sidecar_path(archive)
 
     assert sidecar.name == f"{archive.name}.sha256"
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    assert sidecar.read_text(encoding="ascii") == f"{digest}  {archive.name}\n"
+    assert sidecar.read_bytes() == f"{digest}  {archive.name}\n".encode("ascii")

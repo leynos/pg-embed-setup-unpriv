@@ -305,7 +305,9 @@ def write_archive_checksum(archive_path: Path) -> Path:
     """Write the `sha256sum`-compatible sidecar for `archive_path`.
 
     The sidecar records the digest and the bare archive name, so
-    `sha256sum --check` succeeds from the directory holding both files.
+    `sha256sum --check` succeeds from the directory holding both files. It is
+    written with a Unix newline on every platform, because the checking tools
+    on the release runners read it verbatim.
 
     Parameters
     ----------
@@ -328,10 +330,11 @@ def write_archive_checksum(archive_path: Path) -> Path:
     PosixPath('dist/pkg-v1.0.0.tgz.sha256')
     """
     sidecar = checksum_sidecar_path(archive_path)
-    sidecar.write_text(
-        f"{_file_sha256(archive_path)}  {archive_path.name}\n",
-        encoding="ascii",
-    )
+    # Bytes, not text: text mode would translate the newline to CRLF on
+    # Windows, and `sha256sum --check` then treats the carriage return as part
+    # of the file name.
+    line = f"{_file_sha256(archive_path)}  {archive_path.name}\n"
+    sidecar.write_bytes(line.encode("ascii"))
     return sidecar
 
 
