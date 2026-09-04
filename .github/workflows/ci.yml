@@ -55,6 +55,9 @@ jobs:
       - name: Enforce en-GB-oxendict spelling
         if: ${{ matrix.privilege == 'unprivileged' }}
         run: make spelling
+      - name: Release tooling tests
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        run: make test-scripts
       - name: Install interrogate
         if: ${{ matrix.privilege == 'unprivileged' }}
         run: uv tool install interrogate==1.7.0
@@ -237,6 +240,26 @@ jobs:
         run: >-
           uv run --script scripts/release_archive.py
           "$TARGET"
+      - name: Verify archive checksum sidecar
+        shell: bash
+        working-directory: dist
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          sidecars=(*.tgz.sha256)
+          if [ "${#sidecars[@]}" -eq 0 ]; then
+            echo "release_archive.py wrote no .sha256 sidecar" >&2
+            exit 1
+          fi
+
+          for sidecar in "${sidecars[@]}"; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum --check --strict "$sidecar"
+            else
+              shasum --algorithm 256 --check --strict "$sidecar"
+            fi
+          done
       - name: Start local HTTPS archive server
         id: archive-server
         uses: ./.github/actions/setup-local-https-server

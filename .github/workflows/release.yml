@@ -49,23 +49,35 @@ jobs:
     name: Create draft release
     needs: prepare
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
+      # This job deliberately skips actions/checkout: it only calls the GitHub
+      # API. GH_REPO gives gh the repository it would otherwise infer from a
+      # git remote, and the API tag check replaces `--verify-tag`, which needs
+      # a local clone.
       - name: Create draft release when missing
         env:
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
 
           if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists in $GH_REPO"
             exit 0
+          fi
+
+          if ! gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG does not exist in $GH_REPO" >&2
+            exit 1
           fi
 
           gh release create "$TAG" \
             --draft \
             --generate-notes \
-            --title "$TAG" \
-            --verify-tag
+            --title "$TAG"
 
   build-assets:
     name: Build ${{ matrix.target }}
@@ -85,6 +97,8 @@ jobs:
             target: aarch64-apple-darwin
           - runner: macos-15-intel
             target: x86_64-apple-darwin
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
@@ -105,12 +119,12 @@ jobs:
           uv run --script scripts/release_archive.py
           "$TARGET"
           --release-version "$RELEASE_VERSION"
-      - name: Upload release archive
+      - name: Upload release archive and checksum sidecar
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
-        run: gh release upload "$TAG" dist/*.tgz --clobber
+        run: gh release upload "$TAG" dist/*.tgz dist/*.tgz.sha256 --clobber
 
   audit-draft-assets:
     name: Audit draft assets (${{ matrix.target }})
@@ -131,7 +145,9 @@ jobs:
           - runner: macos-15-intel
             target: x86_64-apple-darwin
     permissions:
-      contents: read
+      # Draft releases are invisible to read-scoped tokens, so downloading the
+      # draft assets requires write scope even though this job only reads.
+      contents: write
     env:
       CARGO_TERM_COLOR: always
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -155,7 +171,28 @@ jobs:
           mkdir -p release-dist
           gh release download "$TAG" \
             --dir release-dist \
-            --pattern "*.tgz"
+            --pattern "*.tgz" \
+            --pattern "*.tgz.sha256"
+      - name: Verify draft asset checksums
+        shell: bash
+        working-directory: release-dist
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          sidecars=(*.tgz.sha256)
+          if [ "${#sidecars[@]}" -eq 0 ]; then
+            echo "No .sha256 sidecars were published alongside the archives" >&2
+            exit 1
+          fi
+
+          for sidecar in "${sidecars[@]}"; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum --check --strict "$sidecar"
+            else
+              shasum --algorithm 256 --check --strict "$sidecar"
+            fi
+          done
       - name: Start local HTTPS archive server
         id: archive-server
         uses: ./.github/actions/setup-local-https-server
@@ -221,9 +258,13 @@ jobs:
     name: Publish release
     needs: [prepare, audit-draft-assets]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
+      # Like create-release, this job has no checkout, so gh needs GH_REPO.
       - name: Publish draft release
         env:
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
