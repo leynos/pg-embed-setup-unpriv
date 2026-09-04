@@ -4,7 +4,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     panic,
-    sync::{Arc, Barrier, TryLockError, mpsc},
+    sync::{TryLockError, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -39,6 +39,7 @@ use thread_helpers::{
     RestoreEnv,
     ThreadAChannels,
     ThreadBChannels,
+    join_guard_thread,
     spawn_inner_guard_thread,
     spawn_outer_guard_thread,
 };
@@ -99,17 +100,35 @@ fn keeps_lock_until_last_scope_drops() {
     assert_eq!(env::var("SCOPE_TEST").as_deref(), Ok("inner"));
 
     drop(inner);
-    let free = ENV_LOCK
-        .try_lock()
-        .expect("mutex should release after final scope drops");
+    // Acquire as its own statement and assert on the outcome: Whitaker treats
+    // `#[serial]` tests as production code, so `expect` here would be a
+    // finding, and burying the fallible call inside `assert!` would hide it.
+    let free = ENV_LOCK.try_lock();
+    assert!(free.is_ok(), "mutex should release after final scope drops");
     drop(free);
     assert!(env::var("SCOPE_TEST").is_err());
 }
 
+/// Build the failure returned when a cross-thread expectation is not met.
+///
+/// `#[serial]` erases the `#[test]` marker before either lint sees the
+/// function, so the body must neither call `expect`, which Whitaker rejects,
+/// nor assert, which trips `clippy::panic_in_result_fn` in a fallible
+/// function. Expectations are reported as errors instead.
+fn scenario_failure(message: impl Into<String>) -> Box<dyn std::error::Error> {
+    Box::<dyn std::error::Error>::from(message.into())
+}
+
 /// Verifies a second thread blocks until the first scoped guard releases.
+///
+/// # Errors
+///
+/// Returns the first coordination failure or unmet expectation. The test is
+/// fallible rather than panicking, because Whitaker cannot recognize a
+/// `#[serial]`-wrapped test and treats its body as production code.
 #[test]
 #[serial]
-fn serializes_env_across_threads() {
+fn serializes_env_across_threads() -> Result<(), Box<dyn std::error::Error>> {
     let key = "THREAD_SCOPE_TEST";
     let restore_env = RestoreEnv {
         key: String::from(key),
@@ -117,21 +136,25 @@ fn serializes_env_across_threads() {
     };
     set_env_var_locked(OsStr::new(key), OsStr::new("pre-existing"));
 
+    // These channels are declared after `restore_env`, so they drop before it.
+    // Every guard thread waits on one, so an early return closes the channel,
+    // the thread returns and drops its scoped guard, and `RestoreEnv::drop`
+    // finds `ENV_LOCK` free rather than hanging on it.
     let (ready_tx, ready_rx) = mpsc::channel();
+    let (proceed_tx, proceed_rx) = mpsc::channel();
     let (start_tx, start_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let (attempt_tx, attempt_rx) = mpsc::channel();
     let (acquired_tx, acquired_rx) = mpsc::channel();
     let (done_a_tx, done_a_rx) = mpsc::channel();
     let (done_b_tx, done_b_rx) = mpsc::channel();
-    let barrier = Arc::new(Barrier::new(2));
     // Generous timeout to avoid hanging tests, not to enforce ordering.
     let deadlock_timeout = Duration::from_secs(30);
 
     let thread_a = spawn_outer_guard_thread(
         String::from(key),
         ThreadAChannels {
-            barrier: Arc::clone(&barrier),
+            proceed_rx,
             ready_tx,
             release_rx,
             done_tx: done_a_tx,
@@ -147,45 +170,46 @@ fn serializes_env_across_threads() {
         },
     );
 
-    ready_rx
-        .recv_timeout(deadlock_timeout)
-        .expect("outer guard should be ready");
-    barrier.wait();
+    ready_rx.recv_timeout(deadlock_timeout)?;
+    proceed_tx.send(())?;
 
     let release_guard = ReleaseOnDrop {
         sender: Some(release_tx),
     };
 
-    start_tx.send(()).expect("start signal must be sent");
-    attempt_rx
-        .recv_timeout(deadlock_timeout)
-        .expect("second thread should attempt to acquire the guard");
+    start_tx.send(())?;
+    attempt_rx.recv_timeout(deadlock_timeout)?;
 
-    assert!(
-        acquired_rx.try_recv().is_err(),
-        "second thread must block while the outer guard holds the lock"
-    );
+    if acquired_rx.try_recv().is_ok() {
+        return Err(scenario_failure(
+            "second thread must block while the outer guard holds the lock",
+        ));
+    }
 
     drop(release_guard);
 
-    let value = acquired_rx
-        .recv_timeout(deadlock_timeout)
-        .expect("second thread should acquire after release");
-    assert_eq!(value.as_deref(), Some("two"));
+    let value = acquired_rx.recv_timeout(deadlock_timeout)?;
+    if value.as_deref() != Some("two") {
+        return Err(scenario_failure(format!(
+            "second thread observed {value:?} after release, expected Some(\"two\")"
+        )));
+    }
 
-    done_a_rx
-        .recv_timeout(deadlock_timeout)
-        .expect("outer guard thread should finish");
-    done_b_rx
-        .recv_timeout(deadlock_timeout)
-        .expect("inner guard thread should finish");
+    done_a_rx.recv_timeout(deadlock_timeout)?;
+    done_b_rx.recv_timeout(deadlock_timeout)?;
 
-    thread_a.join().expect("thread A should exit cleanly");
-    thread_b.join().expect("thread B should exit cleanly");
+    join_guard_thread(thread_a)?;
+    join_guard_thread(thread_b)?;
 
-    assert_eq!(env::var(key).as_deref(), Ok("pre-existing"));
+    let restored = env::var(key);
+    if restored.as_deref() != Ok("pre-existing") {
+        return Err(scenario_failure(format!(
+            "environment left as {restored:?}, expected the pre-existing value"
+        )));
+    }
     assert_env_lock_released();
     drop(restore_env);
+    Ok(())
 }
 
 /// Verifies invalid scope exits restore state without panicking.
