@@ -62,13 +62,32 @@ make lint
    suite, with `RUSTFLAGS="-D warnings"` denying lint warnings. Key lints
    include `module_max_lines` (a 400-line cap per module) and
    `no_expect_outside_tests` (bans `.expect()`/`.unwrap()` outside test-only
-   code). `dylint.toml` whitelists `serial_test`'s `#[serial]` attribute via
-   `[no_expect_outside_tests] additional_test_attributes = ["serial"]`, so
-   `.expect(...)` stays permitted inside `#[serial]`-annotated test functions.
+   code).
+
+Attribute macros are gone by the time a Dylint lint sees HIR, so
+`no_expect_outside_tests` cannot recognize a `#[serial]`-wrapped `#[test]`
+function, nor any plain helper called from one, even inside a `#[cfg(test)]`
+module. Configuring `additional_test_attributes` does not help, because
+`#[serial]` consumes the attribute it would match. Make such a test fallible
+and propagate with `?` instead of reaching for `.expect()`; where a fallible
+call is only being asserted on, run it as its own statement and assert on the
+result, never inside `assert!`. `src/env/tests/thread_helpers.rs` shows the
+shape: the guard threads return a `GuardThreadError`, and `join_guard_thread`
+re-raises a genuine panic while surfacing an orderly failure.
 
 CI installs the pinned `interrogate==1.7.0` uv tool before running `make lint`.
 Keep the Makefile and workflow versions aligned when updating the
 docstring-coverage policy.
+
+The Whitaker suite itself is installed by the shared `install-whitaker` action,
+pinned to a commit SHA, which resolves a checksum-verified release archive for
+the installer version named by `WHITAKER_INSTALLER_VERSION`. The previous
+inline step fell back to `cargo install --locked whitaker-installer`, building
+the tool from source in CI and verifying nothing.
+`tests/whitaker_install_pin.rs` keeps that arrangement in place. Note that the
+installer still resolves the lint suite from the tip of the Whitaker
+repository, so the lints themselves are not yet pinned; a suite change can turn
+this gate red without any commit here.
 
 ## Spelling policy
 

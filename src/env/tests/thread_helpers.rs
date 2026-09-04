@@ -6,11 +6,81 @@
 use std::{
     env,
     ffi::{OsStr, OsString},
+    panic,
     sync::{Arc, Barrier, mpsc},
     thread,
 };
 
+use thiserror::Error;
+
 use super::{ENV_LOCK, ScopedEnv, remove_env_var_unlocked, set_env_var_unlocked};
+
+/// Coordination failure raised by a scoped-environment guard thread.
+///
+/// Whitaker treats `#[serial]`-wrapped tests and their helpers as production
+/// code, because the attribute macros are gone by the time the lint sees HIR.
+/// The guard threads therefore report channel failures instead of calling
+/// `expect`, and `serializes_env_across_threads` propagates them.
+#[derive(Debug, Error)]
+pub(super) enum GuardThreadError {
+    /// A coordination signal never arrived because the sender was dropped.
+    #[error("the {signal} signal was not received")]
+    Receive {
+        /// Name of the signal that was awaited.
+        signal: &'static str,
+        /// Underlying channel failure.
+        #[source]
+        source: mpsc::RecvError,
+    },
+    /// A coordination signal could not be delivered because the receiver was
+    /// dropped. The payload is not retained, since it is either a unit or the
+    /// observed environment value the test has already stopped waiting for.
+    #[error("the {signal} signal could not be sent")]
+    Send {
+        /// Name of the signal that could not be delivered.
+        signal: &'static str,
+    },
+}
+
+/// Receive a coordination signal, naming it if the sender has gone away.
+fn receive_signal(
+    receiver: &mpsc::Receiver<()>,
+    signal: &'static str,
+) -> Result<(), GuardThreadError> {
+    receiver
+        .recv()
+        .map_err(|source| GuardThreadError::Receive { signal, source })
+}
+
+/// Send a coordination signal, naming it if the receiver has gone away.
+fn send_signal<T>(
+    sender: &mpsc::Sender<T>,
+    value: T,
+    signal: &'static str,
+) -> Result<(), GuardThreadError> {
+    sender
+        .send(value)
+        .map_err(|_| GuardThreadError::Send { signal })
+}
+
+/// Join a guard thread, re-raising its panic and surfacing its failure.
+///
+/// A panic inside the thread is resumed on the joining thread so the original
+/// message and backtrace survive; an orderly failure is returned instead.
+///
+/// # Examples
+///
+/// ```ignore
+/// join_guard_thread(spawn_outer_guard_thread(key, channels))?;
+/// ```
+pub(super) fn join_guard_thread(
+    handle: thread::JoinHandle<Result<(), GuardThreadError>>,
+) -> Result<(), GuardThreadError> {
+    match handle.join() {
+        Ok(result) => result,
+        Err(payload) => panic::resume_unwind(payload),
+    }
+}
 
 /// Sends a unit on drop via `mpsc::Sender` and ignores send errors.
 pub(super) struct ReleaseOnDrop {
@@ -85,10 +155,15 @@ pub(super) struct ThreadBChannels {
 
 /// Spawn the inner-guard thread that blocks on the mutex, reports the value,
 /// and signals completion.
+///
+/// # Errors
+///
+/// The thread returns `GuardThreadError` when any coordination channel closes
+/// before its signal is exchanged.
 pub(super) fn spawn_inner_guard_thread(
     key: String,
     channels: ThreadBChannels,
-) -> thread::JoinHandle<()> {
+) -> thread::JoinHandle<Result<(), GuardThreadError>> {
     let ThreadBChannels {
         start_rx,
         attempt_tx,
@@ -96,16 +171,14 @@ pub(super) fn spawn_inner_guard_thread(
         done_tx,
     } = channels;
     thread::spawn(move || {
-        start_rx.recv().expect("start signal must be received");
-        attempt_tx.send(()).expect("attempt signal must be sent");
+        receive_signal(&start_rx, "start")?;
+        send_signal(&attempt_tx, (), "attempt")?;
         let guard = ScopedEnv::apply(&[(key.clone(), Some(String::from("two")))]);
 
         let value = env::var(&key).ok();
-        acquired_tx
-            .send(value)
-            .expect("acquired value must be sent");
+        send_signal(&acquired_tx, value, "acquired value")?;
         drop(guard);
-        done_tx.send(()).expect("completion signal must be sent");
+        send_signal(&done_tx, (), "completion")
     })
 }
 
@@ -127,14 +200,16 @@ pub(super) fn spawn_inner_guard_thread(
 /// signal, waits on the barrier, blocks on `release_rx`, then drops the guard
 /// to restore the environment and signals completion.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if the ready signal cannot be sent, if the release signal is not
-/// received, or if the completion signal cannot be sent.
+/// The thread returns `GuardThreadError` if the ready signal cannot be sent,
+/// if the release signal is not received, or if the completion signal cannot
+/// be sent. Join it with `join_guard_thread` to surface that failure.
 ///
 /// # Returns
 ///
-/// Returns a `thread::JoinHandle<()>` for the spawned thread.
+/// Returns a `thread::JoinHandle<Result<(), GuardThreadError>>` for the
+/// spawned thread.
 ///
 /// # Examples
 ///
@@ -155,12 +230,12 @@ pub(super) fn spawn_inner_guard_thread(
 /// );
 ///
 /// barrier.wait();
-/// handle.join().expect("thread should exit cleanly");
+/// join_guard_thread(handle)?;
 /// ```
 pub(super) fn spawn_outer_guard_thread(
     key: String,
     channels: ThreadAChannels,
-) -> thread::JoinHandle<()> {
+) -> thread::JoinHandle<Result<(), GuardThreadError>> {
     let ThreadAChannels {
         barrier,
         ready_tx,
@@ -170,10 +245,10 @@ pub(super) fn spawn_outer_guard_thread(
     thread::spawn(move || {
         let guard = ScopedEnv::apply(&[(key, Some(String::from("one")))]);
 
-        ready_tx.send(()).expect("ready signal must be sent");
+        send_signal(&ready_tx, (), "ready")?;
         barrier.wait();
-        release_rx.recv().expect("release signal must be received");
+        receive_signal(&release_rx, "release")?;
         drop(guard);
-        done_tx.send(()).expect("completion signal must be sent");
+        send_signal(&done_tx, (), "completion")
     })
 }
