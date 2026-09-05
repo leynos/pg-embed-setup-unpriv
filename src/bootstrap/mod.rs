@@ -26,6 +26,7 @@ use self::{
 use crate::{
     PgEnvCfg,
     error::{BootstrapResult, Result as CrateResult},
+    extensions::{ExtensionRequest, InstalledExtension},
 };
 
 const DEFAULT_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
@@ -82,6 +83,10 @@ pub struct TestBootstrapSettings {
     /// When set, `TestCluster` uses this directory instead of the default
     /// resolved from environment variables.
     pub binary_cache_dir: Option<camino::Utf8PathBuf>,
+    /// Extensions to install before the server starts, from `PG_EXTENSIONS*`.
+    pub extensions: Option<ExtensionRequest>,
+    /// What the extension hook installed, filled in once the cluster started.
+    pub installed_extensions: Vec<InstalledExtension>,
 }
 
 /// Bootstraps an embedded `PostgreSQL` instance, downloads the distribution,
@@ -161,6 +166,7 @@ fn orchestrate_bootstrap(kind: BootstrapKind) -> BootstrapResult<TestBootstrapSe
     let worker_binary = worker_binary_from_env(privileges)?;
     let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
     let shutdown_timeout = shutdown_timeout_from_env()?;
+    let extensions = ExtensionRequest::from_config(&cfg)?;
     let prepared = prepare_bootstrap(privileges, settings, &cfg)?;
 
     Ok(TestBootstrapSettings {
@@ -174,6 +180,8 @@ fn orchestrate_bootstrap(kind: BootstrapKind) -> BootstrapResult<TestBootstrapSe
         shutdown_timeout,
         cleanup_mode: CleanupMode::default(),
         binary_cache_dir: cfg.binary_cache_dir,
+        extensions,
+        installed_extensions: Vec::new(),
     })
 }
 

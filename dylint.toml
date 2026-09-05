@@ -28,6 +28,7 @@ excluded_crates = [
     "database_lifecycle",
     "data_dir_recovery",
     "e2e_postgresql_embedded_diesel",
+    "extensions_install",
     "localized_diagnostics",
     "observability",
     "recovery_integration",
@@ -45,6 +46,7 @@ excluded_crates = [
     "test_cluster_fixture",
     "test_cluster_connection",
     "test_cluster_drop",
+    "test_cluster_extensions",
     "ui",
     "worker_process",
 ]

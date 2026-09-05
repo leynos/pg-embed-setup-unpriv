@@ -16,11 +16,9 @@ use serial_test::serial;
 use tempfile::tempdir;
 
 use super::*;
-use crate::test_support::{
-    dummy_settings,
-    install_run_root_operation_hook,
-    scoped_env,
-    test_runtime,
+use crate::{
+    cluster::extension_hook::populate_cache_on_miss,
+    test_support::{dummy_settings, install_run_root_operation_hook, scoped_env, test_runtime},
 };
 
 const TEST_POSTGRES_VERSION: &str = "17.4.0";
@@ -348,13 +346,21 @@ fn populate_cache_on_miss_only_populates_on_cache_miss(
     bootstrap.settings.data_dir = cache_population_paths.data_dir.into_std_path_buf();
     let cache_config = BinaryCacheConfig::with_dir(cache_population_paths.cache_dir.clone());
 
-    populate_cache_on_miss(true, &cache_config, &bootstrap);
+    let hit = PostSetup {
+        cache_config: &cache_config,
+        cache_hit: true,
+    };
+    populate_cache_on_miss(hit, &bootstrap);
     ensure!(
         !cache_population_paths.marker_path.exists(),
         "cache marker should remain absent on cache hit"
     );
 
-    populate_cache_on_miss(false, &cache_config, &bootstrap);
+    let miss = PostSetup {
+        cache_config: &cache_config,
+        cache_hit: false,
+    };
+    populate_cache_on_miss(miss, &bootstrap);
     ensure!(
         cache_population_paths.marker_path.exists(),
         "cache marker should be written on cache miss"

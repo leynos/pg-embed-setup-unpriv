@@ -39,6 +39,28 @@ pub enum BootstrapErrorKind {
     WorkerBinaryMissing,
     /// Indicates a PATH entry used for worker discovery is not valid UTF-8.
     WorkerBinaryPathNonUtf8,
+    /// `PG_EXTENSIONS*` is set but incomplete or malformed (no manifest, an
+    /// HTTPS manifest without a digest, a bad name, or a bad digest).
+    ExtensionConfigInvalid,
+    /// The extension manifest could not be read from its path or URL.
+    ExtensionManifestUnavailable,
+    /// The manifest bytes do not hash to `PG_EXTENSIONS_MANIFEST_SHA256`.
+    ExtensionManifestDigestMismatch,
+    /// The manifest is not valid JSON, has the wrong schema version, or is
+    /// missing a field.
+    ExtensionManifestInvalid,
+    /// The manifest offers no artifact for the requested name, the running
+    /// `PostgreSQL` major and minor, and the compile target.
+    ExtensionUnavailable,
+    /// The extension archive could not be downloaded and no cached copy exists.
+    ExtensionArchiveUnavailable,
+    /// The archive bytes do not hash to the digest recorded in the manifest.
+    ExtensionArchiveDigestMismatch,
+    /// The archive contains a forbidden entry, escapes its prefixes, or does
+    /// not match the file list recorded in the manifest.
+    ExtensionArchiveInvalid,
+    /// Writing the extension files into the installation tree failed.
+    ExtensionInstallFailed,
 }
 
 /// Captures bootstrap-specific failures.
@@ -172,6 +194,24 @@ mod tests {
         );
         assert_eq!(err.kind(), BootstrapErrorKind::WorkerBinaryMissing);
         assert!(err.into_report().to_string().contains("worker gone"));
+    }
+
+    #[rstest]
+    #[case::config(BootstrapErrorKind::ExtensionConfigInvalid)]
+    #[case::manifest_unavailable(BootstrapErrorKind::ExtensionManifestUnavailable)]
+    #[case::manifest_digest(BootstrapErrorKind::ExtensionManifestDigestMismatch)]
+    #[case::manifest_invalid(BootstrapErrorKind::ExtensionManifestInvalid)]
+    #[case::unavailable(BootstrapErrorKind::ExtensionUnavailable)]
+    #[case::archive_unavailable(BootstrapErrorKind::ExtensionArchiveUnavailable)]
+    #[case::archive_digest(BootstrapErrorKind::ExtensionArchiveDigestMismatch)]
+    #[case::archive_invalid(BootstrapErrorKind::ExtensionArchiveInvalid)]
+    #[case::install_failed(BootstrapErrorKind::ExtensionInstallFailed)]
+    fn extension_error_kinds_survive_wrapping(#[case] kind: BootstrapErrorKind) {
+        let err = BootstrapError::new(kind, eyre!("extension detail"));
+        assert_eq!(err.kind(), kind);
+        let wrapped = BootstrapError::from(PgEmbeddedError::Bootstrap(err));
+        assert_eq!(wrapped.kind(), kind);
+        assert!(wrapped.to_string().contains("extension detail"));
     }
 
     #[test]

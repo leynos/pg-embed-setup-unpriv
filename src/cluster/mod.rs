@@ -53,6 +53,7 @@ mod cache_integration;
 mod cleanup;
 mod connection;
 mod delegation;
+mod extension_hook;
 mod guard;
 mod handle;
 mod installation;
