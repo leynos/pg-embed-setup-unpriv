@@ -239,7 +239,11 @@ fn write_file(
     let destination = install_dir.join(&plan.relative);
     if Sha256Hex::of_file(&destination).is_ok_and(|existing| existing == Sha256Hex::of_bytes(bytes))
     {
-        return Ok(());
+        // Identical bytes keep their inode, but the mode and owner are still
+        // brought into line so a root-owned or 0600 copy does not stop the
+        // server from loading it.
+        set_mode(destination.as_std_path(), plan.mode)?;
+        return apply_owner(destination.as_std_path(), owner);
     }
     let parent = destination
         .parent()

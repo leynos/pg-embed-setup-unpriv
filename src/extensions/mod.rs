@@ -163,9 +163,9 @@ pub(crate) const fn extension_error(kind: BootstrapErrorKind, report: Report) ->
 ///
 /// `install_dir` is the versioned `PostgreSQL` root (the directory holding
 /// `bin/`, `lib/` and `share/`). The manifest is fetched and verified, one
-/// artefact is selected per name for the running major and minor and the
-/// compile target, each archive is verified against the manifest digest, and
-/// its files are validated in full before any file is written. Re-installing
+/// artefact is selected per name for the running `PostgreSQL` major and the
+/// compile target (the minor is not a match key), each archive is verified against the manifest
+/// digest, and its files are validated in full before any file is written. Re-installing
 /// an archive that is already in place is a reporting no-op.
 ///
 /// Every requested name is resolved against the manifest before any archive
