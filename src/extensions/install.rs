@@ -50,25 +50,31 @@ const SHARE_MODE: u32 = 0o644;
 /// ```
 #[must_use]
 pub fn classify_entry_path(raw: &Path) -> Option<Utf8PathBuf> {
-    let mut parts: Vec<&str> = Vec::new();
+    let parts = normal_components(raw)?;
+    is_allowed_layout(&parts).then(|| Utf8PathBuf::from(parts.join("/")))
+}
+
+/// Splits `raw` into plain UTF-8 components, tolerating only a leading `./`.
+fn normal_components(raw: &Path) -> Option<Vec<&str>> {
+    let mut parts = Vec::new();
     for (index, component) in raw.components().enumerate() {
         match component {
             Component::CurDir if index == 0 => {}
-            Component::Normal(part) => parts.push(part.to_str()?),
+            Component::Normal(part) => parts.push(plain_component(part.to_str()?)?),
             _ => return None,
         }
     }
-    if parts
-        .iter()
-        .any(|part| part.contains('\\') || part.contains('/'))
-    {
-        return None;
-    }
-    let canonical = parts.join("/");
-    let is_lib = parts.len() == 2 && parts.first() == Some(&"lib");
-    let is_share =
-        parts.len() >= 3 && parts.first() == Some(&"share") && parts.get(1) == Some(&"extension");
-    (is_lib || is_share).then(|| Utf8PathBuf::from(canonical))
+    Some(parts)
+}
+
+/// Rejects components that smuggle separators on platforms that allow them.
+fn plain_component(part: &str) -> Option<&str> {
+    (!part.contains('\\') && !part.contains('/')).then_some(part)
+}
+
+/// Accepts `lib/<file>` and `share/extension/<path...>` only.
+fn is_allowed_layout(parts: &[&str]) -> bool {
+    matches!(parts, ["lib", _] | ["share", "extension", _, ..])
 }
 
 /// One regular file the archive will write.
