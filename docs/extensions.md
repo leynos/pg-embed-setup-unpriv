@@ -4,10 +4,10 @@ The Theseus `postgresql-binaries` archives that `pg_embedded_setup_unpriv`
 downloads carry only the in-tree contrib extensions. Out-of-tree extensions
 such as `pgvector` are installed by the extension hook: before the server
 starts, the hook fetches a digest-pinned manifest, selects the archive built
-for the running PostgreSQL major and minor and for this crate's compile target,
-verifies the archive against the digest in the manifest, and copies its files
-into the embedded tree. The hook never compiles anything; when no matching,
-verified archive exists it fails closed and the server is not started.
+for the running PostgreSQL major and for this crate's compile target, verifies
+the archive against the digest in the manifest, and copies its files into the
+embedded tree. The hook never compiles anything; when no matching, verified
+archive exists it fails closed and the server is not started.
 
 The archives and manifest are published by
 [`df12-pg-extensions`](https://github.com/leynos/df12-pg-extensions), whose
@@ -36,10 +36,14 @@ export PG_EXTENSIONS_MANIFEST="https://github.com/leynos/df12-pg-extensions/rele
 export PG_EXTENSIONS_MANIFEST_SHA256="<digest from manifest.json.sha256>"
 ```
 
-Matching is exact on the PostgreSQL major and minor (the third component of a
-Theseus release is a build number) and on the compile target triple
-(`PG_EMBED_TARGET`, exported by `build.rs`). There is no cross-minor fallback,
-so pin `PG_VERSION_REQ` to a release the manifest was built against.
+Matching is on the PostgreSQL major and the compile target triple
+(`PG_EMBED_TARGET`, exported by `build.rs`), never the minor: a module built
+for one major loads into every minor of that major, because the server's
+`Pg_magic_func` block checks the major and the layout constants only, and an
+archive built before 16.5 was measured loading into Theseus 16.15. The
+`postgresql` field of an artefact records the exact Theseus release it was
+built against as information. So `PG_VERSION_REQ` may pin a major (`^17`)
+rather than an exact release.
 
 ## Manifest schema
 
@@ -94,8 +98,8 @@ file is written.
    pinned, parse and validate it.
 2. Identify the running PostgreSQL from the versioned installation
    directory name, falling back to `bin/pg_config --version`.
-3. For each declared name, select the artefact for that name, major and
-   minor, and target.
+3. For each declared name, select the artefact for that name, PostgreSQL
+   major and target.
 4. Reuse `<cache>/<sha256>/<file>` when its digest still matches; otherwise
    download to a temporary file under a per-digest lock, verify, and rename
    into place.
@@ -136,7 +140,7 @@ Table: Extension error kinds.
 | `ExtensionManifestUnavailable`    | The manifest path is missing or the URL cannot be fetched                                           |
 | `ExtensionManifestDigestMismatch` | The manifest bytes do not hash to `PG_EXTENSIONS_MANIFEST_SHA256`                                   |
 | `ExtensionManifestInvalid`        | Invalid JSON, wrong `schema_version`, missing field, malformed digest or version                    |
-| `ExtensionUnavailable`            | No artefact for the name, running major and minor, and target; also an unidentifiable PostgreSQL    |
+| `ExtensionUnavailable`            | No artefact for the name, running PostgreSQL major, and target; also an unidentifiable PostgreSQL   |
 | `ExtensionArchiveUnavailable`     | The archive cannot be downloaded and no valid cached copy exists                                    |
 | `ExtensionArchiveDigestMismatch`  | The downloaded bytes do not hash to the manifest digest                                             |
 | `ExtensionArchiveInvalid`         | A forbidden entry, a path outside the prefixes, or contents that differ from the manifest file list |
@@ -165,7 +169,7 @@ sequenceDiagram
         extensions->>extensions: load manifest, verify digest, parse
         extensions->>extensions: running_version(install_dir)
         loop each declared name
-            extensions->>extensions: select artefact (major.minor, target)
+            extensions->>extensions: select artefact (major, target)
             extensions->>extensions: acquire archive (cache or download), verify sha256
             extensions->>extensions: validate every entry
             extensions->>fs: write temp sibling, chmod, chown, rename

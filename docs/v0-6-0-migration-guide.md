@@ -7,8 +7,8 @@ which is the only source-level change.
 
 ## New configuration
 
-Four environment variables, read through `PgEnvCfg` and therefore honoured
-by `TestCluster`, `bootstrap_for_tests`, `run()` and the CLI:
+Four environment variables, read through `PgEnvCfg` and therefore honoured by
+`TestCluster`, `bootstrap_for_tests`, `run()` and the CLI:
 
 Table: Environment variables added in v0.6.0.
 
@@ -34,9 +34,9 @@ literally, which the crate's own fixtures do, must add them; `None` and
 
 ## `BootstrapErrorKind`
 
-Nine variants were added, all prefixed `Extension`. An exhaustive `match`
-over the enum must gain arms (or a wildcard); the existing variants and
-their meanings are unchanged. See the failure table in
+Nine variants were added, all prefixed `Extension`. An exhaustive `match` over
+the enum must gain arms (or a wildcard); the existing variants and their
+meanings are unchanged. See the failure table in
 [`docs/extensions.md`](extensions.md).
 
 ## New API
@@ -44,8 +44,8 @@ their meanings are unchanged. See the failure table in
 - `ClusterHandle::installed_extensions()` reports the installed extensions.
 - The `extensions` module exposes `ExtensionRequest::from_config`,
   `install_extensions`, `install_extensions_async`, the validated
-  `ExtensionName` and `Sha256Hex` newtypes, `Manifest` and its selection
-  rules, and `compile_target()`.
+  `ExtensionName` and `Sha256Hex` newtypes, `Manifest` and its selection rules,
+  and `compile_target()`.
 
 ## Behavioural notes
 
@@ -54,7 +54,7 @@ their meanings are unchanged. See the failure table in
   it) so the shared binary cache never contains extension files; the cache
   layout and keys are unchanged.
 - Failures are fail-closed: an unresolvable name, an unmatched PostgreSQL
-  major or minor, an unmatched target, a digest mismatch or an invalid archive
-  stops the bootstrap before the server starts and nothing is compiled.
+  major, an unmatched target, a digest mismatch or an invalid archive stops the
+  bootstrap before the server starts and nothing is compiled.
 - The crate now depends on `reqwest` (blocking, native TLS), `tar` and
   `flate2`.

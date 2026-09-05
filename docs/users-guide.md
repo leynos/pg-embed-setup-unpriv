@@ -671,9 +671,9 @@ export PG_EXTENSIONS_MANIFEST_SHA256="<digest from manifest.json.sha256>"
 
 `CREATE EXTENSION vector` then works in any database of the cluster, and
 `ClusterHandle::installed_extensions()` reports what was installed. The hook
-matches the running PostgreSQL major and minor and the compile target exactly
-and fails closed when no verified archive exists; it never builds from source.
-See [`docs/extensions.md`](extensions.md) for the manifest schema, the archive
+matches the running PostgreSQL major and the compile target and fails closed
+when no verified archive exists; it never builds from source. See
+[`docs/extensions.md`](extensions.md) for the manifest schema, the archive
 rules and the failure modes.
 
 ## Privilege detection and idempotence

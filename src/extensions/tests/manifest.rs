@@ -122,11 +122,12 @@ fn non_json_manifest_is_invalid() {
     assert_eq!(err.kind(), BootstrapErrorKind::ExtensionManifestInvalid);
 }
 
-/// Selection matches name, running major.minor and target exactly.
+/// Selection matches name, running major and target; the minor is ignored.
 #[rstest]
 #[case::match_(Version::new(17, 11, 0), true, "fixture", true)]
 #[case::patch_ignored(Version::new(17, 11, 7), true, "fixture", true)]
-#[case::minor_mismatch(Version::new(17, 10, 0), true, "fixture", false)]
+#[case::older_minor(Version::new(17, 10, 0), true, "fixture", true)]
+#[case::newer_minor(Version::new(17, 12, 3), true, "fixture", true)]
 #[case::major_mismatch(Version::new(18, 11, 0), true, "fixture", false)]
 #[case::target_mismatch(Version::new(17, 11, 0), false, "fixture", false)]
 #[case::unknown_name(Version::new(17, 11, 0), true, "other", false)]
@@ -179,7 +180,7 @@ fn unavailable_message_lists_offers() {
         .select(query, &path_source(Utf8PathBuf::from("m.json")))
         .expect_err("no 16.x artifact");
     let message = err.to_string();
-    assert!(message.contains("PostgreSQL 16.15"), "{message}");
+    assert!(message.contains("PostgreSQL 16 on"), "{message}");
     assert!(
         message.contains(&format!("17.11.0 on {}", compile_target())),
         "{message}"
