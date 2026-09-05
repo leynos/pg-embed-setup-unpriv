@@ -132,3 +132,20 @@ fn default_paths_for_derive_install_and_data_dirs() {
     assert_eq!(install.as_str(), "/var/tmp/pg-embed-4321/install");
     assert_eq!(data.as_str(), "/var/tmp/pg-embed-4321/data");
 }
+
+/// The per-user default root is unchanged by the `PG_EMBED_ROOT` override.
+#[test]
+fn default_root_for_is_the_var_tmp_per_uid_tree() {
+    assert_eq!(
+        default_root_for(Uid::from_raw(4321)).as_str(),
+        "/var/tmp/pg-embed-4321"
+    );
+}
+
+/// An explicit root yields `install` and `data` leaves directly beneath it.
+#[test]
+fn default_paths_under_derive_leaves_from_root() {
+    let (install, data) = default_paths_under(camino::Utf8Path::new("/srv/project/pg"));
+    assert_eq!(install.as_str(), "/srv/project/pg/install");
+    assert_eq!(data.as_str(), "/srv/project/pg/data");
+}

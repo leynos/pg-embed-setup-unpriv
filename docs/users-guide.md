@@ -88,6 +88,15 @@ cargo binstall pg-embed-setup-unpriv
    export PG_PASSWORD="postgres_pass"
    ```
 
+   Without `PG_RUNTIME_DIR` and `PG_DATA_DIR` the helper derives both under
+   `/var/tmp/pg-embed-{uid}`, one tree per user that every project on the host
+   shares. Set `PG_EMBED_ROOT` to give a project or a test run its own base
+   (`<root>/install` and `<root>/data`); the two leaf variables still win when
+   set.
+
+   Test clusters cap `max_connections` at 20 (a `postgres` container defaults
+   to 100); set `PG_MAX_CONNECTIONS` when parallel test runners need more.
+
    Optionally set `PG_SHUTDOWN_TIMEOUT_SECS` to override the 15-second drop
    budget. The helper accepts values between `1` and `600` seconds and reports
    an error when the override falls outside that range or cannot be parsed.

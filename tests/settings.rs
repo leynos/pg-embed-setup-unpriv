@@ -48,6 +48,8 @@ fn to_settings_roundtrip() -> color_eyre::Result<()> {
         locale: Some("en_US".into()),
         encoding: Some("UTF8".into()),
         binary_cache_dir: None,
+        embed_root: None,
+        max_connections: None,
     };
     let settings = cfg.to_settings()?;
     let expected_version = VersionReq::parse("=16.4.0").map_err(|err| eyre!(err))?;
@@ -121,6 +123,26 @@ fn to_settings_for_tests_applies_worker_limits(default_pg_env: PgEnvCfg) -> colo
         "expected max_connections to be capped for tests",
     );
 
+    Ok(())
+}
+
+/// `PG_MAX_CONNECTIONS` replaces the test cap and applies outside tests too.
+#[rstest]
+#[case::for_tests(true)]
+#[case::plain(false)]
+fn max_connections_override_is_applied(#[case] for_tests: bool) -> color_eyre::Result<()> {
+    let cfg = PgEnvCfg {
+        max_connections: Some(120),
+        ..PgEnvCfg::default()
+    };
+    let settings = cfg.to_settings_with_context(for_tests)?;
+    ensure!(
+        settings
+            .configuration
+            .get("max_connections")
+            .is_some_and(|value| value == "120"),
+        "expected max_connections to follow PG_MAX_CONNECTIONS (for_tests={for_tests})",
+    );
     Ok(())
 }
 

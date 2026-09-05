@@ -232,8 +232,36 @@ pub fn nobody_uid() -> Uid {
 /// ```
 #[must_use]
 pub fn default_paths_for(uid: Uid) -> (Utf8PathBuf, Utf8PathBuf) {
-    let base = Utf8PathBuf::from(format!("/var/tmp/pg-embed-{}", uid.as_raw()));
-    (base.join("install"), base.join("data"))
+    default_paths_under(&default_root_for(uid))
+}
+
+/// Returns the per-user base directory used when `PG_EMBED_ROOT` is unset.
+///
+/// # Examples
+/// ```
+/// use nix::unistd::Uid;
+///
+/// let root = pg_embedded_setup_unpriv::default_root_for(Uid::from_raw(1000));
+/// assert_eq!(root.as_str(), "/var/tmp/pg-embed-1000");
+/// ```
+#[must_use]
+pub fn default_root_for(uid: Uid) -> Utf8PathBuf {
+    Utf8PathBuf::from(format!("/var/tmp/pg-embed-{}", uid.as_raw()))
+}
+
+/// Derives the default `install` and `data` directories under `root`.
+///
+/// # Examples
+/// ```
+/// use camino::Utf8Path;
+///
+/// let (install, data) = pg_embedded_setup_unpriv::default_paths_under(Utf8Path::new("/srv/pg"));
+/// assert_eq!(install.as_str(), "/srv/pg/install");
+/// assert_eq!(data.as_str(), "/srv/pg/data");
+/// ```
+#[must_use]
+pub fn default_paths_under(root: &Utf8Path) -> (Utf8PathBuf, Utf8PathBuf) {
+    (root.join("install"), root.join("data"))
 }
 
 /// DEPRECATED: process-wide UID switching is unsafe and unsupported.

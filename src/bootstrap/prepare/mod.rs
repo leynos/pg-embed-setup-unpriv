@@ -11,7 +11,7 @@ use super::{
     mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error},
 };
 #[cfg(all(unix, privileged_unix_platform))]
-use crate::privileges::default_paths_for;
+use crate::privileges::{default_paths_under, default_root_for};
 use crate::{
     PgEnvCfg,
     error::{BootstrapError, BootstrapResult},
@@ -95,7 +95,11 @@ fn resolve_settings_paths_for_uid(
     cfg: &PgEnvCfg,
     uid: Uid,
 ) -> BootstrapResult<SettingsPaths> {
-    let (default_install_dir, default_data_dir) = default_paths_for(uid);
+    let root = cfg
+        .embed_root
+        .clone()
+        .unwrap_or_else(|| default_root_for(uid));
+    let (default_install_dir, default_data_dir) = default_paths_under(&root);
     let mut install_default = false;
     let mut data_default = false;
 

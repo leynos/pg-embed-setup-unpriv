@@ -146,6 +146,7 @@ mod unix_tests {
     use tempfile::tempdir;
 
     use super::{unix_user::ensure_pgpass_for_user, *};
+    use crate::privileges::default_paths_for;
 
     #[test]
     fn ensure_settings_paths_applies_defaults() {
@@ -162,6 +163,45 @@ mod unix_tests {
         assert_eq!(paths.password_file, expected_install.join(".pgpass"));
         assert!(paths.install_default);
         assert!(paths.data_default);
+    }
+
+    /// `PG_EMBED_ROOT` replaces the per-user base for both derived leaves.
+    #[test]
+    fn ensure_settings_paths_honours_embed_root() {
+        let cfg = PgEnvCfg {
+            embed_root: Some(Utf8PathBuf::from("/srv/project/pg")),
+            ..PgEnvCfg::default()
+        };
+        let mut settings = cfg.to_settings().expect("default config should convert");
+
+        let paths = resolve_settings_paths_for_uid(&mut settings, &cfg, Uid::from_raw(9999))
+            .expect("settings paths");
+
+        assert_eq!(paths.install_dir.as_str(), "/srv/project/pg/install");
+        assert_eq!(paths.data_dir.as_str(), "/srv/project/pg/data");
+        assert!(
+            paths.install_default,
+            "the derived leaf still counts as a default"
+        );
+        assert!(paths.data_default);
+    }
+
+    /// Explicit leaf overrides win over the root-derived defaults.
+    #[test]
+    fn explicit_leaves_win_over_embed_root() {
+        let cfg = PgEnvCfg {
+            embed_root: Some(Utf8PathBuf::from("/srv/project/pg")),
+            data_dir: Some(Utf8PathBuf::from("/elsewhere/data")),
+            ..PgEnvCfg::default()
+        };
+        let mut settings = cfg.to_settings().expect("default config should convert");
+
+        let paths = resolve_settings_paths_for_uid(&mut settings, &cfg, Uid::from_raw(9999))
+            .expect("settings paths");
+
+        assert_eq!(paths.install_dir.as_str(), "/srv/project/pg/install");
+        assert_eq!(paths.data_dir.as_str(), "/elsewhere/data");
+        assert!(!paths.data_default);
     }
 
     #[test]

@@ -212,7 +212,14 @@ pub use privileges::with_temp_euid;
         target_os = "dragonfly",
     ),
 ))]
-pub use privileges::{default_paths_for, make_data_dir_private, make_dir_accessible, nobody_uid};
+pub use privileges::{
+    default_paths_for,
+    default_paths_under,
+    default_root_for,
+    make_data_dir_private,
+    make_dir_accessible,
+    nobody_uid,
+};
 use serde::{Deserialize, Serialize};
 
 #[doc(hidden)]
@@ -291,6 +298,19 @@ pub struct PgEnvCfg {
     /// 3. `$HOME/.cache/pg-embedded/binaries` (if `HOME` is set)
     /// 4. `/tmp/pg-embedded/binaries` (final fallback)
     pub binary_cache_dir: Option<Utf8PathBuf>,
+    /// Base directory under which the default `install` and `data`
+    /// directories are created (`PG_EMBED_ROOT`).
+    ///
+    /// When unset the base is `/var/tmp/pg-embed-{uid}`, which every project
+    /// on a host shares per user. Set it to give a project or a test run its
+    /// own tree. `PG_RUNTIME_DIR` and `PG_DATA_DIR` still override the two
+    /// leaves individually.
+    pub embed_root: Option<Utf8PathBuf>,
+    /// `max_connections` for the server (`PG_MAX_CONNECTIONS`).
+    ///
+    /// Test clusters default to 20; set this when parallel test runners need
+    /// more. Applied to every bootstrap, test or not.
+    pub max_connections: Option<u32>,
 }
 
 impl PgEnvCfg {
@@ -377,6 +397,7 @@ impl PgEnvCfg {
         if for_tests {
             Self::apply_worker_limits(&mut s);
         }
+        self.apply_max_connections(&mut s);
 
         Ok(s)
     }
@@ -423,6 +444,15 @@ impl PgEnvCfg {
             settings
                 .configuration
                 .insert("encoding".into(), enc.clone());
+        }
+    }
+
+    /// Applies an explicit `max_connections`, replacing the test default of 20.
+    fn apply_max_connections(&self, settings: &mut Settings) {
+        if let Some(limit) = self.max_connections {
+            settings
+                .configuration
+                .insert("max_connections".into(), limit.to_string());
         }
     }
 

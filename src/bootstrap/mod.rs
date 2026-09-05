@@ -91,6 +91,8 @@ pub struct TestBootstrapSettings {
 /// subsequent use by [`TestCluster`](crate::TestCluster) or other tools.
 ///
 /// The function honours the following environment variables when present:
+/// - `PG_EMBED_ROOT`: Replaces the per-user `/var/tmp/pg-embed-{uid}` base under which the default
+///   installation and data directories are derived.
 /// - `PG_RUNTIME_DIR`: Overrides the `PostgreSQL` installation directory.
 /// - `PG_DATA_DIR`: Overrides the data directory used for initialization.
 /// - `PG_SUPERUSER`: Sets the superuser account name.
