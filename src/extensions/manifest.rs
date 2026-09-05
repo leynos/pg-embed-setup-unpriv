@@ -10,7 +10,13 @@ use color_eyre::eyre::{Report, eyre};
 use postgresql_embedded::Version;
 use serde::Deserialize;
 
-use super::{ExtensionName, ManifestSource, Sha256Hex, archive::http_get, extension_error};
+use super::{
+    ExtensionName,
+    ManifestSource,
+    Sha256Hex,
+    archive::{http_get, is_permitted_url},
+    extension_error,
+};
 use crate::error::{BootstrapError, BootstrapErrorKind, BootstrapResult};
 
 /// The only manifest schema this crate understands.
@@ -206,6 +212,12 @@ fn validate_artifact(name: &str, artifact: &ManifestArtifact) -> BootstrapResult
             artifact.file
         )));
     }
+    if !is_permitted_url(&artifact.url) {
+        return Err(invalid(eyre!(
+            "{name}: artefact url {:?} must use https:// (loopback http is the only exception)",
+            artifact.url
+        )));
+    }
     Ok(())
 }
 
@@ -265,7 +277,21 @@ pub fn load(source: &ManifestSource) -> BootstrapResult<Manifest> {
     if let Some(expected) = pinned {
         verify_digest(&bytes, expected, source)?;
     }
-    Manifest::parse(&bytes)
+    let manifest = Manifest::parse(&bytes)?;
+    log_loaded(source, bytes.len(), pinned.is_some(), &manifest);
+    Ok(manifest)
+}
+
+fn log_loaded(source: &ManifestSource, bytes: usize, pinned: bool, manifest: &Manifest) {
+    tracing::info!(
+        target: super::LOG_TARGET,
+        location = %source.location(),
+        bytes,
+        pinned,
+        release = %manifest.release,
+        extensions = manifest.extensions.len(),
+        "loaded extension manifest"
+    );
 }
 
 fn read_path(path: &camino::Utf8Path) -> BootstrapResult<Vec<u8>> {

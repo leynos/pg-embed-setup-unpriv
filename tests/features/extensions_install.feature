@@ -16,7 +16,7 @@ Feature: Extension archive installation
     Given a scratch PostgreSQL tree and a manifest describing a fixture archive
     And the manifest records the wrong archive digest
     When the declared extensions are installed
-    Then the install fails with kind ExtensionArchiveUnavailable
+    Then the install fails with kind ExtensionArchiveDigestMismatch
     And the scratch tree is untouched
 
   Scenario: An unknown extension name is refused

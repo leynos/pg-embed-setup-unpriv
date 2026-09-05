@@ -56,6 +56,15 @@ const MODULE_SUFFIX: &str = if cfg!(target_os = "macos") {
 };
 
 /// Starts a cluster in the sandbox, treating known bootstrap limitations as a skip.
+///
+/// Returns `Ok(Some(cluster))` when `PostgreSQL` started, `Ok(None)` when the
+/// bootstrap reported a `SKIP-TEST-CLUSTER` condition (no binaries, no
+/// network), and an error for any other bootstrap failure.
+///
+/// ```ignore
+/// let sandbox = TestSandbox::new("probe")?;
+/// let Some(cluster) = start_cluster(&sandbox, Vec::new())? else { return Ok(()) };
+/// ```
 fn start_cluster(
     sandbox: &TestSandbox,
     extra: Vec<(OsString, Option<OsString>)>,
@@ -75,7 +84,18 @@ fn start_cluster(
     }
 }
 
-/// Packages `autoinc.so` from the running cluster's tree as the probe extension.
+/// Packages the tree's `autoinc` module as the probe extension.
+///
+/// Copies `lib/autoinc.<suffix>` from `install_dir` into a gzip tar as
+/// `lib/df12_probe.<suffix>` with a control file and an SQL script, writes the
+/// archive under `<out_dir>/ext-cache/<sha256>/df12_probe.tar.gz` (the layout
+/// the hook's cache expects), and returns the cache directory and the archive
+/// bytes. Fails when the module is missing or the files cannot be written.
+///
+/// ```ignore
+/// let (cache_dir, bytes) = package_probe(&install_dir, &out_dir)?;
+/// assert!(cache_dir.ends_with("ext-cache"));
+/// ```
 fn package_probe(install_dir: &Utf8Path, out_dir: &Utf8Path) -> Result<(Utf8PathBuf, Vec<u8>)> {
     let module_name = format!("autoinc.{MODULE_SUFFIX}");
     let module = std::fs::read(install_dir.join("lib").join(&module_name))
@@ -111,7 +131,17 @@ fn package_probe(install_dir: &Utf8Path, out_dir: &Utf8Path) -> Result<(Utf8Path
     Ok((cache_dir, bytes))
 }
 
-/// Writes a manifest describing the probe archive for the running version.
+/// Writes a schema-1 manifest describing the probe archive for `version` on
+/// this crate's compile target and returns its path.
+///
+/// The URL is unreachable on purpose: the archive must come from the cache
+/// `package_probe` seeded, so a cache miss fails the test rather than
+/// downloading anything. Fails only when the file cannot be written.
+///
+/// ```ignore
+/// let manifest = write_manifest(&out_dir, "17.11.0", &bytes)?;
+/// assert!(manifest.ends_with("manifest.json"));
+/// ```
 fn write_manifest(out_dir: &Utf8Path, version: &str, bytes: &[u8]) -> Result<Utf8PathBuf> {
     let manifest = serde_json::json!({
         "schema_version": 1,
@@ -142,6 +172,16 @@ fn write_manifest(out_dir: &Utf8Path, version: &str, bytes: &[u8]) -> Result<Utf
     Ok(path)
 }
 
+/// Returns the versioned installation directory of a running cluster and its
+/// name (the Theseus release, for example `17.11.0`).
+///
+/// Fails when the directory is not UTF-8 or has no `bin/`, which would mean
+/// the settings do not point at an installed tree.
+///
+/// ```ignore
+/// let (install_dir, version) = versioned_install_dir(&cluster)?;
+/// assert!(install_dir.join("bin").is_dir());
+/// ```
 fn versioned_install_dir(cluster: &TestCluster) -> Result<(Utf8PathBuf, String)> {
     let dir = Utf8PathBuf::from_path_buf(cluster.settings().installation_dir.clone())
         .map_err(|path| eyre!("installation dir is not UTF-8: {}", path.display()))?;
@@ -156,13 +196,16 @@ fn versioned_install_dir(cluster: &TestCluster) -> Result<(Utf8PathBuf, String)>
     Ok((dir, version))
 }
 
-/// The hook installs a fixture module that the server loads with `CREATE EXTENSION`.
-#[rstest::rstest]
-fn hook_installs_a_loadable_extension(serial_guard: serial::ScenarioSerialGuard) -> Result<()> {
-    let _serial = serial_guard;
-    let sandbox = TestSandbox::new("extensions-probe")?;
-    let Some(first) = start_cluster(&sandbox, Vec::new())? else {
-        return Ok(());
+/// Everything a second cluster needs to install the probe through the hook.
+struct ProbeAssets {
+    extra_env: Vec<(OsString, Option<OsString>)>,
+}
+
+/// Starts a plain cluster, packages the probe from its tree, and returns the
+/// environment that declares it. `None` means the cluster was skipped.
+fn prepare_probe(sandbox: &TestSandbox) -> Result<Option<ProbeAssets>> {
+    let Some(first) = start_cluster(sandbox, Vec::new())? else {
+        return Ok(None);
     };
     let (install_dir, version) = versioned_install_dir(&first)?;
     let out_dir = sandbox.install_dir().join("probe-assets");
@@ -170,22 +213,24 @@ fn hook_installs_a_loadable_extension(serial_guard: serial::ScenarioSerialGuard)
     let (cache_dir, bytes) = package_probe(&install_dir, &out_dir)?;
     let manifest = write_manifest(&out_dir, &version, &bytes)?;
     drop(first);
+    Ok(Some(ProbeAssets {
+        extra_env: vec![
+            (OsString::from("PG_EXTENSIONS"), Some(OsString::from(PROBE))),
+            (
+                OsString::from("PG_EXTENSIONS_MANIFEST"),
+                Some(OsString::from(manifest.as_str())),
+            ),
+            (
+                OsString::from("PG_EXTENSIONS_CACHE_DIR"),
+                Some(OsString::from(cache_dir.as_str())),
+            ),
+            (OsString::from("PG_EXTENSIONS_MANIFEST_SHA256"), None),
+        ],
+    }))
+}
 
-    let extra = vec![
-        (OsString::from("PG_EXTENSIONS"), Some(OsString::from(PROBE))),
-        (
-            OsString::from("PG_EXTENSIONS_MANIFEST"),
-            Some(OsString::from(manifest.as_str())),
-        ),
-        (
-            OsString::from("PG_EXTENSIONS_CACHE_DIR"),
-            Some(OsString::from(cache_dir.as_str())),
-        ),
-        (OsString::from("PG_EXTENSIONS_MANIFEST_SHA256"), None),
-    ];
-    let Some(cluster) = start_cluster(&sandbox, extra)? else {
-        return Ok(());
-    };
+/// Asserts the hook reported the probe and the server can load it.
+fn assert_probe_loaded(cluster: &pg_embedded_setup_unpriv::ClusterHandle) -> Result<()> {
     let installed = cluster.installed_extensions();
     ensure!(
         installed.len() == 1,
@@ -212,4 +257,54 @@ fn hook_installs_a_loadable_extension(serial_guard: serial::ScenarioSerialGuard)
         "the probe function must exist after CREATE EXTENSION"
     );
     Ok(())
+}
+
+/// The hook installs a fixture module that the server loads with `CREATE EXTENSION`.
+#[rstest::rstest]
+fn hook_installs_a_loadable_extension(serial_guard: serial::ScenarioSerialGuard) -> Result<()> {
+    let _serial = serial_guard;
+    let sandbox = TestSandbox::new("extensions-probe")?;
+    let Some(assets) = prepare_probe(&sandbox)? else {
+        return Ok(());
+    };
+    let Some(cluster) = start_cluster(&sandbox, assets.extra_env)? else {
+        return Ok(());
+    };
+    assert_probe_loaded(&cluster)
+}
+
+/// The async lifecycle runs the same hook and the server loads the module.
+#[cfg(feature = "async-api")]
+#[rstest::rstest]
+fn hook_installs_a_loadable_extension_async(
+    serial_guard: serial::ScenarioSerialGuard,
+) -> Result<()> {
+    let _serial = serial_guard;
+    let sandbox = TestSandbox::new("extensions-probe-async")?;
+    let Some(assets) = prepare_probe(&sandbox)? else {
+        return Ok(());
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let mut vars = sandbox.base_env();
+    vars.extend(assets.extra_env);
+    let outcome = sandbox.with_env(vars, || {
+        runtime.block_on(async { TestCluster::start_async().await })
+    });
+    let cluster = match outcome {
+        Ok(cluster) => cluster,
+        Err(err) => {
+            let message = err.to_string();
+            if let Some(reason) = cluster_skip_message(&message, Some(&format!("{err:?}"))) {
+                tracing::warn!("{reason}");
+                return Ok(());
+            }
+            return Err(eyre!("async cluster bootstrap failed: {err}"));
+        }
+    };
+    assert_probe_loaded(&cluster)?;
+    runtime
+        .block_on(cluster.stop_async())
+        .map_err(|err| eyre!("stop: {err}"))
 }

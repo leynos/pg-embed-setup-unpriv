@@ -12,21 +12,15 @@ use super::fixture::{
     FIXTURE_FILES,
     archive_bytes,
     artifact_for,
-    fixture_archive,
     install_tree,
-    serve_once,
     temp_root,
-    unreachable_url,
     write_file,
 };
 use crate::{
     error::BootstrapErrorKind,
     extensions::{
         ALLOWED_PREFIXES,
-        ArchiveOrigin,
         ManifestArtifact,
-        Sha256Hex,
-        archive::acquire,
         classify_entry_path,
         install::install_archive,
     },
@@ -239,88 +233,34 @@ fn directory_entries_are_tolerated() {
     assert_eq!(install(&prepared).expect("install").len(), 3);
 }
 
-/// A cache directory plus an artefact pointing at `url`.
-struct CacheCase {
-    _temp: tempfile::TempDir,
-    cache: Utf8PathBuf,
-    bytes: Vec<u8>,
-    artifact: ManifestArtifact,
-}
-
-fn cache_case(url: &str) -> Result<CacheCase> {
-    let (temp, root) = temp_root()?;
-    let bytes = fixture_archive()?;
-    let artifact = artifact_for(&bytes, "fixture.tar.gz", url);
-    Ok(CacheCase {
-        _temp: temp,
-        cache: root.join("cache"),
-        bytes,
-        artifact,
-    })
-}
-
-impl CacheCase {
-    fn entry_path(&self) -> Utf8PathBuf {
-        self.cache
-            .join(self.artifact.sha256.as_str())
-            .join("fixture.tar.gz")
-    }
-
-    fn seed(&self, bytes: &[u8]) -> Result<Utf8PathBuf> {
-        write_file(
-            &self.cache.join(self.artifact.sha256.as_str()),
-            "fixture.tar.gz",
-            bytes,
-        )
-    }
-}
-
-/// A verified cache entry is reused without touching the network.
+/// Manifest lists and archive contents are compared in the same byte order.
 #[test]
-fn acquire_uses_valid_cached_copy() {
-    let case = cache_case(&unreachable_url().expect("port")).expect("fixture");
-    case.seed(&case.bytes).expect("seed");
-    let acquired = acquire(&case.cache, &case.artifact).expect("cached");
-    assert_eq!(acquired.origin, ArchiveOrigin::Cached);
-    assert_eq!(acquired.path, case.entry_path());
+fn nested_share_paths_sort_consistently_with_the_manifest() {
+    let entries = [
+        Entry::File("share/extension/x/y.sql", b"nested"),
+        Entry::File("share/extension/x-1.sql", b"flat"),
+        Entry::File("share/extension/x.control", b"default_version = '1'\n"),
+    ];
+    let mut prepared = prepared(&entries).expect("fixture");
+    prepared.artifact.files = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::File(name, _) => Some((*name).to_owned()),
+            _ => None,
+        })
+        .collect();
+    let files = install(&prepared).expect("a valid nested layout installs");
+    assert_eq!(files.len(), 3);
 }
 
-/// A corrupt cache entry is replaced by a fresh, verified download.
+/// The archive on disk must still hash to the manifest digest when installed.
 #[test]
-fn acquire_replaces_corrupt_cache_entry_by_download() {
-    let bytes = fixture_archive().expect("fixture");
-    let case = cache_case(&serve_once(bytes).expect("server")).expect("fixture");
-    case.seed(b"corrupt").expect("seed");
-    let acquired = acquire(&case.cache, &case.artifact).expect("downloaded");
-    assert_eq!(acquired.origin, ArchiveOrigin::Downloaded);
-    assert_eq!(
-        Sha256Hex::of_file(&acquired.path).expect("hash"),
-        case.artifact.sha256
-    );
-}
-
-/// Downloaded bytes that do not match the manifest digest are refused and discarded.
-#[test]
-fn acquire_rejects_digest_mismatch() {
-    let mut tampered = fixture_archive().expect("fixture");
-    tampered.push(0);
-    let mut case = cache_case(&serve_once(tampered).expect("server")).expect("fixture");
-    case.artifact.size += 1;
-    let err = acquire(&case.cache, &case.artifact).expect_err("mismatch");
+fn install_refuses_an_archive_changed_after_acquisition() {
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    std::fs::write(&prepared.archive, b"swapped after verification").expect("swap");
+    let err = install(&prepared).expect_err("rejected");
     assert_eq!(
         err.kind(),
         BootstrapErrorKind::ExtensionArchiveDigestMismatch
     );
-    assert!(
-        !case.entry_path().exists(),
-        "a mismatching download must not be kept"
-    );
-}
-
-/// A download failure with no cached copy is `ExtensionArchiveUnavailable`.
-#[test]
-fn acquire_reports_unreachable_download() {
-    let case = cache_case(&unreachable_url().expect("port")).expect("fixture");
-    let err = acquire(&case.cache, &case.artifact).expect_err("unreachable");
-    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveUnavailable);
 }

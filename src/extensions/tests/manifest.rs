@@ -103,16 +103,22 @@ fn missing_required_field_is_invalid(#[case] pointer: &str) {
 #[case::file_with_slash(r#""file":"fixture.tar.gz""#, r#""file":"../fixture.tar.gz""#)]
 #[case::empty_files(r#""files":["#, r#""files":[],"ignored":["#)]
 #[case::bad_name(r#""name":"fixture""#, r#""name":"Fixture""#)]
-#[case::not_json(r#"{"schema_version""#, r#"{"schema_version""#)]
+#[case::plain_http_url(
+    r#""url":"https://example.invalid/fixture.tar.gz""#,
+    r#""url":"http://example.invalid/fixture.tar.gz""#
+)]
 fn malformed_manifest_is_invalid(#[case] needle: &str, #[case] replacement: &str) {
     let text = sample_manifest().expect("fixture");
-    let mutated = if needle == replacement {
-        String::from("not json at all")
-    } else {
-        assert!(text.contains(needle), "fixture must contain {needle}");
-        text.replacen(needle, replacement, 1)
-    };
+    assert!(text.contains(needle), "fixture must contain {needle}");
+    let mutated = text.replacen(needle, replacement, 1);
     let err = Manifest::parse(mutated.as_bytes()).expect_err("must be rejected");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionManifestInvalid);
+}
+
+/// Bytes that are not JSON at all are `ExtensionManifestInvalid`.
+#[test]
+fn non_json_manifest_is_invalid() {
+    let err = Manifest::parse(b"not json at all").expect_err("must be rejected");
     assert_eq!(err.kind(), BootstrapErrorKind::ExtensionManifestInvalid);
 }
 
