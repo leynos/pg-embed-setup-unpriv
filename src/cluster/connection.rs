@@ -196,6 +196,8 @@ mod tests {
             shutdown_timeout: Duration::from_secs(1),
             cleanup_mode: CleanupMode::default(),
             binary_cache_dir: None,
+            extensions: None,
+            installed_extensions: Vec::new(),
         }
     }
 

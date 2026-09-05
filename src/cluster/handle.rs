@@ -46,7 +46,12 @@ use super::{
     lifecycle::DatabaseName,
     temporary_database::TemporaryDatabase,
 };
-use crate::{TestBootstrapEnvironment, TestBootstrapSettings, error::BootstrapResult};
+use crate::{
+    TestBootstrapEnvironment,
+    TestBootstrapSettings,
+    error::BootstrapResult,
+    extensions::InstalledExtension,
+};
 
 /// Send-safe handle providing read-only access to a running `PostgreSQL` cluster.
 ///
@@ -134,6 +139,26 @@ impl ClusterHandle {
     /// ```
     #[must_use]
     pub const fn bootstrap(&self) -> &TestBootstrapSettings { &self.bootstrap }
+
+    /// Returns what the extension hook installed before the server started.
+    ///
+    /// Empty when no extensions were declared through `PG_EXTENSIONS`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pg_embedded_setup_unpriv::TestCluster;
+    ///
+    /// let (handle, _guard) = TestCluster::new_split()?;
+    /// for extension in handle.installed_extensions() {
+    ///     println!("{} {}", extension.name, extension.version);
+    /// }
+    /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
+    /// ```
+    #[must_use]
+    pub fn installed_extensions(&self) -> &[InstalledExtension] {
+        &self.bootstrap.installed_extensions
+    }
 
     /// Returns helper methods for constructing connection artefacts.
     ///

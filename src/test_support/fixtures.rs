@@ -88,6 +88,8 @@ pub fn dummy_settings(privileges: ExecutionPrivileges) -> TestBootstrapSettings 
         shutdown_timeout: Duration::from_secs(15),
         cleanup_mode: CleanupMode::default(),
         binary_cache_dir: None,
+        extensions: None,
+        installed_extensions: Vec::new(),
     }
 }
 

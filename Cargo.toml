@@ -112,6 +112,11 @@ path = "tests/test_cluster_fixture/mod.rs"
 required-features = ["cluster-unit-tests"]
 
 [[test]]
+name = "test_cluster_extensions"
+path = "tests/test_cluster_extensions.rs"
+required-features = ["cluster-unit-tests"]
+
+[[test]]
 name = "test_cluster_async"
 path = "tests/test_cluster_async.rs"
 required-features = ["async-api"]
@@ -150,6 +155,11 @@ rstest = "0.26"
 dashmap = "6.1.0"
 dirs = "6.0"
 sha2 = "0.11"
+# HTTP for the extension hook; the TLS backend matches postgresql_embedded's
+# default so the two share one stack.
+reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "native-tls"] }
+tar = "0.4.46"
+flate2 = "1.1.9"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.3", default-features = false, features = ["user", "fs"] }
