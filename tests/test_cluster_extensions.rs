@@ -48,6 +48,12 @@ use sandbox::TestSandbox;
 use serial::serial_guard;
 
 const PROBE: &str = "df12_probe";
+/// Shared-object suffix `PostgreSQL` uses on this platform.
+const MODULE_SUFFIX: &str = if cfg!(target_os = "macos") {
+    "dylib"
+} else {
+    "so"
+};
 
 /// Starts a cluster in the sandbox, treating known bootstrap limitations as a skip.
 fn start_cluster(
@@ -71,8 +77,9 @@ fn start_cluster(
 
 /// Packages `autoinc.so` from the running cluster's tree as the probe extension.
 fn package_probe(install_dir: &Utf8Path, out_dir: &Utf8Path) -> Result<(Utf8PathBuf, Vec<u8>)> {
-    let module = std::fs::read(install_dir.join("lib").join("autoinc.so"))
-        .context("read autoinc.so from the Theseus tree")?;
+    let module_name = format!("autoinc.{MODULE_SUFFIX}");
+    let module = std::fs::read(install_dir.join("lib").join(&module_name))
+        .with_context(|| format!("read {module_name} from the Theseus tree"))?;
     let control = format!(
         "comment = 'df12 probe'\ndefault_version = '1.0'\nmodule_pathname = \
          '$libdir/{PROBE}'\nrelocatable = true\n"
@@ -81,8 +88,9 @@ fn package_probe(install_dir: &Utf8Path, out_dir: &Utf8Path) -> Result<(Utf8Path
         "CREATE FUNCTION {PROBE}_autoinc() RETURNS trigger AS 'MODULE_PATHNAME', 'autoinc' \
          LANGUAGE C;\n"
     );
+    let probe_module = format!("lib/{PROBE}.{MODULE_SUFFIX}");
     let entries: [(&str, &[u8]); 3] = [
-        ("lib/df12_probe.so", &module),
+        (probe_module.as_str(), &module),
         ("share/extension/df12_probe.control", control.as_bytes()),
         ("share/extension/df12_probe--1.0.sql", sql.as_bytes()),
     ];
@@ -125,7 +133,7 @@ fn write_manifest(out_dir: &Utf8Path, version: &str, bytes: &[u8]) -> Result<Utf
                 "url": "http://127.0.0.1:9/unreachable/df12_probe.tar.gz",
                 "sha256": Sha256Hex::of_bytes(bytes).as_str(),
                 "size": bytes.len(),
-                "files": ["lib/df12_probe.so", "share/extension/df12_probe--1.0.sql", "share/extension/df12_probe.control"],
+                "files": [format!("lib/{PROBE}.{MODULE_SUFFIX}"), "share/extension/df12_probe--1.0.sql".to_owned(), "share/extension/df12_probe.control".to_owned()],
             }],
         }],
     });

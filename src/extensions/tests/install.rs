@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use camino::Utf8PathBuf;
+use color_eyre::eyre::Result;
 use proptest::prelude::*;
 use rstest::rstest;
 
@@ -22,12 +24,60 @@ use crate::{
     extensions::{
         ALLOWED_PREFIXES,
         ArchiveOrigin,
+        ManifestArtifact,
         Sha256Hex,
         archive::acquire,
         classify_entry_path,
         install::install_archive,
     },
 };
+
+/// A scratch tree with an archive written next to it and a matching artefact.
+struct Prepared {
+    _temp: tempfile::TempDir,
+    install_dir: Utf8PathBuf,
+    archive: Utf8PathBuf,
+    artifact: ManifestArtifact,
+}
+
+/// Builds the archive from `entries` and stages it beside a fresh tree.
+fn prepared(entries: &[Entry]) -> Result<Prepared> {
+    let (temp, root) = temp_root()?;
+    let install_dir = install_tree(&root)?;
+    let bytes = archive_bytes(entries)?;
+    let archive = write_file(&root, "fixture.tar.gz", &bytes)?;
+    let artifact = artifact_for(&bytes, "fixture.tar.gz", "unused");
+    Ok(Prepared {
+        _temp: temp,
+        install_dir,
+        archive,
+        artifact,
+    })
+}
+
+fn fixture_entries() -> Vec<Entry> {
+    FIXTURE_FILES
+        .iter()
+        .map(|(name, body)| Entry::File(name, body))
+        .collect()
+}
+
+/// Runs the install against a prepared tree and returns the report.
+fn install(prepared: &Prepared) -> crate::error::BootstrapResult<Vec<Utf8PathBuf>> {
+    install_archive(&prepared.archive, &prepared.artifact, &prepared.install_dir)
+}
+
+#[cfg(unix)]
+fn inode(path: &Utf8PathBuf) -> std::io::Result<u64> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(std::fs::metadata(path)?.ino())
+}
+
+#[cfg(unix)]
+fn mode(path: &Utf8PathBuf) -> std::io::Result<u32> {
+    use std::os::unix::fs::PermissionsExt;
+    Ok(std::fs::metadata(path)?.permissions().mode() & 0o777)
+}
 
 /// Only plain files directly under lib/ or under share/extension/ are accepted.
 #[rstest]
@@ -75,13 +125,8 @@ proptest! {
 /// A well-formed archive installs its files with the expected modes.
 #[test]
 fn install_archive_writes_files_with_modes() {
-    let (_temp, root) = temp_root().expect("fixture");
-    let install_dir = install_tree(&root).expect("fixture");
-    let bytes = fixture_archive().expect("fixture");
-    let archive = write_file(&root, "fixture.tar.gz", &bytes).expect("fixture");
-    let artifact = artifact_for(&bytes, "fixture.tar.gz", "unused");
-
-    let files = install_archive(&archive, &artifact, &install_dir).expect("install");
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    let files = install(&prepared).expect("install");
     let names: Vec<&str> = files.iter().map(|f| f.as_str()).collect();
     assert_eq!(
         names,
@@ -92,22 +137,21 @@ fn install_archive_writes_files_with_modes() {
         ]
     );
     for (name, body) in FIXTURE_FILES {
-        assert_eq!(std::fs::read(install_dir.join(name)).expect("read"), body);
+        assert_eq!(
+            std::fs::read(prepared.install_dir.join(name)).expect("read"),
+            body
+        );
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let so_mode = std::fs::metadata(install_dir.join("lib/fixture.so"))
-            .expect("meta")
-            .permissions()
-            .mode()
-            & 0o777;
-        let ctl_mode = std::fs::metadata(install_dir.join("share/extension/fixture.control"))
-            .expect("meta")
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!((so_mode, ctl_mode), (0o755, 0o644));
+        assert_eq!(
+            mode(&prepared.install_dir.join("lib/fixture.so")).expect("mode"),
+            0o755
+        );
+        assert_eq!(
+            mode(&prepared.install_dir.join("share/extension/fixture.control")).expect("mode"),
+            0o644
+        );
     }
 }
 
@@ -115,21 +159,16 @@ fn install_archive_writes_files_with_modes() {
 #[cfg(unix)]
 #[test]
 fn install_archive_is_idempotent() {
-    use std::os::unix::fs::MetadataExt;
-    let (_temp, root) = temp_root().expect("fixture");
-    let install_dir = install_tree(&root).expect("fixture");
-    let bytes = fixture_archive().expect("fixture");
-    let archive = write_file(&root, "fixture.tar.gz", &bytes).expect("fixture");
-    let artifact = artifact_for(&bytes, "fixture.tar.gz", "unused");
-    install_archive(&archive, &artifact, &install_dir).expect("first install");
-    let before = std::fs::metadata(install_dir.join("lib/fixture.so"))
-        .expect("meta")
-        .ino();
-    let files = install_archive(&archive, &artifact, &install_dir).expect("second install");
-    let after = std::fs::metadata(install_dir.join("lib/fixture.so"))
-        .expect("meta")
-        .ino();
-    assert_eq!(before, after, "an identical file must not be rewritten");
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    install(&prepared).expect("first install");
+    let module = prepared.install_dir.join("lib/fixture.so");
+    let before = inode(&module).expect("inode");
+    let files = install(&prepared).expect("second install");
+    assert_eq!(
+        before,
+        inode(&module).expect("inode"),
+        "an identical file must not be rewritten"
+    );
     assert_eq!(files.len(), 3, "the report still lists every file");
 }
 
@@ -137,28 +176,16 @@ fn install_archive_is_idempotent() {
 #[cfg(unix)]
 #[test]
 fn install_archive_replaces_changed_files_atomically() {
-    use std::os::unix::fs::MetadataExt;
-    let (_temp, root) = temp_root().expect("fixture");
-    let install_dir = install_tree(&root).expect("fixture");
-    write_file(&install_dir, "lib/fixture.so", b"old contents").expect("fixture");
-    let before = std::fs::metadata(install_dir.join("lib/fixture.so"))
-        .expect("meta")
-        .ino();
-    let bytes = fixture_archive().expect("fixture");
-    let archive = write_file(&root, "fixture.tar.gz", &bytes).expect("fixture");
-    let artifact = artifact_for(&bytes, "fixture.tar.gz", "unused");
-    install_archive(&archive, &artifact, &install_dir).expect("install");
-    let after = std::fs::metadata(install_dir.join("lib/fixture.so"))
-        .expect("meta")
-        .ino();
-    assert_ne!(before, after, "the shared object must land on a new inode");
-}
-
-fn fixture_entries() -> Vec<Entry> {
-    FIXTURE_FILES
-        .iter()
-        .map(|(name, body)| Entry::File(name, body))
-        .collect()
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    let module = prepared.install_dir.join("lib/fixture.so");
+    write_file(&prepared.install_dir, "lib/fixture.so", b"old contents").expect("seed");
+    let before = inode(&module).expect("inode");
+    install(&prepared).expect("install");
+    assert_ne!(
+        before,
+        inode(&module).expect("inode"),
+        "the shared object must land on a new inode"
+    );
 }
 
 /// Every forbidden entry is `ExtensionArchiveInvalid` and nothing is written.
@@ -170,22 +197,17 @@ fn fixture_entries() -> Vec<Entry> {
 #[case::third_prefix(Entry::File("include/server/x.h", b"x"))]
 #[case::extra_file(Entry::File("lib/extra.so", b"x"))]
 fn forbidden_entries_are_invalid_and_write_nothing(#[case] extra: Entry) {
-    let (_temp, root) = temp_root().expect("fixture");
-    let install_dir = install_tree(&root).expect("fixture");
     let mut entries = fixture_entries();
     entries.push(extra);
-    let bytes = archive_bytes(&entries).expect("fixture");
-    let archive = write_file(&root, "bad.tar.gz", &bytes).expect("fixture");
-    let artifact = artifact_for(&bytes, "bad.tar.gz", "unused");
-
-    let err = install_archive(&archive, &artifact, &install_dir).expect_err("rejected");
+    let prepared = prepared(&entries).expect("fixture");
+    let err = install(&prepared).expect_err("rejected");
     assert_eq!(
         err.kind(),
         BootstrapErrorKind::ExtensionArchiveInvalid,
         "{err}"
     );
     assert!(
-        !install_dir.join("lib/fixture.so").exists(),
+        !prepared.install_dir.join("lib/fixture.so").exists(),
         "validation must finish before any file is written"
     );
 }
@@ -193,14 +215,10 @@ fn forbidden_entries_are_invalid_and_write_nothing(#[case] extra: Entry) {
 /// An archive missing a file the manifest lists is invalid.
 #[test]
 fn archive_missing_manifest_file_is_invalid() {
-    let (_temp, root) = temp_root().expect("fixture");
-    let install_dir = install_tree(&root).expect("fixture");
     let mut entries = fixture_entries();
     entries.pop();
-    let bytes = archive_bytes(&entries).expect("fixture");
-    let archive = write_file(&root, "short.tar.gz", &bytes).expect("fixture");
-    let artifact = artifact_for(&bytes, "short.tar.gz", "unused");
-    let err = install_archive(&archive, &artifact, &install_dir).expect_err("rejected");
+    let prepared = prepared(&entries).expect("fixture");
+    let err = install(&prepared).expect_err("rejected");
     assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveInvalid);
     assert!(
         err.to_string().contains("differ from the manifest"),
@@ -211,95 +229,90 @@ fn archive_missing_manifest_file_is_invalid() {
 /// Directory entries are tolerated; the files under them still install.
 #[test]
 fn directory_entries_are_tolerated() {
-    let (_temp, root) = temp_root().expect("fixture");
-    let install_dir = install_tree(&root).expect("fixture");
     let mut entries = vec![
         Entry::Dir("lib/"),
         Entry::Dir("share/"),
         Entry::Dir("share/extension/"),
     ];
     entries.extend(fixture_entries());
-    let bytes = archive_bytes(&entries).expect("fixture");
-    let archive = write_file(&root, "dirs.tar.gz", &bytes).expect("fixture");
-    let artifact = artifact_for(&bytes, "dirs.tar.gz", "unused");
-    let files = install_archive(&archive, &artifact, &install_dir).expect("install");
-    assert_eq!(files.len(), 3);
+    let prepared = prepared(&entries).expect("fixture");
+    assert_eq!(install(&prepared).expect("install").len(), 3);
+}
+
+/// A cache directory plus an artefact pointing at `url`.
+struct CacheCase {
+    _temp: tempfile::TempDir,
+    cache: Utf8PathBuf,
+    bytes: Vec<u8>,
+    artifact: ManifestArtifact,
+}
+
+fn cache_case(url: &str) -> Result<CacheCase> {
+    let (temp, root) = temp_root()?;
+    let bytes = fixture_archive()?;
+    let artifact = artifact_for(&bytes, "fixture.tar.gz", url);
+    Ok(CacheCase {
+        _temp: temp,
+        cache: root.join("cache"),
+        bytes,
+        artifact,
+    })
+}
+
+impl CacheCase {
+    fn entry_path(&self) -> Utf8PathBuf {
+        self.cache
+            .join(self.artifact.sha256.as_str())
+            .join("fixture.tar.gz")
+    }
+
+    fn seed(&self, bytes: &[u8]) -> Result<Utf8PathBuf> {
+        write_file(
+            &self.cache.join(self.artifact.sha256.as_str()),
+            "fixture.tar.gz",
+            bytes,
+        )
+    }
 }
 
 /// A verified cache entry is reused without touching the network.
 #[test]
 fn acquire_uses_valid_cached_copy() {
-    let (_temp, root) = temp_root().expect("fixture");
-    let cache = root.join("cache");
-    let bytes = fixture_archive().expect("fixture");
-    let artifact = artifact_for(
-        &bytes,
-        "fixture.tar.gz",
-        &unreachable_url().expect("fixture"),
-    );
-    write_file(
-        &cache.join(artifact.sha256.as_str()),
-        "fixture.tar.gz",
-        &bytes,
-    )
-    .expect("fixture");
-    let acquired = acquire(&cache, &artifact).expect("cached");
+    let case = cache_case(&unreachable_url().expect("port")).expect("fixture");
+    case.seed(&case.bytes).expect("seed");
+    let acquired = acquire(&case.cache, &case.artifact).expect("cached");
     assert_eq!(acquired.origin, ArchiveOrigin::Cached);
-    assert_eq!(
-        acquired.path,
-        cache.join(artifact.sha256.as_str()).join("fixture.tar.gz")
-    );
+    assert_eq!(acquired.path, case.entry_path());
 }
 
 /// A corrupt cache entry is replaced by a fresh, verified download.
 #[test]
 fn acquire_replaces_corrupt_cache_entry_by_download() {
-    let (_temp, root) = temp_root().expect("fixture");
-    let cache = root.join("cache");
     let bytes = fixture_archive().expect("fixture");
-    let artifact = artifact_for(
-        &bytes,
-        "fixture.tar.gz",
-        &serve_once(bytes.clone()).expect("fixture"),
-    );
-    write_file(
-        &cache.join(artifact.sha256.as_str()),
-        "fixture.tar.gz",
-        b"corrupt",
-    )
-    .expect("fixture");
-    let acquired = acquire(&cache, &artifact).expect("downloaded");
+    let case = cache_case(&serve_once(bytes).expect("server")).expect("fixture");
+    case.seed(b"corrupt").expect("seed");
+    let acquired = acquire(&case.cache, &case.artifact).expect("downloaded");
     assert_eq!(acquired.origin, ArchiveOrigin::Downloaded);
     assert_eq!(
         Sha256Hex::of_file(&acquired.path).expect("hash"),
-        artifact.sha256
+        case.artifact.sha256
     );
 }
 
 /// Downloaded bytes that do not match the manifest digest are refused and discarded.
 #[test]
 fn acquire_rejects_digest_mismatch() {
-    let (_temp, root) = temp_root().expect("fixture");
-    let cache = root.join("cache");
-    let bytes = fixture_archive().expect("fixture");
-    let mut tampered = bytes.clone();
+    let mut tampered = fixture_archive().expect("fixture");
     tampered.push(0);
-    let mut artifact = artifact_for(
-        &bytes,
-        "fixture.tar.gz",
-        &serve_once(tampered).expect("fixture"),
-    );
-    artifact.size += 1;
-    let err = acquire(&cache, &artifact).expect_err("mismatch");
+    let mut case = cache_case(&serve_once(tampered).expect("server")).expect("fixture");
+    case.artifact.size += 1;
+    let err = acquire(&case.cache, &case.artifact).expect_err("mismatch");
     assert_eq!(
         err.kind(),
         BootstrapErrorKind::ExtensionArchiveDigestMismatch
     );
     assert!(
-        !cache
-            .join(artifact.sha256.as_str())
-            .join("fixture.tar.gz")
-            .exists(),
+        !case.entry_path().exists(),
         "a mismatching download must not be kept"
     );
 }
@@ -307,14 +320,7 @@ fn acquire_rejects_digest_mismatch() {
 /// A download failure with no cached copy is `ExtensionArchiveUnavailable`.
 #[test]
 fn acquire_reports_unreachable_download() {
-    let (_temp, root) = temp_root().expect("fixture");
-    let cache = root.join("cache");
-    let bytes = fixture_archive().expect("fixture");
-    let artifact = artifact_for(
-        &bytes,
-        "fixture.tar.gz",
-        &unreachable_url().expect("fixture"),
-    );
-    let err = acquire(&cache, &artifact).expect_err("unreachable");
+    let case = cache_case(&unreachable_url().expect("port")).expect("fixture");
+    let err = acquire(&case.cache, &case.artifact).expect_err("unreachable");
     assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveUnavailable);
 }
