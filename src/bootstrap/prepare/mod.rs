@@ -11,7 +11,7 @@ use super::{
     mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error},
 };
 #[cfg(all(unix, privileged_unix_platform))]
-use crate::privileges::{default_paths_under, default_root_for};
+use crate::privileges::default_root_for;
 use crate::{
     PgEnvCfg,
     error::{BootstrapError, BootstrapResult},
@@ -20,6 +20,21 @@ use crate::{
 };
 
 const PGPASS_MODE: u32 = 0o600;
+
+/// Derives the default `install` and `data` directories under `root`.
+///
+/// # Examples
+/// ```
+/// use camino::Utf8Path;
+///
+/// let (install, data) = pg_embedded_setup_unpriv::default_paths_under(Utf8Path::new("/srv/pg"));
+/// assert_eq!(install.as_str(), "/srv/pg/install");
+/// assert_eq!(data.as_str(), "/srv/pg/data");
+/// ```
+#[must_use]
+pub fn default_paths_under(root: &Utf8Path) -> (Utf8PathBuf, Utf8PathBuf) {
+    (root.join("install"), root.join("data"))
+}
 
 #[cfg(all(unix, privileged_unix_platform))]
 mod root;
@@ -124,12 +139,28 @@ fn resolve_settings_paths_for_current_user(
     resolve_settings_paths_for_uid(settings, cfg, uid)
 }
 
+/// Platforms without a per-user default tree keep the `Settings` defaults,
+/// but `PG_EMBED_ROOT` still relocates both leaves when set.
 #[cfg(not(all(unix, privileged_unix_platform)))]
 fn resolve_settings_paths_for_current_user(
     settings: &mut Settings,
-    _cfg: &PgEnvCfg,
+    cfg: &PgEnvCfg,
 ) -> BootstrapResult<SettingsPaths> {
-    settings_paths_from_settings(settings, false, false)
+    let Some(root) = cfg.embed_root.as_ref() else {
+        return settings_paths_from_settings(settings, false, false);
+    };
+    let (install_dir, data_dir) = default_paths_under(root);
+    let mut install_default = false;
+    let mut data_default = false;
+    if cfg.runtime_dir.is_none() {
+        settings.installation_dir = install_dir.into_std_path_buf();
+        install_default = true;
+    }
+    if cfg.data_dir.is_none() {
+        settings.data_dir = data_dir.into_std_path_buf();
+        data_default = true;
+    }
+    settings_paths_from_settings(settings, install_default, data_default)
 }
 
 fn settings_paths_from_settings(

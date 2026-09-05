@@ -16,6 +16,7 @@ pub use env::{TestBootstrapEnvironment, find_timezone_dir};
 pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
 pub(crate) use mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
 use postgresql_embedded::Settings;
+pub use prepare::default_paths_under;
 use serde::{Deserialize, Serialize};
 
 use self::{

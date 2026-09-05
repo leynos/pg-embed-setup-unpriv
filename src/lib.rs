@@ -152,6 +152,7 @@ pub use bootstrap::{
     TestBootstrapEnvironment,
     TestBootstrapSettings,
     bootstrap_for_tests,
+    default_paths_under,
     detect_execution_privileges,
     find_timezone_dir,
     run,
@@ -214,7 +215,6 @@ pub use privileges::with_temp_euid;
 ))]
 pub use privileges::{
     default_paths_for,
-    default_paths_under,
     default_root_for,
     make_data_dir_private,
     make_dir_accessible,
