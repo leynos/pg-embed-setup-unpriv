@@ -143,9 +143,9 @@ fn then_files_unchanged(world: &ExtensionWorldFixture) -> Result<()> {
     Ok(())
 }
 
-#[then("the install fails with kind ExtensionArchiveUnavailable")]
-fn then_archive_unavailable(world: &ExtensionWorldFixture) -> Result<()> {
-    expect_kind(world, BootstrapErrorKind::ExtensionArchiveUnavailable)
+#[then("the install fails with kind ExtensionArchiveDigestMismatch")]
+fn then_archive_digest_mismatch(world: &ExtensionWorldFixture) -> Result<()> {
+    expect_kind(world, BootstrapErrorKind::ExtensionArchiveDigestMismatch)
 }
 
 #[then("the install fails with kind ExtensionUnavailable")]

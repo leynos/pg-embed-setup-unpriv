@@ -125,6 +125,12 @@ fn unknown_extension_is_unavailable() {
     let request = seeded_request(&scratch, &["fixture", "missing"]).expect("fixture");
     let err = install_extensions(&request, &scratch.install_dir).expect_err("missing name");
     assert_eq!(err.kind(), BootstrapErrorKind::ExtensionUnavailable);
+    for (name, _) in FIXTURE_FILES {
+        assert!(
+            !scratch.install_dir.join(name).exists(),
+            "{name} must not be written when a later name cannot be resolved"
+        );
+    }
 }
 
 /// A missing manifest is reported as unavailable.

@@ -53,6 +53,16 @@ fn version_from_dir_name(install_dir: &Utf8Path) -> Option<Version> {
 
 /// Parses `pg_config --version` output such as `PostgreSQL 17.11` or
 /// `PostgreSQL 16.4 (Debian 16.4-1)` into a three-part version.
+///
+/// # Examples
+///
+/// ```
+/// use pg_embedded_setup_unpriv::extensions::parse_pg_config_version;
+///
+/// let version = parse_pg_config_version("PostgreSQL 17.11\n").expect("parses");
+/// assert_eq!((version.major, version.minor, version.patch), (17, 11, 0));
+/// assert!(parse_pg_config_version("not a version").is_none());
+/// ```
 #[must_use]
 pub fn parse_pg_config_version(text: &str) -> Option<Version> {
     let token = text.split_whitespace().nth(1)?;

@@ -42,6 +42,8 @@ pub struct ExtensionWorld {
     pub cache_dir: Utf8PathBuf,
     pub manifest_path: Utf8PathBuf,
     pub archive_bytes: Vec<u8>,
+    /// URL the manifest points at; a loopback server that serves the archive.
+    pub archive_url: String,
     pub names: Vec<&'static str>,
     pub result: Option<Result<Vec<InstalledExtension>, BootstrapError>>,
     pub inode_before: Option<u64>,
@@ -77,9 +79,11 @@ impl ExtensionWorld {
         }
         let cache_dir = root.join("ext-cache");
         let archive_bytes = fixture_archive(false)?;
+        let archive_url = serve_forever(archive_bytes.clone())?;
         let mut world = Self {
             _temp: temp,
             install_dir,
+            archive_url,
             cache_dir,
             manifest_path: root.join("manifest.json"),
             archive_bytes,
@@ -99,10 +103,13 @@ impl ExtensionWorld {
     /// Returns an error when the files cannot be written.
     pub fn publish(&mut self, digest_override: Option<Sha256Hex>) -> Result<()> {
         let real_digest = Sha256Hex::of_bytes(&self.archive_bytes);
+        let is_seeded = digest_override.is_none();
         let recorded = digest_override.unwrap_or_else(|| real_digest.clone());
-        let entry_dir = self.cache_dir.join(real_digest.as_str());
+        let entry_dir = self.cache_dir.join(recorded.as_str());
         std::fs::create_dir_all(&entry_dir)?;
-        std::fs::write(entry_dir.join("fixture.tar.gz"), &self.archive_bytes)?;
+        if is_seeded {
+            std::fs::write(entry_dir.join("fixture.tar.gz"), &self.archive_bytes)?;
+        }
         let files: Vec<&str> = FIXTURE_FILES.iter().map(|(name, _)| *name).collect();
         let manifest = serde_json::json!({
             "schema_version": 1,
@@ -121,7 +128,7 @@ impl ExtensionWorld {
                     "postgresql": PG_VERSION,
                     "target": compile_target(),
                     "file": "fixture.tar.gz",
-                    "url": "http://127.0.0.1:9/unreachable/fixture.tar.gz",
+                    "url": self.archive_url,
                     "sha256": recorded.as_str(),
                     "size": self.archive_bytes.len(),
                     "files": files,
@@ -221,10 +228,51 @@ pub fn inode_of(path: &Utf8Path) -> Result<u64> {
     Ok(std::fs::metadata(path)?.ino())
 }
 
-/// Non-Unix stand-in: identity cannot be observed, so report zero.
+/// Non-Unix stand-in: a rename-into-place creates a new file, so the
+/// creation timestamp changes when the installer rewrites a file.
 ///
 /// # Errors
 ///
-/// Never fails.
+/// Returns an error when the file cannot be inspected or has no creation time.
 #[cfg(not(unix))]
-pub fn inode_of(_path: &Utf8Path) -> Result<u64> { Ok(0) }
+pub fn inode_of(path: &Utf8Path) -> Result<u64> {
+    let created = std::fs::metadata(path)?.created()?;
+    let nanos = created
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|err| eyre!("creation time before the epoch: {err}"))?
+        .as_nanos();
+    u64::try_from(nanos).map_err(|_| eyre!("creation time does not fit in u64"))
+}
+
+/// Serves `body` to every HTTP request on a loopback port for the life of the
+/// process and returns the URL. The server thread is detached; the test
+/// process exit reaps it.
+///
+/// # Errors
+///
+/// Returns an error when the loopback port cannot be bound.
+pub fn serve_forever(body: Vec<u8>) -> Result<String> {
+    use std::{io::Read, net::TcpListener};
+    let listener = TcpListener::bind("127.0.0.1:0").context("bind loopback")?;
+    let port = listener.local_addr().context("local addr")?.port();
+    std::thread::spawn(move || {
+        for incoming in listener.incoming() {
+            let Ok(mut stream) = incoming else {
+                return;
+            };
+            let mut request = [0_u8; 4096];
+            if stream.read(&mut request).is_err() {
+                continue;
+            }
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            // A client that hangs up early is not this fixture's concern.
+            let _served = stream
+                .write_all(head.as_bytes())
+                .and_then(|()| stream.write_all(&body));
+        }
+    });
+    Ok(format!("http://127.0.0.1:{port}/fixture.tar.gz"))
+}
