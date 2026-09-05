@@ -60,6 +60,7 @@ use color_eyre::eyre::Report;
 use tracing::info;
 
 pub use self::{
+    archive::is_permitted_url,
     config::{ExtensionCacheConfig, resolve_extension_cache_dir},
     digest::{InvalidDigest, Sha256Hex},
     install::{ALLOWED_PREFIXES, classify_entry_path},
@@ -72,7 +73,7 @@ pub use self::{
         SUPPORTED_SCHEMA_VERSION,
     },
     name::ExtensionName,
-    version::running_version,
+    version::{parse_pg_config_version, running_version},
 };
 use crate::error::{BootstrapError, BootstrapErrorKind, BootstrapResult};
 
@@ -167,10 +168,17 @@ pub(crate) const fn extension_error(kind: BootstrapErrorKind, report: Report) ->
 /// its files are validated in full before any file is written. Re-installing
 /// an archive that is already in place is a reporting no-op.
 ///
-/// The function is synchronous. When called from inside a Tokio runtime it
-/// performs the work on a scoped helper thread so the blocking HTTP client
-/// never runs on an executor thread; see [`install_extensions_async`] for the
-/// `spawn_blocking` form.
+/// Every requested name is resolved against the manifest before any archive
+/// is acquired or written, so an unknown name or an unmatched version fails
+/// with nothing on disk; a failure while acquiring or writing a later archive
+/// leaves the earlier archives installed and names them in the error.
+///
+/// The function is synchronous and blocks the calling thread for the whole
+/// install. When called from inside a Tokio runtime it moves the work to a
+/// scoped helper thread so the blocking HTTP client never runs on an
+/// executor thread, but the calling task still waits; on a current-thread
+/// runtime that parks the only worker, so async code should prefer
+/// [`install_extensions_async`], which uses `spawn_blocking`.
 ///
 /// # Errors
 ///
@@ -253,42 +261,62 @@ fn install_extensions_blocking(
     request: &ExtensionRequest,
     install_dir: &Utf8Path,
 ) -> BootstrapResult<Vec<InstalledExtension>> {
+    let span = tracing::info_span!(
+        target: LOG_TARGET,
+        "install_extensions",
+        install_dir = %install_dir,
+        names = request.names.len()
+    );
+    let _entered = span.enter();
     let manifest = manifest::load(&request.manifest)?;
     let running = running_version(install_dir)?;
-    let context = InstallContext {
-        request,
-        manifest: &manifest,
-        running: &running,
-        install_dir,
-    };
+    let selections = select_all(request, &manifest, &running)?;
     request
         .names
         .iter()
-        .map(|name| install_one(&context, name))
+        .zip(selections)
+        .map(|(name, selection)| install_one(request, install_dir, name, selection))
         .collect()
 }
 
-/// Inputs shared by every extension installed in one run.
-struct InstallContext<'a> {
-    request: &'a ExtensionRequest,
+/// Resolves every requested name before anything is acquired or written.
+fn select_all<'a>(
+    request: &ExtensionRequest,
     manifest: &'a Manifest,
-    running: &'a postgresql_embedded::Version,
-    install_dir: &'a Utf8Path,
+    running: &postgresql_embedded::Version,
+) -> BootstrapResult<Vec<manifest::Selection<'a>>> {
+    request
+        .names
+        .iter()
+        .map(|name| {
+            let query = ArtifactQuery {
+                name,
+                running,
+                target: compile_target(),
+            };
+            manifest.select(query, &request.manifest)
+        })
+        .collect()
 }
 
-/// Selects, acquires and installs one extension.
+/// Acquires and installs one already-selected extension.
 fn install_one(
-    context: &InstallContext<'_>,
+    request: &ExtensionRequest,
+    install_dir: &Utf8Path,
     name: &ExtensionName,
+    selection: manifest::Selection<'_>,
 ) -> BootstrapResult<InstalledExtension> {
-    let query = ArtifactQuery {
-        name,
-        running: context.running,
-        target: compile_target(),
-    };
-    let selection = context.manifest.select(query, &context.request.manifest)?;
-    let acquired = archive::acquire(&context.request.cache_dir, selection.artifact)?;
-    let files = install::install_archive(&acquired.path, selection.artifact, context.install_dir)?;
+    tracing::debug!(
+        target: LOG_TARGET,
+        name = %name,
+        version = %selection.extension.version,
+        postgresql = %selection.artifact.postgresql,
+        target = %selection.artifact.target,
+        file = %selection.artifact.file,
+        "selected extension artefact"
+    );
+    let acquired = archive::acquire(&request.cache_dir, selection.artifact)?;
+    let files = install::install_archive(&acquired.path, selection.artifact, install_dir)?;
     let installed = InstalledExtension {
         name: name.clone(),
         version: selection.extension.version.clone(),

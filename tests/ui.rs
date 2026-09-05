@@ -64,3 +64,18 @@ mod observability_surface;
 #[test]
 #[cfg(windows)]
 fn observability_surface_smoke_compiles() { observability_surface::verify_surface(); }
+
+#[test]
+#[cfg(not(windows))]
+fn extensions_public_surface_compiles() {
+    let tests = trybuild::TestCases::new();
+    tests.pass("tests/ui/pass/extensions_compile_target.rs");
+}
+
+#[cfg(windows)]
+#[path = "ui/pass/extensions_compile_target.rs"]
+mod extensions_compile_target;
+
+#[test]
+#[cfg(windows)]
+fn extensions_public_surface_smoke_compiles() { extensions_compile_target::main() }

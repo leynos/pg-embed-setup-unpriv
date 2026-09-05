@@ -86,21 +86,54 @@ struct PlannedFile {
 
 /// Validates the archive at `path` and installs its files under `install_dir`.
 ///
-/// Returns the installed paths relative to the install root, sorted.
+/// The archive is read into memory once and its digest checked against the
+/// manifest at that moment, so the bytes that are validated are exactly the
+/// bytes that are written; a concurrent change to the cached file cannot
+/// slip between the two passes. Returns the installed paths relative to the
+/// install root, sorted.
 pub(super) fn install_archive(
     path: &Utf8Path,
     artifact: &ManifestArtifact,
     install_dir: &Utf8Path,
 ) -> BootstrapResult<Vec<Utf8PathBuf>> {
-    let planned = plan(path, artifact)?;
-    write_all(path, &planned, install_dir)?;
+    let bytes = read_verified(path, artifact)?;
+    let planned = plan(path, &bytes, artifact)?;
+    write_all(path, &bytes, &planned, install_dir)?;
+    tracing::info!(
+        target: super::LOG_TARGET,
+        archive = %path,
+        files = planned.len(),
+        install_dir = %install_dir,
+        "installed extension archive"
+    );
     Ok(planned.into_iter().map(|file| file.relative).collect())
 }
 
+/// Reads the archive and confirms it still hashes to the manifest digest.
+fn read_verified(path: &Utf8Path, artifact: &ManifestArtifact) -> BootstrapResult<Vec<u8>> {
+    let bytes =
+        fs::read(path).map_err(|err| invalid(path, &format!("cannot read archive: {err}")))?;
+    let actual = Sha256Hex::of_bytes(&bytes);
+    if actual != artifact.sha256 {
+        return Err(extension_error(
+            BootstrapErrorKind::ExtensionArchiveDigestMismatch,
+            eyre!(
+                "extension archive {path} hashes to {actual} but the manifest records {}",
+                artifact.sha256
+            ),
+        ));
+    }
+    Ok(bytes)
+}
+
 /// Pass one: read every entry and validate without writing.
-fn plan(path: &Utf8Path, artifact: &ManifestArtifact) -> BootstrapResult<Vec<PlannedFile>> {
+fn plan(
+    path: &Utf8Path,
+    bytes: &[u8],
+    artifact: &ManifestArtifact,
+) -> BootstrapResult<Vec<PlannedFile>> {
     let mut files: Vec<PlannedFile> = Vec::new();
-    let mut reader = open_archive(path)?;
+    let mut reader = open_archive(bytes);
     for entry_result in reader.entries()? {
         let entry =
             entry_result.map_err(|err| invalid(path, &format!("unreadable entry: {err}")))?;
@@ -113,7 +146,8 @@ fn plan(path: &Utf8Path, artifact: &ManifestArtifact) -> BootstrapResult<Vec<Pla
             files.push(file);
         }
     }
-    files.sort_by(|a, b| a.relative.cmp(&b.relative));
+    // Byte order, matching how the manifest list is sorted below.
+    files.sort_by(|a, b| a.relative.as_str().cmp(b.relative.as_str()));
     check_against_manifest(path, &files, artifact)?;
     Ok(files)
 }
@@ -168,12 +202,13 @@ fn check_against_manifest(
 /// Pass two: write every planned file.
 fn write_all(
     path: &Utf8Path,
+    bytes: &[u8],
     planned: &[PlannedFile],
     install_dir: &Utf8Path,
 ) -> BootstrapResult<()> {
     let owner = tree_owner(install_dir)?;
     let mut written: Vec<Utf8PathBuf> = Vec::new();
-    let mut reader = open_archive(path)?;
+    let mut reader = open_archive(bytes);
     for entry_result in reader.entries()? {
         let mut entry =
             entry_result.map_err(|err| invalid(path, &format!("unreadable entry: {err}")))?;
@@ -183,11 +218,11 @@ fn write_all(
         let Some(plan) = planned.iter().find(|known| known.relative == file) else {
             continue;
         };
-        let mut bytes = Vec::new();
+        let mut contents = Vec::new();
         entry
-            .read_to_end(&mut bytes)
+            .read_to_end(&mut contents)
             .map_err(|err| invalid(path, &format!("cannot read {}: {err}", plan.relative)))?;
-        write_file(install_dir, plan, &bytes, owner)
+        write_file(install_dir, plan, &contents, owner)
             .map_err(|err| install_failed(&plan.relative, &written, err))?;
         written.push(plan.relative.clone());
     }
@@ -281,24 +316,24 @@ fn apply_owner(path: &Path, owner: Owner) -> Result<(), Report> {
 #[cfg(not(unix))]
 fn apply_owner(_path: &Path, _owner: Owner) -> Result<(), Report> { Ok(()) }
 
-type Entries<'a> = tar::Entries<'a, GzDecoder<fs::File>>;
+/// Entry iterator over an in-memory archive: `'r` is the reader borrow, `'b`
+/// the archive bytes.
+type Entries<'r, 'b> = tar::Entries<'r, GzDecoder<io::Cursor<&'b [u8]>>>;
 
-/// Opens the gzip tar so its entries can be iterated.
-fn open_archive(path: &Utf8Path) -> BootstrapResult<OpenArchive> {
-    let file = fs::File::open(path)
-        .map_err(|err| invalid(path, &format!("cannot open archive: {err}")))?;
-    Ok(OpenArchive {
-        archive: Archive::new(GzDecoder::new(file)),
-    })
+/// Wraps the in-memory archive so its entries can be iterated.
+fn open_archive(bytes: &[u8]) -> OpenArchive<'_> {
+    OpenArchive {
+        archive: Archive::new(GzDecoder::new(io::Cursor::new(bytes))),
+    }
 }
 
 /// Holds the archive so its entries can be iterated by callers.
-struct OpenArchive {
-    archive: Archive<GzDecoder<fs::File>>,
+struct OpenArchive<'a> {
+    archive: Archive<GzDecoder<io::Cursor<&'a [u8]>>>,
 }
 
-impl OpenArchive {
-    fn entries(&mut self) -> BootstrapResult<Entries<'_>> {
+impl<'b> OpenArchive<'b> {
+    fn entries(&mut self) -> BootstrapResult<Entries<'_, 'b>> {
         self.archive.entries().map_err(|err| {
             extension_error(
                 BootstrapErrorKind::ExtensionArchiveInvalid,
