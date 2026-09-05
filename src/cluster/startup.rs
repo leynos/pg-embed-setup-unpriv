@@ -13,6 +13,7 @@ use tracing::info;
 use super::worker_invoker::AsyncInvoker;
 use super::{
     cache_integration,
+    extension_hook::{PostSetup, run_post_setup},
     installation,
     worker_invoker::WorkerInvoker as ClusterWorkerInvoker,
     worker_operation,
@@ -21,10 +22,15 @@ use crate::{
     ExecutionPrivileges,
     TestBootstrapSettings,
     cache::BinaryCacheConfig,
-    env::ScopedEnv,
     error::BootstrapResult,
     observability::LOG_TARGET,
 };
+
+#[path = "startup_setup_only.rs"]
+mod setup_only;
+pub(crate) use self::setup_only::setup_postgres_only;
+#[cfg(test)]
+pub(super) use self::setup_only::{setup_lifecycle, setup_with_privileges};
 
 #[derive(Clone, Copy)]
 enum LifecycleStep {
@@ -75,10 +81,17 @@ pub(super) fn start_postgres(
     let cache_hit =
         cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
 
+    let context = LifecycleContext {
+        runtime,
+        env_vars,
+        post: PostSetup {
+            cache_config,
+            cache_hit,
+        },
+    };
     let (is_managed_via_worker, postgres) =
-        handle_privilege_lifecycle(privileges, runtime, &mut bootstrap, env_vars)?;
+        handle_privilege_lifecycle(privileges, &context, &mut bootstrap)?;
 
-    populate_cache_on_miss(cache_hit, cache_config, &bootstrap);
     log_lifecycle_complete(privileges, is_managed_via_worker, cache_hit, false);
 
     Ok(StartupOutcome {
@@ -120,15 +133,12 @@ fn log_lifecycle_complete(
     );
 }
 
-/// Populates the cache after successful setup if it was a cache miss.
-fn populate_cache_on_miss(
-    cache_hit: bool,
-    cache_config: &BinaryCacheConfig,
-    bootstrap: &TestBootstrapSettings,
-) {
-    if !cache_hit {
-        cache_integration::try_populate_binary_cache(cache_config, &bootstrap.settings);
-    }
+/// Inputs shared by the setup and start steps of one lifecycle run.
+#[derive(Clone, Copy)]
+struct LifecycleContext<'a> {
+    runtime: &'a Runtime,
+    env_vars: &'a [(String, Option<String>)],
+    post: PostSetup<'a>,
 }
 
 /// Handles the privilege-aware lifecycle invocation.
@@ -138,16 +148,15 @@ fn populate_cache_on_miss(
 /// - Unprivileged execution: in-process (false, Some(embedded))
 fn handle_privilege_lifecycle(
     privileges: ExecutionPrivileges,
-    runtime: &Runtime,
+    context: &LifecycleContext<'_>,
     bootstrap: &mut TestBootstrapSettings,
-    env_vars: &[(String, Option<String>)],
 ) -> BootstrapResult<(bool, Option<PostgreSQL>)> {
     if privileges == ExecutionPrivileges::Root {
-        invoke_lifecycle_root(runtime, bootstrap, env_vars)?;
+        invoke_lifecycle_root(context, bootstrap)?;
         Ok((true, None))
     } else {
         let mut embedded = PostgreSQL::new(bootstrap.settings.clone());
-        invoke_lifecycle(runtime, bootstrap, env_vars, &mut embedded)?;
+        invoke_lifecycle(context, bootstrap, &mut embedded)?;
         Ok((false, prepare_postgres_handle(false, bootstrap, embedded)))
     }
 }
@@ -191,105 +200,36 @@ pub(super) fn prepare_postgres_handle(
 }
 
 /// Invokes the lifecycle for root-privileged execution via worker subprocess.
-pub(super) fn invoke_lifecycle_root(
-    runtime: &Runtime,
+///
+/// The post-setup hook (cache population and extension install) runs between
+/// `Setup` and `Start`.
+fn invoke_lifecycle_root(
+    context: &LifecycleContext<'_>,
     bootstrap: &mut TestBootstrapSettings,
-    env_vars: &[(String, Option<String>)],
 ) -> BootstrapResult<()> {
-    let setup_invoker = ClusterWorkerInvoker::new(runtime, bootstrap, env_vars);
+    let setup_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
     invoke_root_operation(&setup_invoker, LifecycleStep::Setup)?;
-    installation::refresh_worker_installation_dir(bootstrap);
-    let start_invoker = ClusterWorkerInvoker::new(runtime, bootstrap, env_vars);
+    run_post_setup(bootstrap, context.post)?;
+    let start_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
     invoke_root_operation(&start_invoker, LifecycleStep::Start)?;
     installation::refresh_worker_port(bootstrap)
 }
 
 /// Invokes the lifecycle for unprivileged in-process execution.
-pub(super) fn invoke_lifecycle(
-    runtime: &Runtime,
+///
+/// The post-setup hook (cache population and extension install) runs between
+/// `Setup` and `Start`.
+fn invoke_lifecycle(
+    context: &LifecycleContext<'_>,
     bootstrap: &mut TestBootstrapSettings,
-    env_vars: &[(String, Option<String>)],
     embedded: &mut PostgreSQL,
 ) -> BootstrapResult<()> {
-    let setup_invoker = ClusterWorkerInvoker::new(runtime, bootstrap, env_vars);
+    let setup_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
     invoke_unprivileged_operation(&setup_invoker, embedded, LifecycleStep::Setup)?;
-    installation::refresh_worker_installation_dir(bootstrap);
-    let start_invoker = ClusterWorkerInvoker::new(runtime, bootstrap, env_vars);
+    run_post_setup(bootstrap, context.post)?;
+    let start_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
     invoke_unprivileged_operation(&start_invoker, embedded, LifecycleStep::Start)?;
     installation::refresh_worker_port(bootstrap)
-}
-
-/// Performs `PostgreSQL` setup (download + `initdb`) without starting the server.
-///
-/// This entry point is intended for the CLI binary, which prepares the
-/// installation and data directory so that a subsequent `TestCluster::new()`
-/// can reuse the cached binaries without a redundant download.
-///
-/// The cache directory is resolved from the host environment *before*
-/// `ScopedEnv` is applied, matching the resolution order in
-/// `TestCluster::new_split()` so the CLI and test runs share the same cache.
-pub(crate) fn setup_postgres_only(
-    bootstrap: TestBootstrapSettings,
-) -> BootstrapResult<TestBootstrapSettings> {
-    // Resolve cache directory from the host environment before applying the
-    // scoped sandbox, matching the resolution order in TestCluster::new_split().
-    let cache_config = cache_config_from_bootstrap(&bootstrap);
-    let env_vars = bootstrap.environment.to_env();
-    let _env_guard = ScopedEnv::apply(&env_vars);
-
-    super::runtime::run_with_runtime("setup_postgres_only", move |runtime| {
-        setup_lifecycle(runtime, bootstrap, &env_vars, &cache_config)
-    })
-}
-
-/// Drives the setup-only lifecycle (download + `initdb`), populating the
-/// binary cache on a miss.
-fn setup_lifecycle(
-    runtime: &Runtime,
-    mut bootstrap: TestBootstrapSettings,
-    env_vars: &[(String, Option<String>)],
-    cache_config: &BinaryCacheConfig,
-) -> BootstrapResult<TestBootstrapSettings> {
-    let privileges = bootstrap.privileges;
-    log_lifecycle_start(privileges, &bootstrap, false);
-
-    let version_req = bootstrap.settings.version.clone();
-    let cache_hit =
-        cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
-
-    setup_with_privileges(privileges, runtime, &mut bootstrap, env_vars)?;
-    installation::refresh_worker_installation_dir(&mut bootstrap);
-    populate_cache_on_miss(cache_hit, cache_config, &bootstrap);
-    log_setup_complete(privileges, cache_hit);
-
-    Ok(bootstrap)
-}
-
-/// Runs the privilege-aware `Setup` operation only (no `Start`).
-fn setup_with_privileges(
-    privileges: ExecutionPrivileges,
-    runtime: &Runtime,
-    bootstrap: &mut TestBootstrapSettings,
-    env_vars: &[(String, Option<String>)],
-) -> BootstrapResult<()> {
-    if privileges == ExecutionPrivileges::Root {
-        let invoker = ClusterWorkerInvoker::new(runtime, bootstrap, env_vars);
-        invoke_root_operation(&invoker, LifecycleStep::Setup)
-    } else {
-        let mut embedded = PostgreSQL::new(bootstrap.settings.clone());
-        let invoker = ClusterWorkerInvoker::new(runtime, bootstrap, env_vars);
-        invoke_unprivileged_operation(&invoker, &mut embedded, LifecycleStep::Setup)
-    }
-}
-
-/// Logs completion of the setup-only lifecycle.
-fn log_setup_complete(privileges: ExecutionPrivileges, cache_hit: bool) {
-    info!(
-        target: LOG_TARGET,
-        privileges = ?privileges,
-        cache_hit,
-        "embedded postgres setup complete (server not started)"
-    );
 }
 
 // ============================================================================
@@ -311,14 +251,19 @@ pub(super) async fn start_postgres_async(
     let cache_hit =
         cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
 
+    let post = PostSetup {
+        cache_config,
+        cache_hit,
+    };
     let (is_managed_via_worker, postgres) = if privileges == ExecutionPrivileges::Root {
-        Box::pin(invoke_lifecycle_root_async(&mut bootstrap, env_vars)).await?;
+        Box::pin(invoke_lifecycle_root_async(&mut bootstrap, env_vars, post)).await?;
         (true, None)
     } else {
         let mut embedded = PostgreSQL::new(bootstrap.settings.clone());
         Box::pin(invoke_lifecycle_async(
             &mut bootstrap,
             env_vars,
+            post,
             &mut embedded,
         ))
         .await?;
@@ -328,7 +273,6 @@ pub(super) async fn start_postgres_async(
         )
     };
 
-    populate_cache_on_miss(cache_hit, cache_config, &bootstrap);
     log_lifecycle_complete(privileges, is_managed_via_worker, cache_hit, true);
     Ok(StartupOutcome {
         bootstrap,
@@ -339,9 +283,10 @@ pub(super) async fn start_postgres_async(
 
 /// Async variant of `invoke_lifecycle`.
 #[cfg(feature = "async-api")]
-pub(super) async fn invoke_lifecycle_async(
+async fn invoke_lifecycle_async(
     bootstrap: &mut TestBootstrapSettings,
     env_vars: &[(String, Option<String>)],
+    post: PostSetup<'_>,
     embedded: &mut PostgreSQL,
 ) -> BootstrapResult<()> {
     let invoker = AsyncInvoker::new(bootstrap, env_vars);
@@ -351,7 +296,7 @@ pub(super) async fn invoke_lifecycle_async(
         }),
     )
     .await?;
-    installation::refresh_worker_installation_dir(bootstrap);
+    super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
     Box::pin(
         start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
@@ -364,9 +309,10 @@ pub(super) async fn invoke_lifecycle_async(
 
 /// Async variant of `invoke_lifecycle_root`.
 #[cfg(feature = "async-api")]
-pub(super) async fn invoke_lifecycle_root_async(
+async fn invoke_lifecycle_root_async(
     bootstrap: &mut TestBootstrapSettings,
     env_vars: &[(String, Option<String>)],
+    post: PostSetup<'_>,
 ) -> BootstrapResult<()> {
     let setup_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual setup; this drives the invocation.
@@ -376,7 +322,7 @@ pub(super) async fn invoke_lifecycle_root_async(
         }),
     )
     .await?;
-    installation::refresh_worker_installation_dir(bootstrap);
+    super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual start; this drives the invocation.
     Box::pin(
