@@ -143,6 +143,7 @@ mod unix_tests {
         sys::stat::Mode,
         unistd::{Uid, User, geteuid},
     };
+    use rstest::rstest;
     use tempfile::tempdir;
 
     use super::{unix_user::ensure_pgpass_for_user, *};
@@ -165,28 +166,30 @@ mod unix_tests {
         assert!(paths.data_default);
     }
 
-    /// `PG_EMBED_ROOT` replaces the per-user base for both derived leaves.
-    #[test]
-    fn ensure_settings_paths_honours_embed_root() {
+    /// Resolves the default paths for a configuration under a fixed uid.
+    fn resolve(cfg: &PgEnvCfg) -> BootstrapResult<SettingsPaths> {
+        let mut settings = cfg.to_settings()?;
+        resolve_settings_paths_for_uid(&mut settings, cfg, Uid::from_raw(9999))
+    }
+
+    /// `PG_EMBED_ROOT` replaces the per-user base for both derived leaves,
+    /// which still count as defaults.
+    #[rstest]
+    #[case::install("/srv/project/pg/install", |paths: &SettingsPaths| (paths.install_dir.to_string(), paths.install_default))]
+    #[case::data("/srv/project/pg/data", |paths: &SettingsPaths| (paths.data_dir.to_string(), paths.data_default))]
+    fn ensure_settings_paths_honours_embed_root(
+        #[case] expected: &str,
+        #[case] pick: fn(&SettingsPaths) -> (String, bool),
+    ) {
         let cfg = PgEnvCfg {
             embed_root: Some(Utf8PathBuf::from("/srv/project/pg")),
             ..PgEnvCfg::default()
         };
-        let mut settings = cfg.to_settings().expect("default config should convert");
-
-        let paths = resolve_settings_paths_for_uid(&mut settings, &cfg, Uid::from_raw(9999))
-            .expect("settings paths");
-
-        assert_eq!(paths.install_dir.as_str(), "/srv/project/pg/install");
-        assert_eq!(paths.data_dir.as_str(), "/srv/project/pg/data");
-        assert!(
-            paths.install_default,
-            "the derived leaf still counts as a default"
-        );
-        assert!(paths.data_default);
+        let paths = resolve(&cfg).expect("settings paths");
+        assert_eq!(pick(&paths), (expected.to_owned(), true));
     }
 
-    /// Explicit leaf overrides win over the root-derived defaults.
+    /// An explicit leaf override wins over the root-derived default.
     #[test]
     fn explicit_leaves_win_over_embed_root() {
         let cfg = PgEnvCfg {
@@ -194,14 +197,15 @@ mod unix_tests {
             data_dir: Some(Utf8PathBuf::from("/elsewhere/data")),
             ..PgEnvCfg::default()
         };
-        let mut settings = cfg.to_settings().expect("default config should convert");
-
-        let paths = resolve_settings_paths_for_uid(&mut settings, &cfg, Uid::from_raw(9999))
-            .expect("settings paths");
-
-        assert_eq!(paths.install_dir.as_str(), "/srv/project/pg/install");
-        assert_eq!(paths.data_dir.as_str(), "/elsewhere/data");
-        assert!(!paths.data_default);
+        let paths = resolve(&cfg).expect("settings paths");
+        assert_eq!(
+            (
+                paths.install_dir.as_str(),
+                paths.data_dir.as_str(),
+                paths.data_default
+            ),
+            ("/srv/project/pg/install", "/elsewhere/data", false)
+        );
     }
 
     #[test]
