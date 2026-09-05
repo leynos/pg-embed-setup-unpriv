@@ -196,32 +196,89 @@ pub(super) fn manifest_json(name: &str, artifacts: &[ManifestArtifact]) -> Strin
     .to_string()
 }
 
-/// Serves `body` to exactly one HTTP request on a loopback port and returns
-/// the URL to fetch it from.
-pub(super) fn serve_once(body: Vec<u8>) -> Result<String> {
+/// One canned HTTP response for [`serve_sequence`].
+#[derive(Debug, Clone)]
+pub(super) struct CannedResponse {
+    /// Status line without the protocol, for example `200 OK`.
+    pub(super) status: &'static str,
+    /// Extra header lines, each without the trailing CRLF.
+    pub(super) headers: Vec<String>,
+    /// Response body.
+    pub(super) body: Vec<u8>,
+}
+
+impl CannedResponse {
+    pub(super) fn ok(body: Vec<u8>) -> Self {
+        Self {
+            status: "200 OK",
+            headers: Vec::new(),
+            body,
+        }
+    }
+
+    pub(super) fn status(status: &'static str) -> Self {
+        Self {
+            status,
+            headers: Vec::new(),
+            body: Vec::new(),
+        }
+    }
+
+    pub(super) fn redirect(location: &str) -> Self {
+        Self {
+            status: "302 Found",
+            headers: vec![format!("Location: {location}")],
+            body: Vec::new(),
+        }
+    }
+}
+
+/// Serves the canned responses to successive HTTP requests on a loopback port
+/// and returns the URL to fetch. Requests beyond the list get `500`.
+pub(super) fn serve_sequence(responses: Vec<CannedResponse>) -> Result<String> {
     let listener = TcpListener::bind("127.0.0.1:0").context("bind loopback")?;
     let port = listener.local_addr().context("local addr")?.port();
     thread::spawn(move || {
-        let Ok((mut stream, _)) = listener.accept() else {
-            return;
-        };
-        let mut request = [0_u8; 4096];
-        if stream.read(&mut request).is_err() {
-            return;
-        }
-        let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: \
-             application/octet-stream\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        if stream.write_all(head.as_bytes()).is_err() || stream.write_all(&body).is_err() {
-            return;
-        }
-        if stream.flush().is_err() {
-            // The client already has the bytes; nothing more to do.
+        let mut queue = responses.into_iter();
+        loop {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut request = [0_u8; 4096];
+            if stream.read(&mut request).is_err() {
+                return;
+            }
+            let response = queue
+                .next()
+                .unwrap_or_else(|| CannedResponse::status("500 Internal Server Error"));
+            let header_lines = response
+                .headers
+                .iter()
+                .fold(String::new(), |mut acc, header| {
+                    acc.push_str(header);
+                    acc.push_str("\r\n");
+                    acc
+                });
+            let head = format!(
+                "HTTP/1.1 {}\r\n{header_lines}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                response.status,
+                response.body.len()
+            );
+            let served = stream
+                .write_all(head.as_bytes())
+                .and_then(|()| stream.write_all(&response.body))
+                .and_then(|()| stream.flush());
+            if served.is_err() {
+                return;
+            }
         }
     });
     Ok(format!("http://127.0.0.1:{port}/fixture.tar.gz"))
+}
+
+/// Serves `body` to one HTTP request on a loopback port and returns the URL.
+pub(super) fn serve_once(body: Vec<u8>) -> Result<String> {
+    serve_sequence(vec![CannedResponse::ok(body)])
 }
 
 /// A URL nothing listens on, for download-failure paths.
