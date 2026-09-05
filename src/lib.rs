@@ -154,6 +154,7 @@ pub use bootstrap::{
     bootstrap_for_tests,
     detect_execution_privileges,
     find_timezone_dir,
+    reuse_existing_password,
     run,
 };
 use camino::Utf8PathBuf;

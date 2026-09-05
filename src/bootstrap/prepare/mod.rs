@@ -21,6 +21,9 @@ use crate::{
 
 const PGPASS_MODE: u32 = 0o600;
 
+mod password;
+pub use password::reuse_existing_password;
+
 #[cfg(all(unix, privileged_unix_platform))]
 mod root;
 #[cfg(all(unix, privileged_unix_platform))]
@@ -64,6 +67,12 @@ fn bootstrap_unprivileged(
     cfg: &PgEnvCfg,
 ) -> BootstrapResult<PreparedBootstrap> {
     let paths = resolve_settings_paths_for_current_user(&mut settings, cfg)?;
+    reuse_existing_password(
+        &mut settings,
+        &paths.data_dir,
+        &paths.password_file,
+        cfg.password.is_some(),
+    )?;
     log_sanitized_settings(&settings);
 
     ensure_parents_for_paths(&paths, ensure_parent_exists)?;

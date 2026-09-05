@@ -40,6 +40,12 @@ pub(super) fn bootstrap_with_root(
         .ok_or_else(|| color_eyre::eyre::eyre!("user 'nobody' not found"))?;
 
     let paths = resolve_settings_paths_for_uid(&mut settings, cfg, nobody_user.uid)?;
+    super::reuse_existing_password(
+        &mut settings,
+        &paths.data_dir,
+        &paths.password_file,
+        cfg.password.is_some(),
+    )?;
     log_sanitized_settings(&settings);
 
     ensure_parents_for_paths(&paths, |path| ensure_parent_for_user(path, &nobody_user))?;
