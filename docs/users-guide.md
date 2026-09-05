@@ -662,10 +662,10 @@ When the data directory already holds a cluster (its `PG_VERSION` marker is
 present) and `PG_PASSWORD` is not set, the bootstrap reads the superuser
 password back from the install tree's password file (`<install>/.pgpass`,
 which `initdb` was given) instead of generating a fresh one, so connections
-to the reused cluster succeed. If that file is missing or empty the bootstrap
-fails and names the data directory and the file: set `PG_PASSWORD` to the
-password that initialised the cluster, or remove the stale cluster. An
-explicit `PG_PASSWORD` always wins.
+to the reused cluster succeed. If that file is missing, unreadable or empty
+the bootstrap fails and names the data directory and the file: set
+`PG_PASSWORD` to the password that initialized the cluster, or remove the
+stale cluster. An explicit `PG_PASSWORD` always wins.
 
 ## Privilege detection and idempotence
 

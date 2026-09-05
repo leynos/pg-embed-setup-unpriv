@@ -31,8 +31,8 @@ const PG_VERSION_MARKER: &str = "PG_VERSION";
 /// # Errors
 ///
 /// Returns an error when the data directory holds a cluster but the password
-/// file is missing or unreadable, because the server that would start could
-/// not be logged in to.
+/// file is missing, unreadable or empty, because the server that would start
+/// could not be logged in to.
 ///
 /// # Examples
 ///
@@ -102,34 +102,54 @@ mod tests {
     //! Tests for password reuse against an existing cluster.
     use camino::Utf8PathBuf;
     use color_eyre::eyre::Result;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
 
     use super::*;
 
+    /// An empty data directory and the password-file path beside it.
     struct Scratch {
         _temp: tempfile::TempDir,
         data_dir: Utf8PathBuf,
         password_file: Utf8PathBuf,
     }
 
-    fn scratch(with_cluster: bool, stored: Option<&str>) -> Result<Scratch> {
+    impl Scratch {
+        /// Marks the data directory as an initialized cluster.
+        fn with_cluster(&self) -> Result<()> {
+            std::fs::write(self.data_dir.join(PG_VERSION_MARKER), "17\n")?;
+            Ok(())
+        }
+
+        /// Writes the stored password file.
+        fn with_stored(&self, value: &str) -> Result<()> {
+            std::fs::write(&self.password_file, value)?;
+            Ok(())
+        }
+    }
+
+    #[fixture]
+    fn scratch() -> Result<Scratch> {
         let temp = tempfile::tempdir()?;
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf())
             .map_err(|path| eyre!("non-UTF-8 tempdir {}", path.display()))?;
         let data_dir = root.join("data");
         std::fs::create_dir_all(&data_dir)?;
-        if with_cluster {
-            std::fs::write(data_dir.join(PG_VERSION_MARKER), "17\n")?;
-        }
-        let password_file = root.join(".pgpass");
-        if let Some(value) = stored {
-            std::fs::write(&password_file, value)?;
-        }
         Ok(Scratch {
             _temp: temp,
             data_dir,
-            password_file,
+            password_file: root.join(".pgpass"),
         })
+    }
+
+    /// Applies one case's on-disk state to a scratch directory.
+    fn arrange(scratch: &Scratch, with_cluster: bool, stored: Option<&str>) -> Result<()> {
+        if with_cluster {
+            scratch.with_cluster()?;
+        }
+        if let Some(value) = stored {
+            scratch.with_stored(value)?;
+        }
+        Ok(())
     }
 
     /// One reuse scenario: the on-disk state, the caller's choice, and the outcome.
@@ -146,8 +166,9 @@ mod tests {
     #[case::existing_cluster(ReuseCase { with_cluster: true, stored: Some("kept-secret\n"), explicit: false, expected_adopted: true, expected_password: "kept-secret" })]
     #[case::explicit_wins(ReuseCase { with_cluster: true, stored: Some("kept-secret"), explicit: true, expected_adopted: false, expected_password: "fresh" })]
     #[case::no_cluster(ReuseCase { with_cluster: false, stored: None, explicit: false, expected_adopted: false, expected_password: "fresh" })]
-    fn reuse_rules(#[case] case: ReuseCase) {
-        let scratch = scratch(case.with_cluster, case.stored).expect("scratch");
+    fn reuse_rules(scratch: Result<Scratch>, #[case] case: ReuseCase) {
+        let scratch = scratch.expect("scratch");
+        arrange(&scratch, case.with_cluster, case.stored).expect("arrange");
         let mut settings = Settings {
             password: "fresh".into(),
             ..Settings::default()
@@ -167,8 +188,13 @@ mod tests {
     #[rstest]
     #[case::missing(None, "is missing")]
     #[case::empty(Some(""), "is empty")]
-    fn missing_or_empty_password_file_fails(#[case] stored: Option<&str>, #[case] needle: &str) {
-        let scratch = scratch(true, stored).expect("scratch");
+    fn missing_or_empty_password_file_fails(
+        scratch: Result<Scratch>,
+        #[case] stored: Option<&str>,
+        #[case] needle: &str,
+    ) {
+        let scratch = scratch.expect("scratch");
+        arrange(&scratch, true, stored).expect("arrange");
         let mut settings = Settings::default();
         let err = reuse_existing_password(
             &mut settings,
