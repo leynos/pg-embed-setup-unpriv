@@ -31,4 +31,6 @@ mod extensions_compile_target;
 
 #[test]
 #[cfg(windows)]
-fn extensions_public_surface_smoke_compiles() { extensions_compile_target::main() }
+fn extensions_public_surface_smoke_compiles() {
+    extensions_compile_target::verify_surface().expect("extension surface should compile and run");
+}
