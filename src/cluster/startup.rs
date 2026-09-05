@@ -199,37 +199,41 @@ pub(super) fn prepare_postgres_handle(
     }
 }
 
+/// Runs `Setup`, the post-setup hook, `Start` and the port refresh, using
+/// `dispatch` to execute each step either via the worker or in-process.
+fn run_lifecycle_steps<F>(
+    context: &LifecycleContext<'_>,
+    bootstrap: &mut TestBootstrapSettings,
+    mut dispatch: F,
+) -> BootstrapResult<()>
+where
+    F: FnMut(&ClusterWorkerInvoker<'_>, LifecycleStep) -> BootstrapResult<()>,
+{
+    let setup_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
+    dispatch(&setup_invoker, LifecycleStep::Setup)?;
+    run_post_setup(bootstrap, context.post)?;
+    let start_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
+    dispatch(&start_invoker, LifecycleStep::Start)?;
+    installation::refresh_worker_port(bootstrap)
+}
+
 /// Invokes the lifecycle for root-privileged execution via worker subprocess.
-///
-/// The post-setup hook (cache population and extension install) runs between
-/// `Setup` and `Start`.
 fn invoke_lifecycle_root(
     context: &LifecycleContext<'_>,
     bootstrap: &mut TestBootstrapSettings,
 ) -> BootstrapResult<()> {
-    let setup_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
-    invoke_root_operation(&setup_invoker, LifecycleStep::Setup)?;
-    run_post_setup(bootstrap, context.post)?;
-    let start_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
-    invoke_root_operation(&start_invoker, LifecycleStep::Start)?;
-    installation::refresh_worker_port(bootstrap)
+    run_lifecycle_steps(context, bootstrap, invoke_root_operation)
 }
 
 /// Invokes the lifecycle for unprivileged in-process execution.
-///
-/// The post-setup hook (cache population and extension install) runs between
-/// `Setup` and `Start`.
 fn invoke_lifecycle(
     context: &LifecycleContext<'_>,
     bootstrap: &mut TestBootstrapSettings,
     embedded: &mut PostgreSQL,
 ) -> BootstrapResult<()> {
-    let setup_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
-    invoke_unprivileged_operation(&setup_invoker, embedded, LifecycleStep::Setup)?;
-    run_post_setup(bootstrap, context.post)?;
-    let start_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
-    invoke_unprivileged_operation(&start_invoker, embedded, LifecycleStep::Start)?;
-    installation::refresh_worker_port(bootstrap)
+    run_lifecycle_steps(context, bootstrap, |invoker, step| {
+        invoke_unprivileged_operation(invoker, embedded, step)
+    })
 }
 
 // ============================================================================
