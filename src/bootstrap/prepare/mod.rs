@@ -22,7 +22,7 @@ use crate::{
 const PGPASS_MODE: u32 = 0o600;
 
 mod password;
-pub use password::reuse_existing_password;
+pub use password::{PasswordReuseOutcome, reuse_existing_password, stored_cluster_password};
 
 #[cfg(all(unix, privileged_unix_platform))]
 mod root;
