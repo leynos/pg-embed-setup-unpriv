@@ -146,8 +146,8 @@ impl Manifest {
         Ok(())
     }
 
-    /// Selects the artefact for `name` matching the running major and minor
-    /// and `target`.
+    /// Selects the artefact for `name` matching the running `PostgreSQL` major
+    /// and `target`; the minor is not a match key.
     ///
     /// # Errors
     ///
@@ -231,10 +231,13 @@ pub fn artifact_version(artifact: &ManifestArtifact) -> Option<Version> {
     Version::parse(&artifact.postgresql).ok()
 }
 
+/// An archive built for one `PostgreSQL` major loads into every minor of that
+/// major: the server's `Pg_magic_func` block checks the major and the layout
+/// constants, not the minor, and modules built before 16.5 load into 16.15.
+/// The Theseus release in the manifest is therefore information, not a key.
 fn artifact_matches(artifact: &ManifestArtifact, running: &Version, target: &str) -> bool {
-    artifact_version(artifact).is_some_and(|built| {
-        built.major == running.major && built.minor == running.minor && artifact.target == target
-    })
+    artifact_version(artifact)
+        .is_some_and(|built| built.major == running.major && artifact.target == target)
 }
 
 fn no_artifact_report(
@@ -249,11 +252,10 @@ fn no_artifact_report(
         .map(|artifact| format!("{} on {}", artifact.postgresql, artifact.target))
         .collect();
     eyre!(
-        "manifest at {} has no {} archive for PostgreSQL {}.{} on {target}; it offers: {}",
+        "manifest at {} has no {} archive for PostgreSQL {} on {target}; it offers: {}",
         source.location(),
         extension.name,
         running.major,
-        running.minor,
         if offered.is_empty() {
             "nothing".to_owned()
         } else {
