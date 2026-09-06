@@ -67,6 +67,7 @@ pub fn resolve_extension_cache_dir() -> Utf8PathBuf {
         .unwrap_or_else(temp_cache_dir)
 }
 
+/// Reads an environment variable, treating blank values as unset.
 fn non_empty_env(key: &str) -> Option<String> {
     std::env::var(key)
         .ok()
@@ -74,11 +75,13 @@ fn non_empty_env(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// `~/.cache/pg-embedded/extensions` when the home directory is known.
 fn home_cache_dir() -> Option<Utf8PathBuf> {
     let home = Utf8PathBuf::from_path_buf(dirs::home_dir()?).ok()?;
     Some(home.join(".cache").join(CACHE_SUBDIR))
 }
 
+/// The last-resort cache directory under the platform temporary directory.
 fn temp_cache_dir() -> Utf8PathBuf {
     let temp: PathBuf = std::env::temp_dir().join("pg-embedded").join("extensions");
     Utf8PathBuf::from_path_buf(temp)
@@ -148,6 +151,7 @@ fn parse_names(raw: &str) -> BootstrapResult<Vec<ExtensionName>> {
     Ok(names)
 }
 
+/// Classifies the manifest location as a URL (digest required) or a path.
 fn parse_manifest_source(
     raw_location: Option<&str>,
     digest: Option<&str>,
@@ -189,11 +193,13 @@ fn parse_manifest_source(
     })
 }
 
+/// Parses `PG_EXTENSIONS_MANIFEST_SHA256`, mapping a bad digest to a config error.
 fn parse_digest(value: &str) -> BootstrapResult<Sha256Hex> {
     Sha256Hex::parse(value)
         .map_err(|err| config_error(&format!("PG_EXTENSIONS_MANIFEST_SHA256: {err}")))
 }
 
+/// Builds an `ExtensionConfigInvalid` error from a message.
 fn config_error(message: &str) -> crate::error::BootstrapError {
     extension_error(
         BootstrapErrorKind::ExtensionConfigInvalid,
