@@ -336,33 +336,6 @@ fn setup_with_privileges_root_dispatches_setup_only(
 }
 
 #[rstest]
-fn populate_cache_on_miss_only_populates_on_cache_miss(
-    #[from(cache_population_paths)] cache_population_paths_res: Result<CachePopulationPaths>,
-) -> Result<()> {
-    let cache_population_paths = cache_population_paths_res?;
-    let mut bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
-    bootstrap.settings.installation_dir = cache_population_paths
-        .install_dir
-        .clone()
-        .into_std_path_buf();
-    bootstrap.settings.data_dir = cache_population_paths.data_dir.into_std_path_buf();
-    let cache_config = BinaryCacheConfig::with_dir(cache_population_paths.cache_dir.clone());
-
-    populate_cache_on_miss(true, &cache_config, &bootstrap);
-    ensure!(
-        !cache_population_paths.marker_path.exists(),
-        "cache marker should remain absent on cache hit"
-    );
-
-    populate_cache_on_miss(false, &cache_config, &bootstrap);
-    ensure!(
-        cache_population_paths.marker_path.exists(),
-        "cache marker should be written on cache miss"
-    );
-    Ok(())
-}
-
-#[rstest]
 fn setup_postgres_only_inside_runtime_returns_recoverable_error(
     #[from(runtime_error_paths)] runtime_error_paths_res: Result<RuntimeErrorPaths>,
 ) -> Result<()> {
@@ -391,3 +364,6 @@ fn setup_postgres_only_inside_runtime_returns_recoverable_error(
     );
     Ok(())
 }
+
+#[path = "startup_extension_tests.rs"]
+mod extension_ordering;

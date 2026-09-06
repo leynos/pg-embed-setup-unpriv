@@ -656,6 +656,26 @@ let temp_db = cluster.temporary_database_from_template("test_db", "migrated_temp
 - Implicit drop (guard goes out of scope) — Best-effort drop with a warning
   logged on failure.
 
+## Prebuilt extensions
+
+Out-of-tree extensions such as `pgvector` are not part of the Theseus binaries.
+Declare them through the environment and the cluster installs digest-verified
+prebuilt archives before the server starts:
+
+```bash
+export PG_VERSION_REQ="=17.11.0"
+export PG_EXTENSIONS="vector"
+export PG_EXTENSIONS_MANIFEST="https://github.com/leynos/df12-pg-extensions/releases/download/v1.0.0/manifest.json"
+export PG_EXTENSIONS_MANIFEST_SHA256="<digest from manifest.json.sha256>"
+```
+
+`CREATE EXTENSION vector` then works in any database of the cluster, and
+`ClusterHandle::installed_extensions()` reports what was installed. The hook
+matches the running PostgreSQL major and the compile target and fails closed
+when no verified archive exists; it never builds from source. See
+[`docs/extensions.md`](extensions.md) for the manifest schema, the archive
+rules and the failure modes.
+
 ## Privilege detection and idempotence
 
 - `pg_embedded_setup_unpriv` detects its effective user ID at runtime. Root

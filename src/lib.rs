@@ -11,6 +11,7 @@ mod cleanup_helpers;
 mod cluster;
 mod env;
 mod error;
+pub mod extensions;
 mod fs;
 #[cfg(all(test, feature = "loom-tests"))]
 mod loom_model;
@@ -291,6 +292,22 @@ pub struct PgEnvCfg {
     /// 3. `$HOME/.cache/pg-embedded/binaries` (if `HOME` is set)
     /// 4. `/tmp/pg-embedded/binaries` (final fallback)
     pub binary_cache_dir: Option<Utf8PathBuf>,
+    /// Comma-separated extension names to install before the server starts
+    /// (`PG_EXTENSIONS`, for example `vector`). Empty or unset disables the
+    /// extension hook.
+    pub extensions: Option<String>,
+    /// Location of the extension manifest (`PG_EXTENSIONS_MANIFEST`): an
+    /// `https://` URL or a filesystem path. Required when `extensions` is set.
+    pub extensions_manifest: Option<String>,
+    /// Lower-case hex SHA-256 of the manifest bytes
+    /// (`PG_EXTENSIONS_MANIFEST_SHA256`). Required for an HTTPS manifest;
+    /// optional for a filesystem path.
+    pub extensions_manifest_sha256: Option<String>,
+    /// Directory holding verified extension archives between runs
+    /// (`PG_EXTENSIONS_CACHE_DIR`). Defaults to
+    /// `$XDG_CACHE_HOME/pg-embedded/extensions` with the same fallbacks as
+    /// [`binary_cache_dir`](Self::binary_cache_dir).
+    pub extensions_cache_dir: Option<Utf8PathBuf>,
 }
 
 impl PgEnvCfg {

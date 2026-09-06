@@ -813,3 +813,32 @@ effortless as using an in-memory database, but with full PostgreSQL fidelity.
 - theseus-rs/postgresql_embedded – _README (features and
   examples)_ (see postgresql_embedded README) (capabilities of the underlying
   embedded Postgres crate, async vs blocking API, ephemeral ports support)
+
+## Implementation update: prebuilt extension hook (v0.6.0)
+
+The Theseus binaries carry only contrib extensions, and the estate forbids
+building an extension from source in a consumer's CI, so v0.6.0 adds a hook
+that installs prebuilt, digest-verified archives published by
+`df12-pg-extensions`. The decisions recorded here are the ones a future
+change must respect:
+
+- **Boundary.** The hook is a post-setup step (`cluster::extension_hook`)
+  that every lifecycle runs after `Setup` and before `Start`: the
+  synchronous and asynchronous in-process paths, the root worker path (the
+  parent process writes; the worker never learns about extensions) and the
+  CLI's setup-only path, which runs the hook without a `Start`.
+- **Ordering invariant.** Binary-cache population moved from after `Start`
+  to just before the hook, so the shared binary cache only ever holds the
+  pristine Theseus tree. Extension files live in the per-run install tree
+  and are re-installed (idempotently, by digest) on every bootstrap.
+- **Matching.** An archive is selected on the running PostgreSQL major and
+  the crate's compile target; the minor is informational because the
+  server's magic block checks the major and layout constants only.
+- **Fail closed.** Every failure is a `BootstrapErrorKind::Extension*` and
+  the server does not start; nothing is ever compiled.
+- **Trust.** The manifest digest pins every archive digest; archives are
+  re-hashed from the bytes that are written, entries are validated in full
+  before the first write, and downloads insist on HTTPS (loopback excepted).
+
+`docs/extensions.md` is the user-facing contract; the developers guide
+describes the modules.
