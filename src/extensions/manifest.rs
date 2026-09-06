@@ -84,6 +84,7 @@ pub struct ManifestArtifact {
     pub files: Vec<String>,
 }
 
+/// Deserialises a digest string, rejecting anything but 64 lower-case hex.
 fn deserialize_digest<'de, D>(deserializer: D) -> Result<Sha256Hex, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -193,6 +194,7 @@ impl Manifest {
     }
 }
 
+/// Checks one artefact's version, file name, file list and URL.
 fn validate_artifact(name: &str, artifact: &ManifestArtifact) -> BootstrapResult<()> {
     artifact_version(artifact).ok_or_else(|| {
         invalid(eyre!(
@@ -221,6 +223,7 @@ fn validate_artifact(name: &str, artifact: &ManifestArtifact) -> BootstrapResult
     Ok(())
 }
 
+/// True when `file` is a bare file name with no separators.
 fn is_single_component(file: &str) -> bool {
     !file.is_empty() && !file.contains('/') && !file.contains('\\') && file != "." && file != ".."
 }
@@ -240,6 +243,7 @@ fn artifact_matches(artifact: &ManifestArtifact, running: &Version, target: &str
         .is_some_and(|built| built.major == running.major && artifact.target == target)
 }
 
+/// Builds the `ExtensionUnavailable` message listing what the manifest offers.
 fn no_artifact_report(
     extension: &ManifestExtension,
     running: &Version,

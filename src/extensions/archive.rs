@@ -65,6 +65,7 @@ pub fn is_permitted_url(url: &str) -> bool {
     Url::parse(url).is_ok_and(|parsed| is_permitted(&parsed))
 }
 
+/// Applies the scheme and loopback rules to a parsed URL.
 fn is_permitted(url: &Url) -> bool {
     match url.scheme() {
         "https" => true,
@@ -73,6 +74,7 @@ fn is_permitted(url: &Url) -> bool {
     }
 }
 
+/// Recognises `localhost` and loopback IP literals (with or without brackets).
 fn is_loopback_host(host: &str) -> bool {
     host == "localhost"
         || host
@@ -166,6 +168,7 @@ enum Failure {
     Permanent(Report),
 }
 
+/// Sends one GET and classifies the result as transient or permanent.
 fn send(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -220,6 +223,7 @@ enum CachedState {
     Corrupt,
 }
 
+/// Classifies the cache entry at `path` against the expected digest.
 fn cached_state(path: &Utf8Path, expected: &Sha256Hex) -> CachedState {
     if !path.is_file() {
         return CachedState::Missing;
@@ -230,6 +234,7 @@ fn cached_state(path: &Utf8Path, expected: &Sha256Hex) -> CachedState {
     }
 }
 
+/// Emits the cache hit, miss or corrupt event for `path`.
 fn log_cache_state(state: CachedState, path: &Utf8Path) {
     match state {
         CachedState::Valid => log_cache_hit(path),
@@ -238,14 +243,17 @@ fn log_cache_state(state: CachedState, path: &Utf8Path) {
     }
 }
 
+/// Debug event for a valid cache entry.
 fn log_cache_hit(path: &Utf8Path) {
     debug!(target: LOG_TARGET, path = %path, "extension archive cache hit");
 }
 
+/// Debug event for an absent cache entry.
 fn log_cache_miss(path: &Utf8Path) {
     debug!(target: LOG_TARGET, path = %path, "extension archive cache miss");
 }
 
+/// Warning event for a cache entry whose digest no longer matches.
 fn log_cache_corrupt(path: &Utf8Path) {
     warn!(
         target: LOG_TARGET,
@@ -254,6 +262,8 @@ fn log_cache_corrupt(path: &Utf8Path) {
     );
 }
 
+/// Downloads the archive to a temporary file, verifies size and digest,
+/// and renames it into place.
 fn download(
     artifact: &ManifestArtifact,
     entry_dir: &Utf8Path,
@@ -292,6 +302,7 @@ fn download(
     Ok(())
 }
 
+/// Wraps a report as `ExtensionArchiveUnavailable`.
 const fn unavailable(report: Report) -> BootstrapError {
     extension_error(BootstrapErrorKind::ExtensionArchiveUnavailable, report)
 }
