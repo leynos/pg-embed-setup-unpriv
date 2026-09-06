@@ -203,7 +203,6 @@ mod embed_root_cases {
 #[cfg(not(all(unix, privileged_unix_platform)))]
 mod portable_root_tests {
     //! Resolver coverage for platforms without a per-user default tree.
-    use camino::Utf8PathBuf;
     use rstest::rstest;
 
     use super::*;
