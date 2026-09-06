@@ -129,6 +129,122 @@ mod behaviour_tests {
     }
 }
 
+mod embed_root_cases {
+    //! `PG_EMBED_ROOT` assertions shared by the privileged and portable
+    //! resolvers, so both are held to the same contract.
+    use camino::Utf8PathBuf;
+    use color_eyre::eyre::{Result, ensure, eyre};
+
+    use super::*;
+
+    /// A resolver under test: builds settings from `cfg` and resolves paths.
+    pub(super) type Resolver = fn(&PgEnvCfg) -> BootstrapResult<SettingsPaths>;
+
+    /// A platform-native scratch path beneath the temp dir.
+    fn scratch(name: &str) -> Result<Utf8PathBuf> {
+        Utf8PathBuf::from_path_buf(std::env::temp_dir().join(name))
+            .map_err(|path| eyre!("temp dir is not UTF-8: {}", path.display()))
+    }
+
+    /// The install or data leaf of `paths` with its derived flag.
+    fn leaf(paths: &SettingsPaths, runtime: bool) -> (Utf8PathBuf, bool) {
+        if runtime {
+            (paths.install_dir.clone(), paths.install_default)
+        } else {
+            (paths.data_dir.clone(), paths.data_default)
+        }
+    }
+
+    /// With only `PG_EMBED_ROOT` set, the chosen leaf sits beneath the root
+    /// and is reported as derived.
+    pub(super) fn assert_root_derives_leaf(resolve: Resolver, runtime: bool) -> Result<()> {
+        let root = scratch("pg-embed-root")?;
+        let cfg = PgEnvCfg {
+            embed_root: Some(root.clone()),
+            ..PgEnvCfg::default()
+        };
+        let paths = resolve(&cfg)?;
+        let expected = root.join(if runtime { "install" } else { "data" });
+        let observed = leaf(&paths, runtime);
+        ensure!(
+            observed == (expected, true),
+            "leaf not derived from root: {observed:?}"
+        );
+        Ok(())
+    }
+
+    /// An explicit leaf keeps its value and is not derived, while the other
+    /// leaf is still derived from the root.
+    pub(super) fn assert_explicit_leaf_wins(resolve: Resolver, runtime: bool) -> Result<()> {
+        let root = scratch("pg-embed-root")?;
+        let explicit = scratch("elsewhere")?;
+        let cfg = PgEnvCfg {
+            embed_root: Some(root.clone()),
+            runtime_dir: runtime.then(|| explicit.clone()),
+            data_dir: (!runtime).then(|| explicit.clone()),
+            ..PgEnvCfg::default()
+        };
+        let paths = resolve(&cfg)?;
+        let chosen = leaf(&paths, runtime);
+        ensure!(
+            chosen == (explicit, false),
+            "explicit leaf lost: {chosen:?}"
+        );
+        let other = root.join(if runtime { "data" } else { "install" });
+        let derived = leaf(&paths, !runtime);
+        ensure!(
+            derived == (other, true),
+            "other leaf not derived: {derived:?}"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(not(all(unix, privileged_unix_platform)))]
+mod portable_root_tests {
+    //! Resolver coverage for platforms without a per-user default tree.
+    use rstest::rstest;
+
+    use super::*;
+
+    /// Resolves the settings paths for `cfg` on the current platform.
+    fn resolve(cfg: &PgEnvCfg) -> BootstrapResult<SettingsPaths> {
+        let mut settings = cfg.to_settings()?;
+        resolve_settings_paths_for_current_user(&mut settings, cfg)
+    }
+
+    /// Without `PG_EMBED_ROOT` the `Settings` defaults stand and neither
+    /// leaf is reported as derived.
+    #[test]
+    fn settings_defaults_are_kept_without_embed_root() {
+        let cfg = PgEnvCfg::default();
+        let mut settings = cfg.to_settings().expect("settings");
+        let expected_install = settings.installation_dir.clone();
+        let expected_data = settings.data_dir.clone();
+        let paths =
+            resolve_settings_paths_for_current_user(&mut settings, &cfg).expect("settings paths");
+        assert_eq!(paths.install_dir.as_std_path(), expected_install);
+        assert_eq!(paths.data_dir.as_std_path(), expected_data);
+        assert!(!paths.install_default && !paths.data_default);
+    }
+
+    /// `PG_EMBED_ROOT` derives both leaves on every platform.
+    #[rstest]
+    #[case::install(true)]
+    #[case::data(false)]
+    fn embed_root_derives_both_leaves(#[case] runtime: bool) {
+        embed_root_cases::assert_root_derives_leaf(resolve, runtime).expect("embed root contract");
+    }
+
+    /// An explicit leaf still wins over the root-derived default.
+    #[rstest]
+    #[case::runtime_dir(true)]
+    #[case::data_dir(false)]
+    fn explicit_leaf_wins_over_embed_root(#[case] runtime: bool) {
+        embed_root_cases::assert_explicit_leaf_wins(resolve, runtime).expect("embed root contract");
+    }
+}
+
 #[cfg(all(unix, privileged_unix_platform))]
 mod unix_tests {
     //! Unix-specific permission tests for bootstrap preparation.
@@ -143,9 +259,11 @@ mod unix_tests {
         sys::stat::Mode,
         unistd::{Uid, User, geteuid},
     };
+    use rstest::rstest;
     use tempfile::tempdir;
 
     use super::{unix_user::ensure_pgpass_for_user, *};
+    use crate::privileges::default_paths_for;
 
     #[test]
     fn ensure_settings_paths_applies_defaults() {
@@ -162,6 +280,38 @@ mod unix_tests {
         assert_eq!(paths.password_file, expected_install.join(".pgpass"));
         assert!(paths.install_default);
         assert!(paths.data_default);
+    }
+
+    /// An explicit root yields `install` and `data` leaves directly beneath it.
+    #[test]
+    fn default_paths_under_derive_leaves_from_root() {
+        let (install, data) = default_paths_under(Utf8Path::new("/srv/project/pg"));
+        assert_eq!(install.as_str(), "/srv/project/pg/install");
+        assert_eq!(data.as_str(), "/srv/project/pg/data");
+    }
+
+    /// Resolves the default paths for a configuration under a fixed uid.
+    fn resolve(cfg: &PgEnvCfg) -> BootstrapResult<SettingsPaths> {
+        let mut settings = cfg.to_settings()?;
+        resolve_settings_paths_for_uid(&mut settings, cfg, Uid::from_raw(9999))
+    }
+
+    /// `PG_EMBED_ROOT` replaces the per-user base for both derived leaves,
+    /// which still count as defaults.
+    #[rstest]
+    #[case::install(true)]
+    #[case::data(false)]
+    fn ensure_settings_paths_honours_embed_root(#[case] runtime: bool) {
+        embed_root_cases::assert_root_derives_leaf(resolve, runtime).expect("embed root contract");
+    }
+
+    /// An explicit leaf wins over the root-derived default while the other
+    /// leaf is still derived from the root.
+    #[rstest]
+    #[case::runtime_dir(true)]
+    #[case::data_dir(false)]
+    fn explicit_leaf_wins_over_embed_root(#[case] runtime: bool) {
+        embed_root_cases::assert_explicit_leaf_wins(resolve, runtime).expect("embed root contract");
     }
 
     #[test]

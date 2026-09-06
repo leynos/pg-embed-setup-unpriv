@@ -232,8 +232,21 @@ pub fn nobody_uid() -> Uid {
 /// ```
 #[must_use]
 pub fn default_paths_for(uid: Uid) -> (Utf8PathBuf, Utf8PathBuf) {
-    let base = Utf8PathBuf::from(format!("/var/tmp/pg-embed-{}", uid.as_raw()));
-    (base.join("install"), base.join("data"))
+    crate::bootstrap::default_paths_under(&default_root_for(uid))
+}
+
+/// Returns the per-user base directory used when `PG_EMBED_ROOT` is unset.
+///
+/// # Examples
+/// ```
+/// use nix::unistd::Uid;
+///
+/// let root = pg_embedded_setup_unpriv::default_root_for(Uid::from_raw(1000));
+/// assert_eq!(root.as_str(), "/var/tmp/pg-embed-1000");
+/// ```
+#[must_use]
+pub fn default_root_for(uid: Uid) -> Utf8PathBuf {
+    Utf8PathBuf::from(format!("/var/tmp/pg-embed-{}", uid.as_raw()))
 }
 
 /// DEPRECATED: process-wide UID switching is unsafe and unsupported.

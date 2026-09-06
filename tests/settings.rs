@@ -48,6 +48,8 @@ fn to_settings_roundtrip() -> color_eyre::Result<()> {
         locale: Some("en_US".into()),
         encoding: Some("UTF8".into()),
         binary_cache_dir: None,
+        embed_root: None,
+        max_connections: None,
     };
     let settings = cfg.to_settings()?;
     let expected_version = VersionReq::parse("=16.4.0").map_err(|err| eyre!(err))?;
@@ -121,6 +123,66 @@ fn to_settings_for_tests_applies_worker_limits(default_pg_env: PgEnvCfg) -> colo
         "expected max_connections to be capped for tests",
     );
 
+    Ok(())
+}
+
+/// `PG_MAX_CONNECTIONS` replaces the test cap and applies outside tests too.
+#[rstest]
+#[case::for_tests(true)]
+#[case::plain(false)]
+fn max_connections_override_is_applied(#[case] for_tests: bool) -> color_eyre::Result<()> {
+    let cfg = PgEnvCfg {
+        max_connections: Some(120),
+        ..PgEnvCfg::default()
+    };
+    let settings = cfg.to_settings_with_context(for_tests)?;
+    ensure!(
+        settings
+            .configuration
+            .get("max_connections")
+            .is_some_and(|value| value == "120"),
+        "expected max_connections to follow PG_MAX_CONNECTIONS (for_tests={for_tests})",
+    );
+    Ok(())
+}
+
+/// `PG_MAX_CONNECTIONS` below the reserved-slot floor is a configuration
+/// error rather than a server that fails to start later.
+#[rstest]
+#[case::zero(0)]
+#[case::one(1)]
+#[case::three(3)]
+fn max_connections_below_floor_is_rejected(#[case] limit: u32) -> color_eyre::Result<()> {
+    let cfg = PgEnvCfg {
+        max_connections: Some(limit),
+        ..PgEnvCfg::default()
+    };
+    let Err(err) = cfg.to_settings() else {
+        color_eyre::eyre::bail!("max_connections={limit} must be rejected");
+    };
+    let message = err.to_string();
+    ensure!(
+        message.contains("PG_MAX_CONNECTIONS") && message.contains(&format!("got {limit}")),
+        "unexpected message: {message}"
+    );
+    Ok(())
+}
+
+/// The floor itself is accepted, so the rejection is exclusive.
+#[test]
+fn max_connections_at_floor_is_accepted() -> color_eyre::Result<()> {
+    let cfg = PgEnvCfg {
+        max_connections: Some(pg_embedded_setup_unpriv::MIN_MAX_CONNECTIONS),
+        ..PgEnvCfg::default()
+    };
+    let settings = cfg.to_settings()?;
+    ensure!(
+        settings
+            .configuration
+            .get("max_connections")
+            .is_some_and(|value| value == "4"),
+        "expected the floor to be applied verbatim"
+    );
     Ok(())
 }
 
