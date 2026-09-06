@@ -4,7 +4,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(all(unix, privileged_unix_platform))]
 use nix::unistd::{Uid, geteuid};
 use postgresql_embedded::Settings;
-use tracing::debug;
+use tracing::{debug, info};
 
 use super::{
     env::{TestBootstrapEnvironment, XdgDirs, prepare_timezone_env},
@@ -110,10 +110,10 @@ fn resolve_settings_paths_for_uid(
     cfg: &PgEnvCfg,
     uid: Uid,
 ) -> BootstrapResult<SettingsPaths> {
-    let root = cfg
-        .embed_root
-        .clone()
-        .unwrap_or_else(|| default_root_for(uid));
+    let (root, root_source) = cfg.embed_root.clone().map_or_else(
+        || (default_root_for(uid), RootSource::PerUserDefault),
+        |root| (root, RootSource::Override),
+    );
     let (default_install_dir, default_data_dir) = default_paths_under(&root);
     let mut install_default = false;
     let mut data_default = false;
@@ -127,7 +127,9 @@ fn resolve_settings_paths_for_uid(
         data_default = true;
     }
 
-    settings_paths_from_settings(settings, install_default, data_default)
+    let paths = settings_paths_from_settings(settings, install_default, data_default)?;
+    log_settings_decision(root_source, &paths, cfg);
+    Ok(paths)
 }
 
 #[cfg(all(unix, privileged_unix_platform))]
@@ -147,7 +149,9 @@ fn resolve_settings_paths_for_current_user(
     cfg: &PgEnvCfg,
 ) -> BootstrapResult<SettingsPaths> {
     let Some(root) = cfg.embed_root.as_ref() else {
-        return settings_paths_from_settings(settings, false, false);
+        let paths = settings_paths_from_settings(settings, false, false)?;
+        log_settings_decision(RootSource::SettingsDefault, &paths, cfg);
+        return Ok(paths);
     };
     let (install_dir, data_dir) = default_paths_under(root);
     let mut install_default = false;
@@ -160,7 +164,37 @@ fn resolve_settings_paths_for_current_user(
         settings.data_dir = data_dir.into_std_path_buf();
         data_default = true;
     }
-    settings_paths_from_settings(settings, install_default, data_default)
+    let paths = settings_paths_from_settings(settings, install_default, data_default)?;
+    log_settings_decision(RootSource::Override, &paths, cfg);
+    Ok(paths)
+}
+
+/// Where the base directory for the derived `install` and `data` leaves came
+/// from; a bounded label for the `settings_decision` event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootSource {
+    /// `PG_EMBED_ROOT` was set.
+    Override,
+    /// The per-user `/var/tmp/pg-embed-{uid}` tree.
+    PerUserDefault,
+    /// No per-user tree on this platform; `Settings` defaults were kept.
+    #[cfg(not(all(unix, privileged_unix_platform)))]
+    SettingsDefault,
+}
+
+/// Records the resolved directories and connection cap once per bootstrap so
+/// an operator can see which override won without reading the settings dump.
+fn log_settings_decision(root_source: RootSource, paths: &SettingsPaths, cfg: &PgEnvCfg) {
+    info!(
+        target: LOG_TARGET,
+        root_source = ?root_source,
+        install_dir = %paths.install_dir,
+        install_default = paths.install_default,
+        data_dir = %paths.data_dir,
+        data_default = paths.data_default,
+        max_connections = cfg.max_connections,
+        "settings_decision"
+    );
 }
 
 fn settings_paths_from_settings(

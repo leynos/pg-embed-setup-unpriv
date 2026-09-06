@@ -309,7 +309,8 @@ pub struct PgEnvCfg {
     /// `max_connections` for the server (`PG_MAX_CONNECTIONS`).
     ///
     /// Test clusters default to 20; set this when parallel test runners need
-    /// more. Applied to every bootstrap, test or not.
+    /// more. Applied to every bootstrap, test or not. Values below
+    /// [`MIN_MAX_CONNECTIONS`] are rejected when the settings are built.
     pub max_connections: Option<u32>,
 }
 
@@ -397,7 +398,7 @@ impl PgEnvCfg {
         if for_tests {
             Self::apply_worker_limits(&mut s);
         }
-        self.apply_max_connections(&mut s);
+        self.apply_max_connections(&mut s)?;
 
         Ok(s)
     }
@@ -448,12 +449,24 @@ impl PgEnvCfg {
     }
 
     /// Applies an explicit `max_connections`, replacing the test default of 20.
-    fn apply_max_connections(&self, settings: &mut Settings) {
-        if let Some(limit) = self.max_connections {
-            settings
-                .configuration
-                .insert("max_connections".into(), limit.to_string());
+    ///
+    /// `PostgreSQL` keeps `superuser_reserved_connections` (3 by default) below
+    /// `max_connections`, so anything under [`MIN_MAX_CONNECTIONS`] would make
+    /// the server refuse to start; reject it here with a clear message.
+    fn apply_max_connections(&self, settings: &mut Settings) -> ConfigResult<()> {
+        let Some(limit) = self.max_connections else {
+            return Ok(());
+        };
+        if limit < MIN_MAX_CONNECTIONS {
+            return Err(ConfigError::from(eyre!(
+                "PG_MAX_CONNECTIONS must be at least {MIN_MAX_CONNECTIONS} (got {limit}); \
+                 PostgreSQL reserves three superuser slots below max_connections"
+            )));
         }
+        settings
+            .configuration
+            .insert("max_connections".into(), limit.to_string());
+        Ok(())
     }
 
     fn apply_worker_limits(settings: &mut Settings) {
@@ -465,6 +478,10 @@ impl PgEnvCfg {
         }
     }
 }
+
+/// Smallest `PG_MAX_CONNECTIONS` the helper accepts: one ordinary slot above
+/// `PostgreSQL`'s default of three reserved superuser connections.
+pub const MIN_MAX_CONNECTIONS: u32 = 4;
 
 const WORKER_LIMIT_DEFAULTS: [(&str, &str); 8] = [
     ("max_connections", "20"),

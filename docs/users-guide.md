@@ -89,13 +89,18 @@ cargo binstall pg-embed-setup-unpriv
    ```
 
    Without `PG_RUNTIME_DIR` and `PG_DATA_DIR` the helper derives both under
-   `/var/tmp/pg-embed-{uid}`, one tree per user that every project on the host
-   shares. Set `PG_EMBED_ROOT` to give a project or a test run its own base
-   (`<root>/install` and `<root>/data`); the two leaf variables still win when
-   set.
+   `/var/tmp/pg-embed-{uid}` on Linux and the BSDs, one tree per user that
+   every project on the host shares. Set `PG_EMBED_ROOT` to give a project or
+   a test run its own base (`<root>/install` and `<root>/data`); the two leaf
+   variables still win when set. On macOS and Windows there is no per-user
+   default tree: without `PG_EMBED_ROOT` the `postgresql_embedded` defaults
+   apply, and with it the same two leaves are derived.
 
    Test clusters cap `max_connections` at 20 (a `postgres` container defaults
    to 100); set `PG_MAX_CONNECTIONS` when parallel test runners need more.
+   The override applies to plain `bootstrap()` runs as well as test
+   bootstraps, and values below 4 are rejected because PostgreSQL keeps three
+   connection slots for superusers below `max_connections`.
 
    Optionally set `PG_SHUTDOWN_TIMEOUT_SECS` to override the 15-second drop
    budget. The helper accepts values between `1` and `600` seconds and reports

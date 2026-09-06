@@ -129,6 +129,78 @@ mod behaviour_tests {
     }
 }
 
+#[cfg(not(all(unix, privileged_unix_platform)))]
+mod portable_root_tests {
+    //! Resolver coverage for platforms without a per-user default tree.
+    use camino::Utf8PathBuf;
+    use rstest::rstest;
+
+    use super::*;
+
+    /// Resolves the settings paths for `cfg` on the current platform.
+    fn resolve(cfg: &PgEnvCfg) -> BootstrapResult<SettingsPaths> {
+        let mut settings = cfg.to_settings()?;
+        resolve_settings_paths_for_current_user(&mut settings, cfg)
+    }
+
+    /// Without `PG_EMBED_ROOT` the `Settings` defaults stand and neither
+    /// leaf is reported as derived.
+    #[test]
+    fn settings_defaults_are_kept_without_embed_root() {
+        let cfg = PgEnvCfg::default();
+        let mut settings = cfg.to_settings().expect("settings");
+        let expected_install = settings.installation_dir.clone();
+        let expected_data = settings.data_dir.clone();
+        let paths =
+            resolve_settings_paths_for_current_user(&mut settings, &cfg).expect("settings paths");
+        assert_eq!(paths.install_dir.as_std_path(), expected_install);
+        assert_eq!(paths.data_dir.as_std_path(), expected_data);
+        assert!(!paths.install_default && !paths.data_default);
+    }
+
+    /// `PG_EMBED_ROOT` derives both leaves on every platform.
+    #[rstest]
+    #[case::install(|paths: &SettingsPaths| (paths.install_dir.to_string(), paths.install_default), "install")]
+    #[case::data(|paths: &SettingsPaths| (paths.data_dir.to_string(), paths.data_default), "data")]
+    fn embed_root_derives_both_leaves(
+        #[case] pick: fn(&SettingsPaths) -> (String, bool),
+        #[case] leaf: &str,
+    ) {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir().join("pg-embed-root"))
+            .expect("temp dir is UTF-8");
+        let cfg = PgEnvCfg {
+            embed_root: Some(root.clone()),
+            ..PgEnvCfg::default()
+        };
+        let paths = resolve(&cfg).expect("settings paths");
+        assert_eq!(pick(&paths), (root.join(leaf).to_string(), true));
+    }
+
+    /// An explicit leaf still wins over the root-derived default.
+    #[rstest]
+    #[case::runtime_dir(true)]
+    #[case::data_dir(false)]
+    fn explicit_leaf_wins_over_embed_root(#[case] runtime: bool) {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir().join("pg-embed-root"))
+            .expect("temp dir is UTF-8");
+        let explicit = Utf8PathBuf::from_path_buf(std::env::temp_dir().join("elsewhere"))
+            .expect("temp dir is UTF-8");
+        let cfg = PgEnvCfg {
+            embed_root: Some(root),
+            runtime_dir: runtime.then(|| explicit.clone()),
+            data_dir: (!runtime).then(|| explicit.clone()),
+            ..PgEnvCfg::default()
+        };
+        let paths = resolve(&cfg).expect("settings paths");
+        let (observed, derived) = if runtime {
+            (paths.install_dir.clone(), paths.install_default)
+        } else {
+            (paths.data_dir.clone(), paths.data_default)
+        };
+        assert_eq!((observed, derived), (explicit, false));
+    }
+}
+
 #[cfg(all(unix, privileged_unix_platform))]
 mod unix_tests {
     //! Unix-specific permission tests for bootstrap preparation.
@@ -195,6 +267,27 @@ mod unix_tests {
         };
         let paths = resolve(&cfg).expect("settings paths");
         assert_eq!(pick(&paths), (expected.to_owned(), true));
+    }
+
+    /// An explicit `PG_RUNTIME_DIR` wins over the root-derived install leaf
+    /// while the data leaf is still derived from the root.
+    #[test]
+    fn explicit_runtime_dir_wins_over_embed_root() {
+        let cfg = PgEnvCfg {
+            embed_root: Some(Utf8PathBuf::from("/srv/project/pg")),
+            runtime_dir: Some(Utf8PathBuf::from("/elsewhere/install")),
+            ..PgEnvCfg::default()
+        };
+        let paths = resolve(&cfg).expect("settings paths");
+        assert_eq!(
+            (
+                paths.install_dir.as_str(),
+                paths.install_default,
+                paths.data_dir.as_str(),
+                paths.data_default
+            ),
+            ("/elsewhere/install", false, "/srv/project/pg/data", true)
+        );
     }
 
     /// An explicit leaf override wins over the root-derived default.

@@ -170,6 +170,27 @@ archive packager and the workflow contract tests in
 `contents: write`, and that the staged archive name and members render the
 `[package.metadata.binstall]` templates exactly.
 
+## Path resolution
+
+`bootstrap()` resolves the installation and data directories once, in
+`src/bootstrap/prepare/mod.rs`, before anything is created on disk:
+
+1. `PG_RUNTIME_DIR` and `PG_DATA_DIR` win outright for their leaf.
+2. Otherwise the leaf is `<root>/install` or `<root>/data`, where the root is
+   `PG_EMBED_ROOT` when set.
+3. Otherwise, on Linux and the BSDs, the root is `/var/tmp/pg-embed-{uid}`
+   (`default_root_for`); the uid is `nobody`'s when running as root and the
+   current user's otherwise. macOS and Windows have no per-user root and keep
+   the `postgresql_embedded` defaults.
+
+`default_paths_under(root)` is the single place that derives the two leaves,
+so the privileged and portable resolvers cannot drift. Each resolver emits an
+info-level `settings_decision` event with `root_source` (`Override`,
+`PerUserDefault` or `SettingsDefault`), both directories, whether each was
+derived, and the effective `PG_MAX_CONNECTIONS`, so a bootstrap log shows which
+override won. `PG_MAX_CONNECTIONS` is validated in `PgEnvCfg::to_settings`
+(floor `MIN_MAX_CONNECTIONS`, currently 4) before the paths are resolved.
+
 ## Lifecycle verification
 
 `proptest` cases run as part of the default unit suite and protect the
