@@ -176,6 +176,7 @@ enum RootSource {
     /// `PG_EMBED_ROOT` was set.
     Override,
     /// The per-user `/var/tmp/pg-embed-{uid}` tree.
+    #[cfg(all(unix, privileged_unix_platform))]
     PerUserDefault,
     /// No per-user tree on this platform; `Settings` defaults were kept.
     #[cfg(not(all(unix, privileged_unix_platform)))]
