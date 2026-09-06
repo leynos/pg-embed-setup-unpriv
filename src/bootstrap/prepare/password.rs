@@ -12,7 +12,7 @@ use std::io::ErrorKind;
 use camino::Utf8Path;
 use color_eyre::eyre::{Report, eyre};
 use postgresql_embedded::Settings;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     error::{BootstrapError, BootstrapErrorKind, BootstrapResult},
@@ -79,12 +79,15 @@ fn has_cluster_marker(data_dir: &Utf8Path) -> BootstrapResult<bool> {
     match std::fs::metadata(data_dir.join(PG_VERSION_MARKER)) {
         Ok(metadata) => Ok(metadata.is_file()),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(BootstrapError::new(
-            BootstrapErrorKind::ClusterPasswordUnreadable,
-            Report::new(err).wrap_err(format!(
-                "cannot probe {data_dir} for an existing cluster ({PG_VERSION_MARKER})"
-            )),
-        )),
+        Err(err) => {
+            log_failure("probe_failed", data_dir, &data_dir.join(PG_VERSION_MARKER));
+            Err(BootstrapError::new(
+                BootstrapErrorKind::ClusterPasswordUnreadable,
+                Report::new(err).wrap_err(format!(
+                    "cannot probe {data_dir} for an existing cluster ({PG_VERSION_MARKER})"
+                )),
+            ))
+        }
     }
 }
 
@@ -149,18 +152,37 @@ fn log_outcome(outcome: PasswordReuseOutcome, data_dir: &Utf8Path, password_file
     );
 }
 
+/// Emits the bounded `password_reuse` failure event before the error is
+/// returned; `outcome` is one of `probe_failed`, `missing_file`,
+/// `unreadable_file` or `empty_file`, and no secret is ever a label.
+fn log_failure(outcome: &'static str, data_dir: &Utf8Path, password_file: &Utf8Path) {
+    warn!(
+        target: LOG_TARGET,
+        outcome,
+        data_dir = %data_dir,
+        password_file = %password_file,
+        "password_reuse"
+    );
+}
+
 /// Reads and trims the stored password, turning I/O and emptiness into a
 /// categorised error that keeps the original `io::Error` as its source.
 fn read_stored_password(password_file: &Utf8Path, data_dir: &Utf8Path) -> BootstrapResult<String> {
     let raw = std::fs::read_to_string(password_file).map_err(|err| {
-        let (kind, hint) = if err.kind() == ErrorKind::NotFound {
-            (BootstrapErrorKind::ClusterPasswordMissing, "is missing")
+        let (kind, hint, outcome) = if err.kind() == ErrorKind::NotFound {
+            (
+                BootstrapErrorKind::ClusterPasswordMissing,
+                "is missing",
+                "missing_file",
+            )
         } else {
             (
                 BootstrapErrorKind::ClusterPasswordUnreadable,
                 "cannot be read",
+                "unreadable_file",
             )
         };
+        log_failure(outcome, data_dir, password_file);
         BootstrapError::new(
             kind,
             Report::new(err).wrap_err(format!(
@@ -172,6 +194,7 @@ fn read_stored_password(password_file: &Utf8Path, data_dir: &Utf8Path) -> Bootst
     })?;
     let stored = raw.trim_end_matches(['\n', '\r']).to_owned();
     if stored.is_empty() {
+        log_failure("empty_file", data_dir, password_file);
         return Err(BootstrapError::new(
             BootstrapErrorKind::ClusterPasswordEmpty,
             eyre!(
@@ -298,6 +321,25 @@ mod tests {
         assert!(message.contains(needle), "{message}");
         assert!(message.contains("PG_PASSWORD"), "{message}");
         assert_eq!(err.kind(), kind);
+    }
+
+    /// A password file that exists but cannot be read is
+    /// `ClusterPasswordUnreadable`, distinct from the missing-file kind.
+    #[cfg(unix)]
+    #[rstest]
+    fn unreadable_password_file_is_an_error(scratch: Result<Scratch>) {
+        use std::os::unix::fs::PermissionsExt;
+        if nix::unistd::geteuid().is_root() {
+            return; // root reads regardless of mode, so the case cannot be staged
+        }
+        let dir = scratch.expect("scratch");
+        arrange(&dir, true, Some("kept-secret")).expect("arrange");
+        std::fs::set_permissions(&dir.password_file, std::fs::Permissions::from_mode(0o000))
+            .expect("chmod");
+        let err = stored_cluster_password(&dir.data_dir, &dir.password_file)
+            .expect_err("an unreadable password file must not read as missing");
+        assert_eq!(err.kind(), BootstrapErrorKind::ClusterPasswordUnreadable);
+        assert!(err.to_string().contains("cannot be read"), "{err}");
     }
 
     /// A data directory that cannot be probed is an error, not "no cluster".

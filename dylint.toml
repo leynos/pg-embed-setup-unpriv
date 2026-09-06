@@ -22,6 +22,7 @@ excluded_crates = [
     "bootstrap_for_tests",
     "bootstrap_privileges",
     "bootstrap_worker_binary",
+    "password_reuse",
     "cli",
     "cluster_handle_send",
     "cluster_split_constructors",

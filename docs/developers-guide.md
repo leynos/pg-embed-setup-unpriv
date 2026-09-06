@@ -254,4 +254,8 @@ Both bootstrap paths (`bootstrap_unprivileged` and `bootstrap_with_root`)
 call it immediately after the settings paths are resolved and before the
 sanitized settings are logged, so the password file is the one that
 `resolve_settings_paths_*` derived (`<install>/.pgpass`). Both functions and
-the outcome enum are exported at the crate root.
+the outcome enum are exported at the crate root. Every failure branch emits
+the same `password_reuse` event at warning level, with `outcome` set to one
+of `probe_failed`, `missing_file`, `unreadable_file` or `empty_file`, before
+the error is returned, so a bootstrap that refuses a stale cluster is visible
+in the log without the caller rendering the error.

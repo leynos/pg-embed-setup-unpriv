@@ -144,6 +144,32 @@ mod tests {
         }
     }
 
+    /// As root, `bootstrap_with_root` adopts the password stored beside an
+    /// existing cluster instead of minting a fresh one. The staging needs the
+    /// `nobody` user and chown rights, so a non-root host reports a skip.
+    #[test]
+    fn bootstrap_with_root_reuses_stored_password() {
+        if !geteuid().is_root() {
+            return; // the root lane in CI runs this; unprivileged hosts cannot stage it
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let base = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).expect("utf8");
+        let install = base.join("install");
+        let data = base.join("data");
+        std::fs::create_dir_all(&install).expect("install dir");
+        std::fs::create_dir_all(&data).expect("data dir");
+        std::fs::write(data.join("PG_VERSION"), "17\n").expect("marker");
+        std::fs::write(install.join(".pgpass"), "stored-secret\n").expect("password file");
+        let cfg = PgEnvCfg {
+            runtime_dir: Some(install),
+            data_dir: Some(data),
+            ..PgEnvCfg::default()
+        };
+        let settings = cfg.to_settings().expect("settings");
+        let prepared = bootstrap_with_root(settings, &cfg).expect("root bootstrap");
+        assert_eq!(prepared.settings.password, "stored-secret");
+    }
+
     #[rstest]
     #[case("", "127.0.0.1")]
     #[case("/var/run/pg.sock", "127.0.0.1")]
