@@ -2,8 +2,18 @@
 
 v0.6.0 adds the prebuilt extension hook. Consumers that do not declare
 extensions see no behavioural change: with `PG_EXTENSIONS` unset the hook is
-inert and every lifecycle runs exactly as in v0.5.x. Two public types grew,
-which is the only source-level change.
+inert and every lifecycle runs exactly as in v0.5.x. The public changes are:
+
+- four new fields on `PgEnvCfg` (a struct literal listing every field must
+  add them; `..PgEnvCfg::default()` needs nothing);
+- two new fields on `TestBootstrapSettings` (same rule for literals);
+- nine new `BootstrapErrorKind` variants, so an exhaustive `match` on that
+  enum must gain arms or a wildcard: this is the one change that can fail to
+  compile existing code;
+- a new public module, `pg_embedded_setup_unpriv::extensions`, and
+  `ClusterHandle::installed_extensions()`.
+
+The sections below detail each.
 
 ## New configuration
 

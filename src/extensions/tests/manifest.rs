@@ -245,3 +245,27 @@ fn running_version_from_dir_name_or_fails_closed() {
     let err = running_version(&unnamed).expect_err("no pg_config either");
     assert_eq!(err.kind(), BootstrapErrorKind::ExtensionUnavailable);
 }
+
+/// When the directory name is not a version, `bin/pg_config --version` decides.
+#[cfg(unix)]
+#[test]
+fn running_version_falls_back_to_pg_config() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_temp, root) = super::fixture::temp_root().expect("tempdir");
+    let install = root.join("install");
+    std::fs::create_dir_all(install.join("bin")).expect("mkdir");
+    let script = install.join("bin/pg_config");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\necho 'PostgreSQL 16.4 (Debian 16.4-1)'\n",
+    )
+    .expect("write");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let version = running_version(&install).expect("pg_config answers");
+    assert_eq!((version.major, version.minor), (16, 4));
+
+    std::fs::write(&script, "#!/bin/sh\necho 'broken' >&2\nexit 3\n").expect("write");
+    let err = running_version(&install).expect_err("non-zero exit fails closed");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionUnavailable);
+    assert!(err.to_string().contains("broken"), "{err}");
+}

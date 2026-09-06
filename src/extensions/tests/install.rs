@@ -264,3 +264,37 @@ fn install_refuses_an_archive_changed_after_acquisition() {
         BootstrapErrorKind::ExtensionArchiveDigestMismatch
     );
 }
+
+/// An identical file with the wrong mode keeps its inode but gets the mode repaired.
+#[cfg(unix)]
+#[test]
+fn install_repairs_mode_on_identical_files() {
+    use std::os::unix::fs::PermissionsExt;
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    install(&prepared).expect("first install");
+    let module = prepared.install_dir.join("lib/fixture.so");
+    std::fs::set_permissions(&module, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    let before = inode(&module).expect("inode");
+    install(&prepared).expect("second install");
+    assert_eq!(
+        inode(&module).expect("inode"),
+        before,
+        "identical bytes keep the inode"
+    );
+    assert_eq!(mode(&module).expect("mode"), 0o755, "the mode is repaired");
+}
+
+/// An archive swapped for a larger file after acquisition is rejected after
+/// reading no more than the manifest size plus one byte.
+#[test]
+fn install_refuses_an_oversized_swapped_archive() {
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    let mut oversized = std::fs::read(&prepared.archive).expect("read");
+    oversized.extend(std::iter::repeat_n(0_u8, 4096));
+    std::fs::write(&prepared.archive, &oversized).expect("swap");
+    let err = install(&prepared).expect_err("rejected");
+    assert_eq!(
+        err.kind(),
+        BootstrapErrorKind::ExtensionArchiveDigestMismatch
+    );
+}

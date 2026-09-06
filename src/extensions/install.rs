@@ -109,12 +109,21 @@ pub(super) fn install_archive(
     Ok(planned.into_iter().map(|file| file.relative).collect())
 }
 
-/// Reads the archive and confirms it still hashes to the manifest digest.
+/// Reads the archive, capped at the manifest size plus one byte, and confirms
+/// it still hashes to the manifest digest.
+///
+/// The cap matters because the cache lock is released before installation:
+/// a file swapped for a larger one in that window is rejected after reading
+/// at most `size + 1` bytes rather than being read whole.
 fn read_verified(path: &Utf8Path, artifact: &ManifestArtifact) -> BootstrapResult<Vec<u8>> {
-    let bytes =
-        fs::read(path).map_err(|err| invalid(path, &format!("cannot read archive: {err}")))?;
+    let file = fs::File::open(path)
+        .map_err(|err| invalid(path, &format!("cannot open archive: {err}")))?;
+    let mut bytes = Vec::with_capacity(usize::try_from(artifact.size).unwrap_or(0));
+    file.take(artifact.size + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| invalid(path, &format!("cannot read archive: {err}")))?;
     let actual = Sha256Hex::of_bytes(&bytes);
-    if actual != artifact.sha256 {
+    if bytes.len() as u64 != artifact.size || actual != artifact.sha256 {
         return Err(extension_error(
             BootstrapErrorKind::ExtensionArchiveDigestMismatch,
             eyre!(
@@ -152,6 +161,8 @@ fn plan(
     Ok(files)
 }
 
+/// Classifies one tar entry: directories are skipped, regular files under an
+/// allowed prefix are planned, anything else is rejected.
 fn plan_entry(
     path: &Utf8Path,
     kind: EntryType,
@@ -182,6 +193,7 @@ fn plan_entry(
     Ok(Some(PlannedFile { relative, mode }))
 }
 
+/// Requires the planned file set to equal the manifest's `files` list.
 fn check_against_manifest(
     path: &Utf8Path,
     files: &[PlannedFile],
@@ -261,6 +273,7 @@ fn write_file(
 }
 
 #[cfg(unix)]
+/// Applies a Unix mode to a written file.
 fn set_mode(path: &Path, mode: u32) -> Result<(), Report> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
@@ -268,6 +281,7 @@ fn set_mode(path: &Path, mode: u32) -> Result<(), Report> {
 }
 
 #[cfg(not(unix))]
+/// Modes are not applied on platforms without Unix permissions.
 fn set_mode(_path: &Path, _mode: u32) -> Result<(), Report> { Ok(()) }
 
 /// Owner of the installation tree, propagated to installed files.
@@ -280,6 +294,7 @@ struct Owner {
 }
 
 #[cfg(unix)]
+/// Reads the uid and gid that own the installation directory.
 fn tree_owner(install_dir: &Utf8Path) -> BootstrapResult<Owner> {
     use std::os::unix::fs::MetadataExt;
     let metadata = fs::metadata(install_dir).map_err(|err| {
@@ -295,6 +310,7 @@ fn tree_owner(install_dir: &Utf8Path) -> BootstrapResult<Owner> {
 }
 
 #[cfg(not(unix))]
+/// Ownership is not tracked on platforms without Unix uids.
 fn tree_owner(_install_dir: &Utf8Path) -> BootstrapResult<Owner> { Ok(Owner {}) }
 
 /// Chowns `path` to the tree owner when it differs, so the demoted worker can
@@ -318,6 +334,7 @@ fn apply_owner(path: &Path, owner: Owner) -> Result<(), Report> {
 }
 
 #[cfg(not(unix))]
+/// Ownership is not applied on platforms without Unix uids.
 fn apply_owner(_path: &Path, _owner: Owner) -> Result<(), Report> { Ok(()) }
 
 /// Entry iterator over an in-memory archive: `'r` is the reader borrow, `'b`
@@ -363,6 +380,7 @@ impl<R: Read> EntryPathExt for tar::Entry<'_, R> {
     }
 }
 
+/// Builds an `ExtensionArchiveInvalid` error naming the archive.
 fn invalid(path: &Utf8Path, detail: &str) -> BootstrapError {
     extension_error(
         BootstrapErrorKind::ExtensionArchiveInvalid,
@@ -370,6 +388,7 @@ fn invalid(path: &Utf8Path, detail: &str) -> BootstrapError {
     )
 }
 
+/// Builds an `ExtensionInstallFailed` error listing the files already written.
 fn install_failed(relative: &Utf8Path, written: &[Utf8PathBuf], err: Report) -> BootstrapError {
     extension_error(
         BootstrapErrorKind::ExtensionInstallFailed,
