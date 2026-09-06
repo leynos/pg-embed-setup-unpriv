@@ -115,6 +115,7 @@ impl fmt::Display for Sha256Hex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.0) }
 }
 
+/// Renders one nibble as a lower-case hex digit.
 const fn lower_hex_digit(nibble: u8) -> char {
     if nibble < 10 {
         (b'0' + nibble) as char

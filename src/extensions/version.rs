@@ -39,6 +39,13 @@ pub fn running_version(install_dir: &Utf8Path) -> BootstrapResult<Version> {
         .output()
         .map_err(|err| unknown(install_dir, &format!("pg_config could not run: {err}")))?;
     let text = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(unknown(
+            install_dir,
+            &format!("pg_config exited with {}: {}", output.status, stderr.trim()),
+        ));
+    }
     parse_pg_config_version(&text).ok_or_else(|| {
         unknown(
             install_dir,
