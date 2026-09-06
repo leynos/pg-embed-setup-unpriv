@@ -238,3 +238,24 @@ states around the grace window.
 
 - `tests/e2e_postgresql_embedded_diesel.rs` – example of combining the helper
   with Diesel-based integration tests while running under `root`.
+
+## Password reuse
+
+`src/bootstrap/prepare/password.rs` keeps a reused data directory reachable.
+`stored_cluster_password` is the query: `Ok(None)` when the data directory
+has no `PG_VERSION` marker, the stored password otherwise, and an error (with
+the `PG_PASSWORD` and remove-the-cluster remedies) when the file the
+bootstrap handed to `initdb` is missing, unreadable or empty.
+`reuse_existing_password` is the command: it applies the query to
+`settings.password` unless the caller supplied an explicit password, and
+returns a `PasswordReuseOutcome`, emitted as the bounded `outcome` field of
+the `password_reuse` tracing event (never a path or a secret as a label).
+Both bootstrap paths (`bootstrap_unprivileged` and `bootstrap_with_root`)
+call it immediately after the settings paths are resolved and before the
+sanitized settings are logged, so the password file is the one that
+`resolve_settings_paths_*` derived (`<install>/.pgpass`). Both functions and
+the outcome enum are exported at the crate root. Every failure branch emits
+the same `password_reuse` event at warning level, with `outcome` set to one
+of `probe_failed`, `missing_file`, `unreadable_file` or `empty_file`, before
+the error is returned, so a bootstrap that refuses a stale cluster is visible
+in the log without the caller rendering the error.

@@ -149,12 +149,15 @@ pub use bootstrap::{
     CleanupMode,
     ExecutionMode,
     ExecutionPrivileges,
+    PasswordReuseOutcome,
     TestBootstrapEnvironment,
     TestBootstrapSettings,
     bootstrap_for_tests,
     detect_execution_privileges,
     find_timezone_dir,
+    reuse_existing_password,
     run,
+    stored_cluster_password,
 };
 use camino::Utf8PathBuf;
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]

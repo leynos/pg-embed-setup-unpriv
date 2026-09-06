@@ -127,6 +127,42 @@ mod behaviour_tests {
         assert_eq!(observed_install, runtime_dir);
         assert_eq!(observed_data, data_dir);
     }
+
+    /// The unprivileged bootstrap adopts the stored password of an existing
+    /// cluster when `PG_PASSWORD` is unset, and keeps an explicit one.
+    #[rstest::rstest]
+    #[case::adopts_stored(None, "stored-secret")]
+    #[case::explicit_wins(Some("explicit-secret"), "explicit-secret")]
+    fn bootstrap_unprivileged_reuses_stored_password(
+        #[case] explicit: Option<&str>,
+        #[case] expected: &str,
+    ) {
+        let runtime = tempdir().expect("runtime dir");
+        let data = tempdir().expect("data dir");
+        let runtime_dir =
+            Utf8PathBuf::from_path_buf(runtime.path().to_path_buf()).expect("runtime dir utf8");
+        let data_dir =
+            Utf8PathBuf::from_path_buf(data.path().to_path_buf()).expect("data dir utf8");
+        std::fs::write(data_dir.join("PG_VERSION"), "17\n").expect("cluster marker");
+        std::fs::write(runtime_dir.join(".pgpass"), "stored-secret\n").expect("password file");
+
+        let cfg = PgEnvCfg {
+            runtime_dir: Some(runtime_dir.clone()),
+            data_dir: Some(data_dir),
+            password: explicit.map(str::to_owned),
+            ..PgEnvCfg::default()
+        };
+        let settings = cfg.to_settings().expect("settings");
+        let _guard = scoped_env(vec![
+            (
+                OsString::from("TZDIR"),
+                Some(OsString::from(runtime_dir.as_str())),
+            ),
+            (OsString::from("TZ"), Some(OsString::from("UTC"))),
+        ]);
+        let prepared = bootstrap_unprivileged(settings, &cfg).expect("bootstrap");
+        assert_eq!(prepared.settings.password, expected);
+    }
 }
 
 #[cfg(all(unix, privileged_unix_platform))]
