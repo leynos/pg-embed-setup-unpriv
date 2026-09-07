@@ -18,7 +18,7 @@ jobs:
     # default; a ceiling merely above the watchdog would cancel the job
     # before the watchdog could report an overrun, and a cancellation
     # discards the log that would have explained it.
-    timeout-minutes: 60
+    timeout-minutes: 65
     strategy:
       fail-fast: false
       matrix:
