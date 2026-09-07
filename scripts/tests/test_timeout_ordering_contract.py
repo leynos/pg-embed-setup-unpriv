@@ -30,6 +30,7 @@ import typing as typ
 import pytest
 from coverage_lanes import CoverageJob, coverage_jobs_of
 from nextest_budgets import (
+    bounds_a_single_test,
     global_timeout,
     largest_test_allowance,
     termination_allowance,
@@ -262,4 +263,25 @@ def test_each_coverage_lane_carries_the_condition_it_is_meant_to(
         f"these coverage lanes do not carry the conditions the developers' "
         f"guide records, as expected versus found: {wrong}; a lane that is "
         f"skipped runs no cargo, so its watchdog never arms"
+    )
+
+
+def test_the_default_profile_bounds_a_test_no_override_matches(
+    nextest_config: str,
+) -> None:
+    """An override bounds its filter's tests; the profile bounds the rest.
+
+    ``largest_test_allowance`` reports the largest budget anywhere in
+    the file, so deleting ``[profile.default]``'s own ``slow-timeout``
+    and leaving the `ui` and `settings` overrides behind still reports
+    360 s while every test those overrides do not match runs with no
+    bound at all. Nothing else here would notice.
+
+    Proved by mutation: commenting out the profile's own
+    ``slow-timeout`` fails this test and nothing else.
+    """
+    assert bounds_a_single_test(nextest_config), (
+        "[profile.default] itself must set slow-timeout with terminate-after; "
+        "an override satisfies the file as a whole while leaving every test it "
+        "does not match unbounded"
     )

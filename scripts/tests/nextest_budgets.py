@@ -254,6 +254,34 @@ def largest_test_allowance(config_text: str) -> float:
     return max(budgets)
 
 
+def bounds_a_single_test(config_text: str, profile: str = "default") -> bool:
+    """Return whether a profile's own table terminates a slow test.
+
+    Only the profile's own ``slow-timeout`` counts. An override bounds
+    the tests its filter matches; the profile's own bounds the rest, so
+    a profile whose only ``terminate-after`` sits in an override leaves
+    every unmatched test running with no bound at all while
+    :func:`largest_test_allowance` still reports a comfortable number.
+
+    Parameters
+    ----------
+    config_text
+        The nextest configuration file's text.
+    profile
+        The profile to read.
+
+    Returns
+    -------
+    bool
+        True when that profile's own ``slow-timeout`` is a table setting
+        ``terminate-after``.
+    """
+    profiles = mapping_or_empty(_parsed(config_text).get("profile"))
+    own = mapping_or_empty(profiles.get(profile))
+    table = own.get("slow-timeout")
+    return isinstance(table, dict) and table.get("terminate-after") is not None
+
+
 def grace_period(config_text: str) -> float:
     """Return the longest grace period the configuration names, in seconds.
 
