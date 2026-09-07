@@ -27,6 +27,7 @@ filter = """
   binary(=bootstrap_privileges)
   | binary(=database_lifecycle)
   | binary(=observability)
+  | binary(=password_reuse_e2e)
   | binary(=settings_logging)
   | binary(=test_cluster_behaviour)
   | binary(=test_cluster_connection)

@@ -23,6 +23,7 @@ excluded_crates = [
     "bootstrap_privileges",
     "bootstrap_worker_binary",
     "password_reuse",
+    "password_reuse_e2e",
     "cli",
     "cluster_handle_send",
     "cluster_split_constructors",
