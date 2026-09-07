@@ -48,6 +48,7 @@ mod archive;
 mod config;
 mod digest;
 mod install;
+mod layout;
 mod manifest;
 mod name;
 mod version;
@@ -63,7 +64,7 @@ pub use self::{
     archive::is_permitted_url,
     config::{ExtensionCacheConfig, resolve_extension_cache_dir},
     digest::{InvalidDigest, Sha256Hex},
-    install::{ALLOWED_PREFIXES, classify_entry_path},
+    layout::{ALLOWED_PREFIXES, classify_entry_path},
     manifest::{
         ArtifactQuery,
         Manifest,
@@ -248,6 +249,8 @@ pub async fn install_extensions_async(
         })
 }
 
+/// Turns a panic in the blocking install thread into an
+/// `ExtensionInstallFailed` error rather than letting it cross the join.
 fn install_thread_panic(payload: Box<dyn std::any::Any + Send>) -> BootstrapError {
     let message = crate::cluster::panic_utils::panic_payload_to_string(payload);
     extension_error(
@@ -330,6 +333,8 @@ fn install_one(
     Ok(installed)
 }
 
+/// Records one installed extension: what it is, what it was built for, and
+/// whether it came from the cache or the network.
 fn log_installed(installed: &InstalledExtension) {
     info!(
         target: LOG_TARGET,

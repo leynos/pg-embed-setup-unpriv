@@ -265,23 +265,34 @@ fn install_refuses_an_archive_changed_after_acquisition() {
     );
 }
 
-/// An identical file with the wrong mode keeps its inode but gets the mode repaired.
+/// An identical file with the wrong mode keeps its inode but gets the mode
+/// repaired, under each of the two prefixes.
+///
+/// The prefixes carry different expected modes (`0o755` under `lib/`, `0o644`
+/// under `share/extension/`) and the installer chooses between them per file,
+/// so both branches are exercised rather than only the shared-object one.
 #[cfg(unix)]
-#[test]
-fn install_repairs_mode_on_identical_files() {
+#[rstest]
+#[case::lib("lib/fixture.so", 0o755)]
+#[case::share("share/extension/fixture.control", 0o644)]
+fn install_repairs_mode_on_identical_files(#[case] relative: &str, #[case] expected: u32) {
     use std::os::unix::fs::PermissionsExt;
     let prepared = prepared(&fixture_entries()).expect("fixture");
     install(&prepared).expect("first install");
-    let module = prepared.install_dir.join("lib/fixture.so");
-    std::fs::set_permissions(&module, std::fs::Permissions::from_mode(0o600)).expect("chmod");
-    let before = inode(&module).expect("inode");
+    let target = prepared.install_dir.join(relative);
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    let before = inode(&target).expect("inode");
     install(&prepared).expect("second install");
     assert_eq!(
-        inode(&module).expect("inode"),
+        inode(&target).expect("inode"),
         before,
         "identical bytes keep the inode"
     );
-    assert_eq!(mode(&module).expect("mode"), 0o755, "the mode is repaired");
+    assert_eq!(
+        mode(&target).expect("mode"),
+        expected,
+        "the mode is repaired"
+    );
 }
 
 /// An archive swapped for a larger file after acquisition is rejected after
