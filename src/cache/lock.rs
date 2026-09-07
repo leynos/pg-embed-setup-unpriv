@@ -4,6 +4,7 @@
 //! parallel test runners. On Unix systems, uses `flock(2)` for advisory locking.
 //! On non-Unix platforms no kernel lock is taken, but the same lock file is
 //! created and held under the cache directory, so callers see one layout.
+//! Issue #232 tracks locking there too.
 
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
@@ -128,7 +129,8 @@ impl CacheLock {
     /// creates and holds the same lock file the Unix arm uses, under the cache
     /// directory it guards, so the two platforms at least agree on where the
     /// file lives and callers see the same failure when the cache is
-    /// unwritable.
+    /// unwritable. Issue #232 tracks making the two arms equivalent with a
+    /// real exclusive lock.
     ///
     /// The previous implementation put the file in the process-wide temp
     /// directory keyed only by `version`, then deleted it immediately. Two
