@@ -9,7 +9,13 @@
 //!
 //! This file runs in its own process, so the cluster it starts is isolated
 //! from other suites.
-#![cfg(unix)]
+//!
+//! It proves the password by opening a real connection, which needs `diesel`
+//! and therefore `libpq`. The macOS and Windows lanes build without
+//! `diesel-support` and have no `libpq` to link against, so the suite is gated
+//! on that feature exactly as the library's own connection helpers are. The
+//! Linux lane runs `--all-features` and does execute it.
+#![cfg(all(unix, feature = "diesel-support"))]
 
 use std::ffi::OsString;
 
