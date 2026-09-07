@@ -30,7 +30,8 @@ SCRIPT_PY_TESTS := scripts/tests/test_coverage_shape_contacts.py \
 	scripts/tests/test_release_archive_failures.py \
 	scripts/tests/test_release_workflow_contract.py \
 	scripts/tests/test_workflow_reader.py \
-	scripts/tests/test_timeout_ordering_contract.py
+	scripts/tests/test_timeout_ordering_contract.py \
+	scripts/tests/test_timeout_reading_contract.py
 # Modules whose examples are collected as doctests alongside the suites.
 SCRIPT_PY_DOCTESTS := scripts/tests/coverage_shape_rules.py \
 	scripts/tests/publisher_token.py \
