@@ -7,12 +7,7 @@ use std::ffi::OsString;
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Result, ensure, eyre};
-use pg_embedded_setup_unpriv::{
-    BootstrapResult,
-    TestBootstrapSettings,
-    bootstrap_for_tests,
-    test_support::capture_debug_logs,
-};
+use pg_embedded_setup_unpriv::{BootstrapResult, TestBootstrapSettings, bootstrap_for_tests};
 use rstest::rstest;
 
 #[path = "support/env.rs"]
@@ -113,10 +108,15 @@ fn max_connections_at_the_public_boundary(
 /// The `settings_decision` event reports the connection limit the server will
 /// actually run at, not the raw `PG_MAX_CONNECTIONS` option.
 ///
+/// Only this test needs `capture_debug_logs`, which the library exports behind
+/// `cluster-unit-tests` or `dev-worker`. Gating the test rather than the file
+/// keeps the override cases above runnable with default features.
+///
 /// The two differ for the case that matters most: a test bootstrap that sets
 /// no override still runs at 20, because `apply_worker_limits` puts it in the
 /// configuration. An event carrying the unset option would tell an operator
 /// nothing about the running server.
+#[cfg(any(feature = "cluster-unit-tests", feature = "dev-worker"))]
 #[rstest]
 #[case::default_test_cap(None, "20")]
 #[case::explicit_override(Some("64"), "64")]
@@ -127,7 +127,9 @@ fn settings_decision_reports_the_effective_connection_limit(
     let (_temp, root) = scratch_root()?;
     // Always name the variable so the default case clears any ambient value.
     let extra: Vec<(&str, Option<&str>)> = vec![("PG_MAX_CONNECTIONS", override_value)];
-    let (logs, outcome) = capture_debug_logs(|| bootstrap_under(&root, &extra));
+    let (logs, outcome) = pg_embedded_setup_unpriv::test_support::capture_debug_logs(|| {
+        bootstrap_under(&root, &extra)
+    });
     outcome?;
     let decision = logs
         .iter()
