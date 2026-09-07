@@ -31,4 +31,4 @@ pub fn verify_surface() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(not(windows))]
-fn main() { verify_surface().expect("install-root surface should compile and run"); }
+fn main() -> Result<(), Box<dyn std::error::Error>> { verify_surface() }

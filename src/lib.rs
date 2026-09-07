@@ -344,7 +344,8 @@ impl PgEnvCfg {
     /// A fully configured `Settings` instance on success, or an error if configuration fails.
     ///
     /// # Errors
-    /// Returns an error when the semantic version requirement cannot be parsed.
+    /// Returns an error when the semantic version requirement cannot be parsed,
+    /// or when `PG_MAX_CONNECTIONS` is below [`MIN_MAX_CONNECTIONS`].
     pub fn to_settings(&self) -> Result<Settings> { self.to_settings_with_context(false) }
 
     /// Converts the configuration into `Settings`, applying test-only worker limits.
@@ -361,7 +362,8 @@ impl PgEnvCfg {
     /// ```
     ///
     /// # Errors
-    /// Returns an error when the semantic version requirement cannot be parsed.
+    /// Returns an error when the semantic version requirement cannot be parsed,
+    /// or when `PG_MAX_CONNECTIONS` is below [`MIN_MAX_CONNECTIONS`].
     pub fn to_settings_for_tests(&self) -> Result<Settings> { self.to_settings_with_context(true) }
 
     /// Converts the configuration into `Settings`, optionally applying test limits.
@@ -379,7 +381,8 @@ impl PgEnvCfg {
     /// ```
     ///
     /// # Errors
-    /// Returns an error when the semantic version requirement cannot be parsed.
+    /// Returns an error when the semantic version requirement cannot be parsed,
+    /// or when `PG_MAX_CONNECTIONS` is below [`MIN_MAX_CONNECTIONS`].
     pub fn to_settings_with_context(&self, for_tests: bool) -> Result<Settings> {
         // Disable the internal postgresql_embedded timeout. This crate wraps lifecycle
         // operations with tokio::time::timeout using setup_timeout/start_timeout from

@@ -128,7 +128,7 @@ fn resolve_settings_paths_for_uid(
     }
 
     let paths = settings_paths_from_settings(settings, install_default, data_default)?;
-    log_settings_decision(root_source, &paths, cfg);
+    log_settings_decision(root_source, &paths, settings);
     Ok(paths)
 }
 
@@ -150,7 +150,7 @@ fn resolve_settings_paths_for_current_user(
 ) -> BootstrapResult<SettingsPaths> {
     let Some(root) = cfg.embed_root.as_ref() else {
         let paths = settings_paths_from_settings(settings, false, false)?;
-        log_settings_decision(RootSource::SettingsDefault, &paths, cfg);
+        log_settings_decision(RootSource::SettingsDefault, &paths, settings);
         return Ok(paths);
     };
     let (install_dir, data_dir) = default_paths_under(root);
@@ -165,7 +165,7 @@ fn resolve_settings_paths_for_current_user(
         data_default = true;
     }
     let paths = settings_paths_from_settings(settings, install_default, data_default)?;
-    log_settings_decision(RootSource::Override, &paths, cfg);
+    log_settings_decision(RootSource::Override, &paths, settings);
     Ok(paths)
 }
 
@@ -185,7 +185,14 @@ enum RootSource {
 
 /// Records the resolved directories and connection cap once per bootstrap so
 /// an operator can see which override won without reading the settings dump.
-fn log_settings_decision(root_source: RootSource, paths: &SettingsPaths, cfg: &PgEnvCfg) {
+///
+/// `max_connections` is read from the resolved settings rather than from
+/// `PgEnvCfg`, because the two differ: a test bootstrap that sets no
+/// `PG_MAX_CONNECTIONS` still runs the server at 20, which `apply_worker_limits`
+/// put into the configuration. Logging the configured option would report
+/// nothing for the case an operator most needs to see. A plain bootstrap that
+/// sets no limit leaves the key absent and the event says `server default`.
+fn log_settings_decision(root_source: RootSource, paths: &SettingsPaths, settings: &Settings) {
     info!(
         target: LOG_TARGET,
         root_source = ?root_source,
@@ -193,7 +200,10 @@ fn log_settings_decision(root_source: RootSource, paths: &SettingsPaths, cfg: &P
         install_default = paths.install_default,
         data_dir = %paths.data_dir,
         data_default = paths.data_default,
-        max_connections = cfg.max_connections,
+        max_connections = settings
+            .configuration
+            .get("max_connections")
+            .map_or("server default", String::as_str),
         "settings_decision"
     );
 }

@@ -7,7 +7,12 @@ use std::ffi::OsString;
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Result, ensure, eyre};
-use pg_embedded_setup_unpriv::{BootstrapResult, TestBootstrapSettings, bootstrap_for_tests};
+use pg_embedded_setup_unpriv::{
+    BootstrapResult,
+    TestBootstrapSettings,
+    bootstrap_for_tests,
+    test_support::capture_debug_logs,
+};
 use rstest::rstest;
 
 #[path = "support/env.rs"]
@@ -102,5 +107,48 @@ fn max_connections_at_the_public_boundary(
         (Ok(_), None) => color_eyre::eyre::bail!("PG_MAX_CONNECTIONS={value} must be rejected"),
         (Err(err), Some(_)) => color_eyre::eyre::bail!("unexpected failure: {err}"),
     }
+    Ok(())
+}
+
+/// The `settings_decision` event reports the connection limit the server will
+/// actually run at, not the raw `PG_MAX_CONNECTIONS` option.
+///
+/// The two differ for the case that matters most: a test bootstrap that sets
+/// no override still runs at 20, because `apply_worker_limits` puts it in the
+/// configuration. An event carrying the unset option would tell an operator
+/// nothing about the running server.
+#[rstest]
+#[case::default_test_cap(None, "20")]
+#[case::explicit_override(Some("64"), "64")]
+fn settings_decision_reports_the_effective_connection_limit(
+    #[case] override_value: Option<&str>,
+    #[case] expected: &str,
+) -> Result<()> {
+    let (_temp, root) = scratch_root()?;
+    // Always name the variable so the default case clears any ambient value.
+    let extra: Vec<(&str, Option<&str>)> = vec![("PG_MAX_CONNECTIONS", override_value)];
+    let (logs, outcome) = capture_debug_logs(|| bootstrap_under(&root, &extra));
+    outcome?;
+    let decision = logs
+        .iter()
+        .find(|line| line.contains("settings_decision"))
+        .ok_or_else(|| eyre!("no settings_decision event in:\n{}", logs.join("\n")))?;
+    ensure!(
+        decision.contains(&format!("max_connections=\"{expected}\"")),
+        "settings_decision did not report {expected}: {decision}"
+    );
+    ensure!(
+        decision.contains(root.join("install").as_str())
+            && decision.contains(root.join("data").as_str()),
+        "settings_decision did not name both resolved directories: {decision}"
+    );
+    ensure!(
+        decision.contains("install_default=true") && decision.contains("data_default=true"),
+        "settings_decision did not report both leaves as derived: {decision}"
+    );
+    ensure!(
+        decision.contains("root_source=Override"),
+        "settings_decision did not attribute the root to PG_EMBED_ROOT: {decision}"
+    );
     Ok(())
 }

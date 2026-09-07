@@ -187,9 +187,14 @@ archive packager and the workflow contract tests in
 so the privileged and portable resolvers cannot drift. Each resolver emits an
 info-level `settings_decision` event with `root_source` (`Override`,
 `PerUserDefault` or `SettingsDefault`), both directories, whether each was
-derived, and the effective `PG_MAX_CONNECTIONS`, so a bootstrap log shows which
-override won. `PG_MAX_CONNECTIONS` is validated in `PgEnvCfg::to_settings`
-(floor `MIN_MAX_CONNECTIONS`, currently 4) before the paths are resolved.
+derived, and the effective `max_connections`, so a bootstrap log shows which
+override won. That last field is read from the resolved settings, not from
+`PgEnvCfg`: a test bootstrap with no `PG_MAX_CONNECTIONS` still runs at 20
+because `apply_worker_limits` put it there, and the event reports 20 rather
+than nothing. A plain bootstrap that sets no limit leaves the key absent and
+the event reads `server default`. `PG_MAX_CONNECTIONS` itself is validated in
+`PgEnvCfg::to_settings` (floor `MIN_MAX_CONNECTIONS`, currently 4) before the
+paths are resolved.
 
 ## Lifecycle verification
 
