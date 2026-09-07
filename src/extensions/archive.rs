@@ -202,8 +202,9 @@ pub(super) fn acquire(
         .map_err(|err| unavailable(eyre!("cannot lock extension cache {cache_dir}: {err}")))?;
     let path = entry_dir.join(&artifact.file);
     let state = cached_state(&path, &artifact.sha256);
+    let reusable = matches!(state, CachedState::Valid);
     log_cache_state(state, &path);
-    if matches!(state, CachedState::Valid) {
+    if reusable {
         return Ok(AcquiredArchive {
             path,
             origin: ArchiveOrigin::Cached,
@@ -216,30 +217,56 @@ pub(super) fn acquire(
     })
 }
 
-#[derive(Debug, Clone, Copy)]
-enum CachedState {
+/// Why a cache entry was or was not reused.
+///
+/// The three failing outcomes are kept apart because they are different
+/// operational problems: an entry that was never written, one whose bytes no
+/// longer hash to the manifest digest, and one this process cannot read at
+/// all. Collapsing the last into the second reports a digest mismatch for what
+/// is really a permission or filesystem fault, which sends the reader looking
+/// for a corrupted download that never happened.
+#[derive(Debug)]
+pub(super) enum CachedState {
+    /// The entry is present and hashes to the expected digest.
     Valid,
+    /// No entry exists at the path.
     Missing,
+    /// The entry exists but its bytes hash to something else.
     Corrupt,
+    /// The entry exists but could not be read; the error says why.
+    Unreadable(std::io::Error),
 }
 
 /// Classifies the cache entry at `path` against the expected digest.
-fn cached_state(path: &Utf8Path, expected: &Sha256Hex) -> CachedState {
-    if !path.is_file() {
-        return CachedState::Missing;
+///
+/// Every outcome other than [`CachedState::Valid`] leads to a re-download,
+/// which is the cache's self-healing path. A download that cannot then write
+/// reports its own error, so an unreadable entry is never silently swallowed.
+pub(super) fn cached_state(path: &Utf8Path, expected: &Sha256Hex) -> CachedState {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() => {}
+        Ok(_) => {
+            return CachedState::Unreadable(std::io::Error::other(
+                "cache entry is not a regular file",
+            ));
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return CachedState::Missing,
+        Err(err) => return CachedState::Unreadable(err),
     }
     match Sha256Hex::of_file(path) {
         Ok(actual) if &actual == expected => CachedState::Valid,
-        _ => CachedState::Corrupt,
+        Ok(_) => CachedState::Corrupt,
+        Err(err) => CachedState::Unreadable(err),
     }
 }
 
-/// Emits the cache hit, miss or corrupt event for `path`.
+/// Emits the cache hit, miss, corrupt or unreadable event for `path`.
 fn log_cache_state(state: CachedState, path: &Utf8Path) {
     match state {
         CachedState::Valid => log_cache_hit(path),
         CachedState::Missing => log_cache_miss(path),
         CachedState::Corrupt => log_cache_corrupt(path),
+        CachedState::Unreadable(error) => log_cache_unreadable(path, &error),
     }
 }
 
@@ -259,6 +286,16 @@ fn log_cache_corrupt(path: &Utf8Path) {
         target: LOG_TARGET,
         path = %path,
         "cached extension archive digest mismatch; re-downloading"
+    );
+}
+
+/// Warning event for a cache entry this process cannot read.
+fn log_cache_unreadable(path: &Utf8Path, error: &std::io::Error) {
+    warn!(
+        target: LOG_TARGET,
+        path = %path,
+        error = %error,
+        "cached extension archive cannot be read; re-downloading"
     );
 }
 

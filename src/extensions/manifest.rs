@@ -25,6 +25,16 @@ pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 /// Upper bound on manifest size; anything larger is not a manifest.
 pub(super) const MANIFEST_SIZE_CAP: u64 = 1024 * 1024;
 
+/// Upper bound on the declared size of one archive.
+///
+/// A `size` is a length the crate will read and buffer, so an unbounded value
+/// is a denial of service in the manifest: `u64::MAX` would ask for a
+/// `u64::MAX`-byte read limit. Real extension archives are hundreds of
+/// kilobytes (`pgvector` is under one megabyte), so 256 MiB leaves several
+/// orders of magnitude of headroom while keeping the value representable and
+/// the buffer bounded.
+pub(super) const ARCHIVE_SIZE_CAP: u64 = 256 * 1024 * 1024;
+
 /// A published extension manifest (`schema_version` 1).
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Manifest {
@@ -129,6 +139,8 @@ impl Manifest {
         Ok(manifest)
     }
 
+    /// Applies every whole-manifest rule: the schema version, each extension
+    /// name, and each artefact.
     fn validate(&self) -> BootstrapResult<()> {
         if self.schema_version != SUPPORTED_SCHEMA_VERSION {
             return Err(invalid(eyre!(
@@ -186,6 +198,7 @@ impl Manifest {
         })
     }
 
+    /// The names this manifest offers, for the "no such extension" message.
     fn extension_names(&self) -> Vec<&str> {
         self.extensions
             .iter()
@@ -194,7 +207,7 @@ impl Manifest {
     }
 }
 
-/// Checks one artefact's version, file name, file list and URL.
+/// Checks one artefact's version, file name, size, file list and URL.
 fn validate_artifact(name: &str, artifact: &ManifestArtifact) -> BootstrapResult<()> {
     artifact_version(artifact).ok_or_else(|| {
         invalid(eyre!(
@@ -206,6 +219,14 @@ fn validate_artifact(name: &str, artifact: &ManifestArtifact) -> BootstrapResult
         return Err(invalid(eyre!(
             "{name}: artefact file {:?} must be a bare file name",
             artifact.file
+        )));
+    }
+    if artifact.size == 0 || artifact.size > ARCHIVE_SIZE_CAP {
+        return Err(invalid(eyre!(
+            "{name}: artefact {} declares size {} bytes; the size must be between 1 and \
+             {ARCHIVE_SIZE_CAP}",
+            artifact.file,
+            artifact.size
         )));
     }
     if artifact.files.is_empty() {
@@ -288,6 +309,7 @@ pub fn load(source: &ManifestSource) -> BootstrapResult<Manifest> {
     Ok(manifest)
 }
 
+/// Records what was loaded, how large it was, and whether a digest pinned it.
 fn log_loaded(source: &ManifestSource, bytes: usize, pinned: bool, manifest: &Manifest) {
     tracing::info!(
         target: super::LOG_TARGET,
@@ -300,6 +322,8 @@ fn log_loaded(source: &ManifestSource, bytes: usize, pinned: bool, manifest: &Ma
     );
 }
 
+/// Reads a manifest from disk, capped at [`MANIFEST_SIZE_CAP`] plus one byte
+/// so an oversized file is refused rather than buffered whole.
 fn read_path(path: &camino::Utf8Path) -> BootstrapResult<Vec<u8>> {
     let file = std::fs::File::open(path)
         .map_err(|err| unavailable_manifest(eyre!("cannot open manifest at {path}: {err}")))?;
@@ -310,6 +334,7 @@ fn read_path(path: &camino::Utf8Path) -> BootstrapResult<Vec<u8>> {
     check_size(bytes, path.as_str())
 }
 
+/// Fetches a manifest over HTTP, subject to the same size cap as a local one.
 fn fetch_url(url: &str) -> BootstrapResult<Vec<u8>> {
     let mut bytes = Vec::new();
     http_get(url, MANIFEST_SIZE_CAP, &mut bytes)
@@ -317,6 +342,7 @@ fn fetch_url(url: &str) -> BootstrapResult<Vec<u8>> {
     check_size(bytes, url)
 }
 
+/// Rejects bytes over [`MANIFEST_SIZE_CAP`], naming where they came from.
 fn check_size(bytes: Vec<u8>, location: &str) -> BootstrapResult<Vec<u8>> {
     if bytes.len() as u64 > MANIFEST_SIZE_CAP {
         return Err(invalid(eyre!(
@@ -344,14 +370,17 @@ fn verify_digest(
     ))
 }
 
+/// Wraps `report` as an `ExtensionManifestInvalid` failure.
 const fn invalid(report: Report) -> BootstrapError {
     extension_error(BootstrapErrorKind::ExtensionManifestInvalid, report)
 }
 
+/// Wraps `report` as an `ExtensionUnavailable` failure.
 const fn unavailable(report: Report) -> BootstrapError {
     extension_error(BootstrapErrorKind::ExtensionUnavailable, report)
 }
 
+/// Wraps `report` as an `ExtensionManifestUnavailable` failure.
 const fn unavailable_manifest(report: Report) -> BootstrapError {
     extension_error(BootstrapErrorKind::ExtensionManifestUnavailable, report)
 }
