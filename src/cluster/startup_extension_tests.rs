@@ -141,6 +141,38 @@ fn assert_installed_between_setup_and_start(
     Ok(())
 }
 
+/// Everything one lifecycle test needs, staged once.
+///
+/// The six tests below differ only in which bootstrap they build and which
+/// lifecycle they drive; staging the rest here keeps that difference the only
+/// thing each test states.
+struct LifecycleCase {
+    hook: OrderingHook,
+    bootstrap: TestBootstrapSettings,
+    env_vars: Vec<(String, Option<String>)>,
+    cache_config: BinaryCacheConfig,
+    runtime: tokio::runtime::Runtime,
+}
+
+/// Stages a case whose bootstrap comes from `build`.
+fn lifecycle_case(
+    paths: &RootSetupPaths,
+    build: fn(&RootSetupPaths) -> Result<TestBootstrapSettings>,
+) -> Result<LifecycleCase> {
+    let hook = ordering_hook(&paths.install_dir)?;
+    let bootstrap = build(paths)?;
+    let env_vars = bootstrap.environment.to_env();
+    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
+    let runtime = test_runtime()?;
+    Ok(LifecycleCase {
+        hook,
+        bootstrap,
+        env_vars,
+        cache_config,
+        runtime,
+    })
+}
+
 /// A request whose manifest cannot be parsed.
 ///
 /// The hook fails at the first step, before it touches the cache or the
@@ -205,15 +237,16 @@ fn root_lifecycle_stops_when_the_extension_hook_fails(
     #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
 ) -> Result<()> {
     let paths = root_setup_paths_res?;
-    let hook = ordering_hook(&paths.install_dir)?;
-    let bootstrap = failing_bootstrap(&paths)?;
-    let env_vars = bootstrap.environment.to_env();
-    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
-    let runtime = test_runtime()?;
-    let err = start_postgres(&runtime, bootstrap, &env_vars, &cache_config)
-        .err()
-        .ok_or_else(|| eyre!("a broken manifest must stop the lifecycle"))?;
-    assert_stopped_before_start(&hook.operations, &err)
+    let case = lifecycle_case(&paths, failing_bootstrap)?;
+    let err = start_postgres(
+        &case.runtime,
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    )
+    .err()
+    .ok_or_else(|| eyre!("a broken manifest must stop the lifecycle"))?;
+    assert_stopped_before_start(&case.hook.operations, &err)
 }
 
 /// The asynchronous root lifecycle stops on the same failure.
@@ -224,16 +257,17 @@ fn async_root_lifecycle_stops_when_the_extension_hook_fails(
     #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
 ) -> Result<()> {
     let paths = root_setup_paths_res?;
-    let hook = ordering_hook(&paths.install_dir)?;
-    let bootstrap = failing_bootstrap(&paths)?;
-    let env_vars = bootstrap.environment.to_env();
-    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
-    let runtime = test_runtime()?;
-    let err = runtime
-        .block_on(start_postgres_async(bootstrap, &env_vars, &cache_config))
+    let case = lifecycle_case(&paths, failing_bootstrap)?;
+    let err = case
+        .runtime
+        .block_on(start_postgres_async(
+            case.bootstrap,
+            &case.env_vars,
+            &case.cache_config,
+        ))
         .err()
         .ok_or_else(|| eyre!("a broken manifest must stop the lifecycle"))?;
-    assert_stopped_before_start(&hook.operations, &err)
+    assert_stopped_before_start(&case.hook.operations, &err)
 }
 
 /// The setup-only lifecycle reports the failure and completes nothing.
@@ -243,15 +277,16 @@ fn setup_only_lifecycle_stops_when_the_extension_hook_fails(
     #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
 ) -> Result<()> {
     let paths = root_setup_paths_res?;
-    let hook = ordering_hook(&paths.install_dir)?;
-    let bootstrap = failing_bootstrap(&paths)?;
-    let env_vars = bootstrap.environment.to_env();
-    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
-    let runtime = test_runtime()?;
-    let err = setup_lifecycle(&runtime, bootstrap, &env_vars, &cache_config)
-        .err()
-        .ok_or_else(|| eyre!("a broken manifest must stop the setup-only lifecycle"))?;
-    assert_stopped_before_start(&hook.operations, &err)
+    let case = lifecycle_case(&paths, failing_bootstrap)?;
+    let err = setup_lifecycle(
+        &case.runtime,
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    )
+    .err()
+    .ok_or_else(|| eyre!("a broken manifest must stop the setup-only lifecycle"))?;
+    assert_stopped_before_start(&case.hook.operations, &err)
 }
 
 /// The synchronous root lifecycle installs extensions after Setup and before Start.
@@ -261,13 +296,14 @@ fn root_lifecycle_installs_extensions_between_setup_and_start(
     #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
 ) -> Result<()> {
     let paths = root_setup_paths_res?;
-    let hook = ordering_hook(&paths.install_dir)?;
-    let bootstrap = ordering_bootstrap(&paths)?;
-    let env_vars = bootstrap.environment.to_env();
-    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
-    let runtime = test_runtime()?;
-    let outcome = start_postgres(&runtime, bootstrap, &env_vars, &cache_config)?;
-    assert_installed_between_setup_and_start(&hook.operations, &outcome.bootstrap)
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+    let outcome = start_postgres(
+        &case.runtime,
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    )?;
+    assert_installed_between_setup_and_start(&case.hook.operations, &outcome.bootstrap)
 }
 
 /// The asynchronous root lifecycle keeps the same ordering.
@@ -278,13 +314,13 @@ fn async_root_lifecycle_installs_extensions_between_setup_and_start(
     #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
 ) -> Result<()> {
     let paths = root_setup_paths_res?;
-    let hook = ordering_hook(&paths.install_dir)?;
-    let bootstrap = ordering_bootstrap(&paths)?;
-    let env_vars = bootstrap.environment.to_env();
-    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
-    let runtime = test_runtime()?;
-    let outcome = runtime.block_on(start_postgres_async(bootstrap, &env_vars, &cache_config))?;
-    assert_installed_between_setup_and_start(&hook.operations, &outcome.bootstrap)
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+    let outcome = case.runtime.block_on(start_postgres_async(
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    ))?;
+    assert_installed_between_setup_and_start(&case.hook.operations, &outcome.bootstrap)
 }
 
 /// The CLI setup-only lifecycle installs extensions after Setup without starting.
@@ -294,13 +330,15 @@ fn setup_only_lifecycle_installs_extensions_after_setup(
     #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
 ) -> Result<()> {
     let paths = root_setup_paths_res?;
-    let hook = ordering_hook(&paths.install_dir)?;
-    let bootstrap = ordering_bootstrap(&paths)?;
-    let env_vars = bootstrap.environment.to_env();
-    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
-    let runtime = test_runtime()?;
-    let prepared = setup_lifecycle(&runtime, bootstrap, &env_vars, &cache_config)?;
-    let recorded = hook
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+    let prepared = setup_lifecycle(
+        &case.runtime,
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    )?;
+    let recorded = case
+        .hook
         .operations
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
