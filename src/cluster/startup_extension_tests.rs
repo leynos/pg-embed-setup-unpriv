@@ -141,6 +141,119 @@ fn assert_installed_between_setup_and_start(
     Ok(())
 }
 
+/// A request whose manifest cannot be parsed.
+///
+/// The hook fails at the first step, before it touches the cache or the
+/// network, so the failure ordering is tested without either.
+fn failing_request(base: &Utf8Path) -> Result<crate::extensions::ExtensionRequest> {
+    use crate::extensions::{ExtensionName, ExtensionRequest, ManifestSource};
+    let manifest_path = base.join("broken-manifest.json");
+    fs::write(manifest_path.as_std_path(), b"this is not a manifest")?;
+    Ok(ExtensionRequest {
+        names: vec![ExtensionName::new("probe").map_err(|err| eyre!("{err}"))?],
+        manifest: ManifestSource::Path {
+            path: manifest_path,
+            sha256: None,
+        },
+        cache_dir: base.join("ext-cache"),
+    })
+}
+
+/// The same bootstrap as [`ordering_bootstrap`], with a request that fails.
+fn failing_bootstrap(paths: &RootSetupPaths) -> Result<TestBootstrapSettings> {
+    let mut bootstrap = dummy_settings(ExecutionPrivileges::Root);
+    configure_root_bootstrap(
+        &mut bootstrap,
+        &paths.install_dir,
+        &paths.data_dir,
+        &paths.scoped_cache_home,
+    )?;
+    bootstrap.extensions = Some(failing_request(&paths.install_dir)?);
+    Ok(bootstrap)
+}
+
+/// The hook's failure stops the lifecycle: the error reaches the caller and
+/// `Start` is never dispatched.
+///
+/// Without this, a regression that logged the hook error and carried on, or
+/// that started the server before installing, would still pass the ordering
+/// and pipeline tests, because those only observe the successful path.
+fn assert_stopped_before_start(
+    operations: &Mutex<Vec<String>>,
+    err: &crate::error::BootstrapError,
+) -> Result<()> {
+    ensure!(
+        err.kind() == crate::error::BootstrapErrorKind::ExtensionManifestInvalid,
+        "expected ExtensionManifestInvalid, got {:?}",
+        err.kind()
+    );
+    let recorded = operations
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    ensure!(
+        recorded == ["setup"],
+        "Start must not be dispatched after a hook failure, recorded {recorded:?}"
+    );
+    Ok(())
+}
+
+/// The synchronous root lifecycle stops when the hook fails.
+#[rstest]
+#[serial(worker_hook)]
+fn root_lifecycle_stops_when_the_extension_hook_fails(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    let hook = ordering_hook(&paths.install_dir)?;
+    let bootstrap = failing_bootstrap(&paths)?;
+    let env_vars = bootstrap.environment.to_env();
+    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
+    let runtime = test_runtime()?;
+    let err = start_postgres(&runtime, bootstrap, &env_vars, &cache_config)
+        .err()
+        .ok_or_else(|| eyre!("a broken manifest must stop the lifecycle"))?;
+    assert_stopped_before_start(&hook.operations, &err)
+}
+
+/// The asynchronous root lifecycle stops on the same failure.
+#[cfg(feature = "async-api")]
+#[rstest]
+#[serial(worker_hook)]
+fn async_root_lifecycle_stops_when_the_extension_hook_fails(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    let hook = ordering_hook(&paths.install_dir)?;
+    let bootstrap = failing_bootstrap(&paths)?;
+    let env_vars = bootstrap.environment.to_env();
+    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
+    let runtime = test_runtime()?;
+    let err = runtime
+        .block_on(start_postgres_async(bootstrap, &env_vars, &cache_config))
+        .err()
+        .ok_or_else(|| eyre!("a broken manifest must stop the lifecycle"))?;
+    assert_stopped_before_start(&hook.operations, &err)
+}
+
+/// The setup-only lifecycle reports the failure and completes nothing.
+#[rstest]
+#[serial(worker_hook)]
+fn setup_only_lifecycle_stops_when_the_extension_hook_fails(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    let hook = ordering_hook(&paths.install_dir)?;
+    let bootstrap = failing_bootstrap(&paths)?;
+    let env_vars = bootstrap.environment.to_env();
+    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
+    let runtime = test_runtime()?;
+    let err = setup_lifecycle(&runtime, bootstrap, &env_vars, &cache_config)
+        .err()
+        .ok_or_else(|| eyre!("a broken manifest must stop the setup-only lifecycle"))?;
+    assert_stopped_before_start(&hook.operations, &err)
+}
+
 /// The synchronous root lifecycle installs extensions after Setup and before Start.
 #[rstest]
 #[serial(worker_hook)]
