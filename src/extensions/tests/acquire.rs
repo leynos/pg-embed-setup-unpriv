@@ -16,7 +16,12 @@ use super::fixture::{
 };
 use crate::{
     error::BootstrapErrorKind,
-    extensions::{ArchiveOrigin, ManifestArtifact, Sha256Hex, archive::acquire},
+    extensions::{
+        ArchiveOrigin,
+        ManifestArtifact,
+        Sha256Hex,
+        archive::{CachedState, acquire, cached_state},
+    },
 };
 
 /// A cache directory plus an artefact pointing at `url`.
@@ -165,4 +170,53 @@ fn acquire_refuses_redirect_to_plain_http() {
 #[case::garbage("not a url", false)]
 fn permitted_url_rules(#[case] url: &str, #[case] expected: bool) {
     assert_eq!(crate::extensions::is_permitted_url(url), expected);
+}
+
+/// Each cache-entry outcome is reported distinctly, so the log says why an
+/// entry was not reused rather than blaming every fault on a digest mismatch.
+///
+/// The four cases are exhaustive over `CachedState`: nothing written, the
+/// expected bytes, the wrong bytes, and a path occupied by something that is
+/// not a regular file.
+#[rstest]
+#[case::missing(EntryKind::Absent)]
+#[case::valid(EntryKind::ExpectedBytes)]
+#[case::corrupt(EntryKind::WrongBytes)]
+#[case::unreadable(EntryKind::Directory)]
+fn cache_entry_states_are_distinct(#[case] kind: EntryKind) {
+    let case = cache_case("https://example.invalid/fixture.tar.gz").expect("fixture");
+    let path = case.entry_path();
+    match kind {
+        EntryKind::Absent => {}
+        EntryKind::ExpectedBytes => {
+            case.seed(&case.bytes).expect("seed");
+        }
+        EntryKind::WrongBytes => {
+            case.seed(b"corrupt").expect("seed");
+        }
+        EntryKind::Directory => {
+            std::fs::create_dir_all(&path).expect("directory in place of an entry");
+        }
+    }
+    let state = cached_state(&path, &case.artifact.sha256);
+    match (kind, &state) {
+        (EntryKind::Absent, CachedState::Missing)
+        | (EntryKind::ExpectedBytes, CachedState::Valid)
+        | (EntryKind::WrongBytes, CachedState::Corrupt)
+        | (EntryKind::Directory, CachedState::Unreadable(_)) => {}
+        (_, other) => panic!("{kind:?} was classified as {other:?}"),
+    }
+}
+
+/// What is sitting at the cache entry path for a [`cache_entry_states_are_distinct`] case.
+#[derive(Debug, Clone, Copy)]
+enum EntryKind {
+    /// Nothing has been written.
+    Absent,
+    /// The archive the manifest describes.
+    ExpectedBytes,
+    /// Some other bytes.
+    WrongBytes,
+    /// A directory, which is not an archive the cache can read.
+    Directory,
 }

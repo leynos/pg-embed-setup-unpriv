@@ -15,6 +15,7 @@ use crate::{
         ManifestSource,
         Sha256Hex,
         compile_target,
+        manifest::ARCHIVE_SIZE_CAP,
         running_version,
         version::parse_pg_config_version,
     },
@@ -113,6 +114,36 @@ fn malformed_manifest_is_invalid(#[case] needle: &str, #[case] replacement: &str
     let mutated = text.replacen(needle, replacement, 1);
     let err = Manifest::parse(mutated.as_bytes()).expect_err("must be rejected");
     assert_eq!(err.kind(), BootstrapErrorKind::ExtensionManifestInvalid);
+}
+
+/// A declared archive size outside the accepted range is rejected at parse
+/// time, so no later stage sees a size it cannot read or buffer.
+///
+/// `u64::MAX` is the case that matters: before the bound existed it reached
+/// `read_verified`, where the read limit `size + 1` overflowed and the buffer
+/// was preallocated from the size.
+#[rstest]
+#[case::zero(0)]
+#[case::one_over_cap(ARCHIVE_SIZE_CAP + 1)]
+#[case::u64_max(u64::MAX)]
+fn artifact_size_outside_the_range_is_invalid(#[case] size: u64) {
+    let bytes = fixture_archive().expect("fixture");
+    let mut artifact = artifact_for(&bytes, "fixture.tar.gz", "https://example.invalid/f.tar.gz");
+    artifact.size = size;
+    let text = manifest_json("fixture", &[artifact]);
+    let err = Manifest::parse(text.as_bytes()).expect_err("must be rejected");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionManifestInvalid);
+}
+
+/// The cap itself is accepted, so the bound is inclusive and a large but
+/// plausible archive is not refused.
+#[test]
+fn artifact_size_at_the_cap_is_accepted() {
+    let bytes = fixture_archive().expect("fixture");
+    let mut artifact = artifact_for(&bytes, "fixture.tar.gz", "https://example.invalid/f.tar.gz");
+    artifact.size = ARCHIVE_SIZE_CAP;
+    let text = manifest_json("fixture", &[artifact]);
+    Manifest::parse(text.as_bytes()).expect("the cap is within the range");
 }
 
 /// Bytes that are not JSON at all are `ExtensionManifestInvalid`.

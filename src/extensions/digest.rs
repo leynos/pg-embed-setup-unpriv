@@ -92,6 +92,7 @@ impl Sha256Hex {
         Self::of_reader(std::fs::File::open(path)?)
     }
 
+    /// Renders a finished hasher as lower-case hexadecimal.
     fn from_hasher(hasher: Sha256) -> Self {
         let bytes = hasher.finalize();
         let mut encoded = String::with_capacity(bytes.len() * 2);
@@ -132,6 +133,7 @@ pub(super) struct HashingWriter<W> {
 }
 
 impl<W: io::Write> HashingWriter<W> {
+    /// Wraps `inner` so every byte written through it is hashed.
     pub(super) fn new(inner: W) -> Self {
         Self {
             inner,

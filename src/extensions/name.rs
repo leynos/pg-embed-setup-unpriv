@@ -49,6 +49,8 @@ impl ExtensionName {
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
+/// True for the bytes an extension name may contain: lower-case ASCII
+/// letters, digits and underscore.
 const fn is_name_byte(byte: u8) -> bool {
     byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
 }
