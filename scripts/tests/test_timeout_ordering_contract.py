@@ -21,6 +21,7 @@ See "Test timeouts: four tiers, outermost last" in
 `leynos/shared-actions`' `generate-coverage` README.
 """
 
+import collections.abc as cabc
 import re
 import typing as typ
 from pathlib import Path
@@ -80,8 +81,15 @@ COLD_BUILD_ALLOWANCE_SECONDS: typ.Final[float] = 10 * 60.0
 #: the budget drifting away from the guide.
 REQUIRED_GLOBAL_TIMEOUT_SECONDS: typ.Final[float] = 10 * 60.0
 
+#: How far a ceiling must sit above the sum it contains, rather than
+#: merely reaching it. A ceiling equal to that sum cancels the job at
+#: the moment the watchdog would have reported the overrun, and the
+#: report is the only thing that makes an overrun actionable.
+CEILING_MARGIN_SECONDS: typ.Final[float] = 15 * 60.0
+
 #: The ceiling every coverage job must carry, likewise from the guide.
-REQUIRED_JOB_CEILING_SECONDS: typ.Final[float] = 60 * 60.0
+#: The requirement is 50 minutes, and this is that plus the margin.
+REQUIRED_JOB_CEILING_SECONDS: typ.Final[float] = 65 * 60.0
 
 _DURATION: typ.Final[re.Pattern[str]] = re.compile(
     r"^\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>ms|s|m|h)\s*$"
@@ -249,6 +257,32 @@ class CoverageJob(typ.NamedTuple):
             ``workflow:job`` for this job.
         """
         return f"{self.workflow}:{self.job}"
+
+
+def required_ceiling(budgets: cabc.Sequence[float], allowance: float) -> float:
+    """Return the smallest acceptable ceiling for one job, in seconds.
+
+    Three terms. Each coverage step may legitimately spend its whole
+    watchdog, so the sum is the floor. The measured work outside those
+    windows is added because the job timer covers it and the watchdogs
+    do not. The margin is added because a ceiling equal to that sum
+    cancels the job at the moment the watchdog would have reported the
+    overrun, and the report is the only thing that makes an overrun
+    actionable.
+
+    Parameters
+    ----------
+    budgets : cabc.Sequence[float]
+        One watchdog budget per coverage step in the job.
+    allowance : float
+        The measured work outside those windows, in seconds.
+
+    Returns
+    -------
+    float
+        The smallest acceptable ceiling, in seconds.
+    """
+    return sum(budgets) + allowance + CEILING_MARGIN_SECONDS
 
 
 def _mapping(value: object) -> dict[str, object]:
@@ -495,7 +529,7 @@ def test_the_job_ceiling_contains_every_watchdog_and_the_work_around_them(
         budgets = [watchdog for watchdog in job.watchdogs if watchdog is not None]
         assert len(budgets) == job.steps, str(job)
         allowance = OUTSIDE_WATCHDOG_ALLOWANCE_SECONDS
-        required = sum(budgets) + allowance
+        required = required_ceiling(budgets, allowance)
         assert job.job_timeout is not None, (
             f"{job} runs {job.steps} watchdog-bounded cargo invocation(s) in a "
             f"job with no timeout-minutes; the outermost tier is missing and "
@@ -510,8 +544,9 @@ def test_the_job_ceiling_contains_every_watchdog_and_the_work_around_them(
         assert job.job_timeout >= required, (
             f"{job} has a ceiling of {job.job_timeout:.0f}s, below the "
             f"{required:.0f}s needed to contain {job.steps} watchdog(s) "
-            f"totalling {sum(budgets):.0f}s plus {allowance:.0f}s of measured "
-            f"work outside them; an overrun would be cancelled rather than "
+            f"totalling {sum(budgets):.0f}s, {allowance:.0f}s of measured "
+            f"work outside them, and a {CEILING_MARGIN_SECONDS:.0f}s margin "
+            f"above that sum; an overrun would be cancelled rather than "
             f"reported"
         )
 
@@ -660,4 +695,23 @@ def test_the_termination_allowance_is_the_grace_period_plus_the_margin() -> None
     )
     assert largest == pytest.approx(45.0 + TERMINATION_SAFETY_MARGIN_SECONDS), (
         "the largest configured grace period governs the allowance"
+    )
+
+
+def test_the_required_ceiling_carries_all_three_terms() -> None:
+    """Watchdogs, measured work outside them, and the margin.
+
+    Both ceilings clear the smaller requirement too, so dropping the
+    margin changes nothing the assertion over the workflows can see.
+    Driving the derivation with controlled numbers is what makes the
+    missing term visible.
+    """
+    assert required_ceiling([1800.0, 2700.0], 1200.0) == pytest.approx(
+        4500.0 + 1200.0 + CEILING_MARGIN_SECONDS
+    ), "two watchdogs, the allowance and the margin are all added"
+    assert required_ceiling([1800.0], 0.0) == pytest.approx(
+        1800.0 + CEILING_MARGIN_SECONDS
+    ), "the margin applies even when nothing runs outside the watchdog"
+    assert required_ceiling([], 0.0) == pytest.approx(CEILING_MARGIN_SECONDS), (
+        "the margin is a term of its own, not a fraction of the others"
     )

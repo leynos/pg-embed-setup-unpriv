@@ -337,7 +337,7 @@ they must be ordered lives in the `generate-coverage` README in
 | Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 360 s for two overrides |
 | nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 600 s (10 m)                                    |
 | Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
-| Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 60 m                                            |
+| Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 65 m                                            |
 
 *Table: the timers that can end a run, innermost first.*
 
@@ -396,7 +396,8 @@ cancelled job reached 727 s of its 3,600 s budget, so no run in the sample was
 ended by any of these four timers.
 
 The widest gap is 969 s, so the contract allows 20 minutes, making the
-requirement 50 minutes against ceilings of 60. That is a rise from the 15
+requirement 50 minutes, and the ceilings are 65: fifteen above it, as the
+estate asks, rather than the ten that 60 gave. That is a rise from the 15
 minutes first written here, which the wider sample showed to be below the worst
 gap already observed. On the pull-request lane most of that gap is the suite's
 own `cargo nextest` step and the Loom models, which run outside the coverage
@@ -414,11 +415,15 @@ then the job, then the workflow, as GitHub resolves it, and it fails on a
 coverage-invoking job that declares no ceiling at all.
 
 It pins two values as well as ordering them: the 10 m `global-timeout` and the
-60 m job ceiling. The ordering holds for a wide range of both, so on its own it
-would let either drift away from the table above without failing anything. It
-also requires the `global-timeout` to be present rather than skipping when it
-is absent, since a skipped test would let this tier be deleted and leave a
-four-tier contract passing with three.
+65 m job ceiling. That ceiling is the 50 minute requirement plus the fifteen
+minutes the estate asks for above every requirement, because a ceiling equal to
+the sum it contains cancels the job at the moment the watchdog would have
+reported the overrun, and the report is the only thing that makes an overrun
+actionable. It was 60, which is ten above. The ordering holds for a wide range
+of both, so on its own it would let either drift away from the table above
+without failing anything. It also requires the `global-timeout` to be present
+rather than skipping when it is absent, since a skipped test would let this
+tier be deleted and leave a four-tier contract passing with three.
 
 The termination allowance it demands between the whole-run budget and the
 watchdog is two terms, not one: the largest `grace-period` the configuration
