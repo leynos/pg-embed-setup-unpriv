@@ -52,7 +52,7 @@ enum Failure {
 
 /// A second bootstrap against a live cluster adopts a password that logs in.
 ///
-/// The first bootstrap initialises the cluster with a generated password and
+/// The first bootstrap initializes the cluster with a generated password and
 /// starts it. The second runs against the same directories, still with no
 /// `PG_PASSWORD`, which is the path that used to invent a fresh password. The
 /// test then opens a real connection with whatever that second bootstrap

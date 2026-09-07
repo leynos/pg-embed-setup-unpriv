@@ -17,3 +17,20 @@ fn shutdown_hook_test_support_surface_smoke_compiles() {
     shutdown_hook_test_support::verify_surface()
         .expect("shutdown-hook test-support surface should compile and run");
 }
+
+#[test]
+#[cfg(not(windows))]
+fn password_reuse_surface_compiles() {
+    let tests = trybuild::TestCases::new();
+    tests.pass("tests/ui/pass/password_reuse_surface.rs");
+}
+
+#[cfg(windows)]
+#[path = "ui/pass/password_reuse_surface.rs"]
+mod password_reuse_surface;
+
+#[test]
+#[cfg(windows)]
+fn password_reuse_surface_smoke_compiles() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+    password_reuse_surface::verify_surface()
+}

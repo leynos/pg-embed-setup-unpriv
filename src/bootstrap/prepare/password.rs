@@ -36,10 +36,12 @@ pub enum PasswordReuseOutcome {
 
 /// Reads the password an existing cluster in `data_dir` was initialized with.
 ///
-/// This is the query half of password reuse: it touches the filesystem and
-/// changes nothing. `Ok(None)` means the data directory holds no cluster
-/// (no `PG_VERSION` marker). A cluster whose password file is missing,
-/// unreadable or empty is an error, because a server started against it
+/// This is the query half of password reuse: it reads the filesystem and
+/// changes nothing, including emitting nothing. A caller that wants the
+/// `password_reuse` failure event calls [`reuse_existing_password`], which is
+/// the command half and publishes on every branch. `Ok(None)` means the data directory holds no
+/// cluster (no `PG_VERSION` marker). A cluster whose password file is missing,
+/// unreadable, or empty is an error, because a server started against it
 /// could not be logged in to.
 ///
 /// # Errors
@@ -66,6 +68,26 @@ pub fn stored_cluster_password(
     data_dir: &Utf8Path,
     password_file: &Utf8Path,
 ) -> BootstrapResult<Option<String>> {
+    query_stored_password(data_dir, password_file).map_err(|failure| failure.error)
+}
+
+/// A failed query, carrying the bounded label its event would use.
+///
+/// The label travels with the error instead of being emitted here, so the
+/// query stays free of side effects and the command decides what to publish.
+struct PasswordQueryFailure {
+    /// Bounded `outcome` label: `probe_failed`, `missing_file`,
+    /// `unreadable_file` or `empty_file`.
+    outcome: &'static str,
+    /// The categorized error to return.
+    error: BootstrapError,
+}
+
+/// The query half proper: reads, categorizes, and emits nothing.
+fn query_stored_password(
+    data_dir: &Utf8Path,
+    password_file: &Utf8Path,
+) -> Result<Option<String>, PasswordQueryFailure> {
     if !has_cluster_marker(data_dir)? {
         return Ok(None);
     }
@@ -75,28 +97,29 @@ pub fn stored_cluster_password(
 /// Probes the `PG_VERSION` marker, treating only "not found" as "no
 /// cluster"; a permission failure or any other I/O error is propagated so a
 /// temporarily unsearchable data directory cannot masquerade as a fresh one.
-fn has_cluster_marker(data_dir: &Utf8Path) -> BootstrapResult<bool> {
+fn has_cluster_marker(data_dir: &Utf8Path) -> Result<bool, PasswordQueryFailure> {
     match std::fs::metadata(data_dir.join(PG_VERSION_MARKER)) {
         Ok(metadata) => Ok(metadata.is_file()),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
-        Err(err) => {
-            log_failure("probe_failed", data_dir, &data_dir.join(PG_VERSION_MARKER));
-            Err(BootstrapError::new(
+        Err(err) => Err(PasswordQueryFailure {
+            outcome: "probe_failed",
+            error: BootstrapError::new(
                 BootstrapErrorKind::ClusterPasswordUnreadable,
                 Report::new(err).wrap_err(format!(
                     "cannot probe {data_dir} for an existing cluster ({PG_VERSION_MARKER})"
                 )),
-            ))
-        }
+            ),
+        }),
     }
 }
 
 /// Aligns `settings.password` with the cluster already present in
 /// `data_dir`, unless the caller supplied an explicit password.
 ///
-/// This is the command half: it consults [`stored_cluster_password`] and
-/// mutates only `settings.password`. Returns the outcome so callers and the
-/// `password_reuse` tracing event can report which branch was taken.
+/// This is the command half: it consults the query, mutates only
+/// `settings.password`, and is the only place a `password_reuse` event is
+/// emitted, on success and on every failure branch. Returns the outcome so
+/// callers and the event can report which branch was taken.
 ///
 /// # Errors
 ///
@@ -131,11 +154,20 @@ pub fn reuse_existing_password(
 ) -> BootstrapResult<PasswordReuseOutcome> {
     let outcome = if is_password_explicit {
         PasswordReuseOutcome::ExplicitPassword
-    } else if let Some(stored) = stored_cluster_password(data_dir, password_file)? {
-        settings.password = stored;
-        PasswordReuseOutcome::Reused
     } else {
-        PasswordReuseOutcome::NoCluster
+        // The query publishes nothing, so the command emits the failure event
+        // on its behalf before propagating the error.
+        match query_stored_password(data_dir, password_file) {
+            Ok(Some(stored)) => {
+                settings.password = stored;
+                PasswordReuseOutcome::Reused
+            }
+            Ok(None) => PasswordReuseOutcome::NoCluster,
+            Err(failure) => {
+                log_failure(failure.outcome, data_dir, password_file);
+                return Err(failure.error);
+            }
+        }
     };
     log_outcome(outcome, data_dir, password_file);
     Ok(outcome)
@@ -166,8 +198,11 @@ fn log_failure(outcome: &'static str, data_dir: &Utf8Path, password_file: &Utf8P
 }
 
 /// Reads and trims the stored password, turning I/O and emptiness into a
-/// categorised error that keeps the original `io::Error` as its source.
-fn read_stored_password(password_file: &Utf8Path, data_dir: &Utf8Path) -> BootstrapResult<String> {
+/// categorized error that keeps the original `io::Error` as its source.
+fn read_stored_password(
+    password_file: &Utf8Path,
+    data_dir: &Utf8Path,
+) -> Result<String, PasswordQueryFailure> {
     let raw = std::fs::read_to_string(password_file).map_err(|err| {
         let (kind, hint, outcome) = if err.kind() == ErrorKind::NotFound {
             (
@@ -182,26 +217,30 @@ fn read_stored_password(password_file: &Utf8Path, data_dir: &Utf8Path) -> Bootst
                 "unreadable_file",
             )
         };
-        log_failure(outcome, data_dir, password_file);
-        BootstrapError::new(
-            kind,
-            Report::new(err).wrap_err(format!(
-                "data directory {data_dir} already holds a cluster but its password file \
-                 {password_file} {hint}; set PG_PASSWORD to the password that initialized it, or \
-                 remove the stale cluster"
-            )),
-        )
+        PasswordQueryFailure {
+            outcome,
+            error: BootstrapError::new(
+                kind,
+                Report::new(err).wrap_err(format!(
+                    "data directory {data_dir} already holds a cluster but its password file \
+                     {password_file} {hint}; set PG_PASSWORD to the password that initialized it, \
+                     or remove the stale cluster"
+                )),
+            ),
+        }
     })?;
     let stored = raw.trim_end_matches(['\n', '\r']).to_owned();
     if stored.is_empty() {
-        log_failure("empty_file", data_dir, password_file);
-        return Err(BootstrapError::new(
-            BootstrapErrorKind::ClusterPasswordEmpty,
-            eyre!(
-                "password file {password_file} is empty; set PG_PASSWORD or remove the stale \
-                 cluster at {data_dir}"
+        return Err(PasswordQueryFailure {
+            outcome: "empty_file",
+            error: BootstrapError::new(
+                BootstrapErrorKind::ClusterPasswordEmpty,
+                eyre!(
+                    "password file {password_file} is empty; set PG_PASSWORD or remove the stale \
+                     cluster at {data_dir}"
+                ),
             ),
-        ));
+        });
     }
     Ok(stored)
 }
