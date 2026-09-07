@@ -35,6 +35,11 @@ class CoverageJob(typ.NamedTuple):
     job_timeout : float or None
         The job's ``timeout-minutes`` in seconds, or None when it
         declares none and so inherits GitHub's six-hour default.
+    conditions : tuple[tuple[object, object], ...]
+        The ``if`` on each coverage step and on its job, in step order.
+        A skipped step runs no ``cargo``, so its watchdog never arms and
+        the tiers say nothing about it; the condition is part of what
+        identifies a lane rather than incidental to it.
     """
 
     workflow: str
@@ -42,6 +47,7 @@ class CoverageJob(typ.NamedTuple):
     steps: int
     watchdogs: tuple[float | None, ...]
     job_timeout: float | None
+    conditions: tuple[tuple[object, object], ...] = ()
 
     def __str__(self) -> str:
         """Return a location suitable for a failure message.
@@ -159,6 +165,7 @@ def _coverage_job(
         steps=len(steps),
         watchdogs=tuple(_watchdog_of(document, job, step) for step in steps),
         job_timeout=None if raw_timeout is None else float(str(raw_timeout)) * 60.0,
+        conditions=tuple((step.get("if"), job.get("if")) for step in steps),
     )
 
 
