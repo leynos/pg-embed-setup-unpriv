@@ -210,10 +210,48 @@ pub(super) fn acquire(
             origin: ArchiveOrigin::Cached,
         });
     }
+    clear_unusable_entry(&path)?;
     download(artifact, &entry_dir, &path)?;
     Ok(AcquiredArchive {
         path,
         origin: ArchiveOrigin::Downloaded,
+    })
+}
+
+/// Removes whatever occupies the entry path so a download can replace it.
+///
+/// The download finishes with `NamedTempFile::persist`, which renames over the
+/// destination. A rename can replace a regular file but not a directory, so an
+/// entry that is not a regular file has to go first; otherwise the acquire
+/// fails with a rename error instead of the cache healing itself. A corrupt
+/// regular file is deliberately left in place, because `persist` replaces it
+/// atomically and removing it first would open a window where the entry is
+/// absent.
+///
+/// The probe does not follow symlinks: a link whose target no longer verifies
+/// is removed rather than written through.
+pub(super) fn clear_unusable_entry(path: &Utf8Path) -> BootstrapResult<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(unavailable(eyre!(
+                "cannot inspect extension cache entry {path}: {err}"
+            )));
+        }
+    };
+    if metadata.is_file() {
+        return Ok(());
+    }
+    let removed = if metadata.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    removed.map_err(|err| {
+        unavailable(eyre!(
+            "cannot remove unusable extension cache entry {path}: {err}"
+        ))
     })
 }
 
