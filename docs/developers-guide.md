@@ -240,12 +240,12 @@ Four independent timers can end a test run, and the canonical statement of how
 they must be ordered lives in the `generate-coverage` README in
 [`leynos/shared-actions`][shared-actions-coverage]. All four are set here.
 
-| Tier | What it bounds | Where it is set | Current value |
-| --- | --- | --- | --- |
-| Per-test `slow-timeout` | one test | `.config/nextest.toml` | 180 s default; 30 s and 360 s for two overrides |
-| nextest `global-timeout` | the whole test run | `.config/nextest.toml` | 600 s (10 m) |
-| Cargo watchdog | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level | 1,800 s (30 m) |
-| Job `timeout-minutes` | the whole job | job level in `ci.yml` and `coverage-main.yml` | 60 m |
+| Tier                     | What it bounds                     | Where it is set                               | Current value                                   |
+| ------------------------ | ---------------------------------- | --------------------------------------------- | ----------------------------------------------- |
+| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 360 s for two overrides |
+| nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 600 s (10 m)                                    |
+| Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
+| Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 60 m                                            |
 
 *Table: the timers that can end a run, innermost first.*
 
@@ -259,7 +259,7 @@ hours.
 
 ### The clocks do not start together
 
-Comparing the configured numbers is not enough, because the timers start at
+Comparing the configured numbers is not enough because the timers start at
 different moments and cover different work.
 
 The watchdog starts when `cargo` starts, so it covers the build as well as the
@@ -283,21 +283,32 @@ discards the log that would have explained it.
 
 ### What the ceiling is sized against
 
-The watchdog plus the work outside its window, measured from the worst of
-several runs rather than one:
+The watchdog plus the work outside its window, measured from the worst of many
+runs rather than one. Runs of every conclusion are read, not only successful
+ones: a run cancelled at its ceiling is the very case the sizing exists to
+prevent, so excluding it would size the ceiling against the runs that never
+needed it.
 
-| Lane | Worst coverage step | Worst whole job | Outside the step | Run |
-| --- | --- | --- | --- | --- |
-| `ci.yml` `build-test` | 327 s | 1,111 s | 830 s | 33982759833 |
-| `coverage-main.yml` `coverage-upload` | 320 s | 353 s | 38 s | 29784541706 |
+| Lane                                  | Worst coverage step | Worst whole job | Widest gap | Run         |
+| ------------------------------------- | ------------------- | --------------- | ---------- | ----------- |
+| `ci.yml` `build-test`                 | 343 s               | 1,312 s         | 969 s      | 30024924292 |
+| `coverage-main.yml` `coverage-upload` | 303 s               | 353 s           | 42 s       | 29354687551 |
 
-*Table: measured coverage-step and whole-job durations, read across ten
-successful runs of each workflow.*
+*Table: measured coverage-step and whole-job durations. The gap is the job's
+duration less its coverage steps, so it is the work the job timer bounds and
+the watchdog does not.*
 
-The widest gap is 830 s, so the contract allows 15 minutes, making the
-requirement 45 minutes against ceilings of 60. On the pull-request lane most of
-that gap is the suite's own `cargo nextest` step and the Loom models, which run
-outside the coverage step and so outside the watchdog.
+The sample is the last 115 `ci.yml` coverage jobs, 44 successful, 55 failed and
+16 cancelled, and all 19 runs of `coverage-main.yml`, all successful. The worst
+cancelled job reached 727 s of its 3,600 s budget, so no run in the sample was
+ended by any of these four timers.
+
+The widest gap is 969 s, so the contract allows 20 minutes, making the
+requirement 50 minutes against ceilings of 60. That is a rise from the 15
+minutes first written here, which the wider sample showed to be below the worst
+gap already observed. On the pull-request lane most of that gap is the suite's
+own `cargo nextest` step and the Loom models, which run outside the coverage
+step and so outside the watchdog.
 
 None of those runs was genuinely cold. One run is the coldest seen so far, not
 a measurement of the cold case.
@@ -306,11 +317,26 @@ a measurement of the cold case.
 
 `scripts/tests/test_timeout_ordering_contract.py`, run by `make test-scripts`,
 asserts the ordering by value over every job invoking the coverage action, in
-both the `.yml` and `.yaml` extensions. It reads a step's own environment
-before the job's, as GitHub resolves it, and it fails on a coverage-invoking
-job that declares no ceiling at all.
+both the `.yml` and `.yaml` extensions. It reads the watchdog from the step,
+then the job, then the workflow, as GitHub resolves it, and it fails on a
+coverage-invoking job that declares no ceiling at all.
 
-Two readings it makes explicit, because both are easy to get wrong and neither
+It pins two values as well as ordering them: the 10 m `global-timeout` and the
+60 m job ceiling. The ordering holds for a wide range of both, so on its own it
+would let either drift away from the table above without failing anything. It
+also requires the `global-timeout` to be present rather than skipping when it
+is absent, since a skipped test would let this tier be deleted and leave a
+four-tier contract passing with three.
+
+The termination allowance it demands between the whole-run budget and the
+watchdog is two terms, not one: the largest `grace-period` the configuration
+sets, five seconds here, plus a fixed 60-second safety margin. A grace period
+is what nextest promises a test after `SIGTERM`; the margin covers the process
+teardown and report writing that follow it. Folding them into a single floor
+would make raising the grace period from five seconds to thirty look free,
+since both would vanish below the margin.
+
+Two readings it makes explicit because both are easy to get wrong and neither
 is exercised by this repository's own values:
 
 - The per-test budget is `period` multiplied by `terminate-after`. Every
