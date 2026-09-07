@@ -336,6 +336,16 @@ slow and never stops it, so the reading refuses that form rather than reporting
 one period as the budget. Every table in `.config/nextest.toml` sets it
 explicitly.
 
+The contract also pins the condition each lane carries. A skipped step runs no
+`cargo`, so its watchdog never arms and the tiers say nothing about it:
+`if: false` on the step or on its job would leave a lane that looks bounded and
+is not. The conditions are pinned rather than forbidden, because the one here
+is legitimate: `ci.yml` runs the coverage step on the unprivileged leg of a
+matrix that also runs as root, and only that leg measures coverage.
+`coverage-main.yml` runs on the trunk and carries no condition. A lane gaining,
+losing or changing a condition has to change this section with it, and a lane
+appearing without an entry fails the contract too.
+
 It pins two values as well as ordering them: the 10 m `global-timeout` and the
 65 m job ceiling. That ceiling is the requirement exactly, and the requirement
 has three terms: the 1,800 s watchdog, the 1,200 s of measured work outside it,

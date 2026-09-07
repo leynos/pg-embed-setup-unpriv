@@ -25,6 +25,8 @@ See "Test timeouts: four tiers, outermost last" in
 `leynos/shared-actions`' `generate-coverage` README.
 """
 
+import typing as typ
+
 import pytest
 from coverage_lanes import CoverageJob, coverage_jobs_of
 from nextest_budgets import (
@@ -43,6 +45,24 @@ from timeout_budgets import (
     WATCHDOG_VARIABLE,
     required_ceiling,
 )
+
+
+#: The condition each coverage lane legitimately carries, keyed by
+#: workflow and job, as the step's ``if`` and its job's.
+#:
+#: A skipped step runs no `cargo`, so its watchdog never arms and every
+#: assertion below says nothing about it. `if: false` on either would
+#: leave a lane that looks bounded and is not. The values are pinned
+#: rather than merely tolerated, because a lane gaining, losing or
+#: changing a condition changes when it runs at all.
+#:
+#: `ci.yml`'s coverage step is the unprivileged leg of a matrix that
+#: also runs as root, and only the unprivileged leg measures coverage.
+#: `coverage-main.yml` runs on the trunk and carries no condition.
+REQUIRED_CONDITIONS: typ.Final[dict[tuple[str, str], tuple[object, object]]] = {
+    ("ci.yml", "build-test"): ("${{ matrix.privilege == 'unprivileged' }}", None),
+    ("coverage-main.yml", "coverage-upload"): (None, None),
+}
 
 
 @pytest.fixture(scope="module")
@@ -202,3 +222,44 @@ def test_the_whole_run_budget_sits_inside_each_watchdog(
                 f"{whole_run:.0f}s whole-run budget, nextest's termination "
                 f"procedure, and a cold build"
             )
+
+
+def test_each_coverage_lane_carries_the_condition_it_is_meant_to(
+    coverage_jobs: tuple[CoverageJob, ...],
+) -> None:
+    """A skipped step runs no `cargo`, so its watchdog never arms.
+
+    Every assertion above reads a lane's declared budgets and says
+    nothing about whether the step runs. `if: false` on the step or on
+    its job would leave a lane that looks bounded and is not, and this
+    contract would certify it. So would a plausible condition that
+    quietly excluded the event the lane exists for.
+
+    The conditions are pinned rather than forbidden, because the one
+    here is legitimate: `ci.yml` runs the coverage step on the
+    unprivileged leg of a matrix that also runs as root. The
+    coordinates are compared both ways first, so a new lane with no
+    entry here fails rather than passing unexamined, and a lane that
+    disappeared fails rather than being skipped.
+
+    Proved by mutation: `if: false` on the coverage step, the same on
+    its job, the matrix condition changed to the root leg, and a
+    coordinate dropped from ``REQUIRED_CONDITIONS`` each fail this test.
+    """
+    found = {(job.workflow, job.job): job.conditions for job in coverage_jobs}
+    assert set(found) == set(REQUIRED_CONDITIONS), (
+        f"the coverage lanes are not the ones this contract pins: "
+        f"unlisted {sorted(set(found) - set(REQUIRED_CONDITIONS))}, missing "
+        f"{sorted(set(REQUIRED_CONDITIONS) - set(found))}; a lane with no "
+        f"entry here is a lane whose condition nobody has judged"
+    )
+    wrong = {
+        coordinate: (expected, found[coordinate])
+        for coordinate, expected in REQUIRED_CONDITIONS.items()
+        if set(found[coordinate]) != {expected}
+    }
+    assert not wrong, (
+        f"these coverage lanes do not carry the conditions the developers' "
+        f"guide records, as expected versus found: {wrong}; a lane that is "
+        f"skipped runs no cargo, so its watchdog never arms"
+    )
