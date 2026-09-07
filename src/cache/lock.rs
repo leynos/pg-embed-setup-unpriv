@@ -2,7 +2,8 @@
 //!
 //! Provides exclusive and shared locks to coordinate binary downloads across
 //! parallel test runners. On Unix systems, uses `flock(2)` for advisory locking.
-//! On non-Unix platforms, locking is a no-op.
+//! On non-Unix platforms no kernel lock is taken, but the same lock file is
+//! created and held under the cache directory, so callers see one layout.
 
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
@@ -14,7 +15,9 @@ use std::{
 use camino::Utf8Path;
 
 /// Subdirectory within the cache for lock files.
-#[cfg(unix)]
+///
+/// Both platforms use it: Unix takes a kernel lock on the file, and non-Unix
+/// merely holds it, but the path is the same so a cache is self-contained.
 const LOCKS_SUBDIR: &str = ".locks";
 
 /// Guard that holds a file lock until dropped.
@@ -118,22 +121,33 @@ impl CacheLock {
         Ok(Self { _file: file })
     }
 
-    /// No-op lock acquisition on non-Unix platforms.
+    /// Lock acquisition on non-Unix platforms, which holds the file but takes
+    /// no kernel lock.
+    ///
+    /// There is no `flock` here, so this does not serialize anything: it
+    /// creates and holds the same lock file the Unix arm uses, under the cache
+    /// directory it guards, so the two platforms at least agree on where the
+    /// file lives and callers see the same failure when the cache is
+    /// unwritable.
+    ///
+    /// The previous implementation put the file in the process-wide temp
+    /// directory keyed only by `version`, then deleted it immediately. Two
+    /// callers using the same version collided there whatever cache they were
+    /// working on, and on Windows a delete leaves the name unopenable while a
+    /// handle remains, so the second caller failed with "Access is denied"
+    /// rather than proceeding.
     #[cfg(not(unix))]
-    fn acquire(_cache_dir: &Utf8Path, version: &str, _lock_type: LockType) -> io::Result<Self> {
+    fn acquire(cache_dir: &Utf8Path, version: &str, _lock_type: LockType) -> io::Result<Self> {
         validate_version(version)?;
-        // Cross-process locking not supported; return a dummy lock.
-        // Concurrent tests may race on non-Unix platforms.
-        // Create a temporary file without external dependencies.
-        let temp_path = std::env::temp_dir().join(format!("pg-cache-lock-{}.tmp", version));
+        let locks_dir = cache_dir.join(LOCKS_SUBDIR);
+        std::fs::create_dir_all(&locks_dir)?;
+        let lock_path = locks_dir.join(format!("{version}.lock"));
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .truncate(true)
-            .open(&temp_path)?;
-        // Attempt cleanup; ignore errors as temp files are ephemeral.
-        drop(std::fs::remove_file(&temp_path));
+            .truncate(false)
+            .open(&lock_path)?;
         Ok(Self { _file: file })
     }
 }
@@ -181,10 +195,14 @@ mod tests {
         Ok((temp, cache_dir))
     }
 
+    /// The lock file lives beside the cache it guards, on every platform.
+    ///
+    /// Windows takes no kernel lock, but it creates the same file in the same
+    /// place, so a caller cannot collide with an unrelated cache that happens
+    /// to use the same version string.
     #[rstest]
     #[case::exclusive("17.4.0", true)]
     #[case::shared("16.3.0", false)]
-    #[cfg(unix)]
     fn acquire_lock_creates_lock_file(
         cache_fixture: io::Result<(TempDir, camino::Utf8PathBuf)>,
         #[case] version: &str,
