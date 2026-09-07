@@ -320,14 +320,30 @@ a measurement of the cold case.
 asserts the ordering by value over every job invoking the coverage action, in
 both the `.yml` and `.yaml` extensions. It reads the watchdog from the step,
 then the job, then the workflow, as GitHub resolves it, and it fails on a
-coverage-invoking job that declares no ceiling at all.
+coverage-invoking job that declares no ceiling at all. The readings it rests on
+live in `scripts/tests/timeout_budgets.py`, `nextest_budgets.py` and
+`coverage_lanes.py`, and are exercised on their own in
+`test_timeout_reading_contract.py`.
+
+The nextest configuration is parsed as TOML rather than matched as text. A text
+match finds a `slow-timeout` inside a comment, inside a `filter` string, or in
+a table nextest never consults. The commented-out `global-timeout` is the case
+that matters most: a scraping reader would go on reporting a tier that had been
+switched off, and the four-tier contract would pass with three.
+
+`terminate-after` is optional, and a `slow-timeout` without it marks a test
+slow and never stops it, so the reading refuses that form rather than reporting
+one period as the budget. Every table in `.config/nextest.toml` sets it
+explicitly.
 
 It pins two values as well as ordering them: the 10 m `global-timeout` and the
-65 m job ceiling. That ceiling is the 50 minute requirement plus the fifteen
-minutes the estate asks for above every requirement, because a ceiling equal to
-the sum it contains cancels the job at the moment the watchdog would have
-reported the overrun, and the report is the only thing that makes an overrun
-actionable. It was 60, which is ten above. The ordering holds for a wide range
+65 m job ceiling. That ceiling is the requirement exactly, and the requirement
+has three terms: the 1,800 s watchdog, the 1,200 s of measured work outside it,
+and a 900 s margin. The margin is a term rather than slack above the other two,
+because a ceiling equal to the watchdog plus the work outside it cancels the job
+at the moment the watchdog would have reported the overrun, and the report is
+the only thing that makes an overrun actionable. It was 60 minutes, which was
+below the requirement. The ordering holds for a wide range
 of both, so on its own it would let either drift away from the table above
 without failing anything. It also requires the `global-timeout` to be present
 rather than skipping when it is absent, since a skipped test would let this
