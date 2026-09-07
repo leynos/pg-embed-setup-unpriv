@@ -172,6 +172,34 @@ fn permitted_url_rules(#[case] url: &str, #[case] expected: bool) {
     assert_eq!(crate::extensions::is_permitted_url(url), expected);
 }
 
+/// A cache entry that is not a regular file is removed and re-downloaded.
+///
+/// The download finishes by renaming a temporary file over the entry path. A
+/// rename can replace a file but not a directory, so without removing the
+/// entry first the acquire fails with a rename error instead of the cache
+/// healing itself. Both prefixes of that failure matter: the entry is
+/// classified as unusable, and the download then succeeds.
+#[rstest]
+#[case::directory(true)]
+#[case::regular_file(false)]
+fn acquire_replaces_an_unusable_entry(#[case] as_directory: bool) {
+    let bytes = fixture_archive().expect("fixture");
+    let url = serve_once(bytes.clone()).expect("server");
+    let case = cache_case(&url).expect("fixture");
+    if as_directory {
+        std::fs::create_dir_all(case.entry_path()).expect("directory in place of an entry");
+    } else {
+        case.seed(b"corrupt").expect("seed");
+    }
+    let acquired = acquire(&case.cache, &case.artifact).expect("acquired");
+    assert_eq!(acquired.origin, ArchiveOrigin::Downloaded);
+    assert_eq!(
+        std::fs::read(&acquired.path).expect("read"),
+        case.bytes,
+        "the entry holds the downloaded archive"
+    );
+}
+
 /// Each cache-entry outcome is reported distinctly, so the log says why an
 /// entry was not reused rather than blaming every fault on a digest mismatch.
 ///
