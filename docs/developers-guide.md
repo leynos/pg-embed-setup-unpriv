@@ -234,6 +234,99 @@ termination and Job Object assignment decisions against a reused-descendant-PID
 case. The serial lock tests cover missing, partial, malformed, and stale owner
 states around the grace window.
 
+## Test timeouts: four tiers, outermost last
+
+Four independent timers can end a test run, and the canonical statement of how
+they must be ordered lives in the `generate-coverage` README in
+[`leynos/shared-actions`][shared-actions-coverage]. All four are set here.
+
+| Tier | What it bounds | Where it is set | Current value |
+| --- | --- | --- | --- |
+| Per-test `slow-timeout` | one test | `.config/nextest.toml` | 180 s default; 30 s and 360 s for two overrides |
+| nextest `global-timeout` | the whole test run | `.config/nextest.toml` | 600 s (10 m) |
+| Cargo watchdog | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level | 1,800 s (30 m) |
+| Job `timeout-minutes` | the whole job | job level in `ci.yml` and `coverage-main.yml` | 60 m |
+
+*Table: the timers that can end a run, innermost first.*
+
+### The outermost tier was missing
+
+Neither coverage job declared `timeout-minutes` before this was written, so
+both inherited GitHub's six-hour default. The three inner tiers were correctly
+ordered, which is what made the gap easy to miss: nothing was wrong until
+something hung outside `cargo`, and then nothing would have stopped it for six
+hours.
+
+### The clocks do not start together
+
+Comparing the configured numbers is not enough, because the timers start at
+different moments and cover different work.
+
+The watchdog starts when `cargo` starts, so it covers the build as well as the
+test run, while nextest's global timeout starts only once tests begin. A
+watchdog merely larger than the global timeout still pre-empts it whenever the
+build takes longer than the difference. Here the difference is 1,200 s, which
+is ample for this crate's build.
+
+Hitting the global timeout does not stop the run instantly either. nextest
+signals the process group and waits `slow-timeout.grace-period`, five seconds
+here, before killing it; on Windows termination is immediate and the grace
+period is ignored for timeouts. That allowance is seconds rather than minutes,
+but it is not zero, and the contract reads it from the configuration so a
+profile that raised it raises the requirement too.
+
+The job timer starts when the job starts, before the checkout and the toolchain
+setup, and it is still running through the plain `cargo nextest` step and the
+Loom models that follow coverage. So a ceiling merely above the watchdog still
+cancels the job before the watchdog can report an overrun, and a cancellation
+discards the log that would have explained it.
+
+### What the ceiling is sized against
+
+The watchdog plus the work outside its window, measured from the worst of
+several runs rather than one:
+
+| Lane | Worst coverage step | Worst whole job | Outside the step | Run |
+| --- | --- | --- | --- | --- |
+| `ci.yml` `build-test` | 327 s | 1,111 s | 830 s | 33982759833 |
+| `coverage-main.yml` `coverage-upload` | 320 s | 353 s | 38 s | 29784541706 |
+
+*Table: measured coverage-step and whole-job durations, read across ten
+successful runs of each workflow.*
+
+The widest gap is 830 s, so the contract allows 15 minutes, making the
+requirement 45 minutes against ceilings of 60. On the pull-request lane most of
+that gap is the suite's own `cargo nextest` step and the Loom models, which run
+outside the coverage step and so outside the watchdog.
+
+None of those runs was genuinely cold. One run is the coldest seen so far, not
+a measurement of the cold case.
+
+### The contract
+
+`scripts/tests/test_timeout_ordering_contract.py`, run by `make test-scripts`,
+asserts the ordering by value over every job invoking the coverage action, in
+both the `.yml` and `.yaml` extensions. It reads a step's own environment
+before the job's, as GitHub resolves it, and it fails on a coverage-invoking
+job that declares no ceiling at all.
+
+Two readings it makes explicit, because both are easy to get wrong and neither
+is exercised by this repository's own values:
+
+- The per-test budget is `period` multiplied by `terminate-after`. Every
+  multiplier here is one, so a reading that ignored it entirely would give the
+  same answer against this file. The assertion is therefore driven with
+  controlled configurations rather than this one.
+- `period` and `grace-period` sit in the same inline table, so a matcher
+  reading the first as a substring would take a grace period for a per-test
+  budget whenever it were the larger.
+
+`cross-platform-tests` and `binstall-packaging` also declare no ceiling. They
+invoke no coverage step, so they are outside this contract, and bounding them
+is separate work.
+
+[shared-actions-coverage]: https://github.com/leynos/shared-actions/blob/main/.github/actions/generate-coverage/README.md
+
 ## Further reading
 
 - `tests/e2e_postgresql_embedded_diesel.rs` – example of combining the helper

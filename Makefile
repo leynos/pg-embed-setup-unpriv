@@ -26,7 +26,8 @@ PYTEST_VERSION ?= 9.0.2
 PYYAML_VERSION ?= 6.0.3
 SCRIPT_PY_TESTS := scripts/tests/test_release_archive.py \
 	scripts/tests/test_release_archive_failures.py \
-	scripts/tests/test_release_workflow_contract.py
+	scripts/tests/test_release_workflow_contract.py \
+	scripts/tests/test_timeout_ordering_contract.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \
 	--with cuprum==$(CUPRUM_VERSION) \
