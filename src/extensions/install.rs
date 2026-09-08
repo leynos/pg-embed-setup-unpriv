@@ -19,14 +19,28 @@ use tar::{Archive, EntryType};
 use super::{Sha256Hex, extension_error, layout::classify_entry_path, manifest::ManifestArtifact};
 use crate::error::{BootstrapError, BootstrapErrorKind, BootstrapResult};
 
-const LIB_MODE: u32 = 0o755;
-const SHARE_MODE: u32 = 0o644;
+pub(super) const LIB_MODE: u32 = 0o755;
+pub(super) const SHARE_MODE: u32 = 0o644;
+
+/// Upper bound on one file's decompressed size.
+///
+/// `ARCHIVE_SIZE_CAP` bounds the compressed archive, which says nothing about
+/// what it expands to: a highly compressible archive within that cap can
+/// decompress to orders of magnitude more. A shared object or a SQL script in
+/// an extension is single-digit megabytes, so 64 MiB per file is generous.
+pub(super) const ENTRY_DECOMPRESSED_CAP: u64 = 64 * 1024 * 1024;
+
+/// Upper bound on the total decompressed size of one archive.
+///
+/// Bounds the whole extraction, so many entries each under the per-file cap
+/// cannot add up to an unbounded allocation either.
+pub(super) const ARCHIVE_DECOMPRESSED_CAP: u64 = 256 * 1024 * 1024;
 
 /// One regular file the archive will write.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PlannedFile {
-    relative: Utf8PathBuf,
-    mode: u32,
+pub(super) struct PlannedFile {
+    pub(super) relative: Utf8PathBuf,
+    pub(super) mode: u32,
 }
 
 /// Validates the archive at `path` and installs its files under `install_dir`.
@@ -43,7 +57,7 @@ pub(super) fn install_archive(
 ) -> BootstrapResult<Vec<Utf8PathBuf>> {
     let bytes = read_verified(path, artifact)?;
     let planned = plan(path, &bytes, artifact)?;
-    write_all(path, &bytes, &planned, install_dir)?;
+    super::write::write_all(path, &bytes, &planned, install_dir)?;
     tracing::info!(
         target: super::LOG_TARGET,
         archive = %path,
@@ -93,6 +107,9 @@ fn plan(
     artifact: &ManifestArtifact,
 ) -> BootstrapResult<Vec<PlannedFile>> {
     let mut files: Vec<PlannedFile> = Vec::new();
+    // A set rather than a scan, so an archive with many entries costs
+    // linearithmic time overall instead of quadratic.
+    let mut seen: std::collections::BTreeSet<Utf8PathBuf> = std::collections::BTreeSet::new();
     let mut reader = open_archive(bytes);
     for entry_result in reader.entries()? {
         let entry =
@@ -100,7 +117,7 @@ fn plan(
         if let Some(file) =
             plan_entry(path, entry.header().entry_type(), &entry.path_bytes_lossy())?
         {
-            if files.iter().any(|known| known.relative == file.relative) {
+            if !seen.insert(file.relative.clone()) {
                 return Err(invalid(path, &format!("duplicate entry {}", file.relative)));
             }
             files.push(file);
@@ -162,152 +179,26 @@ fn check_against_manifest(
     Ok(())
 }
 
-/// Pass two: write every planned file.
-fn write_all(
-    path: &Utf8Path,
-    bytes: &[u8],
-    planned: &[PlannedFile],
-    install_dir: &Utf8Path,
-) -> BootstrapResult<()> {
-    let owner = tree_owner(install_dir)?;
-    let mut written: Vec<Utf8PathBuf> = Vec::new();
-    let mut reader = open_archive(bytes);
-    for entry_result in reader.entries()? {
-        let mut entry =
-            entry_result.map_err(|err| invalid(path, &format!("unreadable entry: {err}")))?;
-        let Some(file) = classify_entry_path(&entry.path_bytes_lossy_path()) else {
-            continue;
-        };
-        let Some(plan) = planned.iter().find(|known| known.relative == file) else {
-            continue;
-        };
-        let mut contents = Vec::new();
-        entry
-            .read_to_end(&mut contents)
-            .map_err(|err| invalid(path, &format!("cannot read {}: {err}", plan.relative)))?;
-        write_file(install_dir, plan, &contents, owner)
-            .map_err(|err| install_failed(&plan.relative, &written, err))?;
-        written.push(plan.relative.clone());
-    }
-    Ok(())
-}
-
-/// Writes one file atomically, skipping it when an identical copy exists.
-fn write_file(
-    install_dir: &Utf8Path,
-    plan: &PlannedFile,
-    bytes: &[u8],
-    owner: Owner,
-) -> Result<(), Report> {
-    let destination = install_dir.join(&plan.relative);
-    if Sha256Hex::of_file(&destination).is_ok_and(|existing| existing == Sha256Hex::of_bytes(bytes))
-    {
-        // Identical bytes keep their inode, but the mode and owner are still
-        // brought into line so a root-owned or 0600 copy does not stop the
-        // server from loading it.
-        set_mode(destination.as_std_path(), plan.mode)?;
-        return apply_owner(destination.as_std_path(), owner);
-    }
-    let parent = destination
-        .parent()
-        .ok_or_else(|| eyre!("{destination} has no parent directory"))?;
-    fs::create_dir_all(parent).map_err(|err| eyre!("cannot create {parent}: {err}"))?;
-    let mut temp = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|err| eyre!("cannot create temporary file in {parent}: {err}"))?;
-    io::Write::write_all(&mut temp, bytes)
-        .map_err(|err| eyre!("cannot write {destination}: {err}"))?;
-    set_mode(temp.path(), plan.mode)?;
-    apply_owner(temp.path(), owner)?;
-    temp.persist(&destination)
-        .map_err(|err| eyre!("cannot move file into place at {destination}: {err}"))?;
-    Ok(())
-}
-
-#[cfg(unix)]
-/// Applies a Unix mode to a written file.
-fn set_mode(path: &Path, mode: u32) -> Result<(), Report> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))
-        .map_err(|err| eyre!("cannot set mode {mode:o} on {}: {err}", path.display()))
-}
-
-#[cfg(not(unix))]
-/// Modes are not applied on platforms without Unix permissions.
-fn set_mode(_path: &Path, _mode: u32) -> Result<(), Report> { Ok(()) }
-
-/// Owner of the installation tree, propagated to installed files.
-#[derive(Debug, Clone, Copy)]
-struct Owner {
-    #[cfg(unix)]
-    uid: u32,
-    #[cfg(unix)]
-    gid: u32,
-}
-
-#[cfg(unix)]
-/// Reads the uid and gid that own the installation directory.
-fn tree_owner(install_dir: &Utf8Path) -> BootstrapResult<Owner> {
-    use std::os::unix::fs::MetadataExt;
-    let metadata = fs::metadata(install_dir).map_err(|err| {
-        extension_error(
-            BootstrapErrorKind::ExtensionInstallFailed,
-            eyre!("cannot stat installation directory {install_dir}: {err}"),
-        )
-    })?;
-    Ok(Owner {
-        uid: metadata.uid(),
-        gid: metadata.gid(),
-    })
-}
-
-#[cfg(not(unix))]
-/// Ownership is not tracked on platforms without Unix uids.
-fn tree_owner(_install_dir: &Utf8Path) -> BootstrapResult<Owner> { Ok(Owner {}) }
-
-/// Chowns `path` to the tree owner when it differs, so the demoted worker can
-/// remove the files during `cleanup-full`.
-#[cfg(unix)]
-fn apply_owner(path: &Path, owner: Owner) -> Result<(), Report> {
-    use std::os::unix::fs::MetadataExt;
-    let metadata =
-        fs::metadata(path).map_err(|err| eyre!("cannot stat {}: {err}", path.display()))?;
-    if metadata.uid() == owner.uid && metadata.gid() == owner.gid {
-        return Ok(());
-    }
-    std::os::unix::fs::chown(path, Some(owner.uid), Some(owner.gid)).map_err(|err| {
-        eyre!(
-            "cannot chown {} to {}:{}: {err}",
-            path.display(),
-            owner.uid,
-            owner.gid
-        )
-    })
-}
-
-#[cfg(not(unix))]
-/// Ownership is not applied on platforms without Unix uids.
-fn apply_owner(_path: &Path, _owner: Owner) -> Result<(), Report> { Ok(()) }
-
 /// Entry iterator over an in-memory archive: `'r` is the reader borrow, `'b`
 /// the archive bytes.
-type Entries<'r, 'b> = tar::Entries<'r, GzDecoder<io::Cursor<&'b [u8]>>>;
+pub(super) type Entries<'r, 'b> = tar::Entries<'r, GzDecoder<io::Cursor<&'b [u8]>>>;
 
 /// Wraps the in-memory archive so its entries can be iterated.
-fn open_archive(bytes: &[u8]) -> OpenArchive<'_> {
+pub(super) fn open_archive(bytes: &[u8]) -> OpenArchive<'_> {
     OpenArchive {
         archive: Archive::new(GzDecoder::new(io::Cursor::new(bytes))),
     }
 }
 
 /// Holds the archive so its entries can be iterated by callers.
-struct OpenArchive<'a> {
+pub(super) struct OpenArchive<'a> {
     archive: Archive<GzDecoder<io::Cursor<&'a [u8]>>>,
 }
 
 impl<'b> OpenArchive<'b> {
     /// Iterates the archive's entries, mapping a malformed archive to
     /// `ExtensionArchiveInvalid`.
-    fn entries(&mut self) -> BootstrapResult<Entries<'_, 'b>> {
+    pub(super) fn entries(&mut self) -> BootstrapResult<Entries<'_, 'b>> {
         self.archive.entries().map_err(|err| {
             extension_error(
                 BootstrapErrorKind::ExtensionArchiveInvalid,
@@ -318,7 +209,7 @@ impl<'b> OpenArchive<'b> {
 }
 
 /// Convenience accessors on tar entries for lossy path rendering.
-trait EntryPathExt {
+pub(super) trait EntryPathExt {
     /// The entry path as a lossy string, for error messages.
     fn path_bytes_lossy(&self) -> String;
     /// The entry path as a lossy `PathBuf`, for classification.
@@ -336,7 +227,7 @@ impl<R: Read> EntryPathExt for tar::Entry<'_, R> {
 }
 
 /// Builds an `ExtensionArchiveInvalid` error naming the archive.
-fn invalid(path: &Utf8Path, detail: &str) -> BootstrapError {
+pub(super) fn invalid(path: &Utf8Path, detail: &str) -> BootstrapError {
     extension_error(
         BootstrapErrorKind::ExtensionArchiveInvalid,
         eyre!("extension archive {path}: {detail}"),
@@ -344,7 +235,11 @@ fn invalid(path: &Utf8Path, detail: &str) -> BootstrapError {
 }
 
 /// Builds an `ExtensionInstallFailed` error listing the files already written.
-fn install_failed(relative: &Utf8Path, written: &[Utf8PathBuf], err: Report) -> BootstrapError {
+pub(super) fn install_failed(
+    relative: &Utf8Path,
+    written: &[Utf8PathBuf],
+    err: Report,
+) -> BootstrapError {
     extension_error(
         BootstrapErrorKind::ExtensionInstallFailed,
         err.wrap_err(format!(
