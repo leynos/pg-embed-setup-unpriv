@@ -7,7 +7,10 @@
 //! The password `initdb` used is the one `postgresql_embedded` wrote to the
 //! password file, so it is read back from there.
 
-use std::io::ErrorKind;
+use std::{
+    fs::File,
+    io::{ErrorKind, Read},
+};
 
 use camino::Utf8Path;
 use color_eyre::eyre::{Report, eyre};
@@ -21,6 +24,16 @@ use crate::{
 
 /// Marker `initdb` leaves in a data directory.
 const PG_VERSION_MARKER: &str = "PG_VERSION";
+
+/// Most a password file may hold before the read is refused.
+///
+/// `postgresql_embedded` writes one password and a newline, so the real file
+/// is tens of bytes. The cap exists because [`stored_cluster_password`] is
+/// public and takes any path: without it a caller could aim the bootstrap at
+/// an arbitrarily large file and the read would allocate all of it before
+/// anything rejected the contents. Four kibibytes leaves room for any password
+/// a person or a generator would produce.
+const MAX_PASSWORD_FILE_BYTES: u64 = 4096;
 
 /// Why the bootstrap did or did not adopt a stored password; a bounded label
 /// for the `password_reuse` tracing event.
@@ -213,7 +226,7 @@ fn read_stored_password(
     password_file: &Utf8Path,
     data_dir: &Utf8Path,
 ) -> Result<String, PasswordQueryFailure> {
-    let raw = std::fs::read_to_string(password_file).map_err(|err| {
+    let raw = read_bounded(password_file).map_err(|err| {
         let (kind, hint, outcome, metric) = if err.kind() == ErrorKind::NotFound {
             (
                 BootstrapErrorKind::ClusterPasswordMissing,
@@ -257,6 +270,50 @@ fn read_stored_password(
         });
     }
     Ok(stored)
+}
+
+/// Reads at most [`MAX_PASSWORD_FILE_BYTES`] from a regular file.
+///
+/// Three refusals, all reported as ordinary [`std::io::Error`]s so the caller
+/// keeps its existing "missing" versus "unreadable" split:
+///
+/// - anything that is not a regular file, which is checked by `metadata` before the file is opened.
+///   Opening first would be too late on Unix, where opening a FIFO blocks until a writer appears
+///   and the bootstrap would hang rather than fail.
+/// - a file whose recorded length already exceeds the cap, which is refused without reading a byte.
+/// - a file that grows past the cap between the two, which the bounded read catches by asking for
+///   one byte more than the cap and rejecting a full buffer.
+fn read_bounded(password_file: &Utf8Path) -> std::io::Result<String> {
+    let metadata = std::fs::metadata(password_file)?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("{password_file} is not a regular file"),
+        ));
+    }
+    if metadata.len() > MAX_PASSWORD_FILE_BYTES {
+        return Err(oversized(password_file, metadata.len()));
+    }
+
+    let mut raw = String::new();
+    File::open(password_file)?
+        .take(MAX_PASSWORD_FILE_BYTES + 1)
+        .read_to_string(&mut raw)?;
+    if raw.len() as u64 > MAX_PASSWORD_FILE_BYTES {
+        return Err(oversized(password_file, raw.len() as u64));
+    }
+    Ok(raw)
+}
+
+/// The error both size refusals report.
+fn oversized(password_file: &Utf8Path, observed: u64) -> std::io::Error {
+    std::io::Error::new(
+        ErrorKind::InvalidData,
+        format!(
+            "password file {password_file} is {observed} bytes, above the \
+             {MAX_PASSWORD_FILE_BYTES}-byte limit"
+        ),
+    )
 }
 
 #[cfg(test)]

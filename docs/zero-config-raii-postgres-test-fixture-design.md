@@ -813,3 +813,64 @@ effortless as using an in-memory database, but with full PostgreSQL fidelity.
 - theseus-rs/postgresql_embedded – _README (features and
   examples)_ (see postgresql_embedded README) (capabilities of the underlying
   embedded Postgres crate, async vs blocking API, ephemeral ports support)
+
+## Implementation update: password reuse and the metrics seam (v0.6.0)
+
+`Settings::default()` generates a fresh superuser password on every bootstrap,
+so a data directory that already held a cluster started a server nobody could
+log in to. That is the ordinary state of a shared host and of
+`shared_cluster_handle` across test processes. v0.6.0 reads the password back
+from the install tree's password file instead. The decisions recorded here are
+the ones a future change must respect:
+
+- **Boundary.** Both bootstrap paths, `bootstrap_unprivileged` and
+  `bootstrap_with_root`, call `reuse_existing_password` immediately after the
+  settings paths are resolved and before the sanitized settings are logged, so
+  the password file is the one `resolve_settings_paths_*` derived. The
+  root/worker path is covered by the parent process; the worker never learns
+  about it.
+- **Command and query.** `stored_cluster_password` is the query: it reads,
+  categorizes, and publishes nothing, so calling it has no observable effect
+  beyond its return value. `reuse_existing_password` is the command and the
+  only place that emits an event or records a metric, exactly once per call on
+  every branch. A failed query carries its bounded label to the command in a
+  private `PasswordQueryFailure` rather than emitting where it was found.
+- **Precedence.** An explicit `PG_PASSWORD` always wins and short-circuits the
+  file read, so a cluster whose stored file has been lost stays usable.
+- **Fail closed.** A data directory that holds a cluster whose password file is
+  missing, unreadable or empty fails the bootstrap with the two remedies named,
+  rather than starting an unreachable server. Only "not found" on the
+  `PG_VERSION` probe means "no cluster"; a permission failure is propagated, so
+  an unsearchable directory cannot masquerade as a fresh one.
+- **Bounded reads.** The query is public and takes any path, so the password
+  file is refused unless it is a regular file within a 4 KiB cap. The regular
+  file check runs on metadata before the open, because opening a FIFO on Unix
+  blocks until a writer appears and would hang the bootstrap rather than fail
+  it.
+
+### Why a metrics seam rather than a metrics crate
+
+Every subsystem here reports through bounded `tracing` events, which a consumer
+can filter but not readily aggregate. A count is the other thing. The crate
+takes no metrics dependency, because a library should not choose one on its
+consumer's behalf.
+
+- **Shape.** `Metric` is an enum whose every variant carries a bounded label
+  set and nothing else, so no password or path can reach a metric: the
+  requirement is a property of the type rather than something a reviewer has to
+  police. `PasswordReuseOutcomeMetric` keeps `ProbeFailed` and `UnreadableFile`
+  distinct even though both map to `ClusterPasswordUnreadable`, because the
+  label would otherwise collapse two different operational failures.
+- **Scope.** Installation is process-wide and returns a guard that restores the
+  previous recorder on drop, matching the crate's other process-wide hooks.
+  With no recorder installed, recording is a lock, a branch and a return.
+- **Dispatch.** `observability::record` clones the installed handle out under
+  the read lock and releases the lock before calling the consumer's callback.
+  It must stay that way: both routes back into the slot, installing and
+  dropping a guard, take the write lock, so holding the read lock across the
+  callback deadlocks a recorder that uses either. The clone is also what keeps
+  a recorder alive when a callback uninstalls itself part-way through.
+- **Label sets.** The returned `PasswordReuseOutcome` carries the three success
+  results. The `outcome` field of the `password_reuse` event carries seven,
+  those three plus the four failures, which return an error rather than an
+  outcome. `PasswordReuseOutcomeMetric` is the seven-value set.

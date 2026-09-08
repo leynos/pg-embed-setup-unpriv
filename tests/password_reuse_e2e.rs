@@ -84,12 +84,14 @@ fn a_second_bootstrap_adopts_a_password_that_authenticates(
 fn reuse_against_live_cluster() -> std::result::Result<(), Failure> {
     let (handle, guard) = TestCluster::new_split().map_err(|err| skip_or_fail(&err))?;
     let running = handle.settings();
-    let host = running.host.clone();
-    let port = running.port;
-    let superuser = running.username.clone();
-    let started_with = running.password.clone();
-
-    let checked = bootstrap_and_authenticate(&host, port, &superuser, &started_with);
+    // Borrow the running settings rather than cloning three `String`s out of
+    // them: the helper only reads, and the handle outlives the call.
+    let checked = bootstrap_and_authenticate(
+        &running.host,
+        running.port,
+        &running.username,
+        &running.password,
+    );
     drop(guard);
     checked
 }

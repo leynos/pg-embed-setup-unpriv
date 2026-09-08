@@ -25,6 +25,7 @@ use std::{
     time::Duration,
 };
 
+use proptest::prelude::*;
 use serial_test::serial;
 
 use super::{
@@ -194,4 +195,101 @@ fn a_recorder_may_drop_its_own_guard_from_its_callback() {
         0,
         "the restored recorder should not have seen this count",
     );
+}
+
+/// One step a consumer can take against the process-wide recorder slot.
+#[derive(Debug, Clone, Copy)]
+enum Step {
+    /// Install a fresh recorder, keeping its guard.
+    Install,
+    /// Drop the newest guard still held, if any.
+    Uninstall,
+}
+
+/// The recorder stack, alongside the count each recorder is owed.
+///
+/// Guards are held in installation order and dropped from the end, which is
+/// the only order a consumer's scopes can produce and the order
+/// `MetricsRecorderGuard` documents.
+#[derive(Default)]
+struct Model {
+    /// Every recorder ever installed, with the number of counts it is owed.
+    recorders: Vec<(Arc<Counting>, usize)>,
+    /// The recorders whose guards are still held, newest last.
+    held: Vec<(Arc<Counting>, MetricsRecorderGuard)>,
+}
+
+impl Model {
+    /// Applies one step.
+    fn apply(&mut self, step: Step) {
+        match step {
+            Step::Install => {
+                let recorder = Arc::new(Counting(AtomicUsize::new(0)));
+                let guard =
+                    install_metrics_recorder(Arc::clone(&recorder) as Arc<dyn MetricsRecorder>);
+                self.recorders.push((Arc::clone(&recorder), 0));
+                self.held.push((recorder, guard));
+            }
+            Step::Uninstall => {
+                self.held.pop();
+            }
+        }
+    }
+
+    /// Records once and credits whichever recorder should have received it.
+    fn record_once(&mut self) {
+        record(SAMPLE);
+        let Some((top, _)) = self.held.last() else {
+            return;
+        };
+        let credited = self
+            .recorders
+            .iter_mut()
+            .find(|(recorder, _)| Arc::ptr_eq(recorder, top));
+        if let Some((_, owed)) = credited {
+            *owed += 1;
+        }
+    }
+
+    /// The recorders that have diverged from what they are owed, as
+    /// `(installation order, observed, owed)`.
+    fn discrepancies(&self) -> Vec<(usize, usize, usize)> {
+        self.recorders
+            .iter()
+            .enumerate()
+            .filter_map(|(order, (recorder, owed))| {
+                let observed = recorder.0.load(Ordering::Relaxed);
+                (observed != *owed).then_some((order, observed, *owed))
+            })
+            .collect()
+    }
+}
+
+/// A bounded sequence of installs and uninstalls.
+fn steps() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(
+        prop_oneof![Just(Step::Install), Just(Step::Uninstall)],
+        0..12,
+    )
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    /// Whatever the order of installs and uninstalls, a recorded count reaches
+    /// the newest recorder whose guard is still held, and no other.
+    ///
+    /// The worked examples above fix the nesting depth at two. This covers the
+    /// invariant the guard exists for at arbitrary depth, including the empty
+    /// stack, where recording must reach nobody at all.
+    #[test]
+    #[serial(metrics_recorder)]
+    fn a_count_reaches_only_the_newest_held_recorder(steps in steps()) {
+        let mut model = Model::default();
+        for step in steps {
+            model.apply(step);
+            model.record_once();
+            prop_assert_eq!(model.discrepancies(), Vec::new());
+        }
+    }
 }

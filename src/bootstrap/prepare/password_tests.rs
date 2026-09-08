@@ -215,5 +215,53 @@ fn explicit_password_survives_an_unreadable_stored_file(scratch: Result<Scratch>
     assert_explicit_password_kept!(&dir);
 }
 
+/// A password file larger than the cap is refused rather than read.
+///
+/// The recorded length alone is enough to refuse, so nothing is allocated.
+#[rstest]
+fn an_oversized_password_file_is_refused(scratch: Result<Scratch>) {
+    let dir = scratch.expect("scratch");
+    dir.with_cluster().expect("cluster");
+    let oversized = "x".repeat(usize::try_from(MAX_PASSWORD_FILE_BYTES).expect("cap fits") + 1);
+    dir.with_stored(&oversized).expect("stored");
+    let err = stored_cluster_password(&dir.data_dir, &dir.password_file)
+        .expect_err("an oversized password file must be refused");
+    assert_eq!(err.kind(), BootstrapErrorKind::ClusterPasswordUnreadable);
+}
+
+/// A password file of exactly the cap is still read, so the boundary is
+/// inclusive rather than off by one.
+#[rstest]
+fn a_password_file_at_the_cap_is_read(scratch: Result<Scratch>) {
+    let dir = scratch.expect("scratch");
+    dir.with_cluster().expect("cluster");
+    let at_cap = "x".repeat(usize::try_from(MAX_PASSWORD_FILE_BYTES).expect("cap fits"));
+    dir.with_stored(&at_cap).expect("stored");
+    let stored = stored_cluster_password(&dir.data_dir, &dir.password_file)
+        .expect("a password file at the cap must be read");
+    assert_eq!(stored, Some(at_cap));
+}
+
+/// A password file that is not a regular file is refused without opening it.
+///
+/// A FIFO is the case that matters: opening one blocks until a writer
+/// appears, so a bootstrap that opened before checking would hang instead of
+/// failing. The test would therefore time out rather than fail if the check
+/// were removed, which is why it never writes to the FIFO.
+#[cfg(unix)]
+#[rstest]
+fn a_non_regular_password_file_is_refused(scratch: Result<Scratch>) {
+    let dir = scratch.expect("scratch");
+    dir.with_cluster().expect("cluster");
+    nix::unistd::mkfifo(
+        dir.password_file.as_std_path(),
+        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+    )
+    .expect("mkfifo");
+    let err = stored_cluster_password(&dir.data_dir, &dir.password_file)
+        .expect_err("a FIFO must not be read as a password file");
+    assert_eq!(err.kind(), BootstrapErrorKind::ClusterPasswordUnreadable);
+}
+
 #[path = "password_metrics_tests.rs"]
 mod metrics;
