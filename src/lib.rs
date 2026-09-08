@@ -153,6 +153,7 @@ pub use bootstrap::{
     TestBootstrapEnvironment,
     TestBootstrapSettings,
     bootstrap_for_tests,
+    default_paths_under,
     detect_execution_privileges,
     find_timezone_dir,
     reuse_existing_password,
@@ -215,7 +216,13 @@ pub use privileges::with_temp_euid;
         target_os = "dragonfly",
     ),
 ))]
-pub use privileges::{default_paths_for, make_data_dir_private, make_dir_accessible, nobody_uid};
+pub use privileges::{
+    default_paths_for,
+    default_root_for,
+    make_data_dir_private,
+    make_dir_accessible,
+    nobody_uid,
+};
 use serde::{Deserialize, Serialize};
 
 #[doc(hidden)]
@@ -294,6 +301,20 @@ pub struct PgEnvCfg {
     /// 3. `$HOME/.cache/pg-embedded/binaries` (if `HOME` is set)
     /// 4. `/tmp/pg-embedded/binaries` (final fallback)
     pub binary_cache_dir: Option<Utf8PathBuf>,
+    /// Base directory under which the default `install` and `data`
+    /// directories are created (`PG_EMBED_ROOT`).
+    ///
+    /// When unset the base is `/var/tmp/pg-embed-{uid}`, which every project
+    /// on a host shares per user. Set it to give a project or a test run its
+    /// own tree. `PG_RUNTIME_DIR` and `PG_DATA_DIR` still override the two
+    /// leaves individually.
+    pub embed_root: Option<Utf8PathBuf>,
+    /// `max_connections` for the server (`PG_MAX_CONNECTIONS`).
+    ///
+    /// Test clusters default to 20; set this when parallel test runners need
+    /// more. Applied to every bootstrap, test or not. Values below
+    /// [`MIN_MAX_CONNECTIONS`] are rejected when the settings are built.
+    pub max_connections: Option<u32>,
 }
 
 impl PgEnvCfg {
@@ -326,7 +347,8 @@ impl PgEnvCfg {
     /// A fully configured `Settings` instance on success, or an error if configuration fails.
     ///
     /// # Errors
-    /// Returns an error when the semantic version requirement cannot be parsed.
+    /// Returns an error when the semantic version requirement cannot be parsed,
+    /// or when `PG_MAX_CONNECTIONS` is below [`MIN_MAX_CONNECTIONS`].
     pub fn to_settings(&self) -> Result<Settings> { self.to_settings_with_context(false) }
 
     /// Converts the configuration into `Settings`, applying test-only worker limits.
@@ -343,7 +365,8 @@ impl PgEnvCfg {
     /// ```
     ///
     /// # Errors
-    /// Returns an error when the semantic version requirement cannot be parsed.
+    /// Returns an error when the semantic version requirement cannot be parsed,
+    /// or when `PG_MAX_CONNECTIONS` is below [`MIN_MAX_CONNECTIONS`].
     pub fn to_settings_for_tests(&self) -> Result<Settings> { self.to_settings_with_context(true) }
 
     /// Converts the configuration into `Settings`, optionally applying test limits.
@@ -361,7 +384,8 @@ impl PgEnvCfg {
     /// ```
     ///
     /// # Errors
-    /// Returns an error when the semantic version requirement cannot be parsed.
+    /// Returns an error when the semantic version requirement cannot be parsed,
+    /// or when `PG_MAX_CONNECTIONS` is below [`MIN_MAX_CONNECTIONS`].
     pub fn to_settings_with_context(&self, for_tests: bool) -> Result<Settings> {
         // Disable the internal postgresql_embedded timeout. This crate wraps lifecycle
         // operations with tokio::time::timeout using setup_timeout/start_timeout from
@@ -380,6 +404,7 @@ impl PgEnvCfg {
         if for_tests {
             Self::apply_worker_limits(&mut s);
         }
+        self.apply_max_connections(&mut s)?;
 
         Ok(s)
     }
@@ -429,6 +454,27 @@ impl PgEnvCfg {
         }
     }
 
+    /// Applies an explicit `max_connections`, replacing the test default of 20.
+    ///
+    /// `PostgreSQL` keeps `superuser_reserved_connections` (3 by default) below
+    /// `max_connections`, so anything under [`MIN_MAX_CONNECTIONS`] would make
+    /// the server refuse to start; reject it here with a clear message.
+    fn apply_max_connections(&self, settings: &mut Settings) -> ConfigResult<()> {
+        let Some(limit) = self.max_connections else {
+            return Ok(());
+        };
+        if limit < MIN_MAX_CONNECTIONS {
+            return Err(ConfigError::from(eyre!(
+                "PG_MAX_CONNECTIONS must be at least {MIN_MAX_CONNECTIONS} (got {limit}); \
+                 PostgreSQL reserves three superuser slots below max_connections"
+            )));
+        }
+        settings
+            .configuration
+            .insert("max_connections".into(), limit.to_string());
+        Ok(())
+    }
+
     fn apply_worker_limits(settings: &mut Settings) {
         for (key, value) in WORKER_LIMIT_DEFAULTS {
             settings
@@ -439,6 +485,9 @@ impl PgEnvCfg {
     }
 }
 
+/// Smallest `PG_MAX_CONNECTIONS` the helper accepts: one ordinary slot above
+/// `PostgreSQL`'s default of three reserved superuser connections.
+pub const MIN_MAX_CONNECTIONS: u32 = 4;
 const WORKER_LIMIT_DEFAULTS: [(&str, &str); 8] = [
     ("max_connections", "20"),
     ("max_worker_processes", "2"),

@@ -572,6 +572,34 @@ users follow the existing worker location logic. See issue #52[^1]._
 
 [^1]: <https://github.com/leynos/pg-embed-setup-unpriv/issues/52>
 
+
+### Implementation update (2026-09-06): install root and connection limit
+
+Two bootstrap inputs were added because a host that runs several projects
+shared one tree per user, and because the test connection cap could not be
+raised.
+
+- **Root precedence.** The base directory for the derived `install` and `data`
+  leaves is `PG_EMBED_ROOT` when set; otherwise, on Linux and the BSDs, the
+  per-user `/var/tmp/pg-embed-{uid}` tree (`default_root_for`, with `nobody`'s
+  uid when running as root). macOS and Windows have no per-user root and keep
+  the `postgresql_embedded` defaults. `PG_RUNTIME_DIR` and `PG_DATA_DIR` still
+  override their own leaf individually, so an explicit leaf wins over the root
+  while the other leaf is still derived from it.
+- **One derivation.** `default_paths_under(root)` is the only place the two
+  leaves are derived, so the privileged and portable resolvers cannot drift;
+  the shared `embed_root_cases` test module holds both to one contract.
+- **Decision event.** Each resolver emits an info-level `settings_decision`
+  event carrying `root_source` (`Override`, `PerUserDefault` or
+  `SettingsDefault`), both directories, whether each was derived, and the
+  effective connection limit read from the resolved settings rather than from
+  the configured option, so a test bootstrap reports the 20 it will actually
+  run at.
+- **Connection limit.** `PG_MAX_CONNECTIONS` applies to plain bootstraps as
+  well as test ones. Values below `MIN_MAX_CONNECTIONS` (4) are rejected when
+  the settings are built, because PostgreSQL reserves three superuser slots
+  below `max_connections` and the server would refuse to start.
+
 ### Ephemeral ports and isolation
 
 To allow the same tests to run concurrently (especially under `nextest`, which

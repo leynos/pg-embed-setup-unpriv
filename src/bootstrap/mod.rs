@@ -16,6 +16,7 @@ pub use env::{TestBootstrapEnvironment, find_timezone_dir};
 pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
 pub(crate) use mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
 use postgresql_embedded::Settings;
+pub use prepare::default_paths_under;
 pub use prepare::{PasswordReuseOutcome, reuse_existing_password, stored_cluster_password};
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,7 @@ use crate::{
     PgEnvCfg,
     error::{BootstrapResult, Result as CrateResult},
 };
+
 
 const DEFAULT_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(60);
@@ -92,6 +94,8 @@ pub struct TestBootstrapSettings {
 /// subsequent use by [`TestCluster`](crate::TestCluster) or other tools.
 ///
 /// The function honours the following environment variables when present:
+/// - `PG_EMBED_ROOT`: Replaces the per-user `/var/tmp/pg-embed-{uid}` base under which the default
+///   installation and data directories are derived.
 /// - `PG_RUNTIME_DIR`: Overrides the `PostgreSQL` installation directory.
 /// - `PG_DATA_DIR`: Overrides the data directory used for initialization.
 /// - `PG_SUPERUSER`: Sets the superuser account name.
