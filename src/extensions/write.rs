@@ -15,7 +15,6 @@ use color_eyre::eyre::{Report, eyre};
 
 use super::{
     Sha256Hex,
-    extension_error,
     install::{
         ARCHIVE_DECOMPRESSED_CAP,
         ENTRY_DECOMPRESSED_CAP,
@@ -27,7 +26,7 @@ use super::{
     },
     layout::classify_entry_path,
 };
-use crate::error::{BootstrapErrorKind, BootstrapResult};
+use crate::error::BootstrapResult;
 
 /// Pass two: write every planned file.
 pub(super) fn write_all(
@@ -149,7 +148,12 @@ struct Owner {
 #[cfg(unix)]
 /// Reads the uid and gid that own the installation directory.
 fn tree_owner(install_dir: &Utf8Path) -> BootstrapResult<Owner> {
+    // Scoped here: both are used only on this Unix-only path, so importing
+    // them at module level leaves them unused off Unix.
     use std::os::unix::fs::MetadataExt;
+
+    use crate::{error::BootstrapErrorKind, extensions::extension_error};
+
     let metadata = fs::metadata(install_dir).map_err(|err| {
         extension_error(
             BootstrapErrorKind::ExtensionInstallFailed,
