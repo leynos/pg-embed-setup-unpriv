@@ -13,7 +13,6 @@ budget is their product, and a ``slow-timeout`` naming no
 refused rather than read as a single period.
 """
 
-import re
 import tomllib
 import typing as typ
 
@@ -23,37 +22,9 @@ from timeout_budgets import (
     NextestConfigurationError,
     UnboundedTestError,
     mapping_or_empty,
+    seconds,
     sequence_or_empty,
 )
-
-_DURATION: typ.Final[re.Pattern[str]] = re.compile(
-    r"^\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>ms|s|m|h)\s*$"
-)
-
-_UNIT_SECONDS: typ.Final[dict[str, float]] = {
-    "ms": 0.001,
-    "s": 1.0,
-    "m": 60.0,
-    "h": 3600.0,
-}
-
-
-def seconds(duration: str) -> float:
-    """Convert a nextest duration to seconds.
-
-    Parameters
-    ----------
-    duration : str
-        A duration as nextest spells it, such as ``"120s"``.
-
-    Returns
-    -------
-    float
-        The duration in seconds.
-    """
-    match = _DURATION.match(duration)
-    assert match is not None, f"unrecognized nextest duration {duration!r}"
-    return float(match["value"]) * _UNIT_SECONDS[match["unit"]]
 
 
 def _parsed(config_text: str) -> dict[str, object]:

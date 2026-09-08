@@ -23,6 +23,7 @@ from timeout_budgets import (
     NextestConfigurationError,
     UnboundedTestError,
     required_ceiling,
+    seconds,
 )
 
 
@@ -277,3 +278,71 @@ def test_the_required_ceiling_carries_all_three_terms() -> None:
     assert required_ceiling([], 0.0) == pytest.approx(CEILING_MARGIN_SECONDS), (
         "the margin is a term of its own, not a fraction of the others"
     )
+
+
+@pytest.mark.parametrize(
+    ("duration", "expected"),
+    [
+        pytest.param("120s", 120.0, id="one-component"),
+        pytest.param("1m 30s", 90.0, id="two-components-spaced"),
+        pytest.param("1m30s", 90.0, id="two-components-joined"),
+        pytest.param("1h 30m 15s", 5415.0, id="three-components"),
+        pytest.param("1day", 86400.0, id="an-extended-unit"),
+        pytest.param("1w", 604800.0, id="a-week"),
+        pytest.param("15min", 900.0, id="a-long-unit-spelling"),
+        pytest.param("500ms", 0.5, id="milliseconds"),
+    ],
+)
+def test_the_duration_grammar_matches_the_one_nextest_reads(
+    duration: str, expected: float
+) -> None:
+    """nextest deserializes durations with ``humantime``, not one unit.
+
+    A reader accepting a single short-unit component refuses `"1m 30s"`
+    and `"1day"`, which nextest loads without complaint, so the contract
+    would fail on a configuration that is correct and the failure would
+    name the file rather than the reader that could not read it. Every
+    spelling here is one ``humantime`` accepts.
+    """
+    assert seconds(duration) == pytest.approx(expected), (
+        f"{duration!r} must read as {expected} seconds"
+    )
+
+
+@pytest.mark.parametrize(
+    "duration",
+    [
+        pytest.param("1.5s", id="a-fractional-value"),
+        pytest.param("120", id="no-unit"),
+        pytest.param("s", id="no-value"),
+        pytest.param("-30s", id="negative"),
+        pytest.param("120 fortnights", id="an-unknown-unit"),
+        pytest.param("", id="empty"),
+    ],
+)
+def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
+    """The grammar is matched, not merely widened.
+
+    ``humantime`` takes whole numbers with units and nothing else, so a
+    reader accepting more would put a number on a configuration nextest
+    fails to load, and the ordering would then be checked against a
+    budget nothing enforces.
+
+    The refusal is now a `NextestConfigurationError` rather than an
+    `AssertionError`. It is the error the rest of this reading reports
+    faults with, so a caller catching `TimeoutBudgetError` gets a
+    finding instead of a crash, and `python -O` cannot strip the check.
+    """
+    with pytest.raises(NextestConfigurationError):
+        seconds(duration)
+
+
+def test_minutes_and_months_are_told_apart() -> None:
+    """``m`` is minutes and ``M`` is months, and ``humantime`` is exact.
+
+    Folding case here would read a ten-minute whole-run budget as a
+    two-and-a-half-year one, or the reverse, and either reading puts a
+    plausible number on the wrong tier.
+    """
+    assert seconds("10m") == pytest.approx(600.0), "m is minutes"
+    assert seconds("10M") == pytest.approx(10 * 2630016.0), "M is months"

@@ -336,6 +336,16 @@ slow and never stops it, so the reading refuses that form rather than reporting
 one period as the budget. Every table in `.config/nextest.toml` sets it
 explicitly.
 
+Durations are read with the grammar `humantime` accepts, which is what nextest
+deserializes them with: one or more whole-number components each carrying a
+unit, written `180s`, `1m 30s` or `1m30s`, with the long unit spellings and with
+no fractional values. A reader taking a single short-unit component would reject
+`1m 30s`, `1day` and `1w`, which nextest loads, and the contract would then fail
+on a correct file and name the file rather than the reader. Case is significant,
+`m` being minutes and `M` months. A duration nextest would refuse raises
+`NextestConfigurationError`, the error the rest of these readings report faults
+with, rather than tripping an assertion that `python -O` would strip.
+
 The contract also pins the condition each lane carries. A skipped step runs no
 `cargo`, so its watchdog never arms and the tiers say nothing about it:
 `if: false` on the step or on its job would leave a lane that looks bounded and
@@ -347,17 +357,22 @@ losing or changing a condition has to change this section with it, and a lane
 appearing without an entry fails the contract too.
 
 It pins two values as well as ordering them: the 10 m `global-timeout` and the
-65 m job ceiling. That ceiling is the requirement exactly, and the requirement
-has three terms: the 1,800 s watchdog, the 1,200 s of measured work outside it,
-and a 900 s margin. The margin is a term rather than slack above the other two,
-because a ceiling equal to the watchdog plus the work outside it cancels the job
-at the moment the watchdog would have reported the overrun, and the report is
-the only thing that makes an overrun actionable. It was 60 minutes, which was
-below the requirement. The ordering holds for a wide range
-of both, so on its own it would let either drift away from the table above
-without failing anything. It also requires the `global-timeout` to be present
-rather than skipping when it is absent, since a skipped test would let this
-tier be deleted and leave a four-tier contract passing with three.
+65 m job ceiling. Two numbers are involved and they are worth keeping apart.
+
+The **base requirement is 50 minutes**: the 1,800 s watchdog plus the 1,200 s of
+measured work outside its window. That is what the job has to be allowed to
+take.
+
+The **configured ceiling is 65 minutes**: the base requirement plus a 900 s
+margin. The margin is a term of what the contract demands rather than slack
+above it, because a ceiling equal to the base requirement cancels the job at the
+moment the watchdog would have reported the overrun, and the report is the only
+thing that makes an overrun actionable. The ceiling was 60 minutes, which left
+only ten. The ordering holds for a wide range of both values, so on its own it
+would let either drift away from the table above without failing anything. It
+also requires the `global-timeout` to be present rather than skipping when it is
+absent, since a skipped test would let this tier be deleted and leave a
+four-tier contract passing with three.
 
 The termination allowance it demands between the whole-run budget and the
 watchdog is two terms, not one: the largest `grace-period` the configuration
