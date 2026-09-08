@@ -20,22 +20,12 @@ use pg_embedded_setup_unpriv::{
 };
 use postgres::NoTls;
 
-// This test uses a subset of the shared sandbox helpers; the rest are
-// exercised by the other behavioural suites that include the same files.
-#[expect(
-    dead_code,
-    reason = "shared support module; only remove_tree is unused here"
-)]
 #[path = "support/cap_fs_bootstrap.rs"]
 mod cap_fs;
 #[path = "support/cluster_skip.rs"]
 mod cluster_skip;
 #[path = "support/env.rs"]
 mod env;
-#[expect(
-    dead_code,
-    reason = "shared support module; this test needs only new, install_dir, base_env and with_env"
-)]
 #[path = "support/sandbox.rs"]
 mod sandbox;
 #[path = "support/serial.rs"]
@@ -69,7 +59,9 @@ fn start_cluster(
     sandbox: &TestSandbox,
     extra: Vec<(OsString, Option<OsString>)>,
 ) -> Result<Option<TestCluster>> {
-    let mut vars = sandbox.base_env();
+    // Match the other cluster suites: the host's timezone configuration has
+    // no business reaching an embedded cluster under test.
+    let mut vars = sandbox.env_without_timezone();
     vars.extend(extra);
     match sandbox.with_env(vars, TestCluster::new) {
         Ok(cluster) => Ok(Some(cluster)),
@@ -264,6 +256,8 @@ fn assert_probe_loaded(cluster: &pg_embedded_setup_unpriv::ClusterHandle) -> Res
 fn hook_installs_a_loadable_extension(serial_guard: serial::ScenarioSerialGuard) -> Result<()> {
     let _serial = serial_guard;
     let sandbox = TestSandbox::new("extensions-probe")?;
+    // Clear any tree a previous run left, as the other cluster suites do.
+    sandbox.reset()?;
     let Some(assets) = prepare_probe(&sandbox)? else {
         return Ok(());
     };
@@ -281,13 +275,14 @@ fn hook_installs_a_loadable_extension_async(
 ) -> Result<()> {
     let _serial = serial_guard;
     let sandbox = TestSandbox::new("extensions-probe-async")?;
+    sandbox.reset()?;
     let Some(assets) = prepare_probe(&sandbox)? else {
         return Ok(());
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let mut vars = sandbox.base_env();
+    let mut vars = sandbox.env_without_timezone();
     vars.extend(assets.extra_env);
     let outcome = sandbox.with_env(vars, || {
         runtime.block_on(async { TestCluster::start_async().await })

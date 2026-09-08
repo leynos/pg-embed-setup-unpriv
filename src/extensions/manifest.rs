@@ -14,8 +14,8 @@ use super::{
     ExtensionName,
     ManifestSource,
     Sha256Hex,
-    archive::{http_get, is_permitted_url},
     extension_error,
+    http::{http_get, is_permitted_url},
 };
 use crate::error::{BootstrapError, BootstrapErrorKind, BootstrapResult};
 
@@ -337,9 +337,13 @@ fn read_path(path: &camino::Utf8Path) -> BootstrapResult<Vec<u8>> {
 /// Fetches a manifest over HTTP, subject to the same size cap as a local one.
 fn fetch_url(url: &str) -> BootstrapResult<Vec<u8>> {
     let mut bytes = Vec::new();
-    http_get(url, MANIFEST_SIZE_CAP, &mut bytes)
-        .map_err(|err| unavailable_manifest(eyre!("cannot fetch manifest from {url}: {err}")))?;
-    check_size(bytes, url)
+    http_get(url, MANIFEST_SIZE_CAP, &mut bytes).map_err(|err| {
+        unavailable_manifest(eyre!(
+            "cannot fetch manifest from {}: {err}",
+            super::http::redact_url(url)
+        ))
+    })?;
+    check_size(bytes, &super::http::redact_url(url))
 }
 
 /// Rejects bytes over [`MANIFEST_SIZE_CAP`], naming where they came from.

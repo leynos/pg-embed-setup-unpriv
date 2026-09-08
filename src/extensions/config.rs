@@ -1,5 +1,9 @@
 //! Translates `PG_EXTENSIONS*` into an [`ExtensionRequest`] and resolves the
 //! extension cache directory.
+//!
+//! The cache directory travels as `ExtensionRequest.cache_dir`; there is no
+//! separate configuration type, because a wrapper around one field earns
+//! nothing until a second field exists.
 
 use std::path::PathBuf;
 
@@ -14,31 +18,6 @@ use crate::{
 
 /// Subdirectory path within the XDG cache home.
 const CACHE_SUBDIR: &str = "pg-embedded/extensions";
-
-/// Configuration for the extension archive cache.
-#[derive(Debug, Clone)]
-pub struct ExtensionCacheConfig {
-    /// Root directory for verified extension archives.
-    pub cache_dir: Utf8PathBuf,
-}
-
-impl ExtensionCacheConfig {
-    /// Creates a configuration using the resolved cache directory.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            cache_dir: resolve_extension_cache_dir(),
-        }
-    }
-
-    /// Creates a configuration with an explicit directory.
-    #[must_use]
-    pub const fn with_dir(cache_dir: Utf8PathBuf) -> Self { Self { cache_dir } }
-}
-
-impl Default for ExtensionCacheConfig {
-    fn default() -> Self { Self::new() }
-}
 
 /// Resolves the extension cache directory.
 ///
