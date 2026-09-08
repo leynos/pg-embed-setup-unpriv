@@ -47,11 +47,13 @@
 mod archive;
 mod config;
 mod digest;
+mod http;
 mod install;
 mod layout;
 mod manifest;
 mod name;
 mod version;
+mod write;
 
 #[cfg(test)]
 mod tests;
@@ -61,9 +63,9 @@ use color_eyre::eyre::Report;
 use tracing::info;
 
 pub use self::{
-    archive::is_permitted_url,
-    config::{ExtensionCacheConfig, resolve_extension_cache_dir},
+    config::resolve_extension_cache_dir,
     digest::{InvalidDigest, Sha256Hex},
+    http::{is_permitted_url, redact_url},
     layout::{ALLOWED_PREFIXES, classify_entry_path},
     manifest::{
         ArtifactQuery,
@@ -106,7 +108,9 @@ impl ManifestSource {
     #[must_use]
     pub fn location(&self) -> String {
         match self {
-            Self::Url { url, .. } => url.clone(),
+            // Redacted: this is used in log fields and error messages, and a
+            // consumer's URL can carry userinfo or a signed query parameter.
+            Self::Url { url, .. } => http::redact_url(url),
             Self::Path { path, .. } => path.to_string(),
         }
     }
