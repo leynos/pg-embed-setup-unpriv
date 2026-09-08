@@ -208,11 +208,30 @@ fn to_settings_omits_worker_limits_by_default(default_pg_env: PgEnvCfg) -> color
 
 #[cfg(all(unix, feature = "privileged-tests", privileged_unix_platform,))]
 #[rstest]
-/// Stub variant ensuring the suite reports skipped when privilege drops are unavailable.
+/// Verify that the effective uid is changed within the passed block
 fn with_temp_euid_changes_uid() -> color_eyre::Result<()> {
-    tracing::warn!(
-        "skipping root-dependent test: enable the privileged-tests feature to exercise privilege \
-         drops",
+    if !geteuid().is_root() {
+        tracing::warn!("skipping root-dependent test");
+        return Ok(());
+    }
+
+    let outcome = invoke_deprecated_with_temp_euid();
+    let Err(err) = outcome else {
+        return Err(eyre!("with_temp_euid should now reject privilege swaps"));
+    };
+    let privilege_err = match err {
+        PgEmbeddedError::Privilege(inner) => inner,
+        other => {
+            return Err(eyre!(
+                "expected privilege error variant, received {other:?}"
+            ));
+        }
+    };
+    let source_message = privilege_err.to_string();
+    ensure!(
+        source_message
+            .contains("with_temp_euid() is unsupported; use the worker-based privileged path"),
+        "unexpected error message: {source_message}",
     );
     Ok(())
 }
