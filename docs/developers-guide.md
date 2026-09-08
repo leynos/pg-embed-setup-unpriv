@@ -247,9 +247,12 @@ no `PG_VERSION` marker, the stored password otherwise, and an error (with the
 `PG_PASSWORD` and remove-the-cluster remedies) when the file the bootstrap
 handed to `initdb` is missing, unreadable, or empty. `reuse_existing_password`
 is the command: it applies the query to `settings.password` unless the caller
-supplied an explicit password, and returns a `PasswordReuseOutcome`, emitted as
-the bounded `outcome` field of the `password_reuse` tracing event (never a path
-or a secret as a label). Both bootstrap paths (`bootstrap_unprivileged` and
+supplied an explicit password, and returns a `PasswordReuseOutcome`. That enum
+covers the three success results only. It supplies the bounded `outcome` field
+of the `password_reuse` tracing event on those branches; the four failure
+labels below are values of the same field that the enum does not carry, because
+a failure returns an error rather than an outcome. Neither a path nor a secret
+is ever a label. Both bootstrap paths (`bootstrap_unprivileged` and
 `bootstrap_with_root`) call it immediately after the settings paths are
 resolved and before the sanitized settings are logged, so the password file is
 the one that `resolve_settings_paths_*` derived (`<install>/.pgpass`). Both
@@ -261,7 +264,10 @@ query has no observable effect beyond its return value. A failure carries its
 bounded label to the caller in a private `PasswordQueryFailure`, and
 `reuse_existing_password` is the single place that emits: the `password_reuse`
 event at warning level with `outcome` set to `probe_failed`, `missing_file`,
-`unreadable_file`, or `empty_file`, before the error is returned. A bootstrap
+`unreadable_file`, or `empty_file`, before the error is returned. Those four are
+additional bounded values of the tracing field, beyond the three the returned
+enum carries, so the field's full label set has seven values and matches
+`PasswordReuseOutcomeMetric` rather than `PasswordReuseOutcome`. A bootstrap
 that refuses a stale cluster is therefore visible in the log without the caller
 rendering the error, while the query stays free of side effects.
 
@@ -285,8 +291,9 @@ different operational failures.
 
 `reuse_existing_password` records exactly one count per call, on every branch,
 and the query records none. The tests in `password_tests.rs` under `mod
-metrics` pin all seven outcomes, that the query is silent, and that neither the
-password nor either directory path appears in a recorded metric. They carry
+metrics` pin all seven outcomes, verify that the query is silent, and assert
+that neither the password nor either directory path appears in a recorded
+metric. They carry
 `#[serial(metrics_recorder)]`, because the recorder is process-wide and two
 tests installing concurrently would collect each other's counts.
 

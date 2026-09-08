@@ -680,11 +680,14 @@ Table: Password-reuse API.
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stored_cluster_password` | Query. Given the data directory and the password file, returns `Ok(None)` when the data directory holds no cluster, `Ok(Some(password))` when it does, and an error when the file is missing, unreadable, or empty. |
 | `reuse_existing_password` | Command. Takes the same two paths plus the mutable `Settings` and whether the caller supplied a password, aligns `settings.password` with the cluster on disk, and returns the outcome.                             |
-| `PasswordReuseOutcome`    | The bounded outcome: `Reused`, `ExplicitPassword`, or `NoCluster`. It is also the `outcome` label of the `password_reuse` tracing event.                                                                            |
+| `PasswordReuseOutcome`    | The bounded outcome of a successful call: `Reused`, `ExplicitPassword`, or `NoCluster`. Each is also an `outcome` label of the `password_reuse` tracing event, which carries four further labels for the failures.  |
 
 `reuse_existing_password` emits a warning-level `password_reuse` event on every
 failure branch before the error is returned, labelled `probe_failed`,
-`missing_file`, `unreadable_file`, or `empty_file`. No password is ever a label.
+`missing_file`, `unreadable_file`, or `empty_file`. A failure returns an error
+rather than a `PasswordReuseOutcome`, so those four labels appear only in the
+event: the field accepts all seven values, the returned enum carries the three
+successes. No password is ever a label.
 `stored_cluster_password` emits nothing at all: it is a query, so a caller
 that wants the event calls the command.
 

@@ -115,6 +115,41 @@ impl Drop for MetricsRecorderGuard {
 }
 
 /// Installs `recorder` and returns a guard that restores the previous one.
+///
+/// Installation is process-wide and nests: the guard puts back whatever was
+/// installed before it, so an inner scope cannot strand an outer collector.
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::{Arc, Mutex};
+///
+/// use pg_embedded_setup_unpriv::observability::{
+///     Metric,
+///     MetricsRecorder,
+///     install_metrics_recorder,
+/// };
+///
+/// #[derive(Default)]
+/// struct Counting(Mutex<usize>);
+///
+/// impl MetricsRecorder for Counting {
+///     fn record(&self, _metric: Metric) {
+///         *self.0.lock().unwrap_or_else(|err| err.into_inner()) += 1;
+///     }
+/// }
+///
+/// let outer = Arc::new(Counting::default());
+/// let outer_guard = install_metrics_recorder(Arc::clone(&outer) as Arc<dyn MetricsRecorder>);
+///
+/// let inner = Arc::new(Counting::default());
+/// let inner_guard = install_metrics_recorder(Arc::clone(&inner) as Arc<dyn MetricsRecorder>);
+/// // Counts recorded here reach `inner`, not `outer`.
+/// drop(inner_guard);
+/// // `outer` is installed again from here until `outer_guard` drops.
+/// drop(outer_guard);
+/// // Nothing is installed now, and recording is a branch and a return.
+/// ```
 pub fn install_metrics_recorder(recorder: Arc<dyn MetricsRecorder>) -> MetricsRecorderGuard {
     let mut slot = RECORDER.write().unwrap_or_else(PoisonError::into_inner);
     let previous = slot.replace(recorder);
@@ -122,9 +157,21 @@ pub fn install_metrics_recorder(recorder: Arc<dyn MetricsRecorder>) -> MetricsRe
 }
 
 /// Records `metric` with the installed recorder, or does nothing.
+///
+/// The installed handle is cloned out and the read lock released before the
+/// consumer's `record` runs. Holding the lock across that call would deadlock
+/// any recorder that installs another recorder or drops a guard from inside
+/// its callback, because both take the write lock on the same thread.
 pub(crate) fn record(metric: Metric) {
-    let slot = RECORDER.read().unwrap_or_else(PoisonError::into_inner);
-    if let Some(recorder) = slot.as_ref() {
+    let installed = {
+        let slot = RECORDER.read().unwrap_or_else(PoisonError::into_inner);
+        slot.as_ref().map(Arc::clone)
+    };
+    if let Some(recorder) = installed {
         recorder.record(metric);
     }
 }
+
+#[cfg(test)]
+#[path = "observability_tests.rs"]
+mod tests;
