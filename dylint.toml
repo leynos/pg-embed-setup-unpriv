@@ -21,6 +21,7 @@ excluded_crates = [
     # (test support utilities are a sanctioned exclusion category).
     "bootstrap_for_tests",
     "bootstrap_privileges",
+    "bootstrap_overrides",
     "bootstrap_worker_binary",
     "cli",
     "cluster_handle_send",

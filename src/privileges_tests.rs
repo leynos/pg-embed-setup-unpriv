@@ -132,3 +132,12 @@ fn default_paths_for_derive_install_and_data_dirs() {
     assert_eq!(install.as_str(), "/var/tmp/pg-embed-4321/install");
     assert_eq!(data.as_str(), "/var/tmp/pg-embed-4321/data");
 }
+
+/// The per-user default root is unchanged by the `PG_EMBED_ROOT` override.
+#[test]
+fn default_root_for_is_the_var_tmp_per_uid_tree() {
+    assert_eq!(
+        default_root_for(Uid::from_raw(4321)).as_str(),
+        "/var/tmp/pg-embed-4321"
+    );
+}
