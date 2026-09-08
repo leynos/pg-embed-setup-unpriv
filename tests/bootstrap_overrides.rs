@@ -22,7 +22,14 @@ fn scratch_root() -> Result<(tempfile::TempDir, Utf8PathBuf)> {
 }
 
 /// Runs the public bootstrap with `PG_EMBED_ROOT` and the given extra
-/// variables, clearing the two leaf overrides so the root decides.
+/// variables.
+///
+/// Every variable a scenario reasons about is cleared first, so an ambient
+/// value in the caller's environment cannot decide the outcome: the two leaf
+/// overrides, so the root decides the directories, and `PG_MAX_CONNECTIONS`,
+/// so the connection cap is whatever the scenario asks for. `extra` is applied
+/// afterwards and `ScopedEnv` applies in order, so an explicit value still
+/// wins over the clear.
 fn bootstrap_under(
     root: &Utf8PathBuf,
     extra: &[(&str, Option<&str>)],
@@ -30,6 +37,7 @@ fn bootstrap_under(
     let mut vars = env::build_env([("PG_EMBED_ROOT", root.as_str())]);
     vars.push((OsString::from("PG_RUNTIME_DIR"), None));
     vars.push((OsString::from("PG_DATA_DIR"), None));
+    vars.push((OsString::from("PG_MAX_CONNECTIONS"), None));
     for (key, value) in extra {
         vars.push((OsString::from(key), value.map(OsString::from)));
     }
@@ -125,7 +133,8 @@ fn settings_decision_reports_the_effective_connection_limit(
     #[case] expected: &str,
 ) -> Result<()> {
     let (_temp, root) = scratch_root()?;
-    // Always name the variable so the default case clears any ambient value.
+    // `bootstrap_under` already clears the variable, so the `None` case states
+    // the scenario rather than defending against the environment.
     let extra: Vec<(&str, Option<&str>)> = vec![("PG_MAX_CONNECTIONS", override_value)];
     let (logs, outcome) = pg_embedded_setup_unpriv::test_support::capture_debug_logs(|| {
         bootstrap_under(&root, &extra)
