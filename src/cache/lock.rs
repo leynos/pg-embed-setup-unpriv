@@ -1,24 +1,22 @@
 //! Cross-process file locking for cache coordination.
 //!
 //! Provides exclusive and shared locks to coordinate binary downloads across
-//! parallel test runners. On Unix systems, uses `flock(2)` for advisory locking.
-//! On non-Unix platforms no kernel lock is taken, but the same lock file is
-//! created and held under the cache directory, so callers see one layout.
-//! Issue #232 tracks locking there too.
+//! parallel test runners. Locking goes through `fs4`, which uses `flock(2)` on
+//! Unix and `LockFileEx` on Windows, so both platforms exclude rather than one
+//! excluding and the other merely holding a file open.
 
-#[cfg(unix)]
-use std::os::unix::io::AsRawFd;
 use std::{
     fs::{File, OpenOptions},
     io,
 };
 
 use camino::Utf8Path;
+use fs4::FileExt;
 
 /// Subdirectory within the cache for lock files.
 ///
-/// Both platforms use it: Unix takes a kernel lock on the file, and non-Unix
-/// merely holds it, but the path is the same so a cache is self-contained.
+/// The lock lives beside the cache it guards, so two caches that happen to
+/// share a version string do not contend.
 const LOCKS_SUBDIR: &str = ".locks";
 
 /// Guard that holds a file lock until dropped.
@@ -80,8 +78,10 @@ impl CacheLock {
         Self::acquire(cache_dir, version, LockType::Shared)
     }
 
-    /// Acquires a lock with the specified type.
-    #[cfg(unix)]
+    /// Opens the version's lock file and takes the requested kernel lock.
+    ///
+    /// Blocks until the lock is available. The lock is released when the file
+    /// handle drops with the guard, so `unlock` is not called explicitly.
     fn acquire(cache_dir: &Utf8Path, version: &str, lock_type: LockType) -> io::Result<Self> {
         validate_version(version)?;
         let locks_dir = cache_dir.join(LOCKS_SUBDIR);
@@ -95,61 +95,14 @@ impl CacheLock {
             .truncate(false)
             .open(&lock_path)?;
 
-        let flock_arg = match lock_type {
-            LockType::Exclusive => libc::LOCK_EX,
-            LockType::Shared => libc::LOCK_SH,
-        };
-
-        // SAFETY: The file descriptor obtained from `file.as_raw_fd()` is valid
-        // because `file` was opened via `OpenOptions::open` and remains owned by
-        // this scope until after the `flock` call completes. No other code moves
-        // or closes the descriptor while this block runs.
-        //
-        // Retry loop handles EINTR, which can occur when the process receives a
-        // signal while blocked on flock.
-        loop {
-            let result = unsafe { libc::flock(file.as_raw_fd(), flock_arg) };
-            if result == 0 {
-                break;
-            }
-            let err = io::Error::last_os_error();
-            if err.kind() != io::ErrorKind::Interrupted {
-                return Err(err);
-            }
-            // EINTR: signal interrupted syscall, retry.
+        // `fs4` names the exclusive lock `lock`, so both calls are spelled
+        // out through the trait rather than relying on the shorter name to
+        // read as "exclusive" at the call site.
+        match lock_type {
+            LockType::Exclusive => FileExt::lock(&file)?,
+            LockType::Shared => FileExt::lock_shared(&file)?,
         }
 
-        Ok(Self { _file: file })
-    }
-
-    /// Lock acquisition on non-Unix platforms, which holds the file but takes
-    /// no kernel lock.
-    ///
-    /// There is no `flock` here, so this does not serialize anything: it
-    /// creates and holds the same lock file the Unix arm uses, under the cache
-    /// directory it guards, so the two platforms at least agree on where the
-    /// file lives and callers see the same failure when the cache is
-    /// unwritable. Issue #232 tracks making the two arms equivalent with a
-    /// real exclusive lock.
-    ///
-    /// The previous implementation put the file in the process-wide temp
-    /// directory keyed only by `version`, then deleted it immediately. Two
-    /// callers using the same version collided there whatever cache they were
-    /// working on, and on Windows a delete leaves the name unopenable while a
-    /// handle remains, so the second caller failed with "Access is denied"
-    /// rather than proceeding.
-    #[cfg(not(unix))]
-    fn acquire(cache_dir: &Utf8Path, version: &str, _lock_type: LockType) -> io::Result<Self> {
-        validate_version(version)?;
-        let locks_dir = cache_dir.join(LOCKS_SUBDIR);
-        std::fs::create_dir_all(&locks_dir)?;
-        let lock_path = locks_dir.join(format!("{version}.lock"));
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_path)?;
         Ok(Self { _file: file })
     }
 }
@@ -199,9 +152,8 @@ mod tests {
 
     /// The lock file lives beside the cache it guards, on every platform.
     ///
-    /// Windows takes no kernel lock, but it creates the same file in the same
-    /// place, so a caller cannot collide with an unrelated cache that happens
-    /// to use the same version string.
+    /// Keeping it under the cache directory means two caches that happen to
+    /// share a version string do not contend.
     #[rstest]
     #[case::exclusive("17.4.0", true)]
     #[case::shared("16.3.0", false)]
@@ -222,6 +174,53 @@ mod tests {
             .join(LOCKS_SUBDIR)
             .join(format!("{version}.lock"));
         assert!(lock_path.exists(), "lock file should be created");
+    }
+
+    /// An exclusive lock excludes a second caller until the first releases.
+    ///
+    /// This is the property the type's name promises, and it runs on every
+    /// platform rather than only Unix: before `fs4` the non-Unix arm held the
+    /// file open without taking a kernel lock, so two callers could enter the
+    /// critical section together, observe the same cache miss, and download
+    /// the same archive independently.
+    ///
+    /// The second acquisition is attempted from another thread, because an
+    /// exclusive lock blocks: the test asserts it does not complete while the
+    /// first guard lives, then that it completes once the guard drops.
+    #[rstest]
+    fn an_exclusive_lock_excludes_a_second_caller(
+        cache_fixture: io::Result<(TempDir, camino::Utf8PathBuf)>,
+    ) {
+        use std::{
+            sync::mpsc,
+            thread,
+            time::{Duration, Instant},
+        };
+
+        let (_temp, cache_dir) = cache_fixture.expect("cache fixture");
+        let held = CacheLock::acquire_exclusive(&cache_dir, "17.4.0").expect("first lock");
+
+        let (tx, rx) = mpsc::channel();
+        let contender_dir = cache_dir.clone();
+        let contender = thread::spawn(move || {
+            let lock = CacheLock::acquire_exclusive(&contender_dir, "17.4.0");
+            tx.send(Instant::now()).ok();
+            lock
+        });
+
+        // While the first guard lives the contender must not get through.
+        assert!(
+            rx.recv_timeout(Duration::from_millis(250)).is_err(),
+            "a second exclusive lock must not be granted while the first is held"
+        );
+
+        drop(held);
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("the contender must acquire once the first lock is released");
+        contender
+            .join()
+            .expect("contender thread")
+            .expect("second lock");
     }
 
     #[rstest]

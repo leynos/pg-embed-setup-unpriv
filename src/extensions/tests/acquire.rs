@@ -248,3 +248,49 @@ enum EntryKind {
     /// A directory, which is not an archive the cache can read.
     Directory,
 }
+
+/// A consumer's URL can carry credentials, so none reaches a log or an error.
+///
+/// `userinfo`, a signed query parameter and a fragment are all places a token
+/// is put in practice. `redact_url` keeps scheme, host, port and path and
+/// nothing else, and an unparsable string is not echoed at all, because a
+/// parse failure is no guarantee that it holds no secret.
+#[rstest]
+#[case::userinfo(
+    "https://user:s3cr3t@example.invalid/x.tar.gz",
+    "https://example.invalid/x.tar.gz"
+)]
+#[case::signed_query(
+    "https://example.invalid/x.tar.gz?X-Amz-Signature=s3cr3t",
+    "https://example.invalid/x.tar.gz"
+)]
+#[case::fragment(
+    "https://example.invalid/x.tar.gz#s3cr3t",
+    "https://example.invalid/x.tar.gz"
+)]
+#[case::port(
+    "https://example.invalid:8443/x.tar.gz?t=s3cr3t",
+    "https://example.invalid:8443/x.tar.gz"
+)]
+#[case::unparsable("s3cr3t not a url", "<unparsable url>")]
+fn redact_url_keeps_no_secret(#[case] raw: &str, #[case] expected: &str) {
+    let redacted = crate::extensions::redact_url(raw);
+    assert_eq!(redacted, expected);
+    assert!(!redacted.contains("s3cr3t"), "{redacted}");
+}
+
+/// The download failure path reports the redacted URL, not the raw one.
+///
+/// This is the end-to-end half: `redact_url` being correct is worth little if
+/// a call site forgets to use it, so this drives a real failing acquisition
+/// through a URL carrying a credential and inspects the error.
+#[rstest]
+fn a_failed_download_reports_no_credential() {
+    let unreachable = unreachable_url().expect("port");
+    let with_secret = format!("{unreachable}?X-Amz-Signature=s3cr3t");
+    let case = cache_case(&with_secret).expect("fixture");
+    let err = acquire(&case.cache, &case.artifact).expect_err("unreachable");
+    let rendered = format!("{err} {err:?}");
+    assert!(!rendered.contains("s3cr3t"), "{rendered}");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveUnavailable);
+}

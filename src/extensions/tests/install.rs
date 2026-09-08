@@ -22,7 +22,7 @@ use crate::{
         ALLOWED_PREFIXES,
         ManifestArtifact,
         classify_entry_path,
-        install::install_archive,
+        install::{ENTRY_DECOMPRESSED_CAP, install_archive},
     },
 };
 
@@ -292,6 +292,50 @@ fn install_repairs_mode_on_identical_files(#[case] relative: &str, #[case] expec
         mode(&target).expect("mode"),
         expected,
         "the mode is repaired"
+    );
+}
+
+/// A file that decompresses past the per-file cap is refused.
+///
+/// The compressed cap says nothing about what an archive expands to: this
+/// fixture is a run of zeroes just over the per-file limit, which gzip packs
+/// into a few kilobytes, so it passes every compressed-size check and would
+/// previously have been read into memory whole.
+#[test]
+fn install_refuses_an_entry_that_decompresses_past_the_cap() {
+    // `Entry::File` borrows for `'static`, and this body outlives the fixture
+    // by construction, so it is leaked rather than reshaping the enum for one
+    // case. The test process reclaims it on exit.
+    let oversized: &'static [u8] = Vec::leak(vec![
+        0_u8;
+        usize::try_from(ENTRY_DECOMPRESSED_CAP)
+            .expect("cap fits")
+            + 1
+    ]);
+    let entries = [
+        Entry::File("lib/fixture.so", oversized),
+        Entry::File(
+            "share/extension/fixture.control",
+            b"default_version = '1'\n",
+        ),
+    ];
+    let mut prepared = prepared(&entries).expect("fixture");
+    prepared.artifact.files = vec![
+        "lib/fixture.so".to_owned(),
+        "share/extension/fixture.control".to_owned(),
+    ];
+    let compressed = std::fs::metadata(&prepared.archive)
+        .expect("archive metadata")
+        .len();
+    assert!(
+        compressed < ENTRY_DECOMPRESSED_CAP,
+        "the fixture must pass the compressed-size checks to be a fair test, was {compressed}"
+    );
+    let err = install(&prepared).expect_err("an entry over the cap is refused");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveInvalid);
+    assert!(
+        err.to_string().contains("decompresses past the limit"),
+        "{err}"
     );
 }
 
