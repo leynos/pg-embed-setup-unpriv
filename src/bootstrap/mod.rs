@@ -30,15 +30,6 @@ use crate::{
     extensions::{ExtensionRequest, InstalledExtension},
 };
 
-
-#[cfg(test)]
-pub use env::{TestBootstrapEnvironment, find_timezone_dir};
-pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
-pub(crate) use mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
-pub use prepare::default_paths_under;
-};
-};
-
 const DEFAULT_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(60);
 

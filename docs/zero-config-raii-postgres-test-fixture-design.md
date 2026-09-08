@@ -841,7 +841,6 @@ effortless as using an in-memory database, but with full PostgreSQL fidelity.
   examples)_ (see postgresql_embedded README) (capabilities of the underlying
   embedded Postgres crate, async vs blocking API, ephemeral ports support)
 
-
 ## Implementation update: prebuilt extension hook (v0.6.0)
 
 The Theseus binaries carry only contrib extensions, and the estate forbids

@@ -265,13 +265,11 @@ states around the grace window.
 - `tests/e2e_postgresql_embedded_diesel.rs` – example of combining the helper
   with Diesel-based integration tests while running under `root`.
 
-
 ## Extension hook
 
 The extension hook installs prebuilt, digest-verified extension archives into
 the embedded tree between `Setup` and `Start`. Its user-facing contract is in
 [`docs/extensions.md`](extensions.md); this section covers the internals.
-
 
 ### Modules
 
@@ -296,7 +294,6 @@ the embedded tree between `Setup` and `Start`. Its user-facing contract is in
   then `bin/pg_config --version`.
 - `name.rs` and `digest.rs`: validated newtypes and the `HashingWriter`.
 
-
 ### Lifecycle seam
 
 `src/cluster/extension_hook.rs` owns `run_post_setup` (and its async twin).
@@ -310,13 +307,11 @@ sees the pristine Theseus tree, never extension files; extension files exist
 before `Start`; the CLI setup-only path (`startup_setup_only.rs`) runs the
 hook without a `Start`.
 
-
 ### Compile target
 
 `build.rs` exports Cargo's `TARGET` as `PG_EMBED_TARGET`; `compile_target()`
 is a `const fn` over `env!`, which `tests/ui/pass/extensions_compile_target.rs`
 proves usable in a const context. Manifest artefacts match on that triple.
-
 
 ### Tests
 
