@@ -572,7 +572,6 @@ users follow the existing worker location logic. See issue #52[^1]._
 
 [^1]: <https://github.com/leynos/pg-embed-setup-unpriv/issues/52>
 
-
 ### Implementation update (2026-09-06): install root and connection limit
 
 Two bootstrap inputs were added because a host that runs several projects

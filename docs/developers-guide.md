@@ -170,7 +170,6 @@ archive packager and the workflow contract tests in
 `contents: write`, and that the staged archive name and members render the
 `[package.metadata.binstall]` templates exactly.
 
-
 ## Path resolution
 
 `bootstrap()` resolves the installation and data directories once, in
