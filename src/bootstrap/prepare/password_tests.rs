@@ -214,3 +214,6 @@ fn explicit_password_survives_an_unreadable_stored_file(scratch: Result<Scratch>
         .expect("chmod");
     assert_explicit_password_kept!(&dir);
 }
+
+#[path = "password_metrics_tests.rs"]
+mod metrics;

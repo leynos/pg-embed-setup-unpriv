@@ -16,7 +16,7 @@ use tracing::{info, warn};
 
 use crate::{
     error::{BootstrapError, BootstrapErrorKind, BootstrapResult},
-    observability::LOG_TARGET,
+    observability::{self, LOG_TARGET, Metric, PasswordReuseOutcomeMetric},
 };
 
 /// Marker `initdb` leaves in a data directory.
@@ -79,6 +79,8 @@ struct PasswordQueryFailure {
     /// Bounded `outcome` label: `probe_failed`, `missing_file`,
     /// `unreadable_file` or `empty_file`.
     outcome: &'static str,
+    /// The same outcome as a bounded metric label.
+    metric: PasswordReuseOutcomeMetric,
     /// The categorized error to return.
     error: BootstrapError,
 }
@@ -103,6 +105,7 @@ fn has_cluster_marker(data_dir: &Utf8Path) -> Result<bool, PasswordQueryFailure>
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
         Err(err) => Err(PasswordQueryFailure {
             outcome: "probe_failed",
+            metric: PasswordReuseOutcomeMetric::ProbeFailed,
             error: BootstrapError::new(
                 BootstrapErrorKind::ClusterPasswordUnreadable,
                 Report::new(err).wrap_err(format!(
@@ -118,7 +121,8 @@ fn has_cluster_marker(data_dir: &Utf8Path) -> Result<bool, PasswordQueryFailure>
 ///
 /// This is the command half: it consults the query, mutates only
 /// `settings.password`, and is the only place a `password_reuse` event is
-/// emitted, on success and on every failure branch. Returns the outcome so
+/// emitted or a [`Metric::PasswordReuse`] recorded, on success and on every
+/// failure branch. Exactly one of each per call. Returns the outcome so
 /// callers and the event can report which branch was taken.
 ///
 /// # Errors
@@ -165,11 +169,17 @@ pub fn reuse_existing_password(
             Ok(None) => PasswordReuseOutcome::NoCluster,
             Err(failure) => {
                 log_failure(failure.outcome, data_dir, password_file);
+                observability::record(Metric::PasswordReuse(failure.metric));
                 return Err(failure.error);
             }
         }
     };
     log_outcome(outcome, data_dir, password_file);
+    observability::record(Metric::PasswordReuse(match outcome {
+        PasswordReuseOutcome::Reused => PasswordReuseOutcomeMetric::Reused,
+        PasswordReuseOutcome::ExplicitPassword => PasswordReuseOutcomeMetric::ExplicitPassword,
+        PasswordReuseOutcome::NoCluster => PasswordReuseOutcomeMetric::NoCluster,
+    }));
     Ok(outcome)
 }
 
@@ -204,21 +214,24 @@ fn read_stored_password(
     data_dir: &Utf8Path,
 ) -> Result<String, PasswordQueryFailure> {
     let raw = std::fs::read_to_string(password_file).map_err(|err| {
-        let (kind, hint, outcome) = if err.kind() == ErrorKind::NotFound {
+        let (kind, hint, outcome, metric) = if err.kind() == ErrorKind::NotFound {
             (
                 BootstrapErrorKind::ClusterPasswordMissing,
                 "is missing",
                 "missing_file",
+                PasswordReuseOutcomeMetric::MissingFile,
             )
         } else {
             (
                 BootstrapErrorKind::ClusterPasswordUnreadable,
                 "cannot be read",
                 "unreadable_file",
+                PasswordReuseOutcomeMetric::UnreadableFile,
             )
         };
         PasswordQueryFailure {
             outcome,
+            metric,
             error: BootstrapError::new(
                 kind,
                 Report::new(err).wrap_err(format!(
@@ -233,6 +246,7 @@ fn read_stored_password(
     if stored.is_empty() {
         return Err(PasswordQueryFailure {
             outcome: "empty_file",
+            metric: PasswordReuseOutcomeMetric::EmptyFile,
             error: BootstrapError::new(
                 BootstrapErrorKind::ClusterPasswordEmpty,
                 eyre!(

@@ -14,7 +14,7 @@ mod error;
 mod fs;
 #[cfg(all(test, feature = "loom-tests"))]
 mod loom_model;
-mod observability;
+pub mod observability;
 #[cfg(all(
     unix,
     any(

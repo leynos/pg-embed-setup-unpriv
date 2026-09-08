@@ -265,6 +265,31 @@ event at warning level with `outcome` set to `probe_failed`, `missing_file`,
 that refuses a stale cluster is therefore visible in the log without the caller
 rendering the error, while the query stays free of side effects.
 
+### Metrics
+
+`src/observability.rs` holds the metric seam alongside the log target. There is
+no metrics dependency: a library should not pick one for its consumer, so the
+crate defines `Metric`, a `MetricsRecorder` trait, and
+`install_metrics_recorder`, which returns a guard restoring the previous
+recorder on drop. That mirrors the crate's other process-wide hooks. With no
+recorder installed, `observability::record` is a read lock, a branch and a
+return.
+
+`Metric::PasswordReuse` carries a `PasswordReuseOutcomeMetric`, an enum rather
+than a string. That is the point of the design: the label set is bounded by
+construction, so no password or path can reach a metric, and the requirement is
+a property of the type rather than something a reviewer has to police.
+`ProbeFailed` and `UnreadableFile` are separate variants even though both map
+to `ClusterPasswordUnreadable`, because the label would otherwise collapse two
+different operational failures.
+
+`reuse_existing_password` records exactly one count per call, on every branch,
+and the query records none. The tests in `password_tests.rs` under `mod
+metrics` pin all seven outcomes, that the query is silent, and that neither the
+password nor either directory path appears in a recorded metric. They carry
+`#[serial(metrics_recorder)]`, because the recorder is process-wide and two
+tests installing concurrently would collect each other's counts.
+
 ### The end-to-end test
 
 `tests/password_reuse_e2e.rs` is the only test that proves the adopted password

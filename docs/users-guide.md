@@ -688,6 +688,41 @@ failure branch before the error is returned, labelled `probe_failed`,
 `stored_cluster_password` emits nothing at all: it is a query, so a caller
 that wants the event calls the command.
 
+The same call records one `Metric::PasswordReuse` count, once per call and
+never from the query. The crate takes no metrics dependency, because a library
+should not choose one on a consumer's behalf; install a `MetricsRecorder` and
+forward each count to whatever you already run.
+
+```rust,no_run
+use std::sync::Arc;
+
+use pg_embedded_setup_unpriv::observability::{
+    Metric,
+    MetricsRecorder,
+    install_metrics_recorder,
+};
+
+struct Forwarding;
+
+impl MetricsRecorder for Forwarding {
+    fn record(&self, metric: Metric) {
+        let Metric::PasswordReuse(outcome) = metric;
+        // `outcome` is an enum, so it is safe to use as a label directly.
+        println!("password_reuse {outcome:?}");
+    }
+}
+
+let _guard = install_metrics_recorder(Arc::new(Forwarding));
+```
+
+The outcome is an enum rather than a string, so the label set is bounded by
+construction: a password or a path cannot reach a metric through it. The seven
+values are `Reused`, `ExplicitPassword` and `NoCluster` for the success
+branches, and `ProbeFailed`, `MissingFile`, `UnreadableFile` and `EmptyFile`
+for the failures. `ProbeFailed` and `UnreadableFile` stay distinct even though
+both return `ClusterPasswordUnreadable`. With no recorder installed, recording
+costs a branch and a return.
+
 ## Privilege detection and idempotence
 
 - `pg_embedded_setup_unpriv` detects its effective user ID at runtime. Root
