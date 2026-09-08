@@ -87,13 +87,13 @@ the tool from source in CI and verifying nothing.
 `tests/whitaker_install_pin.rs` keeps that arrangement in place. Note that the
 installer still resolves the lint suite from the tip of the Whitaker
 repository, so the lints themselves are not yet pinned; a suite change can turn
-this gate red without any commit here. That is what happened between
-2026-08-19 and 2026-09-04, when the same installer version and toolchain built
-suite commit `b4d3101` instead of `2bc0c3f` and the gate failed on every branch.
-Two issues track closing the gap: [whitaker#402][whitaker-suite-pin] asks the
-installer for a ref or suite-version input, and
-[shared-actions#454][shared-actions-suite-pin] asks `install-whitaker` to expose
-and pass it through.
+this gate red without any commit here. That is what happened between 2026-08-19
+and 2026-09-04, when the same installer version and toolchain built suite commit
+`b4d3101` instead of `2bc0c3f` and the gate failed on every branch. Two issues
+track closing the gap: [whitaker#402][whitaker-suite-pin] asks the installer
+for a ref or suite-version input, and
+[shared-actions#454][shared-actions-suite-pin] asks `install-whitaker` to
+expose and pass it through.
 
 [whitaker-suite-pin]: https://github.com/leynos/whitaker/issues/402
 [shared-actions-suite-pin]: https://github.com/leynos/shared-actions/issues/454
@@ -154,8 +154,8 @@ runner. The script builds the selected production binaries, applies the Windows
 `--binary` values before joining filesystem paths, and writes the shared
 `cargo-binstall` `.tgz` layout plus its checksum sidecar. `Cargo.toml` exposes
 matching `[package.metadata.binstall]` entries so
-`cargo binstall pg-embed-setup-unpriv` can install those published assets on the
-supported host triples.
+`cargo binstall pg-embed-setup-unpriv` can install those published assets on
+the supported host triples.
 
 Pull-request CI also performs a local `cargo-binstall` install-and-run check on
 Linux, macOS, and Windows using cargo-binstall 1.19.1, verifying the generated
@@ -264,3 +264,84 @@ states around the grace window.
 
 - `tests/e2e_postgresql_embedded_diesel.rs` – example of combining the helper
   with Diesel-based integration tests while running under `root`.
+
+## Password reuse
+
+`src/bootstrap/prepare/password.rs` keeps a reused data directory reachable.
+`stored_cluster_password` is the query: `Ok(None)` when the data directory has
+no `PG_VERSION` marker, the stored password otherwise, and an error (with the
+`PG_PASSWORD` and remove-the-cluster remedies) when the file the bootstrap
+handed to `initdb` is missing, unreadable, or empty. `reuse_existing_password`
+is the command: it applies the query to `settings.password` unless the caller
+supplied an explicit password, and returns a `PasswordReuseOutcome`. That enum
+covers the three success results only. It supplies the bounded `outcome` field
+of the `password_reuse` tracing event on those branches; the four failure
+labels below are values of the same field that the enum does not carry, because
+a failure returns an error rather than an outcome. Neither a path nor a secret
+is ever a label. Both bootstrap paths (`bootstrap_unprivileged` and
+`bootstrap_with_root`) call it immediately after the settings paths are
+resolved and before the sanitized settings are logged, so the password file is
+the one that `resolve_settings_paths_*` derived (`<install>/.pgpass`). Both
+functions and the outcome enum are exported at the crate root.
+
+The query publishes nothing. `stored_cluster_password`, and the two private
+helpers behind it, read and categorize but never emit, so calling the public
+query has no observable effect beyond its return value. A failure carries its
+bounded label to the caller in a private `PasswordQueryFailure`, and
+`reuse_existing_password` is the single place that emits: the `password_reuse`
+event at warning level with `outcome` set to `probe_failed`, `missing_file`,
+`unreadable_file`, or `empty_file`, before the error is returned. Those four are
+additional bounded values of the tracing field, beyond the three the returned
+enum carries, so the field's full label set has seven values and matches
+`PasswordReuseOutcomeMetric` rather than `PasswordReuseOutcome`. A bootstrap
+that refuses a stale cluster is therefore visible in the log without the caller
+rendering the error, while the query stays free of side effects.
+
+### Metrics
+
+`src/observability.rs` holds the metric seam alongside the log target. There is
+no metrics dependency: a library should not pick one for its consumer, so the
+crate defines `Metric`, a `MetricsRecorder` trait, and
+`install_metrics_recorder`, which returns a guard restoring the previous
+recorder on drop. That mirrors the crate's other process-wide hooks. With no
+recorder installed, `observability::record` is a read lock, a branch and a
+return.
+
+`Metric::PasswordReuse` carries a `PasswordReuseOutcomeMetric`, an enum rather
+than a string. That is the point of the design: the label set is bounded by
+construction, so no password or path can reach a metric, and the requirement is
+a property of the type rather than something a reviewer has to police.
+`ProbeFailed` and `UnreadableFile` are separate variants even though both map
+to `ClusterPasswordUnreadable`, because the label would otherwise collapse two
+different operational failures.
+
+`reuse_existing_password` records exactly one count per call, on every branch,
+and the query records none. The tests in `password_tests.rs` under `mod
+metrics` pin all seven outcomes, verify that the query is silent, and assert
+that neither the password nor either directory path appears in a recorded
+metric. They carry
+`#[serial(metrics_recorder)]`, because the recorder is process-wide and two
+tests installing concurrently would collect each other's counts.
+
+### The end-to-end test
+
+`tests/password_reuse_e2e.rs` is the only test that proves the adopted password
+authenticates: it starts a real cluster with no `PG_PASSWORD`, bootstraps a
+second time against the same directories, and opens a connection with whatever
+that second bootstrap chose. Three things about it are deliberate.
+
+- It is gated on `cfg(all(unix, feature = "diesel-support"))`. Opening the
+  connection needs diesel and therefore `libpq`, and the macOS and Windows
+  lanes build `--no-default-features --features cluster-unit-tests,async-api`
+  on runners with no `libpq`. The Linux lane runs `--all-features` and does
+  execute it.
+- It joins the `serial` group in `.config/nextest.toml`, alongside every other
+  binary that starts a cluster. It takes the process lock and starts a
+  postmaster, so running it concurrently starves both itself and the tests
+  sharing that lock.
+- Its crate name is in the `no_std_fs_operations` exclusion list in
+  `dylint.toml`, for the reason the list already gives for the other
+  integration-test crates: they share the ambient `tests/support` modules,
+  which stage fixtures through `std::fs`. A new test crate that touches those
+  modules fails the lint until it is added, which is the point; the policy
+  decision stays visible.

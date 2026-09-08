@@ -670,6 +670,76 @@ let temp_db = cluster.temporary_database_from_template("test_db", "migrated_temp
 - Implicit drop (guard goes out of scope) — Best-effort drop with a warning
   logged on failure.
 
+## Reusing an existing cluster
+
+When the data directory already holds a cluster (its `PG_VERSION` marker is
+present) and `PG_PASSWORD` is not set, the bootstrap reads the superuser
+password back from the install tree's password file (`<install>/.pgpass`, which
+`initdb` was given) instead of generating a fresh one, so connections to the
+reused cluster succeed. If that file is missing, unreadable, or empty the
+bootstrap fails and names the data directory and the file: set `PG_PASSWORD` to
+the password that initialized the cluster, or remove the stale cluster. An
+explicit `PG_PASSWORD` always wins.
+
+An explicit password short-circuits the whole check: the password file is not
+read at all, so setting `PG_PASSWORD` is a working escape from a cluster whose
+stored file has been lost.
+
+Three items at the crate root expose the same logic to a consumer that manages
+its own `Settings`.
+
+Table: Password-reuse API.
+
+| Item                      | Purpose                                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stored_cluster_password` | Query. Given the data directory and the password file, returns `Ok(None)` when the data directory holds no cluster, `Ok(Some(password))` when it does, and an error when the file is missing, unreadable, or empty. |
+| `reuse_existing_password` | Command. Takes the same two paths plus the mutable `Settings` and whether the caller supplied a password, aligns `settings.password` with the cluster on disk, and returns the outcome.                             |
+| `PasswordReuseOutcome`    | The bounded outcome of a successful call: `Reused`, `ExplicitPassword`, or `NoCluster`. Each is also an `outcome` label of the `password_reuse` tracing event, which carries four further labels for the failures.  |
+
+`reuse_existing_password` emits a warning-level `password_reuse` event on every
+failure branch before the error is returned, labelled `probe_failed`,
+`missing_file`, `unreadable_file`, or `empty_file`. A failure returns an error
+rather than a `PasswordReuseOutcome`, so those four labels appear only in the
+event: the field accepts all seven values, the returned enum carries the three
+successes. No password is ever a label.
+`stored_cluster_password` emits nothing at all: it is a query, so a caller
+that wants the event calls the command.
+
+The same call records one `Metric::PasswordReuse` count, once per call and
+never from the query. The crate takes no metrics dependency, because a library
+should not choose one on a consumer's behalf; install a `MetricsRecorder` and
+forward each count to whatever you already run.
+
+```rust,no_run
+use std::sync::Arc;
+
+use pg_embedded_setup_unpriv::observability::{
+    Metric,
+    MetricsRecorder,
+    install_metrics_recorder,
+};
+
+struct Forwarding;
+
+impl MetricsRecorder for Forwarding {
+    fn record(&self, metric: Metric) {
+        let Metric::PasswordReuse(outcome) = metric;
+        // `outcome` is an enum, so it is safe to use as a label directly.
+        println!("password_reuse {outcome:?}");
+    }
+}
+
+let _guard = install_metrics_recorder(Arc::new(Forwarding));
+```
+
+The outcome is an enum rather than a string, so the label set is bounded by
+construction: a password or a path cannot reach a metric through it. The seven
+values are `Reused`, `ExplicitPassword` and `NoCluster` for the success
+branches, and `ProbeFailed`, `MissingFile`, `UnreadableFile` and `EmptyFile`
+for the failures. `ProbeFailed` and `UnreadableFile` stay distinct even though
+both return `ClusterPasswordUnreadable`. With no recorder installed, recording
+costs a branch and a return.
+
 ## Privilege detection and idempotence
 
 - `pg_embedded_setup_unpriv` detects its effective user ID at runtime. Root
