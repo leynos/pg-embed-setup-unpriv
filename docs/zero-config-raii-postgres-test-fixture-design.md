@@ -870,10 +870,15 @@ the ones a future change must respect:
   `PG_VERSION` probe means "no cluster"; a permission failure is propagated, so
   an unsearchable directory cannot masquerade as a fresh one.
 - **Bounded reads.** The query is public and takes any path, so the password
-  file is refused unless it is a regular file within a 4 KiB cap. The regular
-  file check runs on metadata before the open, because opening a FIFO on Unix
-  blocks until a writer appears and would hang the bootstrap rather than fail
-  it.
+  file is refused unless it is a regular file within a 4 KiB cap. The path is
+  opened once, read-only and with `O_NONBLOCK` on Unix, and the type and size
+  checks both read the metadata of that opened handle. Classifying the path and
+  then opening it would leave a window in which the path is replaced, and a
+  FIFO substituted into that window blocks an ordinary open until a writer
+  appears, hanging the bootstrap rather than failing it. `O_NONBLOCK` closes
+  the window without reintroducing the hang: a read-only open of a writerless
+  FIFO returns at once, and the handle is then refused for not being a regular
+  file. Windows needs no flag, having no filesystem FIFO to wait on.
 
 ### Why a metrics seam rather than a metrics crate
 
