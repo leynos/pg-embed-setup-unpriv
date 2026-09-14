@@ -5,6 +5,8 @@ nextest arithmetic stay legible apart, and so neither module outgrows
 the 400-line limit ``AGENTS.md`` sets.
 """
 
+import collections.abc as cabc
+import pathlib
 import typing as typ
 
 import yaml
@@ -15,6 +17,18 @@ from timeout_budgets import (
     mapping_or_empty,
     sequence_or_empty,
 )
+
+#: One workflow file's name mapped to its parsed document.
+WorkflowDocuments: typ.TypeAlias = cabc.Mapping[str, dict[str, object]]
+
+
+class WorkflowReadError(RuntimeError):
+    """Raised when a workflow file cannot be read or parsed.
+
+    The lane query is pure and takes documents. Reading them is the one
+    fallible step, so it reports its own failure rather than letting a
+    parser's exception surface from what reads like a query.
+    """
 
 
 class CoverageJob(typ.NamedTuple):
@@ -93,21 +107,41 @@ def _watchdog_of(
     return None
 
 
-def _workflow_documents() -> dict[str, dict[str, object]]:
-    """Return every workflow document, keyed by file name.
+def load_workflow_documents(
+    directory: pathlib.Path | None = None,
+) -> dict[str, dict[str, object]]:
+    """Read and parse every workflow document, keyed by file name.
 
-    Both extensions are read. A coverage lane in the other one would
-    otherwise escape every assertion below without failing anything.
+    This is the only filesystem and parsing step in this module, named
+    for what it does so no query hides it. Both extensions are read: a
+    coverage lane in the other one would otherwise escape every
+    assertion without failing anything.
+
+    Parameters
+    ----------
+    directory : pathlib.Path or None
+        The workflow directory to read. Defaults to the repository's
+        own, which is what the contract asserts against.
 
     Returns
     -------
     dict[str, dict[str, object]]
         File name to parsed document.
+
+    Raises
+    ------
+    WorkflowReadError
+        If a workflow file cannot be read or does not parse as YAML.
     """
+    root = WORKFLOWS_DIRECTORY if directory is None else directory
     documents: dict[str, dict[str, object]] = {}
     for pattern in ("*.yml", "*.yaml"):
-        for path in sorted(WORKFLOWS_DIRECTORY.glob(pattern)):
-            parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for path in sorted(root.glob(pattern)):
+            try:
+                parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+            except (OSError, yaml.YAMLError) as error:
+                message = f"cannot read workflow {path}: {error}"
+                raise WorkflowReadError(message) from error
             document = mapping_or_empty(parsed)
             if document:
                 documents[path.name] = document
@@ -169,12 +203,22 @@ def _coverage_job(
     )
 
 
-def coverage_jobs_of() -> tuple[CoverageJob, ...]:
-    """Return every job invoking the coverage action, with its budgets.
+def coverage_jobs_in(documents: WorkflowDocuments) -> tuple[CoverageJob, ...]:
+    """Return every job in `documents` invoking the coverage action.
+
+    A pure query over documents the caller has already loaded, so the
+    reading is visible at the boundary that does it and the lane
+    arithmetic can be exercised against documents built in a test.
 
     Jobs are the unit rather than steps, because the ceiling is a job's
     and it has to contain every watchdog inside it. Counting steps is
     what makes a job with two invocations visible to the arithmetic.
+
+    Parameters
+    ----------
+    documents : WorkflowDocuments
+        Workflow file name to parsed document, as
+        `load_workflow_documents` returns.
 
     Returns
     -------
@@ -183,7 +227,7 @@ def coverage_jobs_of() -> tuple[CoverageJob, ...]:
     """
     return tuple(
         found
-        for name, document in _workflow_documents().items()
+        for name, document in documents.items()
         for job_name, job in mapping_or_empty(document.get("jobs")).items()
         if (
             found := _coverage_job(name, document, str(job_name), mapping_or_empty(job))
