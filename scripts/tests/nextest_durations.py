@@ -36,14 +36,26 @@ _U64_MAX: typ.Final[int] = 2**64 - 1
 #: Nanoseconds in one second.
 _NANOS_PER_SECOND: typ.Final[int] = 1_000_000_000
 
-#: One value-and-unit component. The fractional part is optional and
-#: ``humantime`` tolerates whitespace around the point, so ``"1.5m"``
-#: and ``"1 . 5 m"`` are both ninety seconds. A leading point, a
-#: trailing point, a second point, a sign and a digit separator are all
-#: refused there and so are refused here.
+#: One value-and-unit component. The fractional part is optional, and
+#: ``humantime`` skips whitespace wherever a digit could go: inside a
+#: number, so ``"1 0s"`` is ten seconds, and around the decimal point,
+#: so ``"1.5m"`` and ``"1 . 5 m"`` are both ninety seconds. A leading
+#: point, a trailing point, a second point, a sign and a digit separator
+#: are all refused there and so are refused here.
 _COMPONENT: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?P<whole>\d+)(?:\s*\.\s*(?P<fraction>\d+))?\s*(?P<unit>[A-Za-zµ]+)\s*"
+    r"(?P<whole>\d[\d\s]*)"
+    r"(?:\.\s*(?P<fraction>\d[\d\s]*))?"
+    r"(?P<unit>[A-Za-zµ]+)\s*"
 )
+
+#: The one duration ``humantime`` reads without a unit.
+#:
+#: ``parse_duration`` opens with ``if s == "0" { return Ok(ZERO) }``,
+#: compared against the untrimmed string. So ``"0"`` is zero and
+#: ``" 0 "`` is not: the special case misses, the parser then finds a
+#: number with no unit after it, and that is ``UnknownUnit``. The
+#: comparison here is against the untrimmed text for the same reason.
+_BARE_ZERO: typ.Final[str] = "0"
 
 #: Every unit spelling ``humantime`` accepts, mapped to a canonical
 #: name. Case is not folded: ``m`` is minutes and ``M`` is months, so
@@ -225,7 +237,7 @@ def _component_parts(component: re.Match[str], duration: str) -> tuple[int, int]
             f"that 'm' is minutes and 'M' is months"
         )
         raise DurationGrammarError(message)
-    whole = int(component["whole"])
+    whole = int("".join(component["whole"].split()))
     per_second, per_nano = _WHOLE[unit]
     seconds = _in_range(whole * per_second, duration)
     nanos = _in_range(whole * per_nano, duration)
@@ -266,7 +278,13 @@ def read(duration: str) -> float:
     90.0
     >>> read("1.5m")
     90.0
+    >>> read("1 0s")
+    10.0
+    >>> read("0")
+    0.0
     """
+    if duration == _BARE_ZERO:
+        return 0.0
     text = duration.strip()
     if not text:
         message = (
