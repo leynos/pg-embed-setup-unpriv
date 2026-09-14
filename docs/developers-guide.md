@@ -363,12 +363,17 @@ one period as the budget. Every table in `.config/nextest.toml` sets it
 explicitly.
 
 Durations are read with the grammar `humantime` accepts, which is what nextest
-deserializes them with: one or more whole-number components each carrying a
-unit, written `180s`, `1m 30s` or `1m30s`, with the long unit spellings and with
-no fractional values. A reader taking a single short-unit component would reject
-`1m 30s`, `1day` and `1w`, which nextest loads, and the contract would then fail
-on a correct file and name the file rather than the reader. Case is significant,
-`m` being minutes and `M` months. A duration nextest would refuse raises
+deserializes them with: a sequence of values each carrying a unit, written
+`180s`, `1m 30s` or `1m30s`, with the long unit spellings. The grammar was read
+from `humantime` 2.3.0, the version nextest resolves, rather than assumed. A
+value may carry a fractional part and `humantime` tolerates whitespace around
+the point, so `1.5m` and `1 . 5 m` are both ninety seconds; a leading point, a
+trailing point and a second point are refused. The abbreviations `wk`, `wks`,
+`yr` and `yrs` and the micro sign in `µs` are accepted alongside the longer
+spellings. A reader taking a single short-unit component would reject `1m 30s`,
+`1day` and `1w`, which nextest loads, and the contract would then fail on a
+correct file and name the file rather than the reader. Case is significant, `m`
+being minutes and `M` months. A duration nextest would refuse raises
 `NextestConfigurationError`, the error the rest of these readings report faults
 with, rather than tripping an assertion that `python -O` would strip.
 
