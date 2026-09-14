@@ -429,12 +429,22 @@ one period as the budget. Every table in `.config/nextest.toml` sets it
 explicitly.
 
 Durations are read with the grammar `humantime` accepts, which is what nextest
-deserializes them with: a sequence of values each carrying a unit, written
-`180s`, `1m 30s` or `1m30s`, with the long unit spellings. The grammar was read
-from `humantime` 2.3.0, the version nextest resolves, rather than assumed. A
-value may carry a fractional part and `humantime` tolerates whitespace around
-the point, so `1.5m` and `1 . 5 m` are both ninety seconds; a leading point, a
-trailing point and a second point are refused. The abbreviations `wk`, `wks`,
+deserializes them with. A duration is a sequence of values each carrying a
+unit, written `180s`, `1m 30s` or `1m30s`, with the long unit spellings. The
+grammar was read from `humantime` 2.3.0, the version nextest resolves, rather
+than assumed. A value may carry a fractional part and `humantime` tolerates
+whitespace around the point, so `1.5m` and `1 . 5 m` are both ninety seconds; a
+leading point, a trailing point and a second point are refused.
+
+The arithmetic is integer, and split into seconds and nanoseconds the way
+`humantime` splits it, because a floating-point reading accepts two classes of
+text the runner refuses. `humantime` divides a fraction into its unit and
+errors on any remainder, so `0.0000000002s` is an error rather than a rounding;
+and every intermediate is held in a `u64`, so an oversized value is refused
+rather than becoming a large float. The split matters too: whole hours, days,
+weeks, months and years are counted in seconds, so a duration of several
+centuries stays in range where a single nanosecond counter would overflow. The
+reading lives in `scripts/tests/nextest_durations.py`. The abbreviations `wk`, `wks`,
 `yr` and `yrs` and the micro sign in `µs` are accepted alongside the longer
 spellings. A reader taking a single short-unit component would reject `1m 30s`,
 `1day` and `1w`, which nextest loads, and the contract would then fail on a

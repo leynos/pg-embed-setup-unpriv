@@ -10,6 +10,8 @@ readings that could be wrong while every file in the repository is
 right, so no configuration under version control can expose them.
 """
 
+import typing as typ
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -20,7 +22,7 @@ from timeout_budgets import seconds
 #: with that length. Sub-second units are left out so the expected sum
 #: stays exact and a failure means the reader is wrong rather than the
 #: arithmetic being imprecise.
-_EXACT_UNITS: dict[str, int] = {
+_EXACT_UNITS: typ.Final[dict[str, int]] = {
     "s": 1,
     "sec": 1,
     "seconds": 1,
@@ -40,7 +42,7 @@ _EXACT_UNITS: dict[str, int] = {
 }
 
 #: One component: a small whole value and one of those units.
-_COMPONENTS = st.tuples(
+_COMPONENTS: typ.Final[st.SearchStrategy[tuple[int, str]]] = st.tuples(
     st.integers(min_value=0, max_value=999),
     st.sampled_from(sorted(_EXACT_UNITS)),
 )
