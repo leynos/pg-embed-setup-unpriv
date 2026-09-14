@@ -94,7 +94,7 @@ pub struct ManifestArtifact {
     pub files: Vec<String>,
 }
 
-/// Deserialises a digest string, rejecting anything but 64 lower-case hex.
+/// Deserializes a digest string, rejecting anything but 64 lower-case hex.
 fn deserialize_digest<'de, D>(deserializer: D) -> Result<Sha256Hex, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -236,9 +236,13 @@ fn validate_artifact(name: &str, artifact: &ManifestArtifact) -> BootstrapResult
         )));
     }
     if !is_permitted_url(&artifact.url) {
+        // Redacted like every other rendering of a configured URL: a
+        // manifest is consumer-supplied, so a rejected artefact URL can
+        // still carry userinfo, a signed query or a token in its fragment,
+        // and this error is returned to a caller that may print it.
         return Err(invalid(eyre!(
             "{name}: artefact url {:?} must use https:// (loopback http is the only exception)",
-            artifact.url
+            super::http::redact_url(&artifact.url)
         )));
     }
     Ok(())

@@ -20,8 +20,8 @@ Table: Environment variables read by the extension hook.
 | Variable                        | Meaning                                                                                                                                                                  |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PG_EXTENSIONS`                 | Comma-separated `CREATE EXTENSION` names, for example `vector`. Unset, empty or whitespace leaves the hook inert.                                                        |
-| `PG_EXTENSIONS_MANIFEST`        | Location of `manifest.json`: an `https://` URL or a filesystem path. Required when `PG_EXTENSIONS` is set.                                                               |
-| `PG_EXTENSIONS_MANIFEST_SHA256` | Lower-case hex SHA-256 of the manifest bytes. Required for an HTTPS manifest; optional for a path. Pinning the manifest digest pins every archive it describes.          |
+| `PG_EXTENSIONS_MANIFEST`        | Location of `manifest.json`: an `https://` URL, a loopback `http://` URL, or a filesystem path. Required when `PG_EXTENSIONS` is set.                                    |
+| `PG_EXTENSIONS_MANIFEST_SHA256` | Lower-case hex SHA-256 of the manifest bytes. Required for a URL manifest, loopback included; optional for a path. Pinning the manifest digest pins every archive it describes. |
 | `PG_EXTENSIONS_CACHE_DIR`       | Where verified archives are kept between runs. Defaults to `$XDG_CACHE_HOME/pg-embedded/extensions`, then `~/.cache/pg-embedded/extensions`, then a temporary directory. |
 
 `TestCluster`, `bootstrap_for_tests`, `run()` and the

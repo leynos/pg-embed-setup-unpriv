@@ -134,8 +134,8 @@ Table: Environment variables added in v0.6.0.
 | Variable                        | Purpose                                                                      |
 | ------------------------------- | ---------------------------------------------------------------------------- |
 | `PG_EXTENSIONS`                 | Comma-separated `CREATE EXTENSION` names to install before the server starts |
-| `PG_EXTENSIONS_MANIFEST`        | `https://` URL or path of the `manifest.json` that pins the archives         |
-| `PG_EXTENSIONS_MANIFEST_SHA256` | Manifest digest; required for an HTTPS manifest                              |
+| `PG_EXTENSIONS_MANIFEST`        | `https://` or loopback `http://` URL, or path, of the `manifest.json`        |
+| `PG_EXTENSIONS_MANIFEST_SHA256` | Manifest digest; required for a URL manifest, loopback included              |
 | `PG_EXTENSIONS_CACHE_DIR`       | Where verified archives are kept between runs                                |
 
 `PgEnvCfg` gains the matching fields `extensions`, `extensions_manifest`,

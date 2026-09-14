@@ -110,16 +110,27 @@ fn plan(
     // A set rather than a scan, so an archive with many entries costs
     // linearithmic time overall instead of quadratic.
     let mut seen: std::collections::BTreeSet<Utf8PathBuf> = std::collections::BTreeSet::new();
+    let mut declared: u64 = 0;
     let mut reader = open_archive(bytes);
     for entry_result in reader.entries()? {
         let entry =
             entry_result.map_err(|err| invalid(path, &format!("unreadable entry: {err}")))?;
+        let size = entry.header().size().map_err(|err| {
+            invalid(
+                path,
+                &format!(
+                    "entry {:?} has an unreadable size: {err}",
+                    entry.path_bytes_lossy()
+                ),
+            )
+        })?;
         if let Some(file) =
             plan_entry(path, entry.header().entry_type(), &entry.path_bytes_lossy())?
         {
             if !seen.insert(file.relative.clone()) {
                 return Err(invalid(path, &format!("duplicate entry {}", file.relative)));
             }
+            declared = check_decompressed_caps(path, &file.relative, size, declared)?;
             files.push(file);
         }
     }
@@ -159,6 +170,48 @@ fn plan_entry(
         SHARE_MODE
     };
     Ok(Some(PlannedFile { relative, mode }))
+}
+
+/// Charges one entry's declared size against the decompressed caps.
+///
+/// The caps are applied here, in pass one, so an archive that breaches them
+/// is refused with nothing on disk, which is the invariant this module's
+/// documentation states. A tar header records the decompressed size of its
+/// entry, so the whole expansion is known before a byte is decompressed and
+/// no bound has to be trusted to the writer.
+///
+/// The header is the archive's own claim about itself, and a lying one would
+/// under-declare rather than over-declare, so `write::read_entry_bounded`
+/// keeps enforcing the same two caps against the bytes that actually arrive.
+/// That is the backstop; this is the gate.
+///
+/// Returns the running total including `size`.
+pub(super) fn check_decompressed_caps(
+    path: &Utf8Path,
+    relative: &Utf8Path,
+    size: u64,
+    declared: u64,
+) -> BootstrapResult<u64> {
+    if size > ENTRY_DECOMPRESSED_CAP {
+        return Err(invalid(
+            path,
+            &format!(
+                "{relative} declares {size} decompressed bytes, above the \
+                 {ENTRY_DECOMPRESSED_CAP}-byte per-file limit"
+            ),
+        ));
+    }
+    let total = declared.saturating_add(size);
+    if total > ARCHIVE_DECOMPRESSED_CAP {
+        return Err(invalid(
+            path,
+            &format!(
+                "the archive declares at least {total} decompressed bytes by {relative}, above \
+                 the {ARCHIVE_DECOMPRESSED_CAP}-byte limit for one archive"
+            ),
+        ));
+    }
+    Ok(total)
 }
 
 /// Requires the planned file set to equal the manifest's `files` list.

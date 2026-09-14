@@ -76,7 +76,26 @@ fn names_are_trimmed_and_deduplicated_in_order() {
     Some("vector"),
     Some("ftp://x.invalid/m.json"),
     Some(DIGEST),
-    "https:// URL or a filesystem path"
+    "loopback http:// URL"
+)]
+#[case::non_loopback_http(
+    Some("vector"),
+    Some("http://example.invalid/m.json"),
+    Some(DIGEST),
+    "loopback http:// URL"
+)]
+#[case::scheme_without_host(Some("vector"), Some("https://"), Some(DIGEST), "loopback http:// URL")]
+#[case::unparsable_url(
+    Some("vector"),
+    Some("https://[bad"),
+    Some(DIGEST),
+    "loopback http:// URL"
+)]
+#[case::loopback_without_digest(
+    Some("vector"),
+    Some("http://127.0.0.1:8000/m.json"),
+    None,
+    "required to pin"
 )]
 fn malformed_declaration_is_config_invalid(
     #[case] extensions: Option<&str>,
@@ -103,6 +122,29 @@ fn https_manifest_with_digest_is_url_source() {
     match request.manifest {
         ManifestSource::Url { url, sha256 } => {
             assert_eq!(url, "https://example.invalid/manifest.json");
+            assert_eq!(sha256.as_str(), DIGEST);
+        }
+        ManifestSource::Path { .. } => panic!("expected a URL source"),
+    }
+}
+
+/// A loopback `http://` manifest is a URL source, as loopback archives are.
+///
+/// `is_permitted_url` is the one rule both the manifest and the archives it
+/// names go through, so a local mirror can serve both. The digest stays
+/// mandatory here: it is what pins the archives, and a loopback origin does
+/// not make the manifest bytes any more trustworthy.
+#[rstest]
+#[case::ip_literal("http://127.0.0.1:8000/manifest.json")]
+#[case::localhost("http://localhost:8000/manifest.json")]
+#[case::ipv6_literal("http://[::1]:8000/manifest.json")]
+fn loopback_http_manifest_with_digest_is_url_source(#[case] location: &str) {
+    let request = ExtensionRequest::from_config(&cfg(Some("vector"), Some(location), Some(DIGEST)))
+        .expect("valid")
+        .expect("declared");
+    match request.manifest {
+        ManifestSource::Url { url, sha256 } => {
+            assert_eq!(url, location);
             assert_eq!(sha256.as_str(), DIGEST);
         }
         ManifestSource::Path { .. } => panic!("expected a URL source"),

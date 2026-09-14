@@ -321,11 +321,13 @@ pub struct PgEnvCfg {
     /// extension hook.
     pub extensions: Option<String>,
     /// Location of the extension manifest (`PG_EXTENSIONS_MANIFEST`): an
-    /// `https://` URL or a filesystem path. Required when `extensions` is set.
+    /// `https://` URL, a loopback `http://` URL, or a filesystem path, which
+    /// is the rule the archives it names go through. Required when
+    /// `extensions` is set.
     pub extensions_manifest: Option<String>,
     /// Lower-case hex SHA-256 of the manifest bytes
-    /// (`PG_EXTENSIONS_MANIFEST_SHA256`). Required for an HTTPS manifest;
-    /// optional for a filesystem path.
+    /// (`PG_EXTENSIONS_MANIFEST_SHA256`). Required for a URL manifest,
+    /// loopback included; optional for a filesystem path.
     pub extensions_manifest_sha256: Option<String>,
     /// Directory holding verified extension archives between runs
     /// (`PG_EXTENSIONS_CACHE_DIR`). Defaults to
