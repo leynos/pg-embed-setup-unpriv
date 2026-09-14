@@ -300,6 +300,8 @@ def test_the_required_ceiling_carries_all_three_terms() -> None:
         pytest.param("2wk", 1209600.0, id="an-abbreviated-week"),
         pytest.param("1yr", 31557600.0, id="an-abbreviated-year"),
         pytest.param("500\u00b5s", 0.0005, id="the-micro-sign"),
+        pytest.param("1 0s", 10.0, id="whitespace-inside-a-number"),
+        pytest.param("0", 0.0, id="a-bare-zero"),
     ],
 )
 def test_the_duration_grammar_matches_the_one_nextest_reads(
@@ -312,10 +314,15 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
     would fail on a configuration that is correct and the failure would
     name the file rather than the reader that could not read it. Every
     spelling here is one ``humantime`` accepts, read from its 2.3.0
-    source rather than assumed: a component may carry a fractional part
-    with whitespace tolerated around the point, and ``wk``, ``wks``,
-    ``yr``, ``yrs`` and ``\u00b5s`` are units alongside the longer
-    spellings.
+    source rather than assumed: a component may carry a fractional part,
+    whitespace is skipped wherever a digit could go so ``"1 0s"`` is ten
+    seconds, and ``wk``, ``wks``, ``yr``, ``yrs`` and ``\u00b5s`` are
+    units alongside the longer spellings.
+
+    ``"0"`` is the one duration written without a unit.
+    ``parse_duration`` opens with ``if s == "0"``, compared against the
+    untrimmed string, so the bare form is zero and the padded form is
+    not; the refusal list carries ``" 0 "`` for that reason.
     """
     assert seconds(duration) == pytest.approx(expected), (
         f"{duration!r} must read as {expected} seconds"
@@ -337,6 +344,7 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
         pytest.param("1.5ns", id="a-fraction-of-a-nanosecond"),
         pytest.param("18446744073709551616s", id="past-the-range-humantime-holds"),
         pytest.param("600000000000y", id="a-value-that-overflows-its-unit"),
+        pytest.param(" 0 ", id="a-padded-bare-zero"),
     ],
 )
 def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
@@ -355,6 +363,11 @@ def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
     rounded, and a fraction of a nanosecond is refused outright. Every
     intermediate is also held in a ``u64``, so a value past that range
     is refused rather than becoming a large float.
+
+    ``" 0 "`` is a refusal rather than an acceptance because
+    ``parse_duration``'s zero shortcut compares the untrimmed string:
+    padded, the shortcut misses and the parser then finds a number with
+    no unit, which is `UnknownUnit`.
 
     The refusal is now a `NextestConfigurationError` rather than an
     `AssertionError`. It is the error the rest of this reading reports
