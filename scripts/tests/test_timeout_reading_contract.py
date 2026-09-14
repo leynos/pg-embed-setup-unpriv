@@ -291,6 +291,11 @@ def test_the_required_ceiling_carries_all_three_terms() -> None:
         pytest.param("1w", 604800.0, id="a-week"),
         pytest.param("15min", 900.0, id="a-long-unit-spelling"),
         pytest.param("500ms", 0.5, id="milliseconds"),
+        pytest.param("1.5m", 90.0, id="a-fractional-value"),
+        pytest.param("1 . 5 m", 90.0, id="a-fractional-value-spaced"),
+        pytest.param("2wk", 1209600.0, id="an-abbreviated-week"),
+        pytest.param("1yr", 31557600.0, id="an-abbreviated-year"),
+        pytest.param("500\u00b5s", 0.0005, id="the-micro-sign"),
     ],
 )
 def test_the_duration_grammar_matches_the_one_nextest_reads(
@@ -302,7 +307,11 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
     and `"1day"`, which nextest loads without complaint, so the contract
     would fail on a configuration that is correct and the failure would
     name the file rather than the reader that could not read it. Every
-    spelling here is one ``humantime`` accepts.
+    spelling here is one ``humantime`` accepts, read from its 2.3.0
+    source rather than assumed: a component may carry a fractional part
+    with whitespace tolerated around the point, and ``wk``, ``wks``,
+    ``yr``, ``yrs`` and ``\u00b5s`` are units alongside the longer
+    spellings.
     """
     assert seconds(duration) == pytest.approx(expected), (
         f"{duration!r} must read as {expected} seconds"
@@ -312,21 +321,25 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
 @pytest.mark.parametrize(
     "duration",
     [
-        pytest.param("1.5s", id="a-fractional-value"),
         pytest.param("120", id="no-unit"),
         pytest.param("s", id="no-value"),
         pytest.param("-30s", id="negative"),
         pytest.param("120 fortnights", id="an-unknown-unit"),
         pytest.param("", id="empty"),
+        pytest.param(".5s", id="a-leading-point"),
+        pytest.param("1.s", id="a-trailing-point"),
+        pytest.param("1.2.3s", id="a-second-point"),
     ],
 )
 def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
     """The grammar is matched, not merely widened.
 
-    ``humantime`` takes whole numbers with units and nothing else, so a
-    reader accepting more would put a number on a configuration nextest
-    fails to load, and the ordering would then be checked against a
-    budget nothing enforces.
+    ``humantime`` takes values with units and nothing else, so a reader
+    accepting more would put a number on a configuration nextest fails
+    to load, and the ordering would then be checked against a budget
+    nothing enforces. A fractional part is allowed, but a leading point,
+    a trailing point and a second point are each refused by
+    ``humantime`` and so are refused here.
 
     The refusal is now a `NextestConfigurationError` rather than an
     `AssertionError`. It is the error the rest of this reading reports
