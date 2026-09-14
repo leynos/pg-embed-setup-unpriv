@@ -196,18 +196,19 @@ def required_ceiling(budgets: cabc.Sequence[float], allowance: float) -> float:
     return sum(budgets) + allowance + CEILING_MARGIN_SECONDS
 
 
-#: A duration as ``humantime`` spells it: one or more whole-number
-#: components, each carrying a unit, spaced or joined. nextest
-#: deserializes every duration with ``humantime_serde``, so ``"1m 30s"``,
-#: ``"1day"`` and ``"1w"`` are all configuration it accepts, and a
-#: fractional value such as ``"1.5s"`` is one it refuses. A reader taking
-#: a single short-unit component rejects a file nextest would load, and
-#: the contract then blames the file for its own limitation.
-_DURATION: typ.Final[re.Pattern[str]] = re.compile(r"\A\s*(?:\d+\s*[A-Za-z]+\s*)+\Z")
-
-#: One component of such a duration.
+#: One value-and-unit component of a duration, as ``humantime`` spells
+#: it. nextest deserializes every duration with ``humantime_serde``, so
+#: ``"1m 30s"``, ``"1day"`` and ``"1w"`` are all configuration it
+#: accepts. A reader taking a single short-unit component rejects a file
+#: nextest would load, and the contract then blames the file for its own
+#: limitation. The grammar was read from ``humantime`` 2.3.0, the
+#: version nextest resolves, rather than assumed: a value may carry a
+#: fractional part and ``humantime`` tolerates whitespace around the
+#: point, so ``"1.5m"`` and ``"1 . 5 m"`` are both ninety seconds. A
+#: leading point, a trailing point, a second point, a sign and a digit
+#: separator are all refused there and so are refused here.
 _COMPONENT: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?P<value>\d+)\s*(?P<unit>[A-Za-z]+)"
+    r"(?P<value>\d+(?:\s*\.\s*\d+)?)\s*(?P<unit>[A-Za-z\u00b5]+)\s*"
 )
 
 #: Every unit spelling ``humantime`` accepts, with its length in
@@ -221,6 +222,7 @@ _UNIT_SECONDS: typ.Final[dict[str, float]] = {
     "ns": 1e-9,
     "usec": 1e-6,
     "us": 1e-6,
+    "\u00b5s": 1e-6,
     "millis": 0.001,
     "msec": 0.001,
     "ms": 0.001,
@@ -244,14 +246,74 @@ _UNIT_SECONDS: typ.Final[dict[str, float]] = {
     "d": 86400.0,
     "weeks": 604800.0,
     "week": 604800.0,
+    "wks": 604800.0,
+    "wk": 604800.0,
     "w": 604800.0,
     "months": 2630016.0,
     "month": 2630016.0,
     "M": 2630016.0,
     "years": 31557600.0,
     "year": 31557600.0,
+    "yrs": 31557600.0,
+    "yr": 31557600.0,
     "y": 31557600.0,
 }
+
+
+def _ungrammatical(duration: str) -> NextestConfigurationError:
+    """Return the error for text that is not a duration at all.
+
+    Parameters
+    ----------
+    duration : str
+        The text as it was configured.
+
+    Returns
+    -------
+    NextestConfigurationError
+        The error to raise. Returned rather than raised so the caller
+        reads as one `raise` per refusal.
+    """
+    message = (
+        f"unrecognized nextest duration {duration!r}; nextest reads durations "
+        f"with humantime, which wants a sequence of values each carrying a "
+        f'unit, such as "120s", "1m 30s" or "1.5m"'
+    )
+    return NextestConfigurationError(message, field="duration", value=duration)
+
+
+def _component_seconds(duration: str, component: re.Match[str]) -> float:
+    """Return one matched value-and-unit component's length in seconds.
+
+    Parameters
+    ----------
+    duration : str
+        The whole duration, for the error message.
+    component : re.Match[str]
+        A match of `_COMPONENT`.
+
+    Returns
+    -------
+    float
+        The component's length in seconds.
+
+    Raises
+    ------
+    NextestConfigurationError
+        If the unit is not one `humantime` accepts.
+    """
+    unit = component["unit"]
+    length = _UNIT_SECONDS.get(unit)
+    if length is None:
+        message = (
+            f"nextest duration {duration!r} names the unit {unit!r}, which "
+            f"humantime does not accept; note that 'm' is minutes and 'M' "
+            f"is months"
+        )
+        raise NextestConfigurationError(message, field="duration", value=duration)
+    # humantime tolerates whitespace around the fractional point, so the
+    # matched value can read "1 . 5", which float cannot take.
+    return float("".join(component["value"].split())) * length
 
 
 def seconds(duration: str) -> float:
@@ -279,24 +341,18 @@ def seconds(duration: str) -> float:
     120.0
     >>> seconds("1m 30s")
     90.0
+    >>> seconds("1.5m")
+    90.0
     """
-    if _DURATION.match(duration) is None:
-        message = (
-            f"unrecognized nextest duration {duration!r}; nextest reads "
-            f"durations with humantime, which wants whole-number components "
-            f'each carrying a unit, such as "120s" or "1m 30s"'
-        )
-        raise NextestConfigurationError(message, field="duration", value=duration)
+    text = duration.strip()
+    if not text:
+        raise _ungrammatical(duration)
     total = 0.0
-    for component in _COMPONENT.finditer(duration):
-        unit = component["unit"]
-        length = _UNIT_SECONDS.get(unit)
-        if length is None:
-            message = (
-                f"nextest duration {duration!r} names the unit {unit!r}, which "
-                f"humantime does not accept; note that 'm' is minutes and 'M' "
-                f"is months"
-            )
-            raise NextestConfigurationError(message, field="duration", value=duration)
-        total += float(component["value"]) * length
+    position = 0
+    while position < len(text):
+        component = _COMPONENT.match(text, position)
+        if component is None:
+            raise _ungrammatical(duration)
+        total += _component_seconds(duration, component)
+        position = component.end()
     return total
