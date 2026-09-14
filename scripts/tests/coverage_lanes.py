@@ -131,7 +131,10 @@ def load_workflow_documents(
     Raises
     ------
     WorkflowReadError
-        If a workflow file cannot be read or does not parse as YAML.
+        If a workflow file cannot be read, does not decode as UTF-8, or
+        does not parse as YAML. `UnicodeDecodeError` is a `ValueError`
+        rather than an `OSError`, so it needs naming separately or a
+        workflow with a stray byte escapes the contract this promises.
     """
     root = WORKFLOWS_DIRECTORY if directory is None else directory
     documents: dict[str, dict[str, object]] = {}
@@ -139,7 +142,7 @@ def load_workflow_documents(
         for path in sorted(root.glob(pattern)):
             try:
                 parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
-            except (OSError, yaml.YAMLError) as error:
+            except (OSError, UnicodeError, yaml.YAMLError) as error:
                 message = f"cannot read workflow {path}: {error}"
                 raise WorkflowReadError(message) from error
             document = mapping_or_empty(parsed)

@@ -9,9 +9,11 @@ See "Test timeouts: four tiers, outermost last" in
 """
 
 import collections.abc as cabc
-import re
 import typing as typ
 from pathlib import Path
+
+from nextest_durations import DurationGrammarError
+from nextest_durations import read as read_duration
 
 REPO_ROOT: typ.Final[Path] = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIRECTORY: typ.Final[Path] = REPO_ROOT / ".github" / "workflows"
@@ -195,135 +197,23 @@ def required_ceiling(budgets: cabc.Sequence[float], allowance: float) -> float:
     """
     return sum(budgets) + allowance + CEILING_MARGIN_SECONDS
 
-
-#: One value-and-unit component of a duration, as ``humantime`` spells
-#: it. nextest deserializes every duration with ``humantime_serde``, so
-#: ``"1m 30s"``, ``"1day"`` and ``"1w"`` are all configuration it
-#: accepts. A reader taking a single short-unit component rejects a file
-#: nextest would load, and the contract then blames the file for its own
-#: limitation. The grammar was read from ``humantime`` 2.3.0, the
-#: version nextest resolves, rather than assumed: a value may carry a
-#: fractional part and ``humantime`` tolerates whitespace around the
-#: point, so ``"1.5m"`` and ``"1 . 5 m"`` are both ninety seconds. A
-#: leading point, a trailing point, a second point, a sign and a digit
-#: separator are all refused there and so are refused here.
-_COMPONENT: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?P<value>\d+(?:\s*\.\s*\d+)?)\s*(?P<unit>[A-Za-z\u00b5]+)\s*"
-)
-
-#: Every unit spelling ``humantime`` accepts, with its length in
-#: seconds. Case is not folded: ``m`` is minutes and ``M`` is months, so
-#: folding would read a thirty-minute budget as a two-and-a-half-year
-#: one. A month is a twelfth of a Julian year and a year is 365.25 days,
-#: which is how ``humantime`` defines them.
-_UNIT_SECONDS: typ.Final[dict[str, float]] = {
-    "nanos": 1e-9,
-    "nsec": 1e-9,
-    "ns": 1e-9,
-    "usec": 1e-6,
-    "us": 1e-6,
-    "\u00b5s": 1e-6,
-    "millis": 0.001,
-    "msec": 0.001,
-    "ms": 0.001,
-    "seconds": 1.0,
-    "second": 1.0,
-    "secs": 1.0,
-    "sec": 1.0,
-    "s": 1.0,
-    "minutes": 60.0,
-    "minute": 60.0,
-    "mins": 60.0,
-    "min": 60.0,
-    "m": 60.0,
-    "hours": 3600.0,
-    "hour": 3600.0,
-    "hrs": 3600.0,
-    "hr": 3600.0,
-    "h": 3600.0,
-    "days": 86400.0,
-    "day": 86400.0,
-    "d": 86400.0,
-    "weeks": 604800.0,
-    "week": 604800.0,
-    "wks": 604800.0,
-    "wk": 604800.0,
-    "w": 604800.0,
-    "months": 2630016.0,
-    "month": 2630016.0,
-    "M": 2630016.0,
-    "years": 31557600.0,
-    "year": 31557600.0,
-    "yrs": 31557600.0,
-    "yr": 31557600.0,
-    "y": 31557600.0,
-}
-
-
-def _ungrammatical(duration: str) -> NextestConfigurationError:
-    """Return the error for text that is not a duration at all.
-
-    Parameters
-    ----------
-    duration : str
-        The text as it was configured.
-
-    Returns
-    -------
-    NextestConfigurationError
-        The error to raise. Returned rather than raised so the caller
-        reads as one `raise` per refusal.
-    """
-    message = (
-        f"unrecognized nextest duration {duration!r}; nextest reads durations "
-        f"with humantime, which wants a sequence of values each carrying a "
-        f'unit, such as "120s", "1m 30s" or "1.5m"'
-    )
-    return NextestConfigurationError(message, field="duration", value=duration)
-
-
-def _component_seconds(duration: str, component: re.Match[str]) -> float:
-    """Return one matched value-and-unit component's length in seconds.
-
-    Parameters
-    ----------
-    duration : str
-        The whole duration, for the error message.
-    component : re.Match[str]
-        A match of `_COMPONENT`.
-
-    Returns
-    -------
-    float
-        The component's length in seconds.
-
-    Raises
-    ------
-    NextestConfigurationError
-        If the unit is not one `humantime` accepts.
-    """
-    unit = component["unit"]
-    length = _UNIT_SECONDS.get(unit)
-    if length is None:
-        message = (
-            f"nextest duration {duration!r} names the unit {unit!r}, which "
-            f"humantime does not accept; note that 'm' is minutes and 'M' "
-            f"is months"
-        )
-        raise NextestConfigurationError(message, field="duration", value=duration)
-    # humantime tolerates whitespace around the fractional point, so the
-    # matched value can read "1 . 5", which float cannot take.
-    return float("".join(component["value"].split())) * length
-
-
 def seconds(duration: str) -> float:
     """Convert a nextest duration to seconds.
 
+    The grammar and the arithmetic live in ``nextest_durations``, which
+    mirrors ``humantime`` 2.3.0 exactly: integer seconds and
+    nanoseconds, kept apart the way ``humantime`` keeps them, with every
+    intermediate checked against the range of a ``u64`` and a fraction
+    refused unless it divides into its unit exactly. This wrapper exists
+    so the refusal arrives as the `NextestConfigurationError` the rest
+    of these readings report faults with, rather than as a second error
+    type callers would have to catch.
+
     Parameters
     ----------
     duration : str
-        A duration as nextest spells it, such as ``"120s"`` or the
-        multi-component ``"1m 30s"``.
+        A duration as nextest spells it, such as ``"120s"``, the
+        multi-component ``"1m 30s"`` or the fractional ``"1.5m"``.
 
     Returns
     -------
@@ -344,15 +234,9 @@ def seconds(duration: str) -> float:
     >>> seconds("1.5m")
     90.0
     """
-    text = duration.strip()
-    if not text:
-        raise _ungrammatical(duration)
-    total = 0.0
-    position = 0
-    while position < len(text):
-        component = _COMPONENT.match(text, position)
-        if component is None:
-            raise _ungrammatical(duration)
-        total += _component_seconds(duration, component)
-        position = component.end()
-    return total
+    try:
+        return read_duration(duration)
+    except DurationGrammarError as error:
+        raise NextestConfigurationError(
+            str(error), field="duration", value=duration
+        ) from error
