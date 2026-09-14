@@ -74,6 +74,7 @@ pub use self::{
         ManifestExtension,
         ManifestSourceInfo,
         SUPPORTED_SCHEMA_VERSION,
+        Selection,
     },
     name::ExtensionName,
     version::{parse_pg_config_version, running_version},
@@ -176,7 +177,9 @@ pub(crate) const fn extension_error(kind: BootstrapErrorKind, report: Report) ->
 /// Every requested name is resolved against the manifest before any archive
 /// is acquired or written, so an unknown name or an unmatched version fails
 /// with nothing on disk; a failure while acquiring or writing a later archive
-/// leaves the earlier archives installed and names them in the error.
+/// leaves the earlier archives installed. The error identifies the failing
+/// archive and, for a partial write, the files written for it; it does not
+/// list the earlier archives.
 ///
 /// The function is synchronous and blocks the calling thread for the whole
 /// install. When called from inside a Tokio runtime it moves the work to a

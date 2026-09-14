@@ -22,20 +22,20 @@ use crate::{
         ALLOWED_PREFIXES,
         ManifestArtifact,
         classify_entry_path,
-        install::{ENTRY_DECOMPRESSED_CAP, install_archive},
+        install::install_archive,
     },
 };
 
 /// A scratch tree with an archive written next to it and a matching artefact.
-struct Prepared {
+pub(super) struct Prepared {
     _temp: tempfile::TempDir,
-    install_dir: Utf8PathBuf,
-    archive: Utf8PathBuf,
-    artifact: ManifestArtifact,
+    pub(super) install_dir: Utf8PathBuf,
+    pub(super) archive: Utf8PathBuf,
+    pub(super) artifact: ManifestArtifact,
 }
 
 /// Builds the archive from `entries` and stages it beside a fresh tree.
-fn prepared(entries: &[Entry]) -> Result<Prepared> {
+pub(super) fn prepared(entries: &[Entry]) -> Result<Prepared> {
     let (temp, root) = temp_root()?;
     let install_dir = install_tree(&root)?;
     let bytes = archive_bytes(entries)?;
@@ -49,7 +49,7 @@ fn prepared(entries: &[Entry]) -> Result<Prepared> {
     })
 }
 
-fn fixture_entries() -> Vec<Entry> {
+pub(super) fn fixture_entries() -> Vec<Entry> {
     FIXTURE_FILES
         .iter()
         .map(|(name, body)| Entry::File(name, body))
@@ -57,7 +57,7 @@ fn fixture_entries() -> Vec<Entry> {
 }
 
 /// Runs the install against a prepared tree and returns the report.
-fn install(prepared: &Prepared) -> crate::error::BootstrapResult<Vec<Utf8PathBuf>> {
+pub(super) fn install(prepared: &Prepared) -> crate::error::BootstrapResult<Vec<Utf8PathBuf>> {
     install_archive(&prepared.archive, &prepared.artifact, &prepared.install_dir)
 }
 
@@ -292,64 +292,5 @@ fn install_repairs_mode_on_identical_files(#[case] relative: &str, #[case] expec
         mode(&target).expect("mode"),
         expected,
         "the mode is repaired"
-    );
-}
-
-/// A file that decompresses past the per-file cap is refused.
-///
-/// The compressed cap says nothing about what an archive expands to: this
-/// fixture is a run of zeroes just over the per-file limit, which gzip packs
-/// into a few kilobytes, so it passes every compressed-size check and would
-/// previously have been read into memory whole.
-#[test]
-fn install_refuses_an_entry_that_decompresses_past_the_cap() {
-    // `Entry::File` borrows for `'static`, and this body outlives the fixture
-    // by construction, so it is leaked rather than reshaping the enum for one
-    // case. The test process reclaims it on exit.
-    let oversized: &'static [u8] = Vec::leak(vec![
-        0_u8;
-        usize::try_from(ENTRY_DECOMPRESSED_CAP)
-            .expect("cap fits")
-            + 1
-    ]);
-    let entries = [
-        Entry::File("lib/fixture.so", oversized),
-        Entry::File(
-            "share/extension/fixture.control",
-            b"default_version = '1'\n",
-        ),
-    ];
-    let mut prepared = prepared(&entries).expect("fixture");
-    prepared.artifact.files = vec![
-        "lib/fixture.so".to_owned(),
-        "share/extension/fixture.control".to_owned(),
-    ];
-    let compressed = std::fs::metadata(&prepared.archive)
-        .expect("archive metadata")
-        .len();
-    assert!(
-        compressed < ENTRY_DECOMPRESSED_CAP,
-        "the fixture must pass the compressed-size checks to be a fair test, was {compressed}"
-    );
-    let err = install(&prepared).expect_err("an entry over the cap is refused");
-    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveInvalid);
-    assert!(
-        err.to_string().contains("decompresses past the limit"),
-        "{err}"
-    );
-}
-
-/// An archive swapped for a larger file after acquisition is rejected after
-/// reading no more than the manifest size plus one byte.
-#[test]
-fn install_refuses_an_oversized_swapped_archive() {
-    let prepared = prepared(&fixture_entries()).expect("fixture");
-    let mut oversized = std::fs::read(&prepared.archive).expect("read");
-    oversized.extend(std::iter::repeat_n(0_u8, 4096));
-    std::fs::write(&prepared.archive, &oversized).expect("swap");
-    let err = install(&prepared).expect_err("rejected");
-    assert_eq!(
-        err.kind(),
-        BootstrapErrorKind::ExtensionArchiveDigestMismatch
     );
 }

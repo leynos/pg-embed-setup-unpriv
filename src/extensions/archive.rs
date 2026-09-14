@@ -218,7 +218,7 @@ fn download(
         .map_err(|err| unavailable(eyre!("cannot move downloaded archive into {path}: {err}")))?;
     info!(
         target: LOG_TARGET,
-        url = %artifact.url,
+        url = %redact_url(&artifact.url),
         bytes = written,
         elapsed_ms = millis(started.elapsed()),
         "downloaded extension archive"
