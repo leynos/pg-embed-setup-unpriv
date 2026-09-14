@@ -272,19 +272,50 @@ fn read_stored_password(
     Ok(stored)
 }
 
+/// Opens the password file without blocking on a FIFO.
+///
+/// `O_NONBLOCK` makes the open return at once even when the path names a FIFO
+/// with no writer, so the handle can be classified rather than the bootstrap
+/// hanging. Read-only is the direction that matters: a read-only open of a
+/// writerless FIFO succeeds immediately under `O_NONBLOCK`, and the caller
+/// then refuses it on the handle's own type. The flag changes nothing for a
+/// regular file, which is the only kind the caller goes on to read.
+#[cfg(unix)]
+fn open_without_blocking(password_file: &Utf8Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(password_file)
+}
+
+/// Opens the password file; no flag is needed off Unix.
+///
+/// Windows has no filesystem FIFO, so an ordinary open already returns
+/// without waiting for a peer and the caller's classification of the opened
+/// handle carries the same guarantee.
+#[cfg(not(unix))]
+fn open_without_blocking(password_file: &Utf8Path) -> std::io::Result<File> {
+    File::open(password_file)
+}
+
 /// Reads at most [`MAX_PASSWORD_FILE_BYTES`] from a regular file.
 ///
 /// Three refusals, all reported as ordinary [`std::io::Error`]s so the caller
 /// keeps its existing "missing" versus "unreadable" split:
 ///
-/// - anything that is not a regular file, which is checked by `metadata` before the file is opened.
-///   Opening first would be too late on Unix, where opening a FIFO blocks until a writer appears
-///   and the bootstrap would hang rather than fail.
+/// - anything that is not a regular file, which is decided from the opened handle rather than from
+///   the path. Classifying the path and then opening it leaves a window in which the path is
+///   replaced, and a FIFO substituted into that window would hang the bootstrap on Unix; opening
+///   first with `O_NONBLOCK` closes the window without reintroducing the hang, because the
+///   classification and the read then use the one file the open resolved.
 /// - a file whose recorded length already exceeds the cap, which is refused without reading a byte.
 /// - a file that grows past the cap between the two, which the bounded read catches by asking for
 ///   one byte more than the cap and rejecting a full buffer.
 fn read_bounded(password_file: &Utf8Path) -> std::io::Result<String> {
-    let metadata = std::fs::metadata(password_file)?;
+    let file = open_without_blocking(password_file)?;
+    let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(std::io::Error::new(
             ErrorKind::InvalidInput,
@@ -296,8 +327,7 @@ fn read_bounded(password_file: &Utf8Path) -> std::io::Result<String> {
     }
 
     let mut raw = String::new();
-    File::open(password_file)?
-        .take(MAX_PASSWORD_FILE_BYTES + 1)
+    file.take(MAX_PASSWORD_FILE_BYTES + 1)
         .read_to_string(&mut raw)?;
     if raw.len() as u64 > MAX_PASSWORD_FILE_BYTES {
         return Err(oversized(password_file, raw.len() as u64));

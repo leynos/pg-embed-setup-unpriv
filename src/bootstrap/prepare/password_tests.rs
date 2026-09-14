@@ -242,12 +242,15 @@ fn a_password_file_at_the_cap_is_read(scratch: Result<Scratch>) {
     assert_eq!(stored, Some(at_cap));
 }
 
-/// A password file that is not a regular file is refused without opening it.
+/// A password file that is not a regular file is refused from its handle.
 ///
-/// A FIFO is the case that matters: opening one blocks until a writer
-/// appears, so a bootstrap that opened before checking would hang instead of
-/// failing. The test would therefore time out rather than fail if the check
-/// were removed, which is why it never writes to the FIFO.
+/// A FIFO is the case that matters twice over. It is what an attacker would
+/// substitute for the password file, and the reading opens the path once and
+/// classifies the handle it got, so there is no window between a check on the
+/// path and an open of a different file. It also blocks an ordinary open
+/// until a writer appears, so the open must carry `O_NONBLOCK`: this test
+/// never writes to the FIFO, and it would hang rather than fail if either the
+/// flag or the classification were removed.
 #[cfg(unix)]
 #[rstest]
 fn a_non_regular_password_file_is_refused(scratch: Result<Scratch>) {
@@ -261,7 +264,14 @@ fn a_non_regular_password_file_is_refused(scratch: Result<Scratch>) {
     let err = stored_cluster_password(&dir.data_dir, &dir.password_file)
         .expect_err("a FIFO must not be read as a password file");
     assert_eq!(err.kind(), BootstrapErrorKind::ClusterPasswordUnreadable);
+    assert!(
+        format!("{err:?}").contains("not a regular file"),
+        "the refusal must name the file type, not a read failure: {err:?}"
+    );
 }
 
 #[path = "password_metrics_tests.rs"]
 mod metrics;
+
+#[path = "password_tracing_tests.rs"]
+mod tracing_events;

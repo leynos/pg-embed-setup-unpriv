@@ -219,6 +219,17 @@ struct Model {
     held: Vec<(Arc<Counting>, MetricsRecorderGuard)>,
 }
 
+impl Drop for Model {
+    /// Releases the still-held guards newest first.
+    ///
+    /// Each guard restores the recorder it displaced, so releasing them out
+    /// of nesting order would leave a stale recorder installed for whatever
+    /// runs next. `Vec` does not document the order it drops its elements in,
+    /// and has changed it before, so the model pops rather than relying on
+    /// that.
+    fn drop(&mut self) { while self.held.pop().is_some() {} }
+}
+
 impl Model {
     /// Applies one step.
     fn apply(&mut self, step: Step) {
