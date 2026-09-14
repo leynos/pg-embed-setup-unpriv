@@ -339,10 +339,13 @@ explicitly.
 Durations are read with the grammar `humantime` accepts, which is what nextest
 deserializes them with. A duration is a sequence of values each carrying a
 unit, written `180s`, `1m 30s` or `1m30s`, with the long unit spellings. The
-grammar was read from `humantime` 2.3.0, the version nextest resolves, rather
-than assumed. A value may carry a fractional part and `humantime` tolerates
-whitespace around the point, so `1.5m` and `1 . 5 m` are both ninety seconds; a
-leading point, a trailing point and a second point are refused.
+grammar was read from `humantime` 2.3.0, the version nextest resolves through
+`humantime_serde`, rather than assumed. A value may carry a fractional part,
+and whitespace is skipped wherever a digit could go: `1 0s` is ten seconds, and
+`1.5m` and `1 . 5 m` are both ninety. A leading point, a trailing point and a
+second point are refused. `0` is the one duration written without a unit, and
+only in that exact form: `parse_duration` compares the untrimmed string, so
+` 0 ` misses the shortcut and fails as a number with no unit.
 
 The arithmetic is integer, and split into seconds and nanoseconds the way
 `humantime` splits it, because a floating-point reading accepts two classes of
