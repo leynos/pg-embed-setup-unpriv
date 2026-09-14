@@ -28,7 +28,8 @@ SCRIPT_PY_TESTS := scripts/tests/test_release_archive.py \
 	scripts/tests/test_release_archive_failures.py \
 	scripts/tests/test_release_workflow_contract.py \
 	scripts/tests/test_timeout_ordering_contract.py \
-	scripts/tests/test_timeout_reading_contract.py
+	scripts/tests/test_timeout_reading_contract.py \
+	scripts/tests/test_timeout_reading_properties.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \
 	--with cuprum==$(CUPRUM_VERSION) \
