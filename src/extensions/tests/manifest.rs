@@ -5,7 +5,15 @@ use color_eyre::eyre::Result;
 use postgresql_embedded::Version;
 use rstest::rstest;
 
-use super::fixture::{artifact_for, fixture_archive, manifest_json};
+use super::fixture::{
+    CannedResponse,
+    artifact_for,
+    fixture_archive,
+    manifest_json,
+    serve_once,
+    serve_sequence,
+    unreachable_url,
+};
 use crate::{
     error::BootstrapErrorKind,
     extensions::{
@@ -248,6 +256,85 @@ fn load_from_path_verifies_digest_and_reports_missing() {
         missing_err.kind(),
         BootstrapErrorKind::ExtensionManifestUnavailable
     );
+}
+
+/// Builds a `Url` manifest source for `url`, pinned to `digest`.
+fn url_source(url: &str, digest: Sha256Hex) -> ManifestSource {
+    ManifestSource::Url {
+        url: url.to_owned(),
+        sha256: digest,
+    }
+}
+
+/// A loopback manifest served over `http://` loads when its digest matches.
+///
+/// The URL arm of `load` had no test at all: every manifest reached it from
+/// disk, so the fetch, the size cap and the digest check over HTTP were only
+/// ever exercised for archives. `is_permitted_url` admits loopback `http://`
+/// for the manifest exactly as it does for the archives a manifest names, so
+/// a local mirror is serving both here.
+#[test]
+fn load_from_a_loopback_url_verifies_the_digest() {
+    let text = sample_manifest().expect("fixture");
+    let url = serve_once(text.clone().into_bytes()).expect("server");
+    let manifest =
+        crate::extensions::manifest::load(&url_source(&url, Sha256Hex::of_bytes(text.as_bytes())))
+            .expect("a pinned loopback manifest loads");
+    assert_eq!(
+        manifest.release, "v1.0.0",
+        "the served release must survive"
+    );
+    assert_eq!(
+        manifest.extensions.len(),
+        1,
+        "the served manifest declares one extension"
+    );
+}
+
+/// A loopback manifest whose bytes do not match the pin is refused.
+///
+/// The pin is the whole point of requiring a digest for a URL source: the
+/// bytes arrive over a connection the caller does not control, and nothing
+/// else establishes that they are the manifest that was pinned.
+#[test]
+fn a_loopback_manifest_that_misses_its_pin_is_refused() {
+    let text = sample_manifest().expect("fixture");
+    let url = serve_once(text.into_bytes()).expect("server");
+    let err = crate::extensions::manifest::load(&url_source(
+        &url,
+        Sha256Hex::of_bytes(b"a manifest that was never served"),
+    ))
+    .expect_err("the pin must be enforced over HTTP");
+    assert_eq!(
+        err.kind(),
+        BootstrapErrorKind::ExtensionManifestDigestMismatch
+    );
+}
+
+/// A URL manifest that cannot be fetched or parsed reports the right kind.
+///
+/// Unavailable and invalid are different failures with different operator
+/// responses, and the URL arm reached neither in any test: a refused
+/// connection is the transport failing, a 404 is the origin answering, and
+/// bytes that are not a manifest are the origin answering with the wrong
+/// thing.
+#[rstest]
+#[case::refused(None, BootstrapErrorKind::ExtensionManifestUnavailable)]
+#[case::not_found(Some(b"" as &[u8]), BootstrapErrorKind::ExtensionManifestUnavailable)]
+#[case::not_a_manifest(Some(b"{}" as &[u8]), BootstrapErrorKind::ExtensionManifestInvalid)]
+fn a_url_manifest_failure_keeps_its_kind(
+    #[case] served: Option<&[u8]>,
+    #[case] expected: BootstrapErrorKind,
+) {
+    let url = match served {
+        None => unreachable_url().expect("port"),
+        Some(b"") => serve_sequence(vec![CannedResponse::status("404 Not Found")]).expect("server"),
+        Some(body) => serve_once(body.to_vec()).expect("server"),
+    };
+    let digest = Sha256Hex::of_bytes(served.unwrap_or_default());
+    let err = crate::extensions::manifest::load(&url_source(&url, digest))
+        .expect_err("the load must fail");
+    assert_eq!(err.kind(), expected, "{err}");
 }
 
 /// `pg_config --version` output parses into a three-part version.

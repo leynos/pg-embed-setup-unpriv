@@ -184,6 +184,16 @@ enum Failure {
     Permanent(Report),
 }
 
+/// Renders a transport error without the URL `reqwest` embeds in it.
+///
+/// `reqwest::Error` displays as "error sending request for url (...)" with
+/// the whole URL inline, userinfo, query and fragment included. That error
+/// is logged in the retry warning and returned to the caller, so rendering
+/// it as it comes undoes the redaction every other site in this module
+/// performs. `without_url` is `reqwest`'s own way of dropping it; the caller
+/// already names the location in redacted form.
+fn transport_error(err: reqwest::Error) -> Report { eyre!("{}", err.without_url()) }
+
 /// Sends one GET and classifies the result as transient or permanent.
 fn send(
     client: &reqwest::blocking::Client,
@@ -191,9 +201,9 @@ fn send(
 ) -> Result<reqwest::blocking::Response, Failure> {
     let response = client.get(url.clone()).send().map_err(|err| {
         if err.is_redirect() {
-            Failure::Permanent(eyre!("{err}"))
+            Failure::Permanent(transport_error(err))
         } else {
-            Failure::Transient(eyre!("{err}"))
+            Failure::Transient(transport_error(err))
         }
     })?;
     let status = response.status();

@@ -52,12 +52,38 @@ pub(super) fn write_all(
         let Some(plan) = planned_by_path.get(file.as_path()).copied() else {
             continue;
         };
-        let contents = read_entry_bounded(path, &mut entry, &plan.relative, &mut budget)?;
+        let contents = read_entry_bounded(path, &mut entry, &plan.relative, &mut budget)
+            .map_err(|err| over_cap_after_writing(&plan.relative, &written, err))?;
         write_file(install_dir, plan, &contents, owner)
             .map_err(|err| install_failed(&plan.relative, &written, err))?;
         written.push(plan.relative.clone());
     }
     Ok(())
+}
+
+/// Reports a pass-two cap breach as a partial installation.
+///
+/// The caps are gated in `install::check_decompressed_caps` from the tar
+/// headers, so reaching one here means the bytes exceeded what the header
+/// declared and earlier files of this archive are already in the tree. The
+/// breach keeps its `ExtensionArchiveInvalid` kind, which is what the archive
+/// is, but it is wrapped so the operator gets the same list of written files
+/// that a write failure gives.
+fn over_cap_after_writing(
+    relative: &Utf8Path,
+    written: &[Utf8PathBuf],
+    err: crate::error::BootstrapError,
+) -> crate::error::BootstrapError {
+    if written.is_empty() {
+        return err;
+    }
+    let kind = err.kind();
+    crate::error::BootstrapError::new(
+        kind,
+        err.into_report().wrap_err(format!(
+            "failed to install {relative}; files already written: {written:?}"
+        )),
+    )
 }
 
 /// Reads one entry, refusing to decompress past the per-file cap or to exhaust
@@ -93,6 +119,45 @@ fn read_entry_bounded(
     Ok(contents)
 }
 
+/// Refuses a destination whose parent components are not real directories.
+///
+/// `classify_entry_path` validates the name the archive carries, not the tree
+/// the file lands in. If `lib` or `share/extension` under `install_dir` is a
+/// symlink, `create_dir_all` and `NamedTempFile::new_in` both follow it and
+/// `persist` then installs the file outside `install_dir` altogether. Every
+/// component of the relative path that already exists is therefore checked
+/// with `symlink_metadata`, which does not follow, and must be a directory. A
+/// component that does not exist yet is one `create_dir_all` will create, and
+/// nothing below a missing component can exist, so the walk stops there.
+///
+/// The destination itself is deliberately not covered. A symlink there is
+/// replaced by the atomic `persist`, which is how an already-installed file
+/// is meant to be rewritten; it is not the parent-component escape.
+fn require_real_parents(install_dir: &Utf8Path, relative: &Utf8Path) -> Result<(), Report> {
+    let components: Vec<&str> = relative
+        .components()
+        .map(|component| component.as_str())
+        .collect();
+    let parents = components.len().saturating_sub(1);
+    let mut current = install_dir.to_path_buf();
+    for component in components.into_iter().take(parents) {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(metadata) => {
+                return Err(eyre!(
+                    "{current} is a {:?}, not a directory; the installation tree must not route \
+                     through a symlink",
+                    metadata.file_type()
+                ));
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => break,
+            Err(err) => return Err(eyre!("cannot inspect {current}: {err}")),
+        }
+    }
+    Ok(())
+}
+
 /// Writes one file atomically, skipping it when an identical copy exists.
 fn write_file(
     install_dir: &Utf8Path,
@@ -100,6 +165,7 @@ fn write_file(
     bytes: &[u8],
     owner: Owner,
 ) -> Result<(), Report> {
+    require_real_parents(install_dir, &plan.relative)?;
     let destination = install_dir.join(&plan.relative);
     if Sha256Hex::of_file(&destination).is_ok_and(|existing| existing == Sha256Hex::of_bytes(bytes))
     {
@@ -124,16 +190,16 @@ fn write_file(
     Ok(())
 }
 
-#[cfg(unix)]
 /// Applies a Unix mode to a written file.
+#[cfg(unix)]
 fn set_mode(path: &Path, mode: u32) -> Result<(), Report> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
         .map_err(|err| eyre!("cannot set mode {mode:o} on {}: {err}", path.display()))
 }
 
-#[cfg(not(unix))]
 /// Modes are not applied on platforms without Unix permissions.
+#[cfg(not(unix))]
 fn set_mode(_path: &Path, _mode: u32) -> Result<(), Report> { Ok(()) }
 
 /// Owner of the installation tree, propagated to installed files.
@@ -145,8 +211,8 @@ struct Owner {
     gid: u32,
 }
 
-#[cfg(unix)]
 /// Reads the uid and gid that own the installation directory.
+#[cfg(unix)]
 fn tree_owner(install_dir: &Utf8Path) -> BootstrapResult<Owner> {
     // Scoped here: both are used only on this Unix-only path, so importing
     // them at module level leaves them unused off Unix.
@@ -166,8 +232,8 @@ fn tree_owner(install_dir: &Utf8Path) -> BootstrapResult<Owner> {
     })
 }
 
-#[cfg(not(unix))]
 /// Ownership is not tracked on platforms without Unix uids.
+#[cfg(not(unix))]
 fn tree_owner(_install_dir: &Utf8Path) -> BootstrapResult<Owner> { Ok(Owner {}) }
 
 /// Chowns `path` to the tree owner when it differs, so the demoted worker can
@@ -190,6 +256,6 @@ fn apply_owner(path: &Path, owner: Owner) -> Result<(), Report> {
     })
 }
 
-#[cfg(not(unix))]
 /// Ownership is not applied on platforms without Unix uids.
+#[cfg(not(unix))]
 fn apply_owner(_path: &Path, _owner: Owner) -> Result<(), Report> { Ok(()) }

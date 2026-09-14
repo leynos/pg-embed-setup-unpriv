@@ -131,6 +131,15 @@ fn parse_names(raw: &str) -> BootstrapResult<Vec<ExtensionName>> {
 }
 
 /// Classifies the manifest location as a URL (digest required) or a path.
+///
+/// A location is a URL when [`is_permitted_url`](super::is_permitted_url)
+/// accepts it, which is the same rule the archive fetches apply: `https://`
+/// anywhere, and `http://` only to a loopback host. Sharing the rule keeps a
+/// local mirror from serving the archives a manifest names while the manifest
+/// itself is refused, and it parses the location, so `"https://"` and
+/// `"https://[bad"` fail here as configuration rather than later as an
+/// unavailable manifest. The digest stays mandatory for every URL source,
+/// loopback included: it is what pins the archives the manifest describes.
 fn parse_manifest_source(
     raw_location: Option<&str>,
     digest: Option<&str>,
@@ -149,11 +158,11 @@ fn parse_manifest_source(
         .filter(|value| !value.is_empty())
         .map(parse_digest)
         .transpose()?;
-    if location.starts_with("https://") {
+    if super::is_permitted_url(location) {
         let Some(sha256) = pinned else {
             return Err(config_error(
-                "PG_EXTENSIONS_MANIFEST is an https:// URL, so PG_EXTENSIONS_MANIFEST_SHA256 is \
-                 required to pin it",
+                "PG_EXTENSIONS_MANIFEST is a URL, so PG_EXTENSIONS_MANIFEST_SHA256 is required to \
+                 pin it",
             ));
         };
         return Ok(ManifestSource::Url {
@@ -163,7 +172,8 @@ fn parse_manifest_source(
     }
     if location.contains("://") {
         return Err(config_error(
-            "PG_EXTENSIONS_MANIFEST must be an https:// URL or a filesystem path",
+            "PG_EXTENSIONS_MANIFEST must be an https:// URL, a loopback http:// URL, or a \
+             filesystem path",
         ));
     }
     Ok(ManifestSource::Path {
