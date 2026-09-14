@@ -27,6 +27,7 @@ from timeout_budgets import (
 )
 
 
+
 def _profile(*lines: str) -> str:
     """Return a default profile declaring the given keys.
 

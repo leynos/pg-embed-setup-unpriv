@@ -28,7 +28,7 @@ See "Test timeouts: four tiers, outermost last" in
 import typing as typ
 
 import pytest
-from coverage_lanes import CoverageJob, coverage_jobs_of
+from coverage_lanes import CoverageJob, coverage_jobs_in, load_workflow_documents
 from nextest_budgets import (
     bounds_a_single_test,
     global_timeout,
@@ -82,12 +82,15 @@ def nextest_config() -> str:
 def coverage_jobs() -> tuple[CoverageJob, ...]:
     """Return every job invoking the coverage action, with its budgets.
 
+    The reading happens here, at the test boundary, and the lane query
+    it feeds is pure.
+
     Returns
     -------
     tuple[CoverageJob, ...]
         One entry per coverage-invoking job.
     """
-    return coverage_jobs_of()
+    return coverage_jobs_in(load_workflow_documents())
 
 
 def test_the_coverage_action_is_invoked_somewhere(
