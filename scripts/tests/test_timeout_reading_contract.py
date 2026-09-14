@@ -9,7 +9,10 @@ same answer, and nothing here is commented out. So the readings are
 driven with controlled configurations.
 """
 
+import pathlib
+
 import pytest
+from coverage_lanes import WorkflowReadError, load_workflow_documents
 from nextest_budgets import (
     global_timeout,
     grace_period,
@@ -330,6 +333,10 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
         pytest.param(".5s", id="a-leading-point"),
         pytest.param("1.s", id="a-trailing-point"),
         pytest.param("1.2.3s", id="a-second-point"),
+        pytest.param("0.0000000002s", id="finer-than-a-nanosecond"),
+        pytest.param("1.5ns", id="a-fraction-of-a-nanosecond"),
+        pytest.param("18446744073709551616s", id="past-the-range-humantime-holds"),
+        pytest.param("600000000000y", id="a-value-that-overflows-its-unit"),
     ],
 )
 def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
@@ -341,6 +348,13 @@ def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
     nothing enforces. A fractional part is allowed, but a leading point,
     a trailing point and a second point are each refused by
     ``humantime`` and so are refused here.
+
+    So are two limits that a floating-point reading would not have.
+    ``humantime`` divides a fraction into its unit and errors on any
+    remainder, so a value finer than a nanosecond is refused rather than
+    rounded, and a fraction of a nanosecond is refused outright. Every
+    intermediate is also held in a ``u64``, so a value past that range
+    is refused rather than becoming a large float.
 
     The refusal is now a `NextestConfigurationError` rather than an
     `AssertionError`. It is the error the rest of this reading reports
@@ -360,3 +374,26 @@ def test_minutes_and_months_are_told_apart() -> None:
     """
     assert seconds("10m") == pytest.approx(600.0), "m is minutes"
     assert seconds("10M") == pytest.approx(10 * 2630016.0), "M is months"
+
+
+@pytest.mark.parametrize(
+    ("name", "contents"),
+    [
+        pytest.param("broken.yml", b"jobs: [unclosed", id="not-yaml"),
+        pytest.param("stray.yml", b"jobs:\n  build:\n    name: \xff\n", id="not-utf-8"),
+    ],
+)
+def test_an_unreadable_workflow_is_reported_as_one(
+    tmp_path: pathlib.Path, name: str, contents: bytes
+) -> None:
+    """The loader promises one error type, so it must catch both faults.
+
+    `yaml.YAMLError` and `UnicodeDecodeError` reach the loader by
+    different routes: the second is a `ValueError`, not an `OSError`,
+    so a workflow carrying a stray byte would otherwise escape the
+    documented contract and surface as a decoding error from what the
+    caller reads as a load.
+    """
+    (tmp_path / name).write_bytes(contents)
+    with pytest.raises(WorkflowReadError):
+        load_workflow_documents(tmp_path)
