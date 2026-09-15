@@ -302,6 +302,12 @@ def test_the_required_ceiling_carries_all_three_terms() -> None:
         pytest.param("500\u00b5s", 0.0005, id="the-micro-sign"),
         pytest.param("1 0s", 10.0, id="whitespace-inside-a-number"),
         pytest.param("0", 0.0, id="a-bare-zero"),
+        pytest.param("0.5s 0.5s", 1.0, id="two-halves-carry-to-one-second"),
+        pytest.param(
+            "18446744073709551615s 999999999ns",
+            18446744073709551615.0,
+            id="one-nanosecond-short-of-the-ceiling",
+        ),
     ],
 )
 def test_the_duration_grammar_matches_the_one_nextest_reads(
@@ -345,6 +351,10 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
         pytest.param("18446744073709551616s", id="past-the-range-humantime-holds"),
         pytest.param("600000000000y", id="a-value-that-overflows-its-unit"),
         pytest.param(
+            "18446744073709551615s 500ms 500ms",
+            id="a-carry-that-passes-the-ceiling",
+        ),
+        pytest.param(
             "1.00000000000000000000s",
             id="a-denominator-past-the-range-humantime-holds",
         ),
@@ -376,6 +386,16 @@ def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
     else, so an Arabic-Indic digit is refused there; a reader whose
     pattern used Python's ``\d`` would accept it and put a number on a
     configuration nextest cannot load.
+
+    The carry into seconds is the last of these. Nanoseconds reaching
+    exactly one billion are a whole second, so
+    ``18446744073709551615s 500ms 500ms`` carries one second past
+    ``u64::MAX`` and ``humantime`` refuses it; a reader carrying only
+    above a billion returns a duration a second past the ceiling
+    instead. Its companions are in the acceptance list: the same
+    seconds with ``999999999ns``, one nanosecond short and therefore
+    fine, and ``0.5s 0.5s``, which carries to exactly one second and
+    shows that the strict-or-equal carry does not over-refuse.
 
     ``" 0 "`` is a refusal rather than an acceptance because
     ``parse_duration``'s zero shortcut compares the untrimmed string:
