@@ -685,16 +685,31 @@ An explicit password short-circuits the whole check: the password file is not
 read at all, so setting `PG_PASSWORD` is a working escape from a cluster whose
 stored file has been lost.
 
+The file itself must be a regular file of no more than 4 KiB. The bootstrap
+opens it once and takes both its type and its size from that one handle, so a
+path replaced after a check cannot redirect the read. A FIFO, a directory, or
+any other non-regular file is refused rather than waited on: the Unix open
+carries `O_NONBLOCK`, so a FIFO with no writer returns at once and is then
+rejected for its type. A file longer than the cap is refused without being
+read. Both refusals return `ClusterPasswordUnreadable`, the error an
+unreadable file returns.
+
+Probing the data directory fails loudly as well. Only a missing `PG_VERSION`
+marker means there is no cluster; a permission error, or any other failure to
+read that marker, returns `ClusterPasswordUnreadable` rather than reporting no
+cluster, so a data directory that is temporarily unsearchable cannot be
+mistaken for a fresh one and started with a new password.
+
 Three items at the crate root expose the same logic to a consumer that manages
 its own `Settings`.
 
 Table: Password-reuse API.
 
-| Item                      | Purpose                                                                                                                                                                                                             |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stored_cluster_password` | Query. Given the data directory and the password file, returns `Ok(None)` when the data directory holds no cluster, `Ok(Some(password))` when it does, and an error when the file is missing, unreadable, or empty. |
-| `reuse_existing_password` | Command. Takes the same two paths plus the mutable `Settings` and whether the caller supplied a password, aligns `settings.password` with the cluster on disk, and returns the outcome.                             |
-| `PasswordReuseOutcome`    | The bounded outcome of a successful call: `Reused`, `ExplicitPassword`, or `NoCluster`. Each is also an `outcome` label of the `password_reuse` tracing event, which carries four further labels for the failures.  |
+| Item                      | Purpose                                                                                                                                                                                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `stored_cluster_password` | Query. Given the data directory and the password file, returns `Ok(None)` when the data directory holds no cluster, `Ok(Some(password))` when it does, and an error when the data directory cannot be probed or when the file is missing, unreadable, empty, not a regular file, or larger than 4 KiB. |
+| `reuse_existing_password` | Command. Takes the same two paths plus the mutable `Settings` and whether the caller supplied a password, aligns `settings.password` with the cluster on disk, and returns the outcome.                                                                                                                |
+| `PasswordReuseOutcome`    | The bounded outcome of a successful call: `Reused`, `ExplicitPassword`, or `NoCluster`. Each is also an `outcome` label of the `password_reuse` tracing event, which carries four further labels for the failures.                                                                                     |
 
 `reuse_existing_password` emits a warning-level `password_reuse` event on every
 failure branch before the error is returned, labelled `probe_failed`,
