@@ -308,6 +308,11 @@ def test_the_required_ceiling_carries_all_three_terms() -> None:
             18446744073709551615.0,
             id="one-nanosecond-short-of-the-ceiling",
         ),
+        pytest.param(
+            "18446744073709551615ns 1ns",
+            18446744073.709551616,
+            id="nanoseconds-normalized-between-components",
+        ),
     ],
 )
 def test_the_duration_grammar_matches_the_one_nextest_reads(
@@ -355,6 +360,10 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
             id="a-carry-that-passes-the-ceiling",
         ),
         pytest.param(
+            "18446744073709551615ns 18446744073709551615ns",
+            id="a-nanosecond-part-that-overflows-before-it-carries",
+        ),
+        pytest.param(
             "1.00000000000000000000s",
             id="a-denominator-past-the-range-humantime-holds",
         ),
@@ -396,6 +405,15 @@ def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
     seconds with ``999999999ns``, one nanosecond short and therefore
     fine, and ``0.5s 0.5s``, which carries to exactly one second and
     shows that the strict-or-equal carry does not over-refuse.
+
+    Where that carry happens is a refusal of its own.
+    ``humantime`` normalizes its running total after every whole part
+    and every fraction, so a nanosecond part that overflows a ``u64``
+    *at one addition* is refused however small the duration it names:
+    ``18446744073709551615ns`` twice over is thirty-seven seconds and
+    is refused for that reason. Its acceptance companion is in the
+    other list, the same value plus ``1ns``, which a reader summing
+    into one nanosecond accumulator refuses and ``humantime`` reads.
 
     ``" 0 "`` is a refusal rather than an acceptance because
     ``parse_duration``'s zero shortcut compares the untrimmed string:

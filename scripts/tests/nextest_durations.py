@@ -215,8 +215,16 @@ def _fraction_of(unit: str, digits: str, duration: str) -> tuple[int, int]:
     return (quotient, 0) if is_seconds else (0, quotient)
 
 
-def _component_parts(component: re.Match[str], duration: str) -> tuple[int, int]:
-    """Return one matched component's (seconds, nanoseconds).
+def _component_contributions(
+    component: re.Match[str], duration: str
+) -> list[tuple[int, int]]:
+    """Return one component's contributions, whole part before fraction.
+
+    Two contributions rather than one sum, in that order, because
+    ``humantime`` adds them to the running total separately and the
+    running total is normalized between the two. Summing them here and
+    adding once would accept totals it refuses and refuse totals it
+    accepts.
 
     Parameters
     ----------
@@ -227,8 +235,9 @@ def _component_parts(component: re.Match[str], duration: str) -> tuple[int, int]
 
     Returns
     -------
-    tuple[int, int]
-        Seconds and nanoseconds contributed.
+    list[tuple[int, int]]
+        One or two (seconds, nanoseconds) pairs, in the order
+        `humantime` adds them.
 
     Raises
     ------
@@ -246,16 +255,71 @@ def _component_parts(component: re.Match[str], duration: str) -> tuple[int, int]
         raise DurationGrammarError(message)
     whole = int("".join(component["whole"].split()))
     per_second, per_nano = _WHOLE[unit]
-    seconds = _in_range(whole * per_second, duration)
-    nanos = _in_range(whole * per_nano, duration)
+    contributions = [
+        (
+            _in_range(whole * per_second, duration),
+            _in_range(whole * per_nano, duration),
+        )
+    ]
     raw_fraction = component["fraction"]
     if raw_fraction is not None:
-        extra_seconds, extra_nanos = _fraction_of(
-            unit, "".join(raw_fraction.split()), duration
+        contributions.append(
+            _fraction_of(unit, "".join(raw_fraction.split()), duration)
         )
-        seconds = _in_range(seconds + extra_seconds, duration)
-        nanos = _in_range(nanos + extra_nanos, duration)
-    return seconds, nanos
+    return contributions
+
+
+def _add_current(
+    total: tuple[int, int], contribution: tuple[int, int], duration: str
+) -> tuple[int, int]:
+    """Add one contribution to the running total the way `humantime` does.
+
+    `humantime` keeps whole seconds and a nanosecond part, both `u64`,
+    and normalizes after every contribution rather than at the end. That
+    is the whole of the difference between this and a single nanosecond
+    accumulator: `"18446744073709551615ns 1ns"` is a fraction over
+    eighteen seconds short of nineteen billion, which `humantime` reads,
+    and which one accumulator refuses because the two values together
+    pass the `u64` ceiling before anything carries.
+
+    The carry is deliberately in two parts, as `humantime`'s is. Its own
+    normalization runs only when the nanosecond part is *above* a
+    second, so a part of exactly one second reaches `Duration::new`,
+    which carries it and aborts if that carry overflows. Both halves
+    check, so the abort is a refusal here.
+
+    Parameters
+    ----------
+    total : tuple[int, int]
+        The running (seconds, nanoseconds).
+    contribution : tuple[int, int]
+        What this whole part or fraction adds.
+    duration : str
+        The whole duration, for the message.
+
+    Returns
+    -------
+    tuple[int, int]
+        The new running total, its nanosecond part below one second.
+
+    Raises
+    ------
+    DurationGrammarError
+        If any sum leaves the range `humantime` computes in.
+    """
+    total_seconds, total_nanos = total
+    seconds, nanos = contribution
+    nanos = _in_range(total_nanos + nanos, duration)
+    if nanos > _NANOS_PER_SECOND:
+        seconds = _in_range(seconds + nanos // _NANOS_PER_SECOND, duration)
+        nanos %= _NANOS_PER_SECOND
+    total_seconds = _in_range(total_seconds + seconds, duration)
+    if nanos >= _NANOS_PER_SECOND:
+        total_seconds = _in_range(
+            total_seconds + nanos // _NANOS_PER_SECOND, duration
+        )
+        nanos %= _NANOS_PER_SECOND
+    return total_seconds, nanos
 
 
 def read(duration: str) -> float:
@@ -300,8 +364,7 @@ def read(duration: str) -> float:
             f'each carrying a unit, such as "120s", "1m 30s" or "1.5m"'
         )
         raise DurationGrammarError(message)
-    total_seconds = 0
-    total_nanos = 0
+    total = (0, 0)
     position = 0
     while position < len(text):
         component = _COMPONENT.match(text, position)
@@ -312,11 +375,8 @@ def read(duration: str) -> float:
                 f'each carrying a unit, such as "120s", "1m 30s" or "1.5m"'
             )
             raise DurationGrammarError(message)
-        seconds, nanos = _component_parts(component, duration)
-        total_seconds = _in_range(total_seconds + seconds, duration)
-        total_nanos = _in_range(total_nanos + nanos, duration)
+        for contribution in _component_contributions(component, duration):
+            total = _add_current(total, contribution, duration)
         position = component.end()
-    total_seconds = _in_range(
-        total_seconds + total_nanos // _NANOS_PER_SECOND, duration
-    )
-    return total_seconds + (total_nanos % _NANOS_PER_SECOND) / _NANOS_PER_SECOND
+    total_seconds, total_nanos = total
+    return total_seconds + total_nanos / _NANOS_PER_SECOND

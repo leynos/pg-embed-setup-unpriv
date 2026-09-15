@@ -449,7 +449,24 @@ twenty fractional digits are refused however small the numerator is. Digits are
 ASCII, `'0'..='9'` and nothing else, so an Arabic-Indic digit is not a number
 there. The split matters too: whole hours, days, weeks, months, and years are
 counted in seconds, so a duration of several centuries stays in range where a
-single nanosecond counter would overflow. The reading lives in
+single nanosecond counter would overflow.
+
+Where the two halves meet is the subtle part, and the reading follows
+`humantime` step for step rather than summing and carrying once at the end.
+The running total is normalized after every whole part and every fraction, so
+a nanosecond part that passes the `u64` ceiling at one addition is refused
+however short the duration it names, and one that carries cleanly is read:
+`18446744073709551615ns` twice over is thirty-seven seconds and is refused,
+while the same value plus `1ns` is read. The carry itself is in two parts
+because `humantime`'s is. Its own normalization runs only when the nanosecond
+part is above one second, so a part of exactly one second reaches the duration
+constructor, which carries it and aborts if that carry overflows. That is why
+`0.5s 0.5s` is one second while `18446744073709551615s 500ms 500ms` is refused;
+a reader made merely stricter to refuse the second gets the first wrong.
+
+The whole set of inputs this was measured against, and the acceptance gate of
+zero disagreements, is the estate's humantime reader differential rather than
+anything invented here. The reading lives in
 `scripts/tests/nextest_durations.py`. The abbreviations `wk`, `wks`,
 `yr` and `yrs` and the micro sign in `µs` are accepted alongside the longer
 spellings. A reader taking a single short-unit component would reject `1m 30s`,
