@@ -428,7 +428,9 @@ the embedded tree between `Setup` and `Start`. Its user-facing contract is in
 - `config.rs`: `PG_EXTENSIONS*` to `ExtensionRequest`, and the extension
   cache directory resolution, which mirrors `cache::resolve_cache_dir`.
 - `manifest.rs`: schema-1 types, `Manifest::parse` and `select` (pure), and
-  `load` (path or HTTPS, size-capped, digest-verified).
+  `load` (a filesystem path, `https://`, or loopback `http://`; size-capped
+  and digest-verified). The digest is mandatory for every URL source,
+  loopback included, and optional for a path.
 - `archive.rs`: per-digest cache under `cache::CacheLock`, HTTPS-only
   downloads with a redirect policy that refuses non-HTTPS targets, bounded
   retries for connection failures and 5xx, streaming SHA-256.
