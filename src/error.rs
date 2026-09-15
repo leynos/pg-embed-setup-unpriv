@@ -46,8 +46,11 @@ pub enum BootstrapErrorKind {
     ClusterPasswordUnreadable,
     /// The data directory holds a cluster but its password file is empty.
     ClusterPasswordEmpty,
-    /// `PG_EXTENSIONS*` is set but incomplete or malformed (no manifest, an
-    /// HTTPS manifest without a digest, a bad name, or a bad digest).
+    /// `PG_EXTENSIONS*` is set but incomplete or malformed (no manifest, a
+    /// URL manifest without a digest, a bad name, or a bad digest).
+    ///
+    /// The digest is required for every URL manifest, loopback `http://`
+    /// included, and optional for a filesystem path.
     ExtensionConfigInvalid,
     /// The extension manifest could not be read from its path or URL.
     ExtensionManifestUnavailable,
