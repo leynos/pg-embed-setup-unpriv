@@ -265,3 +265,128 @@ fn an_identical_file_behind_a_symlinked_destination_is_not_followed() {
         "the symlink must be replaced by a real file"
     );
 }
+
+/// A parent swapped for an escaping symlink after the tree is opened cannot
+/// redirect the write.
+///
+/// This is the check-to-use race stated as a deterministic case. The other
+/// symlink tests plant the link before installation begins, so a path-based
+/// writer refuses them at the parent walk and passes. Here the link is planted
+/// *after* the handle is open, which is what an attacker who owns the tree can
+/// do between the check and the write, and no ordering of the two is required
+/// to observe it: the tree's own root path is replaced, so a writer that
+/// resolves paths afresh lands in `escape` while one that resolves through the
+/// handle lands on the original directory.
+///
+/// The installation tree is owned by the demoted worker while this write may
+/// run as root, so redirecting it is a privilege boundary crossing rather than
+/// a tidiness problem. Asserting the file's location is what discriminates:
+/// both writers report success.
+#[cfg(unix)]
+#[test]
+fn a_parent_swapped_after_the_tree_is_opened_cannot_redirect_the_write() {
+    use camino::Utf8Path;
+
+    use crate::extensions::tree::InstallTree;
+
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    let root = prepared.install_dir.clone();
+    let escape = root
+        .parent()
+        .expect("install tree has a parent")
+        .join("escape");
+    std::fs::create_dir_all(escape.join("lib")).expect("escape directory");
+
+    // The handle is taken while the tree is still the real directory.
+    let tree = InstallTree::open(&root).expect("open the installation tree");
+
+    // The attacker now replaces the whole tree with a link to their own.
+    let moved = root.with_file_name("moved-aside");
+    std::fs::rename(root.as_std_path(), moved.as_std_path()).expect("move the tree aside");
+    std::os::unix::fs::symlink(escape.as_std_path(), root.as_std_path()).expect("symlink the root");
+
+    let relative = Utf8Path::new("lib/swapped.so");
+    tree.create_parents(relative).expect("create parents");
+    let (file, temp) = tree.create_temp_beside(relative).expect("temporary file");
+    std::io::Write::write_all(&mut (&file), b"payload").expect("write payload");
+    drop(file);
+    tree.place(&temp, relative).expect("place the file");
+
+    assert!(
+        moved.join(relative).exists(),
+        "the write must land in the directory the handle was opened on"
+    );
+    assert!(
+        !escape.join(relative).exists(),
+        "the write must not follow the symlink planted after the handle was opened"
+    );
+}
+
+/// A validated parent swapped for an escaping symlink inside the race window
+/// is refused, not followed.
+///
+/// This is the check-to-use race itself, driven deterministically. The writer
+/// validates parents and then creates, writes and renames, and an attacker who
+/// owns the installation tree — which the demoted worker does, while this write
+/// may run as root — gets to act between those two steps. The test occupies
+/// that window explicitly: it validates through the same handle the writer
+/// uses, then replaces the validated `lib` with a link out of the tree, then
+/// performs the write steps.
+///
+/// Refusal is the assertion, and the escape directory staying empty is what
+/// discriminates: under the path-based standard-library calls this replaced,
+/// every one of these steps succeeds and the file lands in `escape`.
+#[cfg(unix)]
+#[test]
+fn a_validated_parent_swapped_inside_the_race_window_is_refused() {
+    use camino::Utf8Path;
+
+    use crate::extensions::tree::InstallTree;
+
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    let root = prepared.install_dir.clone();
+    let escape = root
+        .parent()
+        .expect("install tree has a parent")
+        .join("escape");
+    std::fs::create_dir_all(&escape).expect("escape directory");
+
+    let tree = InstallTree::open(&root).expect("open the installation tree");
+    let relative = Utf8Path::new("lib/swapped.so");
+
+    // The check half: lib is a real directory and the walk accepts it.
+    tree.require_real_parents(relative)
+        .expect("a real parent must validate");
+
+    // The window: the owner of the tree replaces the validated parent.
+    let lib = root.join("lib");
+    std::fs::remove_dir_all(&lib).expect("clear lib");
+    std::os::unix::fs::symlink(escape.as_std_path(), lib.as_std_path()).expect("symlink lib");
+
+    // The use half: every step must refuse the link rather than follow it.
+    let reported = match (
+        tree.create_parents(relative),
+        tree.create_temp_beside(relative),
+    ) {
+        (Err(err), _) | (Ok(()), Err(err)) => format!("{err:#}"),
+        (Ok(()), Ok(_)) => {
+            panic!("creating under a parent swapped for an escaping symlink must be refused")
+        }
+    };
+    assert!(
+        reported.contains("lib"),
+        "the refusal must name the offending path, got: {reported}"
+    );
+
+    assert!(
+        !escape.join("swapped.so").exists(),
+        "nothing may be written through the swapped parent"
+    );
+    assert!(
+        std::fs::read_dir(&escape)
+            .expect("read escape")
+            .next()
+            .is_none(),
+        "the escape directory must stay empty"
+    );
+}
