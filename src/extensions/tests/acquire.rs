@@ -1,0 +1,296 @@
+//! Tests for archive acquisition: cache reuse, downloads, retries and URL policy.
+
+use camino::Utf8PathBuf;
+use color_eyre::eyre::Result;
+use rstest::rstest;
+
+use super::fixture::{
+    CannedResponse,
+    artifact_for,
+    fixture_archive,
+    serve_once,
+    serve_sequence,
+    temp_root,
+    unreachable_url,
+    write_file,
+};
+use crate::{
+    error::BootstrapErrorKind,
+    extensions::{
+        ArchiveOrigin,
+        ManifestArtifact,
+        Sha256Hex,
+        archive::{CachedState, acquire, cached_state},
+    },
+};
+
+/// A cache directory plus an artefact pointing at `url`.
+struct CacheCase {
+    _temp: tempfile::TempDir,
+    cache: Utf8PathBuf,
+    bytes: Vec<u8>,
+    artifact: ManifestArtifact,
+}
+
+fn cache_case(url: &str) -> Result<CacheCase> {
+    let (temp, root) = temp_root()?;
+    let bytes = fixture_archive()?;
+    let artifact = artifact_for(&bytes, "fixture.tar.gz", url);
+    Ok(CacheCase {
+        _temp: temp,
+        cache: root.join("cache"),
+        bytes,
+        artifact,
+    })
+}
+
+impl CacheCase {
+    fn entry_path(&self) -> Utf8PathBuf {
+        self.cache
+            .join(self.artifact.sha256.as_str())
+            .join("fixture.tar.gz")
+    }
+
+    fn seed(&self, bytes: &[u8]) -> Result<Utf8PathBuf> {
+        write_file(
+            &self.cache.join(self.artifact.sha256.as_str()),
+            "fixture.tar.gz",
+            bytes,
+        )
+    }
+}
+
+/// A valid cache entry is reused; a corrupt one is replaced by a verified download.
+#[rstest]
+#[case::valid_entry(true, false, ArchiveOrigin::Cached)]
+#[case::corrupt_entry(false, true, ArchiveOrigin::Downloaded)]
+fn acquire_uses_cache_or_redownloads(
+    #[case] seed_real_bytes: bool,
+    #[case] serve: bool,
+    #[case] expected: ArchiveOrigin,
+) {
+    let bytes = fixture_archive().expect("fixture");
+    let url = if serve {
+        serve_once(bytes.clone()).expect("server")
+    } else {
+        unreachable_url().expect("port")
+    };
+    let case = cache_case(&url).expect("fixture");
+    let seed: &[u8] = if seed_real_bytes {
+        &case.bytes
+    } else {
+        b"corrupt"
+    };
+    case.seed(seed).expect("seed");
+    let acquired = acquire(&case.cache, &case.artifact).expect("acquired");
+    assert_eq!(acquired.origin, expected);
+    assert_eq!(acquired.path, case.entry_path());
+    assert_eq!(
+        Sha256Hex::of_file(&acquired.path).expect("hash"),
+        case.artifact.sha256
+    );
+}
+
+/// Downloaded bytes that do not match the manifest digest are refused and discarded.
+#[test]
+fn acquire_rejects_digest_mismatch() {
+    let mut tampered = fixture_archive().expect("fixture");
+    tampered.push(0);
+    let mut case = cache_case(&serve_once(tampered).expect("server")).expect("fixture");
+    case.artifact.size += 1;
+    let err = acquire(&case.cache, &case.artifact).expect_err("mismatch");
+    assert_eq!(
+        err.kind(),
+        BootstrapErrorKind::ExtensionArchiveDigestMismatch
+    );
+    assert!(
+        !case.entry_path().exists(),
+        "a mismatching download must not be kept"
+    );
+}
+
+/// A download failure with no cached copy is `ExtensionArchiveUnavailable`.
+#[test]
+fn acquire_reports_unreachable_download() {
+    let case = cache_case(&unreachable_url().expect("port")).expect("fixture");
+    let err = acquire(&case.cache, &case.artifact).expect_err("unreachable");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveUnavailable);
+}
+
+/// Transient failures are retried; the archive then downloads and verifies.
+#[test]
+fn acquire_retries_after_a_transient_server_error() {
+    let bytes = fixture_archive().expect("fixture");
+    let url = serve_sequence(vec![
+        CannedResponse::status("503 Service Unavailable"),
+        CannedResponse::ok(bytes),
+    ])
+    .expect("server");
+    let case = cache_case(&url).expect("fixture");
+    let acquired = acquire(&case.cache, &case.artifact).expect("downloaded on retry");
+    assert_eq!(acquired.origin, ArchiveOrigin::Downloaded);
+}
+
+/// A 4xx is final: no retry, and the archive stays unavailable.
+#[test]
+fn acquire_does_not_retry_client_errors() {
+    let bytes = fixture_archive().expect("fixture");
+    let url = serve_sequence(vec![
+        CannedResponse::status("404 Not Found"),
+        CannedResponse::ok(bytes),
+    ])
+    .expect("server");
+    let case = cache_case(&url).expect("fixture");
+    let err = acquire(&case.cache, &case.artifact).expect_err("404 is final");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveUnavailable);
+    assert!(err.to_string().contains("404"), "{err}");
+}
+
+/// A redirect away from HTTPS (or loopback HTTP) is refused.
+#[test]
+fn acquire_refuses_redirect_to_plain_http() {
+    let url = serve_sequence(vec![CannedResponse::redirect(
+        "http://example.invalid/fixture.tar.gz",
+    )])
+    .expect("server");
+    let case = cache_case(&url).expect("fixture");
+    let err = acquire(&case.cache, &case.artifact).expect_err("downgrade refused");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveUnavailable);
+    assert!(err.to_string().contains("redirect"), "{err}");
+}
+
+/// Only https, or http to a loopback host, may be fetched.
+#[rstest]
+#[case::https("https://github.com/x/y.tar.gz", true)]
+#[case::loopback_v4("http://127.0.0.1:1234/x.tar.gz", true)]
+#[case::loopback_v6("http://[::1]:1234/x.tar.gz", true)]
+#[case::localhost("http://localhost/x.tar.gz", true)]
+#[case::plain_http("http://example.com/x.tar.gz", false)]
+#[case::ftp("ftp://example.com/x.tar.gz", false)]
+#[case::garbage("not a url", false)]
+fn permitted_url_rules(#[case] url: &str, #[case] expected: bool) {
+    assert_eq!(crate::extensions::is_permitted_url(url), expected);
+}
+
+/// A cache entry that is not a regular file is removed and re-downloaded.
+///
+/// The download finishes by renaming a temporary file over the entry path. A
+/// rename can replace a file but not a directory, so without removing the
+/// entry first the acquire fails with a rename error instead of the cache
+/// healing itself. Both prefixes of that failure matter: the entry is
+/// classified as unusable, and the download then succeeds.
+#[rstest]
+#[case::directory(true)]
+#[case::regular_file(false)]
+fn acquire_replaces_an_unusable_entry(#[case] as_directory: bool) {
+    let bytes = fixture_archive().expect("fixture");
+    let url = serve_once(bytes.clone()).expect("server");
+    let case = cache_case(&url).expect("fixture");
+    if as_directory {
+        std::fs::create_dir_all(case.entry_path()).expect("directory in place of an entry");
+    } else {
+        case.seed(b"corrupt").expect("seed");
+    }
+    let acquired = acquire(&case.cache, &case.artifact).expect("acquired");
+    assert_eq!(acquired.origin, ArchiveOrigin::Downloaded);
+    assert_eq!(
+        std::fs::read(&acquired.path).expect("read"),
+        case.bytes,
+        "the entry holds the downloaded archive"
+    );
+}
+
+/// Each cache-entry outcome is reported distinctly, so the log says why an
+/// entry was not reused rather than blaming every fault on a digest mismatch.
+///
+/// The four cases are exhaustive over `CachedState`: nothing written, the
+/// expected bytes, the wrong bytes, and a path occupied by something that is
+/// not a regular file.
+#[rstest]
+#[case::missing(EntryKind::Absent)]
+#[case::valid(EntryKind::ExpectedBytes)]
+#[case::corrupt(EntryKind::WrongBytes)]
+#[case::unreadable(EntryKind::Directory)]
+fn cache_entry_states_are_distinct(#[case] kind: EntryKind) {
+    let case = cache_case("https://example.invalid/fixture.tar.gz").expect("fixture");
+    let path = case.entry_path();
+    match kind {
+        EntryKind::Absent => {}
+        EntryKind::ExpectedBytes => {
+            case.seed(&case.bytes).expect("seed");
+        }
+        EntryKind::WrongBytes => {
+            case.seed(b"corrupt").expect("seed");
+        }
+        EntryKind::Directory => {
+            std::fs::create_dir_all(&path).expect("directory in place of an entry");
+        }
+    }
+    let state = cached_state(&path, &case.artifact.sha256);
+    match (kind, &state) {
+        (EntryKind::Absent, CachedState::Missing)
+        | (EntryKind::ExpectedBytes, CachedState::Valid)
+        | (EntryKind::WrongBytes, CachedState::Corrupt)
+        | (EntryKind::Directory, CachedState::Unreadable(_)) => {}
+        (_, other) => panic!("{kind:?} was classified as {other:?}"),
+    }
+}
+
+/// What is sitting at the cache entry path for a [`cache_entry_states_are_distinct`] case.
+#[derive(Debug, Clone, Copy)]
+enum EntryKind {
+    /// Nothing has been written.
+    Absent,
+    /// The archive the manifest describes.
+    ExpectedBytes,
+    /// Some other bytes.
+    WrongBytes,
+    /// A directory, which is not an archive the cache can read.
+    Directory,
+}
+
+/// A consumer's URL can carry credentials, so none reaches a log or an error.
+///
+/// `userinfo`, a signed query parameter and a fragment are all places a token
+/// is put in practice. `redact_url` keeps scheme, host, port and path and
+/// nothing else, and an unparsable string is not echoed at all, because a
+/// parse failure is no guarantee that it holds no secret.
+#[rstest]
+#[case::userinfo(
+    "https://user:s3cr3t@example.invalid/x.tar.gz",
+    "https://example.invalid/x.tar.gz"
+)]
+#[case::signed_query(
+    "https://example.invalid/x.tar.gz?X-Amz-Signature=s3cr3t",
+    "https://example.invalid/x.tar.gz"
+)]
+#[case::fragment(
+    "https://example.invalid/x.tar.gz#s3cr3t",
+    "https://example.invalid/x.tar.gz"
+)]
+#[case::port(
+    "https://example.invalid:8443/x.tar.gz?t=s3cr3t",
+    "https://example.invalid:8443/x.tar.gz"
+)]
+#[case::unparsable("s3cr3t not a url", "<unparsable url>")]
+fn redact_url_keeps_no_secret(#[case] raw: &str, #[case] expected: &str) {
+    let redacted = crate::extensions::redact_url(raw);
+    assert_eq!(redacted, expected);
+    assert!(!redacted.contains("s3cr3t"), "{redacted}");
+}
+
+/// The download failure path reports the redacted URL, not the raw one.
+///
+/// This is the end-to-end half: `redact_url` being correct is worth little if
+/// a call site forgets to use it, so this drives a real failing acquisition
+/// through a URL carrying a credential and inspects the error.
+#[rstest]
+fn a_failed_download_reports_no_credential() {
+    let unreachable = unreachable_url().expect("port");
+    let with_secret = format!("{unreachable}?X-Amz-Signature=s3cr3t");
+    let case = cache_case(&with_secret).expect("fixture");
+    let err = acquire(&case.cache, &case.artifact).expect_err("unreachable");
+    let rendered = format!("{err} {err:?}");
+    assert!(!rendered.contains("s3cr3t"), "{rendered}");
+    assert_eq!(err.kind(), BootstrapErrorKind::ExtensionArchiveUnavailable);
+}

@@ -88,6 +88,12 @@ directories, starting the server, and cleaning up when the test ends.
   `diesel_connection()` for direct database access.
 - **Observability**: Tracing spans for lifecycle events, with sensitive values
   automatically redacted.
+- **Prebuilt extensions**: Declare `PG_EXTENSIONS` (for example `vector`) and
+  a digest-pinned manifest, and the cluster installs verified prebuilt archives
+  from [df12-pg-extensions][df12-pg-extensions] before the server starts; see
+  [docs/extensions.md](docs/extensions.md).
+
+[df12-pg-extensions]: https://github.com/leynos/df12-pg-extensions
 
 ## Running as root / pg_worker
 
