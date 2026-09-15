@@ -194,12 +194,32 @@ mod tests {
         assert!(temp.url().contains("test_db"));
     }
 
+    /// An admin URL nothing listens on, with the attempt bounded.
+    ///
+    /// Two details, and both are load-bearing on Windows. The host is
+    /// `127.0.0.1` rather than `localhost`, because the name resolves to
+    /// `::1` as well and the client tries the addresses in turn, so a
+    /// host that refuses one slowly is waited on before the other is
+    /// reached. `connect_timeout` then bounds what is left.
+    ///
+    /// Without them the test relies on the operating system refusing a
+    /// connection promptly, which Linux and macOS do in 0.01 to 0.04 s
+    /// and Windows does not: it measured 8.07 s on run 34161062265 and
+    /// then exceeded the profile's 180 s per-test allowance on run
+    /// 34274541426, ending the whole Windows lane.
+    const UNREACHABLE_ADMIN_URL: &str =
+        "postgresql://user:pass@127.0.0.1:59999/postgres?connect_timeout=2";
+
+    /// The matching database URL. See [`UNREACHABLE_ADMIN_URL`].
+    const UNREACHABLE_DB_URL: &str =
+        "postgresql://user:pass@127.0.0.1:59999/test_db?connect_timeout=2";
+
     #[test]
     fn drop_database_returns_error_on_connection_failure() {
         let temp = TemporaryDatabase::new(
             "test_db".to_owned(),
-            "postgresql://user:pass@localhost:59999/postgres".to_owned(),
-            "postgresql://user:pass@localhost:59999/test_db".to_owned(),
+            UNREACHABLE_ADMIN_URL.to_owned(),
+            UNREACHABLE_DB_URL.to_owned(),
         );
 
         let result = temp.drop_database();
@@ -217,8 +237,8 @@ mod tests {
     fn force_drop_returns_error_on_connection_failure() {
         let temp = TemporaryDatabase::new(
             "test_db".to_owned(),
-            "postgresql://user:pass@localhost:59999/postgres".to_owned(),
-            "postgresql://user:pass@localhost:59999/test_db".to_owned(),
+            UNREACHABLE_ADMIN_URL.to_owned(),
+            UNREACHABLE_DB_URL.to_owned(),
         );
 
         let result = temp.force_drop();
@@ -237,8 +257,8 @@ mod tests {
         // Create a TemporaryDatabase with an unreachable URL
         let temp = TemporaryDatabase::new(
             "test_db".to_owned(),
-            "postgresql://user:pass@localhost:59999/postgres".to_owned(),
-            "postgresql://user:pass@localhost:59999/test_db".to_owned(),
+            UNREACHABLE_ADMIN_URL.to_owned(),
+            UNREACHABLE_DB_URL.to_owned(),
         );
 
         // Dropping should not panic even when cleanup fails

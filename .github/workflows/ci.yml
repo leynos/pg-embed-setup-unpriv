@@ -12,6 +12,13 @@ jobs:
   build-test:
     name: Linux Build and Test (${{ matrix.privilege }})
     runs-on: ubuntu-latest
+    # Above the 1,800 s cargo watchdog on the coverage step plus the work
+    # either side of it, which reached 830 s on run 33982759833. The job
+    # had no ceiling before this and so inherited GitHub's six-hour
+    # default; a ceiling merely above the watchdog would cancel the job
+    # before the watchdog could report an overrun, and a cancellation
+    # discards the log that would have explained it.
+    timeout-minutes: 65
     strategy:
       fail-fast: false
       matrix:

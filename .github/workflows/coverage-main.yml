@@ -16,6 +16,10 @@ on:
 jobs:
   coverage-upload:
     runs-on: ubuntu-latest
+    # Kept in step with ci.yml's coverage lane: above the 1,800 s cargo
+    # watchdog plus the work either side. This job's own worst was 38 s
+    # outside the coverage step, on run 29784541706.
+    timeout-minutes: 65
     permissions:
       contents: read
     env:
