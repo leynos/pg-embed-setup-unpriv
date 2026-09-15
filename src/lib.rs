@@ -14,7 +14,7 @@ mod error;
 mod fs;
 #[cfg(all(test, feature = "loom-tests"))]
 mod loom_model;
-mod observability;
+pub mod observability;
 #[cfg(all(
     unix,
     any(
@@ -149,13 +149,16 @@ pub use bootstrap::{
     CleanupMode,
     ExecutionMode,
     ExecutionPrivileges,
+    PasswordReuseOutcome,
     TestBootstrapEnvironment,
     TestBootstrapSettings,
     bootstrap_for_tests,
     default_paths_under,
     detect_execution_privileges,
     find_timezone_dir,
+    reuse_existing_password,
     run,
+    stored_cluster_password,
 };
 use camino::Utf8PathBuf;
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
@@ -485,7 +488,6 @@ impl PgEnvCfg {
 /// Smallest `PG_MAX_CONNECTIONS` the helper accepts: one ordinary slot above
 /// `PostgreSQL`'s default of three reserved superuser connections.
 pub const MIN_MAX_CONNECTIONS: u32 = 4;
-
 const WORKER_LIMIT_DEFAULTS: [(&str, &str); 8] = [
     ("max_connections", "20"),
     ("max_worker_processes", "2"),

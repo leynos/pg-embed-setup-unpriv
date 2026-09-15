@@ -39,6 +39,13 @@ pub enum BootstrapErrorKind {
     WorkerBinaryMissing,
     /// Indicates a PATH entry used for worker discovery is not valid UTF-8.
     WorkerBinaryPathNonUtf8,
+    /// The data directory holds a cluster but its password file does not exist.
+    ClusterPasswordMissing,
+    /// The data directory holds a cluster but its password file, or the
+    /// cluster marker itself, cannot be read.
+    ClusterPasswordUnreadable,
+    /// The data directory holds a cluster but its password file is empty.
+    ClusterPasswordEmpty,
 }
 
 /// Captures bootstrap-specific failures.
