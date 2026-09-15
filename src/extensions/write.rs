@@ -4,16 +4,13 @@
 //! Split from `install` so pass one, which validates and decides, reads
 //! separately from pass two, which acts.
 
-use std::{
-    fs,
-    io::{self, Read},
-};
+use std::{fs, io::Read};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use cap_std::fs::File;
 use color_eyre::eyre::{Report, eyre};
 
 use super::{
-    Sha256Hex,
     install::{
         ARCHIVE_DECOMPRESSED_CAP,
         ENTRY_DECOMPRESSED_CAP,
@@ -24,6 +21,7 @@ use super::{
         open_archive,
     },
     layout::classify_entry_path,
+    tree::InstallTree,
 };
 use crate::error::BootstrapResult;
 
@@ -35,6 +33,11 @@ pub(super) fn write_all(
     install_dir: &Utf8Path,
 ) -> BootstrapResult<()> {
     let owner = tree_owner(install_dir)?;
+    // One handle for the whole archive, held until the last rename completes.
+    let context = WriteContext {
+        tree: InstallTree::open(install_dir)?,
+        owner,
+    };
     let mut written: Vec<Utf8PathBuf> = Vec::new();
     let mut budget = ARCHIVE_DECOMPRESSED_CAP;
     let planned_by_path: std::collections::BTreeMap<&Utf8Path, &PlannedFile> = planned
@@ -53,7 +56,7 @@ pub(super) fn write_all(
         };
         let contents = read_entry_bounded(path, &mut entry, &plan.relative, &mut budget)
             .map_err(|err| over_cap_after_writing(&plan.relative, &written, err))?;
-        write_file(install_dir, plan, &contents, owner)
+        write_file(&context, plan, &contents)
             .map_err(|err| install_failed(&plan.relative, &written, err))?;
         written.push(plan.relative.clone());
     }
@@ -118,123 +121,58 @@ fn read_entry_bounded(
     Ok(contents)
 }
 
-/// Refuses a destination whose parent components are not real directories.
+/// The installation tree and the ownership every file written into it takes.
 ///
-/// `classify_entry_path` validates the name the archive carries, not the tree
-/// the file lands in. If `lib` or `share/extension` under `install_dir` is a
-/// symlink, `create_dir_all` and `NamedTempFile::new_in` both follow it and
-/// `persist` then installs the file outside `install_dir` altogether. The walk
-/// therefore starts at `install_dir` itself, which is a parent of every
-/// destination and escapes the whole tree at once when it is a symlink, and
-/// then covers each parent component of the relative path. Each is checked
-/// with `symlink_metadata`, which does not follow, and must be a directory. A
-/// component that does not exist yet is one `create_dir_all` will create, and
-/// nothing below a missing component can exist, so the walk stops there.
-///
-/// The destination itself is not covered here. A symlink there is replaced by
-/// the atomic `persist`, which is how an already-installed file is meant to be
-/// rewritten; the branch that must not follow it is the identical-bytes one,
-/// and [`open_identical_regular_file`] is what holds that line.
-fn require_real_parents(install_dir: &Utf8Path, relative: &Utf8Path) -> Result<(), Report> {
-    let components: Vec<&str> = relative
-        .components()
-        .map(|component| component.as_str())
-        .collect();
-    let parents = components.len().saturating_sub(1);
-    let mut remaining = components.into_iter().take(parents);
-    let mut current = install_dir.to_path_buf();
-    loop {
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.is_dir() => {}
-            Ok(metadata) => {
-                return Err(eyre!(
-                    "{current} is a {:?}, not a directory; the installation tree must not route \
-                     through a symlink",
-                    metadata.file_type()
-                ));
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => break,
-            Err(err) => return Err(eyre!("cannot inspect {current}: {err}")),
-        }
-        let Some(component) = remaining.next() else {
-            break;
-        };
-        current.push(component);
-    }
-    Ok(())
+/// Carried together so the per-file writer stays inside the four-argument
+/// ceiling, and so the tree handle outlives every file placed through it.
+struct WriteContext {
+    tree: InstallTree,
+    owner: Owner,
 }
-
-/// Opens `destination` when it already holds exactly `bytes`.
-///
-/// The handle is returned so the mode and ownership repair acts on the file
-/// that was hashed rather than on the path. A symlink at the destination is
-/// otherwise followed alike by the digest, the `chmod` and the `chown`, and a
-/// bootstrap running as root would set the mode and the tree's ownership on
-/// whatever the link named, outside the tree entirely, without writing a byte
-/// through it. Unix opens carry `O_NOFOLLOW`, so the symlink is refused by the
-/// open itself; every platform then requires the opened handle to report a
-/// regular file, which also refuses a directory.
-///
-/// `None` covers every other case: a missing, unreadable, non-regular or
-/// differing destination. The caller writes a fresh file and `persist`s it,
-/// and that rename replaces the symlink rather than following it.
-fn open_identical_regular_file(destination: &Utf8Path, bytes: &[u8]) -> Option<fs::File> {
-    let file = open_no_follow(destination).ok()?;
-    if !file.metadata().ok()?.is_file() {
-        return None;
-    }
-    (Sha256Hex::of_reader(&file).ok()? == Sha256Hex::of_bytes(bytes)).then_some(file)
-}
-
-/// Opens a path read-only without following a symlink in its final component.
-#[cfg(unix)]
-fn open_no_follow(path: &Utf8Path) -> io::Result<fs::File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
-}
-
-/// Opens a path read-only; the handle's own type is what the caller checks.
-///
-/// Windows has no `O_NOFOLLOW`, so a destination replaced between the open and
-/// the check is not closed off here. Creating a symlink there needs privilege
-/// or developer mode, and the mode and ownership calls this guards are Unix
-/// only, so the remaining exposure is a digest read through a link.
-#[cfg(not(unix))]
-fn open_no_follow(path: &Utf8Path) -> io::Result<fs::File> { fs::File::open(path) }
 
 /// Writes one file atomically, skipping it when an identical copy exists.
-fn write_file(
-    install_dir: &Utf8Path,
-    plan: &PlannedFile,
-    bytes: &[u8],
-    owner: Owner,
-) -> Result<(), Report> {
-    require_real_parents(install_dir, &plan.relative)?;
-    let destination = install_dir.join(&plan.relative);
-    if let Some(existing) = open_identical_regular_file(&destination, bytes) {
+///
+/// Every filesystem operation resolves through the tree handle rather than a
+/// path, so the parent a file lands under cannot be swapped for a link to
+/// somewhere else between the check and the write.
+fn write_file(context: &WriteContext, plan: &PlannedFile, bytes: &[u8]) -> Result<(), Report> {
+    let tree = &context.tree;
+    tree.require_real_parents(&plan.relative)?;
+    let destination = tree.path_of(&plan.relative);
+    if let Some(existing) = tree.open_identical_regular_file(&plan.relative, bytes) {
         // Identical bytes keep their inode, but the mode and owner are still
         // brought into line so a root-owned or 0600 copy does not stop the
         // server from loading it.
         set_mode(&existing, &destination, plan.mode)?;
-        return apply_owner(&existing, &destination, owner);
+        return apply_owner(&existing, &destination, context.owner);
     }
-    let parent = destination
-        .parent()
-        .ok_or_else(|| eyre!("{destination} has no parent directory"))?;
-    fs::create_dir_all(parent).map_err(|err| eyre!("cannot create {parent}: {err}"))?;
-    let mut temp = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|err| eyre!("cannot create temporary file in {parent}: {err}"))?;
-    io::Write::write_all(&mut temp, bytes)
+    tree.create_parents(&plan.relative)?;
+    let (temp, temp_relative) = tree.create_temp_beside(&plan.relative)?;
+    let placed = fill_temp(context, plan, bytes, &temp)
+        .and_then(|()| tree.place(&temp_relative, &plan.relative));
+    if placed.is_err() {
+        tree.discard_temp(&temp_relative);
+    }
+    placed
+}
+
+/// Writes the bytes into the temporary file and stamps its mode and owner.
+///
+/// Both are applied through the open handle before the rename, so the file
+/// arrives at its destination already correct and never appears there with the
+/// wrong mode.
+fn fill_temp(
+    context: &WriteContext,
+    plan: &PlannedFile,
+    bytes: &[u8],
+    temp: &File,
+) -> Result<(), Report> {
+    let destination = context.tree.path_of(&plan.relative);
+    let mut handle = temp;
+    std::io::Write::write_all(&mut handle, bytes)
         .map_err(|err| eyre!("cannot write {destination}: {err}"))?;
-    set_mode(temp.as_file(), &destination, plan.mode)?;
-    apply_owner(temp.as_file(), &destination, owner)?;
-    temp.persist(&destination)
-        .map_err(|err| eyre!("cannot move file into place at {destination}: {err}"))?;
-    Ok(())
+    set_mode(temp, &destination, plan.mode)?;
+    apply_owner(temp, &destination, context.owner)
 }
 
 /// Applies a Unix mode to an open file.
@@ -243,15 +181,15 @@ fn write_file(
 /// and never a path the destination was replaced by in the meantime.
 /// `destination` names the file in the error only.
 #[cfg(unix)]
-fn set_mode(file: &fs::File, destination: &Utf8Path, mode: u32) -> Result<(), Report> {
-    use std::os::unix::fs::PermissionsExt;
-    file.set_permissions(fs::Permissions::from_mode(mode))
+fn set_mode(file: &File, destination: &Utf8Path, mode: u32) -> Result<(), Report> {
+    use cap_std::fs::{Permissions, PermissionsExt};
+    file.set_permissions(Permissions::from_mode(mode))
         .map_err(|err| eyre!("cannot set mode {mode:o} on {destination}: {err}"))
 }
 
 /// Modes are not applied on platforms without Unix permissions.
 #[cfg(not(unix))]
-fn set_mode(_file: &fs::File, _destination: &Utf8Path, _mode: u32) -> Result<(), Report> { Ok(()) }
+fn set_mode(_file: &File, _destination: &Utf8Path, _mode: u32) -> Result<(), Report> { Ok(()) }
 
 /// Owner of the installation tree, propagated to installed files.
 #[derive(Debug, Clone, Copy)]
@@ -294,8 +232,8 @@ fn tree_owner(_install_dir: &Utf8Path) -> BootstrapResult<Owner> { Ok(Owner {}) 
 /// redirected by a replacement at the path. `destination` names the file in
 /// the errors only.
 #[cfg(unix)]
-fn apply_owner(file: &fs::File, destination: &Utf8Path, owner: Owner) -> Result<(), Report> {
-    use std::os::unix::fs::MetadataExt;
+fn apply_owner(file: &File, destination: &Utf8Path, owner: Owner) -> Result<(), Report> {
+    use cap_std::fs::MetadataExt;
     let metadata = file
         .metadata()
         .map_err(|err| eyre!("cannot stat {destination}: {err}"))?;
@@ -313,6 +251,6 @@ fn apply_owner(file: &fs::File, destination: &Utf8Path, owner: Owner) -> Result<
 
 /// Ownership is not applied on platforms without Unix uids.
 #[cfg(not(unix))]
-fn apply_owner(_file: &fs::File, _destination: &Utf8Path, _owner: Owner) -> Result<(), Report> {
+fn apply_owner(_file: &File, _destination: &Utf8Path, _owner: Owner) -> Result<(), Report> {
     Ok(())
 }

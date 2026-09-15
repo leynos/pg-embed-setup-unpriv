@@ -52,6 +52,7 @@ mod install;
 mod layout;
 mod manifest;
 mod name;
+mod tree;
 mod version;
 mod write;
 
