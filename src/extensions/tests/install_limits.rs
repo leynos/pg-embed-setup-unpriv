@@ -173,3 +173,95 @@ fn install_refuses_an_oversized_swapped_archive() {
         BootstrapErrorKind::ExtensionArchiveDigestMismatch
     );
 }
+
+/// A symlinked installation root is refused.
+///
+/// `install_dir` is a parent of every destination, so a symlink there routes
+/// the whole tree elsewhere in one step, and it does so invisibly to a walk
+/// that starts below it: `lib` resolves through the link, `create_dir_all`
+/// creates it inside the link's target, and every component the walk inspects
+/// is a real directory. The empty escape directory is the assertion that fails
+/// if the walk starts below `install_dir` rather than at it; the error kind
+/// alone would not.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_installation_root_is_refused() {
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    let escape = prepared
+        .install_dir
+        .parent()
+        .expect("install tree has a parent")
+        .join("escape");
+    std::fs::create_dir(&escape).expect("escape directory");
+    std::fs::remove_dir_all(&prepared.install_dir).expect("clear the install tree");
+    std::os::unix::fs::symlink(escape.as_std_path(), prepared.install_dir.as_std_path())
+        .expect("symlink the install tree");
+
+    let err = install(&prepared).expect_err("a symlinked installation root must be refused");
+    assert_eq!(
+        err.kind(),
+        BootstrapErrorKind::ExtensionInstallFailed,
+        "{err}"
+    );
+    assert!(
+        std::fs::read_dir(&escape)
+            .expect("read escape")
+            .next()
+            .is_none(),
+        "the escape directory must stay empty"
+    );
+}
+
+/// An identical file behind a symlinked destination is replaced, not followed.
+///
+/// A destination symlink whose target already holds the planned bytes takes
+/// the identical-bytes branch, where a path-based digest, mode repair and
+/// chown all resolve the link. A bootstrap running as root would then set the
+/// tree's mode and ownership on a file outside the tree, without ever writing
+/// a byte through the link. The outside file keeping mode `0o600` is the
+/// assertion that fails when that branch works from the path instead of the
+/// opened handle, and the destination being a regular file afterwards is what
+/// the atomic replacement guarantees in its place.
+#[cfg(unix)]
+#[test]
+fn an_identical_file_behind_a_symlinked_destination_is_not_followed() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::fixture::FIXTURE_FILES;
+
+    let prepared = prepared(&fixture_entries()).expect("fixture");
+    let body = FIXTURE_FILES
+        .iter()
+        .find(|(name, _)| *name == "lib/fixture.so")
+        .map(|(_, body)| *body)
+        .expect("the fixture carries a shared object");
+    let outside = prepared
+        .install_dir
+        .parent()
+        .expect("install tree has a parent")
+        .join("outside.so");
+    std::fs::write(&outside, body).expect("write the file outside the tree");
+    std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    let destination = prepared.install_dir.join("lib/fixture.so");
+    std::os::unix::fs::symlink(outside.as_std_path(), destination.as_std_path())
+        .expect("symlink the destination");
+
+    install(&prepared).expect("install over a symlinked destination");
+
+    assert_eq!(
+        std::fs::symlink_metadata(&outside)
+            .expect("outside metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600,
+        "the file outside the tree must not be chmodded through the link"
+    );
+    assert!(
+        !std::fs::symlink_metadata(&destination)
+            .expect("destination metadata")
+            .file_type()
+            .is_symlink(),
+        "the symlink must be replaced by a real file"
+    );
+}
