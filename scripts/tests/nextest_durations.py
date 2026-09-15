@@ -5,18 +5,20 @@ Split from ``timeout_budgets`` so neither outgrows the 400-line limit
 the grammar and the arithmetic of ``humantime`` 2.3.0, the version
 ``cargo-nextest`` 0.9.122 resolves through ``humantime_serde``.
 
-The arithmetic is integer, and split into seconds and nanoseconds the
-way ``humantime``'s is, because reading a component as a float accepts
-two classes of text it refuses.
+The arithmetic uses integers, and splits into seconds and nanoseconds
+the way ``humantime``'s does because reading a component as a float
+accepts two classes of text it refuses.
 
 Sub-nanosecond precision is one. ``humantime`` scales a fraction's
 numerator by its unit and divides by the denominator, and that division
 errors unless it is exact, so ``"0.0000000002s"`` is an error there and
 a small positive number to ``float``. Out-of-range values are the
-other: every step is checked against the range of a ``u64``.
+other: every step is checked against the range of a ``u64``, the
+denominator included, so twenty fractional digits overflow whatever the
+numerator is.
 
 The split matters as much as the integers. ``humantime`` counts whole
-hours, days, weeks, months and years in *seconds*, so a duration of
+hours, days, weeks, months, and years in *seconds*, so a duration of
 several centuries is fine there while a single nanosecond accumulator
 would overflow and refuse it.
 """
@@ -42,9 +44,14 @@ _NANOS_PER_SECOND: typ.Final[int] = 1_000_000_000
 #: so ``"1.5m"`` and ``"1 . 5 m"`` are both ninety seconds. A leading
 #: point, a trailing point, a second point, a sign and a digit separator
 #: are all refused there and so are refused here.
+#:
+#: The digit classes are spelled ``[0-9]`` rather than ``\d`` because
+#: ``humantime`` matches ``'0'..='9'`` and nothing else, while Python's
+#: ``\d`` accepts every Unicode decimal digit: ``\d`` would read an
+#: Arabic-Indic one as a number that nextest then refuses to load.
 _COMPONENT: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?P<whole>\d[\d\s]*)"
-    r"(?:\.\s*(?P<fraction>\d[\d\s]*))?"
+    r"(?P<whole>[0-9][0-9\s]*)"
+    r"(?:\.\s*(?P<fraction>[0-9][0-9\s]*))?"
     r"(?P<unit>[A-Za-zµ]+)\s*"
 )
 
@@ -200,7 +207,7 @@ def _fraction_of(unit: str, digits: str, duration: str) -> tuple[int, int]:
         )
         raise DurationGrammarError(message)
     numerator = int(digits)
-    denominator = 10 ** len(digits)
+    denominator = _in_range(10 ** len(digits), duration)
     factor, is_seconds = scale
     quotient = _exact_division(
         _in_range(numerator * factor, duration), denominator, duration

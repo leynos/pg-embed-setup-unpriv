@@ -344,11 +344,16 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
         pytest.param("1.5ns", id="a-fraction-of-a-nanosecond"),
         pytest.param("18446744073709551616s", id="past-the-range-humantime-holds"),
         pytest.param("600000000000y", id="a-value-that-overflows-its-unit"),
+        pytest.param(
+            "1.00000000000000000000s",
+            id="a-denominator-past-the-range-humantime-holds",
+        ),
+        pytest.param("\u0661s", id="an-arabic-indic-digit"),
         pytest.param(" 0 ", id="a-padded-bare-zero"),
     ],
 )
 def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
-    """The grammar is matched, not merely widened.
+    r"""The grammar is matched, not merely widened.
 
     ``humantime`` takes values with units and nothing else, so a reader
     accepting more would put a number on a configuration nextest fails
@@ -362,7 +367,15 @@ def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
     remainder, so a value finer than a nanosecond is refused rather than
     rounded, and a fraction of a nanosecond is refused outright. Every
     intermediate is also held in a ``u64``, so a value past that range
-    is refused rather than becoming a large float.
+    is refused rather than becoming a large float. The denominator is
+    one of those intermediates: ``humantime`` multiplies it by ten per
+    fractional digit with a checked multiplication, so twenty fractional
+    digits overflow it even when the numerator is zero.
+
+    Digits are ASCII. ``humantime`` matches ``'0'..='9'`` and nothing
+    else, so an Arabic-Indic digit is refused there; a reader whose
+    pattern used Python's ``\d`` would accept it and put a number on a
+    configuration nextest cannot load.
 
     ``" 0 "`` is a refusal rather than an acceptance because
     ``parse_duration``'s zero shortcut compares the untrimmed string:

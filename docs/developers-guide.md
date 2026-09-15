@@ -347,15 +347,18 @@ second point are refused. `0` is the one duration written without a unit, and
 only in that exact form: `parse_duration` compares the untrimmed string, so
 ` 0 ` misses the shortcut and fails as a number with no unit.
 
-The arithmetic is integer, and split into seconds and nanoseconds the way
-`humantime` splits it, because a floating-point reading accepts two classes of
+The arithmetic uses integers, and splits into seconds and nanoseconds the way
+`humantime` splits it because a floating-point reading accepts two classes of
 text the runner refuses. `humantime` divides a fraction into its unit and
-errors on any remainder, so `0.0000000002s` is an error rather than a rounding;
-and every intermediate is held in a `u64`, so an oversized value is refused
-rather than becoming a large float. The split matters too: whole hours, days,
-weeks, months and years are counted in seconds, so a duration of several
-centuries stays in range where a single nanosecond counter would overflow. The
-reading lives in `scripts/tests/nextest_durations.py`. The abbreviations `wk`, `wks`,
+errors on any remainder, so `0.0000000002s` is an error rather than a rounding.
+Every intermediate is held in a `u64`, so an oversized value is refused rather
+than becoming a large float; the denominator is one of those intermediates, so
+twenty fractional digits are refused however small the numerator is. Digits are
+ASCII, `'0'..='9'` and nothing else, so an Arabic-Indic digit is not a number
+there. The split matters too: whole hours, days, weeks, months, and years are
+counted in seconds, so a duration of several centuries stays in range where a
+single nanosecond counter would overflow. The reading lives in
+`scripts/tests/nextest_durations.py`. The abbreviations `wk`, `wks`,
 `yr` and `yrs` and the micro sign in `µs` are accepted alongside the longer
 spellings. A reader taking a single short-unit component would reject `1m 30s`,
 `1day` and `1w`, which nextest loads, and the contract would then fail on a
