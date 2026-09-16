@@ -452,9 +452,9 @@ counted in seconds, so a duration of several centuries stays in range where a
 single nanosecond counter would overflow.
 
 Where the two halves meet is the subtle part, and the reading follows
-`humantime` step for step rather than summing and carrying once at the end.
-The running total is normalized after every whole part and every fraction, so
-a nanosecond part that passes the `u64` ceiling at one addition is refused
+`humantime` step for step rather than summing and carrying once at the end. The
+running total is normalized after every whole part and every fraction, so a
+nanosecond part that passes the `u64` ceiling at one addition is refused
 however short the duration it names, and one that carries cleanly is read:
 `18446744073709551615ns` twice over is thirty-seven seconds and is refused,
 while the same value plus `1ns` is read. The carry itself is in two parts
@@ -467,12 +467,12 @@ a reader made merely stricter to refuse the second gets the first wrong.
 The whole set of inputs this was measured against, and the acceptance gate of
 zero disagreements, is the estate's humantime reader differential rather than
 anything invented here. The reading lives in
-`scripts/tests/nextest_durations.py`. The abbreviations `wk`, `wks`,
-`yr` and `yrs` and the micro sign in `µs` are accepted alongside the longer
-spellings. A reader taking a single short-unit component would reject `1m 30s`,
-`1day` and `1w`, which nextest loads, and the contract would then fail on a
-correct file and name the file rather than the reader. Case is significant, `m`
-being minutes and `M` months. A duration nextest would refuse raises
+`scripts/tests/nextest_durations.py`. The abbreviations `wk`, `wks`, `yr` and
+`yrs` and the micro sign in `µs` are accepted alongside the longer spellings. A
+reader taking a single short-unit component would reject `1m 30s`, `1day` and
+`1w`, which nextest loads, and the contract would then fail on a correct file
+and name the file rather than the reader. Case is significant, `m` being
+minutes and `M` months. A duration nextest would refuse raises
 `NextestConfigurationError`, the error the rest of these readings report faults
 with, rather than tripping an assertion that `python -O` would strip.
 
@@ -489,20 +489,20 @@ appearing without an entry fails the contract too.
 It pins two values as well as ordering them: the 10 m `global-timeout` and the
 65 m job ceiling. Two numbers are involved and they are worth keeping apart.
 
-The **base requirement is 50 minutes**: the 1,800 s watchdog plus the 1,200 s of
-measured work outside its window. That is what the job has to be allowed to
+The **base requirement is 50 minutes**: the 1,800 s watchdog plus the 1,200 s
+of measured work outside its window. That is what the job has to be allowed to
 take.
 
 The **configured ceiling is 65 minutes**: the base requirement plus a 900 s
 margin. The margin is a term of what the contract demands rather than slack
-above it, because a ceiling equal to the base requirement cancels the job at the
-moment the watchdog would have reported the overrun, and the report is the only
-thing that makes an overrun actionable. The ceiling was 60 minutes, which left
-only ten. The ordering holds for a wide range of both values, so on its own it
-would let either drift away from the table above without failing anything. It
-also requires the `global-timeout` to be present rather than skipping when it is
-absent, since a skipped test would let this tier be deleted and leave a
-four-tier contract passing with three.
+above it, because a ceiling equal to the base requirement cancels the job at
+the moment the watchdog would have reported the overrun, and the report is the
+only thing that makes an overrun actionable. The ceiling was 60 minutes, which
+left only ten. The ordering holds for a wide range of both values, so on its
+own it would let either drift away from the table above without failing
+anything. It also requires the `global-timeout` to be present rather than
+skipping when it is absent, since a skipped test would let this tier be deleted
+and leave a four-tier contract passing with three.
 
 The termination allowance it demands between the whole-run budget and the
 watchdog is two terms, not one: the largest `grace-period` the configuration
