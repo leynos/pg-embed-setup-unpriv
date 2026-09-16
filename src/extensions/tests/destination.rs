@@ -76,6 +76,17 @@ fn a_file_holding_other_bytes_is_named_different() {
     );
 }
 
+/// A directory where a file belongs is refused, and the two platforms
+/// refuse it at different steps.
+///
+/// On Unix the open succeeds and the stat reports a directory, so the
+/// outcome is `NotRegular`. On Windows a directory cannot be opened for
+/// reading without backup semantics, which this deliberately does not ask
+/// for, so the refusal arrives from the open itself as `Unreadable`. Both
+/// are correct and both lead to the same rewrite; the case asserts the one
+/// its platform actually produces rather than the weaker "either of these",
+/// which would survive a mutation swapping the two.
+#[cfg(unix)]
 #[rstest]
 fn a_directory_at_the_destination_is_named_not_regular() {
     let (_root, tree, path) = tree();
@@ -86,6 +97,27 @@ fn a_directory_at_the_destination_is_named_not_regular() {
     assert!(
         matches!(found, Destination::NotRegular),
         "something other than a regular file is not a differing file"
+    );
+}
+
+/// The Windows half of the case above.
+#[cfg(windows)]
+#[rstest]
+fn a_directory_at_the_destination_is_refused_by_the_open() {
+    let (_root, tree, path) = tree();
+    std::fs::create_dir(path.join("ext.so")).expect("plant a directory");
+
+    let found = tree.inspect_destination(Utf8Path::new("ext.so"), BYTES);
+
+    assert!(
+        matches!(found, Destination::Unreadable(_)),
+        "a directory cannot be opened for reading here, so the open refuses it"
+    );
+    assert!(
+        found
+            .rewrite_reason()
+            .is_some_and(|reason| reason.starts_with("what is there cannot be read")),
+        "the operator is told the destination could not be read"
     );
 }
 

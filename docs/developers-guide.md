@@ -380,12 +380,15 @@ the embedded tree between `Setup` and `Start`. Its user-facing contract is in
   its mode and ownership repaired; an absent, non-regular or differing
   destination; or one that could not be opened, stated or read. A symlink
   arrives as the last of those, because the open carries `O_NOFOLLOW` and so
-  refuses it rather than following it to a file outside the tree. Only the
-  identical case changes what the writer does, but the outcomes are kept apart
-  rather than collapsed into "not identical": an absent or differing
-  destination is the ordinary course of an install, while an unreadable or
-  non-regular one is a repair the operator should be able to see named, and it
-  is logged at debug with its reason.
+  refuses it rather than following it to a file outside the tree. A directory
+  reaches the non-regular outcome on Unix and the unreadable one on Windows,
+  where it cannot be opened for reading without backup semantics; both refuse
+  it, and the tests assert the outcome each platform actually produces rather
+  than accepting either. Only the identical case changes what the writer does,
+  but the outcomes are kept apart rather than collapsed into "not identical":
+  an absent or differing destination is the ordinary course of an install,
+  while an unreadable or non-regular one is a repair the operator should be
+  able to see named, and it is logged at debug with its reason.
 - `version.rs`: running-version detection from the versioned directory name,
   then `bin/pg_config --version`.
 - `name.rs` and `digest.rs`: validated newtypes and the `HashingWriter`.
