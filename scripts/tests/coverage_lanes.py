@@ -8,6 +8,7 @@ the 400-line limit ``AGENTS.md`` sets.
 import collections.abc as cabc
 import pathlib
 import typing as typ
+from fractions import Fraction
 
 import yaml
 from timeout_budgets import (
@@ -43,10 +44,10 @@ class CoverageJob(typ.NamedTuple):
     steps : int
         How many coverage steps the job runs. Each gets its own watchdog,
         so the job must contain all of their budgets.
-    watchdogs : tuple[float | None, ...]
+    watchdogs : tuple[Fraction | None, ...]
         The watchdog budget in force for each of those steps, in order,
         with None where neither the step nor the job sets one.
-    job_timeout : float or None
+    job_timeout : Fraction or None
         The job's ``timeout-minutes`` in seconds, or None when it
         declares none and so inherits GitHub's six-hour default.
     conditions : tuple[tuple[object, object], ...]
@@ -59,8 +60,8 @@ class CoverageJob(typ.NamedTuple):
     workflow: str
     job: str
     steps: int
-    watchdogs: tuple[float | None, ...]
-    job_timeout: float | None
+    watchdogs: tuple[Fraction | None, ...]
+    job_timeout: Fraction | None
     conditions: tuple[tuple[object, object], ...] = ()
 
     def __str__(self) -> str:
@@ -78,7 +79,7 @@ def _watchdog_of(
     document: dict[str, object],
     job: dict[str, object],
     step: dict[str, object],
-) -> float | None:
+) -> Fraction | None:
     """Return the watchdog budget in force for one step.
 
     All three levels are read, innermost first, as GitHub resolves them.
@@ -97,13 +98,17 @@ def _watchdog_of(
 
     Returns
     -------
-    float or None
-        The budget in seconds, or None when no level sets one.
+    Fraction or None
+        The budget in seconds, exactly, or None when no level sets one.
+        Read as a ``Fraction`` rather than a ``float`` because the
+        ordering contract compares it against sums of nextest budgets
+        that are themselves exact, and one ``float`` in a comparison
+        converts the whole of it back.
     """
     for owner in (step, job, document):
         raw = mapping_or_empty(owner.get("env")).get(WATCHDOG_VARIABLE)
         if raw is not None:
-            return float(str(raw))
+            return Fraction(str(raw))
     return None
 
 
@@ -201,7 +206,7 @@ def _coverage_job(
         job=job_name,
         steps=len(steps),
         watchdogs=tuple(_watchdog_of(document, job, step) for step in steps),
-        job_timeout=None if raw_timeout is None else float(str(raw_timeout)) * 60.0,
+        job_timeout=None if raw_timeout is None else Fraction(str(raw_timeout)) * 60,
         conditions=tuple((step.get("if"), job.get("if")) for step in steps),
     )
 

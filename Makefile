@@ -30,6 +30,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_coverage_shape_contacts.py \
 	scripts/tests/test_release_archive_failures.py \
 	scripts/tests/test_release_workflow_contract.py \
 	scripts/tests/test_workflow_reader.py \
+	scripts/tests/test_timeout_exactness_contract.py \
 	scripts/tests/test_timeout_ordering_contract.py \
 	scripts/tests/test_timeout_reading_contract.py \
 	scripts/tests/test_timeout_reading_properties.py
