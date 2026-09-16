@@ -369,6 +369,10 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
         ),
         pytest.param("\u0661s", id="an-arabic-indic-digit"),
         pytest.param(" 0 ", id="a-padded-bare-zero"),
+        pytest.param("1\x1cs", id="a-file-separator-inside-a-number"),
+        pytest.param("\x1c45m", id="a-file-separator-leading"),
+        pytest.param("45m\x1f", id="a-unit-separator-trailing"),
+        pytest.param("1\x1d0s", id="a-group-separator-between-digits"),
     ],
 )
 def test_a_duration_nextest_would_refuse_is_refused_here(duration: str) -> None:
