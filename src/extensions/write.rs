@@ -4,7 +4,7 @@
 //! Split from `install` so pass one, which validates and decides, reads
 //! separately from pass two, which acts.
 
-use std::{fs, io::Read};
+use std::io::Read;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::fs::File;
@@ -203,9 +203,10 @@ struct Owner {
 /// Reads the uid and gid that own the installation directory.
 #[cfg(unix)]
 fn tree_owner(install_dir: &Utf8Path) -> BootstrapResult<Owner> {
-    // Scoped here: both are used only on this Unix-only path, so importing
-    // them at module level leaves them unused off Unix.
-    use std::os::unix::fs::MetadataExt;
+    // Scoped here: all three are used only on this Unix-only path, so
+    // importing them at module level leaves them unused off Unix, and
+    // `-D warnings` turns an unused import into a Windows build failure.
+    use std::{fs, os::unix::fs::MetadataExt};
 
     use crate::{error::BootstrapErrorKind, extensions::extension_error};
 
