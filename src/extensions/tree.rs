@@ -41,7 +41,11 @@ pub(super) enum Destination {
     Identical(File),
     /// Nothing is at the destination.
     Absent,
-    /// Something is there that is not a regular file.
+    /// Something is there that is not a regular file. A directory reaches
+    /// this on Unix, where it opens and then fails the stat; on Windows it
+    /// cannot be opened for reading without backup semantics, which this
+    /// does not ask for, so it arrives as [`Destination::Unreadable`]
+    /// instead. Either way it is refused and replaced.
     NotRegular,
     /// A regular file holding different bytes.
     Different,
