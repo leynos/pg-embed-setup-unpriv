@@ -356,36 +356,36 @@ the embedded tree between `Setup` and `Start`. Its user-facing contract is in
 
 - `src/extensions/mod.rs`: the public surface (`ExtensionRequest`,
   `InstalledExtension`, `install_extensions`, `install_extensions_async`,
-  `compile_target()`), the per-run span, and the two-phase orchestration:
-  every requested name is selected against the manifest first, then each
-  archive is acquired and installed.
+  `compile_target()`), the per-run span, and the two-phase orchestration: every
+  requested name is selected against the manifest first, then each archive is
+  acquired and installed.
 - `config.rs`: `PG_EXTENSIONS*` to `ExtensionRequest`, and the extension
   cache directory resolution, which mirrors `cache::resolve_cache_dir`.
 - `manifest.rs`: schema-1 types, `Manifest::parse` and `select` (pure), and
-  `load` (a filesystem path, `https://`, or loopback `http://`; size-capped
-  and digest-verified). The digest is mandatory for every URL source,
-  loopback included, and optional for a path.
+  `load` (a filesystem path, `https://`, or loopback `http://`; size-capped and
+  digest-verified). The digest is mandatory for every URL source, loopback
+  included, and optional for a path.
 - `archive.rs`: per-digest cache under `cache::CacheLock`, HTTPS-only
   downloads with a redirect policy that refuses non-HTTPS targets, bounded
   retries for connection failures and 5xx, streaming SHA-256.
 - `install.rs`: the archive is read into memory, re-hashed against the
   manifest digest, validated in full (`classify_entry_path`, the manifest
-  `files` list) and only then written, each file to a temporary sibling that
-  is renamed over the destination, with `0o755`/`0o644` modes and a chown to
-  the tree owner.
+  `files` list) and only then written, each file to a temporary sibling that is
+  renamed over the destination, with `0o755`/`0o644` modes and a chown to the
+  tree owner.
 - `tree.rs` and `write.rs`: the installation tree as one `cap-std` directory
-  handle held until the last rename, and the per-file writer that goes
-  through it. Before writing, `inspect_destination` reports what is already
-  there as one of five outcomes: an identical regular file, which is reused
-  and only has its mode and ownership repaired; an absent, non-regular or
-  differing destination; or one that could not be opened, stated or read. A
-  symlink arrives as the last of those, because the open carries
-  `O_NOFOLLOW` and so refuses it rather than following it to a file outside
-  the tree. Only the identical case changes what the writer does, but the
-  outcomes are kept apart rather than collapsed into "not identical": an
-  absent or differing destination is the ordinary course of an install,
-  while an unreadable or non-regular one is a repair the operator should be
-  able to see named, and it is logged at debug with its reason.
+  handle held until the last rename, and the per-file writer that goes through
+  it. Before writing, `inspect_destination` reports what is already there as
+  one of five outcomes: an identical regular file, which is reused and only has
+  its mode and ownership repaired; an absent, non-regular or differing
+  destination; or one that could not be opened, stated or read. A symlink
+  arrives as the last of those, because the open carries `O_NOFOLLOW` and so
+  refuses it rather than following it to a file outside the tree. Only the
+  identical case changes what the writer does, but the outcomes are kept apart
+  rather than collapsed into "not identical": an absent or differing
+  destination is the ordinary course of an install, while an unreadable or
+  non-regular one is a repair the operator should be able to see named, and it
+  is logged at debug with its reason.
 - `version.rs`: running-version detection from the versioned directory name,
   then `bin/pg_config --version`.
 - `name.rs` and `digest.rs`: validated newtypes and the `HashingWriter`.
@@ -395,27 +395,26 @@ the embedded tree between `Setup` and `Start`. Its user-facing contract is in
 `src/cluster/extension_hook.rs` owns `run_post_setup` (and its async twin).
 `startup.rs` passes a `LifecycleContext` (runtime, environment, and a
 `PostSetup` carrying the binary-cache configuration and hit flag) through
-`run_lifecycle_steps`, which executes `Setup`, the hook, `Start` and the
-port refresh with a dispatcher closure for the root and unprivileged cases.
-The hook first refreshes the installation directory, then populates the
-binary cache on a miss, then installs. Ordering invariants: the binary cache
-sees the pristine Theseus tree, never extension files; extension files exist
-before `Start`; the CLI setup-only path (`startup_setup_only.rs`) runs the
-hook without a `Start`.
+`run_lifecycle_steps`, which executes `Setup`, the hook, `Start` and the port
+refresh with a dispatcher closure for the root and unprivileged cases. The hook
+first refreshes the installation directory, then populates the binary cache on
+a miss, then installs. Ordering invariants: the binary cache sees the pristine
+Theseus tree, never extension files; extension files exist before `Start`; the
+CLI setup-only path (`startup_setup_only.rs`) runs the hook without a `Start`.
 
 ### Compile target
 
-`build.rs` exports Cargo's `TARGET` as `PG_EMBED_TARGET`; `compile_target()`
-is a `const fn` over `env!`, which `tests/ui/pass/extensions_compile_target.rs`
+`build.rs` exports Cargo's `TARGET` as `PG_EMBED_TARGET`; `compile_target()` is
+a `const fn` over `env!`, which `tests/ui/pass/extensions_compile_target.rs`
 proves usable in a const context. Manifest artefacts match on that triple.
 
 ### Tests
 
-Unit tests live under `src/extensions/tests/` with an in-memory archive
-builder that writes hostile names straight into GNU headers, a loopback HTTP
-server with canned response sequences (retries, redirects, 4xx), proptests
-over entry paths and the hashing writer, and end-to-end pipeline tests. The
-lifecycle ordering is asserted in `src/cluster/startup_tests.rs` through the
-root-operation hook. `tests/extensions_install.rs` is the rstest-bdd suite
-and `tests/test_cluster_extensions.rs` loads a probe module (a renamed
-`autoinc`) into a real cluster, synchronously and asynchronously.
+Unit tests live under `src/extensions/tests/` with an in-memory archive builder
+that writes hostile names straight into GNU headers, a loopback HTTP server
+with canned response sequences (retries, redirects, 4xx), proptests over entry
+paths and the hashing writer, and end-to-end pipeline tests. The lifecycle
+ordering is asserted in `src/cluster/startup_tests.rs` through the
+root-operation hook. `tests/extensions_install.rs` is the rstest-bdd suite and
+`tests/test_cluster_extensions.rs` loads a probe module (a renamed `autoinc`)
+into a real cluster, synchronously and asynchronously.
