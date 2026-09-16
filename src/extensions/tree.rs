@@ -65,6 +65,31 @@ impl Destination {
     }
 }
 
+/// Requires an opened destination to be a regular file.
+///
+/// A directory or a device where a file belongs is not a differing file, and
+/// the distinction matters: the rename that follows replaces it, and an
+/// operator should be told that is what happened.
+fn require_regular(file: File) -> Result<File, Destination> {
+    match file.metadata() {
+        Ok(metadata) if metadata.is_file() => Ok(file),
+        Ok(_) => Err(Destination::NotRegular),
+        Err(err) => Err(Destination::Unreadable(err)),
+    }
+}
+
+/// Compares an opened regular file against the planned bytes.
+///
+/// The handle is carried into [`Destination::Identical`] so the mode and
+/// ownership repair acts on the file that was hashed rather than on the path.
+fn compare_digest(file: File, bytes: &[u8]) -> Destination {
+    match Sha256Hex::of_reader(&file) {
+        Ok(digest) if digest == Sha256Hex::of_bytes(bytes) => Destination::Identical(file),
+        Ok(_) => Destination::Different,
+        Err(err) => Destination::Unreadable(err),
+    }
+}
+
 /// A handle on the installation tree, plus its path for operator messages.
 pub(super) struct InstallTree {
     dir: Dir,
@@ -179,28 +204,28 @@ impl InstallTree {
     /// is something planted where a file belongs. Returning `Option` reported
     /// all three as the first.
     pub(super) fn inspect_destination(&self, relative: &Utf8Path, bytes: &[u8]) -> Destination {
-        let file = match self
+        match self.open_destination(relative).and_then(require_regular) {
+            Ok(file) => compare_digest(file, bytes),
+            Err(found) => found,
+        }
+    }
+
+    /// Opens the destination without following a symlink at it.
+    ///
+    /// The error side carries the outcome rather than an error type, so the
+    /// three steps of the inspection compose without any of them having to
+    /// know what the others report.
+    fn open_destination(&self, relative: &Utf8Path) -> Result<File, Destination> {
+        match self
             .dir
             .open_with(relative.as_std_path(), &read_no_follow())
         {
-            Ok(file) => file,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Destination::Absent;
-            }
+            Ok(file) => Ok(file),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(Destination::Absent),
             // A symlink refused by `O_NOFOLLOW` arrives here rather than as a
-            // successful open, under whichever errno the platform uses for it,
-            // so it is reported as unreadable rather than silently ignored.
-            Err(err) => return Destination::Unreadable(err),
-        };
-        match file.metadata() {
-            Ok(metadata) if metadata.is_file() => {}
-            Ok(_) => return Destination::NotRegular,
-            Err(err) => return Destination::Unreadable(err),
-        }
-        match Sha256Hex::of_reader(&file) {
-            Ok(digest) if digest == Sha256Hex::of_bytes(bytes) => Destination::Identical(file),
-            Ok(_) => Destination::Different,
-            Err(err) => Destination::Unreadable(err),
+            // successful open, under whichever errno the platform uses for
+            // it, so it is reported as unreadable rather than ignored.
+            Err(err) => Err(Destination::Unreadable(err)),
         }
     }
 
