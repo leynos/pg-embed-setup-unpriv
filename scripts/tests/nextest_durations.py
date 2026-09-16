@@ -38,6 +38,39 @@ _U64_MAX: typ.Final[int] = 2**64 - 1
 #: Nanoseconds in one second.
 _NANOS_PER_SECOND: typ.Final[int] = 1_000_000_000
 
+#: Whitespace as Rust reads it, spelled as character-class content.
+#:
+#: ``humantime`` skips what ``char::is_whitespace`` accepts, which is the
+#: Unicode ``White_Space`` property. Python's ``\s`` is that same set plus
+#: U+001C to U+001F, the four information separators, which Rust rejects.
+#: Scanning every code point finds those four and nothing else, in either
+#: direction, so subtracting them makes the two sets identical. Spelled
+#: ``\s`` instead, this reader returns one second for ``"1\x1cs"`` while
+#: nextest refuses to load the same configuration. It is written out rather
+#: than as ``[^\S\x1c-\x1f]`` because a class cannot nest inside another,
+#: and the digit classes here need to carry it.
+_SPACE: typ.Final[str] = (
+    r"\t\n\v\f\r \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000"
+)
+
+#: The characters :data:`_SPACE` matches, for trimming the ends.
+_SPACE_CHARS: typ.Final[str] = "".join(
+    chr(code)
+    for code in (
+        *range(0x09, 0x0E),
+        0x20,
+        0x85,
+        0xA0,
+        0x1680,
+        *range(0x2000, 0x200B),
+        0x2028,
+        0x2029,
+        0x202F,
+        0x205F,
+        0x3000,
+    )
+)
+
 #: One value-and-unit component. The fractional part is optional, and
 #: ``humantime`` skips whitespace wherever a digit could go: inside a
 #: number, so ``"1 0s"`` is ten seconds, and around the decimal point,
@@ -48,11 +81,13 @@ _NANOS_PER_SECOND: typ.Final[int] = 1_000_000_000
 #: The digit classes are spelled ``[0-9]`` rather than ``\d`` because
 #: ``humantime`` matches ``'0'..='9'`` and nothing else, while Python's
 #: ``\d`` accepts every Unicode decimal digit: ``\d`` would read an
-#: Arabic-Indic one as a number that nextest then refuses to load.
+#: Arabic-Indic one as a number that nextest then refuses to load. The
+#: whitespace class is spelled out for the mirror-image reason; see
+#: :data:`_SPACE`.
 _COMPONENT: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?P<whole>[0-9][0-9\s]*)"
-    r"(?:\.\s*(?P<fraction>[0-9][0-9\s]*))?"
-    r"(?P<unit>[A-Za-zµ]+)\s*"
+    rf"(?P<whole>[0-9][0-9{_SPACE}]*)"
+    rf"(?:\.[{_SPACE}]*(?P<fraction>[0-9][0-9{_SPACE}]*))?"
+    rf"(?P<unit>[A-Za-zµ]+)[{_SPACE}]*"
 )
 
 #: The one duration ``humantime`` reads without a unit.
@@ -356,7 +391,7 @@ def read(duration: str) -> float:
     """
     if duration == _BARE_ZERO:
         return 0.0
-    text = duration.strip()
+    text = duration.strip(_SPACE_CHARS)
     if not text:
         message = (
             f"unrecognized nextest duration {duration!r}; nextest reads "
