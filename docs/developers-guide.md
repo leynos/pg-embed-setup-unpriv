@@ -183,8 +183,8 @@ archive packager and the workflow contract tests in
    current user's otherwise. macOS and Windows have no per-user root and keep
    the `postgresql_embedded` defaults.
 
-`default_paths_under(root)` is the single place that derives the two leaves,
-so the privileged and portable resolvers cannot drift. Each resolver emits an
+`default_paths_under(root)` is the single place that derives the two leaves, so
+the privileged and portable resolvers cannot drift. Each resolver emits an
 info-level `settings_decision` event with `root_source` (`Override`,
 `PerUserDefault` or `SettingsDefault`), both directories, whether each was
 derived, and the effective `max_connections`, so a bootstrap log shows which
@@ -290,12 +290,12 @@ query has no observable effect beyond its return value. A failure carries its
 bounded label to the caller in a private `PasswordQueryFailure`, and
 `reuse_existing_password` is the single place that emits: the `password_reuse`
 event at warning level with `outcome` set to `probe_failed`, `missing_file`,
-`unreadable_file`, or `empty_file`, before the error is returned. Those four are
-additional bounded values of the tracing field, beyond the three the returned
-enum carries, so the field's full label set has seven values and matches
-`PasswordReuseOutcomeMetric` rather than `PasswordReuseOutcome`. A bootstrap
-that refuses a stale cluster is therefore visible in the log without the caller
-rendering the error, while the query stays free of side effects.
+`unreadable_file`, or `empty_file`, before the error is returned. Those four
+are additional bounded values of the tracing field, beyond the three the
+returned enum carries, so the field's full label set has seven values and
+matches `PasswordReuseOutcomeMetric` rather than `PasswordReuseOutcome`. A
+bootstrap that refuses a stale cluster is therefore visible in the log without
+the caller rendering the error, while the query stays free of side effects.
 
 ### Metrics
 
@@ -311,17 +311,17 @@ return.
 than a string. That is the point of the design: the label set is bounded by
 construction, so no password or path can reach a metric, and the requirement is
 a property of the type rather than something a reviewer has to police.
-`ProbeFailed` and `UnreadableFile` are separate variants even though both map
-to `ClusterPasswordUnreadable`, because the label would otherwise collapse two
+`ProbeFailed` and `UnreadableFile` are separate variants even though both map to
+`ClusterPasswordUnreadable`, because the label would otherwise collapse two
 different operational failures.
 
 `reuse_existing_password` records exactly one count per call, on every branch,
-and the query records none. The tests in `password_tests.rs` under `mod
-metrics` pin all seven outcomes, verify that the query is silent, and assert
-that neither the password nor either directory path appears in a recorded
-metric. They carry
-`#[serial(metrics_recorder)]`, because the recorder is process-wide and two
-tests installing concurrently would collect each other's counts.
+and the query records none. The tests in `password_tests.rs` under
+`mod metrics` pin all seven outcomes, verify that the query is silent, and
+assert that neither the password nor either directory path appears in a
+recorded metric. They carry `#[serial(metrics_recorder)]`, because the recorder
+is process-wide and two tests installing concurrently would collect each
+other's counts.
 
 ### The end-to-end test
 
