@@ -46,38 +46,38 @@ COVERAGE_ACTION: typ.Final[str] = (
 #: any of these four timers. Twenty minutes covers the worst gap seen
 #: with eleven minutes to spare, and none of those runs was genuinely
 #: cold.
-OUTSIDE_WATCHDOG_ALLOWANCE_SECONDS: typ.Final[float] = 20 * 60.0
+OUTSIDE_WATCHDOG_ALLOWANCE_SECONDS: typ.Final[Fraction] = Fraction(20 * 60)
 
 #: What nextest allows a test between `SIGTERM` and `SIGKILL` when the
 #: configuration names no `grace-period`. This one names 5 s, so the
 #: default is a fallback rather than the value in force.
-NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS: typ.Final[float] = 10.0
+NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS: typ.Final[Fraction] = Fraction(10)
 
 #: Added to that grace period to cover the teardown and report writing
 #: that follow it. Kept a separate term rather than folded into a single
 #: floor, so raising the grace period raises the requirement instead of
 #: being absorbed silently.
-TERMINATION_SAFETY_MARGIN_SECONDS: typ.Final[float] = 60.0
+TERMINATION_SAFETY_MARGIN_SECONDS: typ.Final[Fraction] = Fraction(60)
 
 #: Build time inside a `cargo` invocation before nextest starts its own
 #: clock.
-COLD_BUILD_ALLOWANCE_SECONDS: typ.Final[float] = 10 * 60.0
+COLD_BUILD_ALLOWANCE_SECONDS: typ.Final[Fraction] = Fraction(10 * 60)
 
 #: The whole-run budget `.config/nextest.toml` must declare, as
 #: `docs/developers-guide.md` records it. Pinned as well as ordered: the
 #: ordering below holds for a wide range of values and would not notice
 #: the budget drifting away from the guide.
-REQUIRED_GLOBAL_TIMEOUT_SECONDS: typ.Final[float] = 10 * 60.0
+REQUIRED_GLOBAL_TIMEOUT_SECONDS: typ.Final[Fraction] = Fraction(10 * 60)
 
 #: How far a ceiling must sit above the sum it contains, rather than
 #: merely reaching it. A ceiling equal to that sum cancels the job at
 #: the moment the watchdog would have reported the overrun, and the
 #: report is the only thing that makes an overrun actionable.
-CEILING_MARGIN_SECONDS: typ.Final[float] = 15 * 60.0
+CEILING_MARGIN_SECONDS: typ.Final[Fraction] = Fraction(15 * 60)
 
 #: The ceiling every coverage job must carry, likewise from the guide.
 #: The requirement is 50 minutes, and this is that plus the margin.
-REQUIRED_JOB_CEILING_SECONDS: typ.Final[float] = 65 * 60.0
+REQUIRED_JOB_CEILING_SECONDS: typ.Final[Fraction] = Fraction(65 * 60)
 
 
 class TimeoutBudgetError(ValueError):
@@ -174,7 +174,9 @@ def sequence_or_empty(value: object) -> list[object]:
             return []
 
 
-def required_ceiling(budgets: cabc.Sequence[float], allowance: float) -> float:
+def required_ceiling(
+    budgets: cabc.Sequence[Fraction], allowance: Fraction
+) -> Fraction:
     """Return the smallest acceptable ceiling for one job, in seconds.
 
     Three terms. Each coverage step may legitimately spend its whole
@@ -187,17 +189,20 @@ def required_ceiling(budgets: cabc.Sequence[float], allowance: float) -> float:
 
     Parameters
     ----------
-    budgets : cabc.Sequence[float]
+    budgets : cabc.Sequence[Fraction]
         One watchdog budget per coverage step in the job.
-    allowance : float
+    allowance : Fraction
         The measured work outside those windows, in seconds.
 
     Returns
     -------
-    float
-        The smallest acceptable ceiling, in seconds.
+    Fraction
+        The smallest acceptable ceiling, in seconds, exactly. Every term
+        is a ``Fraction`` so that the sum stays exact: a single ``float``
+        among them would convert the whole ceiling back, and the two
+        comparisons that read it are the ones a lost second would pass.
     """
-    return sum(budgets) + allowance + CEILING_MARGIN_SECONDS
+    return sum(budgets, Fraction(0)) + allowance + CEILING_MARGIN_SECONDS
 
 def seconds(duration: str) -> Fraction:
     """Convert a nextest duration to seconds.

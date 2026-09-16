@@ -126,8 +126,8 @@ def _table_budget(path: str, table: dict[str, object]) -> Fraction:
 
     Returns
     -------
-    float
-        The period multiplied by ``terminate-after``.
+    Fraction
+        The period multiplied by ``terminate-after``, exactly.
 
     Raises
     ------
@@ -164,8 +164,8 @@ def _budget_of(path: str, value: object) -> Fraction:
 
     Returns
     -------
-    float
-        The budget in seconds.
+    Fraction
+        The budget in seconds, exactly.
 
     Raises
     ------
@@ -203,9 +203,9 @@ def largest_test_allowance(config_text: str) -> Fraction:
 
     Returns
     -------
-    float
+    Fraction
         The longest per-test budget, period multiplied by
-        ``terminate-after``.
+        ``terminate-after``, exactly.
 
     Raises
     ------
@@ -269,7 +269,7 @@ def grace_period(config_text: str) -> Fraction:
 
     Returns
     -------
-    float
+    Fraction
         The largest configured grace period, or nextest's default.
     """
     periods = [
@@ -297,7 +297,7 @@ def termination_allowance(config_text: str) -> Fraction:
 
     Returns
     -------
-    float
+    Fraction
         The grace period plus the safety margin.
     """
     return grace_period(config_text) + TERMINATION_SAFETY_MARGIN_SECONDS
@@ -319,7 +319,7 @@ def global_timeout(config_text: str) -> Fraction | None:
 
     Returns
     -------
-    float or None
+    Fraction or None
         The whole-run budget in seconds, or None when the default
         profile declares none.
     """

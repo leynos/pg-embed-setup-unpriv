@@ -410,6 +410,21 @@ minutes and `M` months. A duration nextest would refuse raises
 `NextestConfigurationError`, the error the rest of these readings report faults
 with, rather than tripping an assertion that `python -O` would strip.
 
+Exactness has to survive the comparison as well as the reading, and that is a
+separate place to lose it. Every tier comparison is a sum, and each sum mixes a
+duration from `.config/nextest.toml` with a budget read from a workflow and
+with a constant declared in `timeout_budgets`. A sum is only as exact as its
+least exact term: one `float` among them converts the whole of it back, and the
+conversion is silent. So the workflow budgets are read as exact values too, and
+every constant the tiers add is one. Above two to the fifty-third a `float` no
+longer holds every integer second, and two budgets nextest reads as different
+compare equal there, so an ordering that must hold strictly would pass on a
+configuration that violates it.
+`scripts/tests/test_timeout_exactness_contract.py` drives each composition with
+inputs one second apart and far larger than anything this repository will
+configure, which is exactly why the loss cannot be exposed by the real files: a
+contract resting on them would pass with every term a `float`.
+
 The contract also pins the condition each lane carries. A skipped step runs no
 `cargo`, so its watchdog never arms and the tiers say nothing about it:
 `if: false` on the step or on its job would leave a lane that looks bounded and
