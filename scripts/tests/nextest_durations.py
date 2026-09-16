@@ -369,8 +369,11 @@ def read_exact(duration: str) -> Fraction:
 
     Returns
     -------
-    float
-        The duration in seconds.
+    Fraction
+        The duration in seconds, exactly. A ``Fraction`` is returned
+        rather than a ``float`` because the seconds and nanoseconds are
+        accumulated as integers and a float discards that exactness
+        above two to the fifty-third.
 
     Raises
     ------
