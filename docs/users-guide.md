@@ -90,17 +90,17 @@ cargo binstall pg-embed-setup-unpriv
 
    Without `PG_RUNTIME_DIR` and `PG_DATA_DIR` the helper derives both under
    `/var/tmp/pg-embed-{uid}` on Linux and the BSDs, one tree per user that
-   every project on the host shares. Set `PG_EMBED_ROOT` to give a project or
-   a test run its own base (`<root>/install` and `<root>/data`); the two leaf
+   every project on the host shares. Set `PG_EMBED_ROOT` to give a project or a
+   test run its own base (`<root>/install` and `<root>/data`); the two leaf
    variables still win when set. On macOS and Windows there is no per-user
    default tree: without `PG_EMBED_ROOT` the `postgresql_embedded` defaults
    apply, and with it the same two leaves are derived.
 
    Test clusters cap `max_connections` at 20 (a `postgres` container defaults
-   to 100); set `PG_MAX_CONNECTIONS` when parallel test runners need more.
-   The override applies to plain `bootstrap()` runs as well as test
-   bootstraps, and values below 4 are rejected because PostgreSQL keeps three
-   connection slots for superusers below `max_connections`.
+   to 100); set `PG_MAX_CONNECTIONS` when parallel test runners need more. The
+   override applies to plain `bootstrap()` runs as well as test bootstraps, and
+   values below 4 are rejected because PostgreSQL keeps three connection slots
+   for superusers below `max_connections`.
 
    Optionally set `PG_SHUTDOWN_TIMEOUT_SECS` to override the 15-second drop
    budget. The helper accepts values between `1` and `600` seconds and reports
@@ -691,8 +691,8 @@ path replaced after a check cannot redirect the read. A FIFO, a directory, or
 any other non-regular file is refused rather than waited on: the Unix open
 carries `O_NONBLOCK`, so a FIFO with no writer returns at once and is then
 rejected for its type. A file longer than the cap is refused without being
-read. Both refusals return `ClusterPasswordUnreadable`, the error an
-unreadable file returns.
+read. Both refusals return `ClusterPasswordUnreadable`, the error an unreadable
+file returns.
 
 Probing the data directory fails loudly as well. Only a missing `PG_VERSION`
 marker means there is no cluster; a permission error, or any other failure to
@@ -716,9 +716,8 @@ failure branch before the error is returned, labelled `probe_failed`,
 `missing_file`, `unreadable_file`, or `empty_file`. A failure returns an error
 rather than a `PasswordReuseOutcome`, so those four labels appear only in the
 event: the field accepts all seven values, the returned enum carries the three
-successes. No password is ever a label.
-`stored_cluster_password` emits nothing at all: it is a query, so a caller
-that wants the event calls the command.
+successes. No password is ever a label. `stored_cluster_password` emits nothing
+at all: it is a query, so a caller that wants the event calls the command.
 
 The same call records one `Metric::PasswordReuse` count, once per call and
 never from the query. The crate takes no metrics dependency, because a library

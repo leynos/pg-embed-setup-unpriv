@@ -34,6 +34,14 @@ jobs:
           persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+      - name: Install mdtablefix
+        # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
+        # first release with `--check` and `--git`.
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@c5a54701c8603a0fa756a6b34c49bc2af75a6c11
+        with:
+          version: "0.6.0"
+
       - name: Format
         if: ${{ matrix.privilege == 'unprivileged' }}
         run: make check-fmt
@@ -41,12 +49,7 @@ jobs:
         if: ${{ matrix.privilege == 'unprivileged' }}
         uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25
         with:
-          globs: |
-            **/*.md
-            !**/target/**
-            !**/dist/**
-            !**/.uv-cache/**
-            !**/.uv-tools/**
+          globs: '**/*.md'
       - name: Setup uv
         if: ${{ matrix.privilege == 'unprivileged' }}
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990

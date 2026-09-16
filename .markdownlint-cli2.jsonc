@@ -10,5 +10,19 @@
     },
     "MD029": { "style": "ordered" }
   },
-  "ignores": ["**/.venv/**", ".node_modules/**", "**/node_modules/**", "**/.uv-cache/**", "**/target/**", "**/execplans/**"]
+  "ignores": [
+    "**/.venv/**",
+    ".node_modules/**",
+    "**/node_modules/**",
+    "**/.uv-cache/**",
+    "**/target/**",
+    "**/execplans/**",
+    ".vtcode/**",
+    ".terraform/**",
+    ".uv-cache/**",
+    "memories/**",
+    "CRUSH.md",
+    "**/dist/**",
+    "**/.uv-tools/**"
+  ]
 }
