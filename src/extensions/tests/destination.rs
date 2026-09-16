@@ -13,7 +13,7 @@
 //! file, which is precisely the problem.
 
 use camino::{Utf8Path, Utf8PathBuf};
-use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::eyre::{Result, eyre};
 use rstest::rstest;
 
 use super::fixture::temp_root;
@@ -33,8 +33,8 @@ fn tree() -> Result<(tempfile::TempDir, InstallTree, Utf8PathBuf)> {
 }
 
 #[rstest]
-fn an_absent_destination_is_named_absent() -> Result<()> {
-    let (_root, tree, _path) = tree()?;
+fn an_absent_destination_is_named_absent() {
+    let (_root, tree, _path) = tree().expect("arrange the installation tree");
 
     let found = tree.inspect_destination(Utf8Path::new("lib/ext.so"), BYTES);
 
@@ -47,13 +47,12 @@ fn an_absent_destination_is_named_absent() -> Result<()> {
         Some("nothing is there"),
         "the reason reaches the log"
     );
-    Ok(())
 }
 
 #[rstest]
-fn a_matching_file_is_named_identical() -> Result<()> {
-    let (_root, tree, path) = tree()?;
-    std::fs::write(path.join("ext.so"), BYTES).context("plant the identical file")?;
+fn a_matching_file_is_named_identical() {
+    let (_root, tree, path) = tree().expect("arrange the installation tree");
+    std::fs::write(path.join("ext.so"), BYTES).expect("plant the identical file");
 
     let found = tree.inspect_destination(Utf8Path::new("ext.so"), BYTES);
 
@@ -65,13 +64,12 @@ fn a_matching_file_is_named_identical() -> Result<()> {
         found.rewrite_reason().is_none(),
         "nothing is rewritten, so there is no reason to report"
     );
-    Ok(())
 }
 
 #[rstest]
-fn a_file_holding_other_bytes_is_named_different() -> Result<()> {
-    let (_root, tree, path) = tree()?;
-    std::fs::write(path.join("ext.so"), b"an older build").context("plant the stale file")?;
+fn a_file_holding_other_bytes_is_named_different() {
+    let (_root, tree, path) = tree().expect("arrange the installation tree");
+    std::fs::write(path.join("ext.so"), b"an older build").expect("plant the stale file");
 
     let found = tree.inspect_destination(Utf8Path::new("ext.so"), BYTES);
 
@@ -79,7 +77,6 @@ fn a_file_holding_other_bytes_is_named_different() -> Result<()> {
         matches!(found, Destination::Different),
         "a regular file holding other bytes is replaced, and says so"
     );
-    Ok(())
 }
 
 /// A directory where a file belongs is refused, and the two platforms
@@ -94,9 +91,9 @@ fn a_file_holding_other_bytes_is_named_different() -> Result<()> {
 /// which would survive a mutation swapping the two.
 #[cfg(unix)]
 #[rstest]
-fn a_directory_at_the_destination_is_named_not_regular() -> Result<()> {
-    let (_root, tree, path) = tree()?;
-    std::fs::create_dir(path.join("ext.so")).context("plant a directory")?;
+fn a_directory_at_the_destination_is_named_not_regular() {
+    let (_root, tree, path) = tree().expect("arrange the installation tree");
+    std::fs::create_dir(path.join("ext.so")).expect("plant a directory");
 
     let found = tree.inspect_destination(Utf8Path::new("ext.so"), BYTES);
 
@@ -104,15 +101,14 @@ fn a_directory_at_the_destination_is_named_not_regular() -> Result<()> {
         matches!(found, Destination::NotRegular),
         "something other than a regular file is not a differing file"
     );
-    Ok(())
 }
 
 /// The Windows half of the case above.
 #[cfg(windows)]
 #[rstest]
-fn a_directory_at_the_destination_is_refused_by_the_open() -> Result<()> {
-    let (_root, tree, path) = tree()?;
-    std::fs::create_dir(path.join("ext.so")).context("plant a directory")?;
+fn a_directory_at_the_destination_is_refused_by_the_open() {
+    let (_root, tree, path) = tree().expect("arrange the installation tree");
+    std::fs::create_dir(path.join("ext.so")).expect("plant a directory");
 
     let found = tree.inspect_destination(Utf8Path::new("ext.so"), BYTES);
 
@@ -126,7 +122,6 @@ fn a_directory_at_the_destination_is_refused_by_the_open() -> Result<()> {
             .is_some_and(|reason| reason.starts_with("what is there cannot be read")),
         "the operator is told the destination could not be read"
     );
-    Ok(())
 }
 
 /// A symlink at the destination is refused by the open, not followed.
@@ -137,12 +132,12 @@ fn a_directory_at_the_destination_is_refused_by_the_open() -> Result<()> {
 /// the rename that follows replaces the link itself.
 #[cfg(unix)]
 #[rstest]
-fn a_symlinked_destination_is_named_unreadable() -> Result<()> {
-    let (_root, tree, path) = tree()?;
+fn a_symlinked_destination_is_named_unreadable() {
+    let (_root, tree, path) = tree().expect("arrange the installation tree");
     let outside = path.join("elsewhere");
-    std::fs::write(&outside, BYTES).context("write the link's target")?;
+    std::fs::write(&outside, BYTES).expect("write the link's target");
     std::os::unix::fs::symlink(outside.as_std_path(), path.join("ext.so").as_std_path())
-        .context("plant the symlink")?;
+        .expect("plant the symlink");
 
     let found = tree.inspect_destination(Utf8Path::new("ext.so"), BYTES);
 
@@ -156,5 +151,4 @@ fn a_symlinked_destination_is_named_unreadable() -> Result<()> {
             .is_some_and(|reason| reason.starts_with("what is there cannot be read")),
         "the operator is told the destination could not be read"
     );
-    Ok(())
 }
