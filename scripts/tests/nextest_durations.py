@@ -25,6 +25,7 @@ would overflow and refuse it.
 
 import re
 import typing as typ
+from fractions import Fraction
 
 
 class DurationGrammarError(ValueError):
@@ -357,7 +358,7 @@ def _add_current(
     return total_seconds, nanos
 
 
-def read(duration: str) -> float:
+def read_exact(duration: str) -> Fraction:
     """Convert a nextest duration to seconds.
 
     Parameters
@@ -378,19 +379,19 @@ def read(duration: str) -> float:
 
     Examples
     --------
-    >>> read("120s")
-    120.0
-    >>> read("1m 30s")
-    90.0
-    >>> read("1.5m")
-    90.0
-    >>> read("1 0s")
-    10.0
-    >>> read("0")
-    0.0
+    >>> read_exact("120s") == 120
+    True
+    >>> read_exact("1m 30s") == 90
+    True
+    >>> read_exact("1.5m") == 90
+    True
+    >>> read_exact("1 0s") == 10
+    True
+    >>> read_exact("0") == 0
+    True
     """
     if duration == _BARE_ZERO:
-        return 0.0
+        return Fraction(0)
     text = duration.strip(_SPACE_CHARS)
     if not text:
         message = (
@@ -414,4 +415,40 @@ def read(duration: str) -> float:
             total = _add_current(total, contribution, duration)
         position = component.end()
     total_seconds, total_nanos = total
-    return total_seconds + total_nanos / _NANOS_PER_SECOND
+    return Fraction(total_seconds) + Fraction(total_nanos, _NANOS_PER_SECOND)
+
+
+def read(duration: str) -> float:
+    """Read a nextest duration as a float, for display and comparison by eye.
+
+    Prefer :func:`read_exact` wherever the value is compared with another
+    duration. Above two to the fifty-third a float no longer holds every
+    integer second, so two durations nextest reads as different become
+    the same number here: ``"9007199254740993s"`` and
+    ``"9007199254740992s"`` are one apart and indistinguishable as
+    floats, and an ordering that must hold strictly would compare them
+    equal.
+
+    Parameters
+    ----------
+    duration : str
+        The duration text.
+
+    Returns
+    -------
+    float
+        The duration in seconds, rounded to the nearest float.
+
+    Raises
+    ------
+    DurationGrammarError
+        If the text is not a duration ``humantime`` would accept.
+
+    Examples
+    --------
+    >>> read("120s")
+    120.0
+    >>> read("1.5m")
+    90.0
+    """
+    return float(read_exact(duration))

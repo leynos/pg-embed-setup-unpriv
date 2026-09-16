@@ -16,6 +16,8 @@ refused rather than read as a single period.
 import tomllib
 import typing as typ
 
+from fractions import Fraction
+
 from timeout_budgets import (
     NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS,
     TERMINATION_SAFETY_MARGIN_SECONDS,
@@ -112,7 +114,7 @@ def _slow_timeouts(config: dict[str, object]) -> list[tuple[str, object]]:
     ]
 
 
-def _table_budget(path: str, table: dict[str, object]) -> float:
+def _table_budget(path: str, table: dict[str, object]) -> Fraction:
     """Return one ``slow-timeout`` table's per-test budget, in seconds.
 
     Parameters
@@ -147,10 +149,10 @@ def _table_budget(path: str, table: dict[str, object]) -> float:
             f"compare against"
         )
         raise UnboundedTestError(message, field="terminate-after", value=table)
-    return seconds(period) * float(str(multiplier))
+    return seconds(period) * Fraction(str(multiplier))
 
 
-def _budget_of(path: str, value: object) -> float:
+def _budget_of(path: str, value: object) -> Fraction:
     """Return the per-test budget one ``slow-timeout`` value declares.
 
     Parameters
@@ -188,7 +190,7 @@ def _budget_of(path: str, value: object) -> float:
             raise NextestConfigurationError(message, field="slow-timeout", value=value)
 
 
-def largest_test_allowance(config_text: str) -> float:
+def largest_test_allowance(config_text: str) -> Fraction:
     """Return the longest a single test may run, in seconds.
 
     nextest warns once per ``period`` and terminates after
@@ -253,7 +255,7 @@ def bounds_a_single_test(config_text: str, profile: str = "default") -> bool:
     return isinstance(table, dict) and table.get("terminate-after") is not None
 
 
-def grace_period(config_text: str) -> float:
+def grace_period(config_text: str) -> Fraction:
     """Return the longest grace period the configuration names, in seconds.
 
     Read from the configuration rather than fixed, so a profile that
@@ -279,7 +281,7 @@ def grace_period(config_text: str) -> float:
     return max(periods, default=NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS)
 
 
-def termination_allowance(config_text: str) -> float:
+def termination_allowance(config_text: str) -> Fraction:
     """Return the time nextest may take to stop the run, in seconds.
 
     Two terms, not one: what nextest promises a test after ``SIGTERM``,
@@ -301,7 +303,7 @@ def termination_allowance(config_text: str) -> float:
     return grace_period(config_text) + TERMINATION_SAFETY_MARGIN_SECONDS
 
 
-def global_timeout(config_text: str) -> float | None:
+def global_timeout(config_text: str) -> Fraction | None:
     """Return the whole-run budget, or None when none is set.
 
     Read from ``[profile.default]`` alone. nextest's other profiles

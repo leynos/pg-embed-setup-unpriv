@@ -12,8 +12,10 @@ import collections.abc as cabc
 import typing as typ
 from pathlib import Path
 
+from fractions import Fraction
+
 from nextest_durations import DurationGrammarError
-from nextest_durations import read as read_duration
+from nextest_durations import read_exact as read_duration
 
 REPO_ROOT: typ.Final[Path] = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIRECTORY: typ.Final[Path] = REPO_ROOT / ".github" / "workflows"
@@ -197,7 +199,7 @@ def required_ceiling(budgets: cabc.Sequence[float], allowance: float) -> float:
     """
     return sum(budgets) + allowance + CEILING_MARGIN_SECONDS
 
-def seconds(duration: str) -> float:
+def seconds(duration: str) -> Fraction:
     """Convert a nextest duration to seconds.
 
     The grammar and the arithmetic live in ``nextest_durations``, which
@@ -217,22 +219,27 @@ def seconds(duration: str) -> float:
 
     Returns
     -------
-    float
-        The duration in seconds.
+    Fraction
+        The duration in seconds, exactly.
 
     Raises
     ------
     NextestConfigurationError
         If the text is not a duration nextest would accept.
 
+    The value is exact rather than a float. Above two to the fifty-third
+    a float no longer holds every integer second, so two budgets nextest
+    reads as different would compare equal and an ordering that must
+    hold strictly would pass on a configuration that violates it.
+
     Examples
     --------
-    >>> seconds("120s")
-    120.0
-    >>> seconds("1m 30s")
-    90.0
-    >>> seconds("1.5m")
-    90.0
+    >>> seconds("120s") == 120
+    True
+    >>> seconds("1m 30s") == 90
+    True
+    >>> seconds("1.5m") == 90
+    True
     """
     try:
         return read_duration(duration)
