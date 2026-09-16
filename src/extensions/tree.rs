@@ -31,6 +31,40 @@ use crate::{
     extensions::extension_error,
 };
 
+/// What the destination holds, as far as the planned bytes are concerned.
+///
+/// A query's answer, not an error: only [`Destination::Identical`] changes
+/// what the caller does, and the rest are reported apart so the reason a file
+/// is rewritten is available to the log rather than inferred from its absence.
+pub(super) enum Destination {
+    /// A regular file already holding exactly the planned bytes.
+    Identical(File),
+    /// Nothing is at the destination.
+    Absent,
+    /// Something is there that is not a regular file.
+    NotRegular,
+    /// A regular file holding different bytes.
+    Different,
+    /// The destination could not be opened, stated or read. A symlink refused
+    /// by `O_NOFOLLOW` arrives here.
+    Unreadable(std::io::Error),
+}
+
+impl Destination {
+    /// Returns why the destination cannot be reused, for the log.
+    ///
+    /// [`Destination::Identical`] has no reason, because nothing is rewritten.
+    pub(super) fn rewrite_reason(&self) -> Option<String> {
+        match self {
+            Self::Identical(_) => None,
+            Self::Absent => Some("nothing is there".to_owned()),
+            Self::NotRegular => Some("what is there is not a regular file".to_owned()),
+            Self::Different => Some("what is there holds different bytes".to_owned()),
+            Self::Unreadable(err) => Some(format!("what is there cannot be read: {err}")),
+        }
+    }
+}
+
 /// A handle on the installation tree, plus its path for operator messages.
 pub(super) struct InstallTree {
     dir: Dir,
@@ -124,7 +158,7 @@ impl InstallTree {
             .map_err(|err| eyre!("cannot create {}: {err}", self.path_of(parent)))
     }
 
-    /// Opens `relative` when it already holds exactly `bytes`.
+    /// Inspects `relative` against `bytes`, naming what is there.
     ///
     /// The handle is returned so the mode and ownership repair acts on the
     /// file that was hashed rather than on the path. A symlink at the
@@ -135,22 +169,39 @@ impl InstallTree {
     /// refused by the open itself; every platform then requires the opened
     /// handle to report a regular file, which also refuses a directory.
     ///
-    /// `None` covers every other case: a missing, unreadable, non-regular or
-    /// differing destination. The caller writes a fresh file and renames it,
-    /// and that rename replaces the symlink rather than following it.
-    pub(super) fn open_identical_regular_file(
-        &self,
-        relative: &Utf8Path,
-        bytes: &[u8],
-    ) -> Option<File> {
-        let file = self
+    /// Three fallible steps, and each names its own outcome rather than
+    /// collapsing into "not identical". Every outcome but
+    /// [`Destination::Identical`] leads the caller to the same place, a fresh
+    /// file and a rename that replaces whatever was there; but they are not
+    /// the same event. An absent or differing destination is the ordinary
+    /// course of an install, while a destination that cannot be read is a
+    /// fault the operator should see named in the log, and a non-regular one
+    /// is something planted where a file belongs. Returning `Option` reported
+    /// all three as the first.
+    pub(super) fn inspect_destination(&self, relative: &Utf8Path, bytes: &[u8]) -> Destination {
+        let file = match self
             .dir
             .open_with(relative.as_std_path(), &read_no_follow())
-            .ok()?;
-        if !file.metadata().ok()?.is_file() {
-            return None;
+        {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Destination::Absent;
+            }
+            // A symlink refused by `O_NOFOLLOW` arrives here rather than as a
+            // successful open, under whichever errno the platform uses for it,
+            // so it is reported as unreadable rather than silently ignored.
+            Err(err) => return Destination::Unreadable(err),
+        };
+        match file.metadata() {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => return Destination::NotRegular,
+            Err(err) => return Destination::Unreadable(err),
         }
-        (Sha256Hex::of_reader(&file).ok()? == Sha256Hex::of_bytes(bytes)).then_some(file)
+        match Sha256Hex::of_reader(&file) {
+            Ok(digest) if digest == Sha256Hex::of_bytes(bytes) => Destination::Identical(file),
+            Ok(_) => Destination::Different,
+            Err(err) => Destination::Unreadable(err),
+        }
     }
 
     /// Creates a fresh temporary file beside the destination.

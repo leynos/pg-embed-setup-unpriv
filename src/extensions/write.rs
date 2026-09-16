@@ -21,7 +21,7 @@ use super::{
         open_archive,
     },
     layout::classify_entry_path,
-    tree::InstallTree,
+    tree::{Destination, InstallTree},
 };
 use crate::error::BootstrapResult;
 
@@ -139,13 +139,55 @@ fn write_file(context: &WriteContext, plan: &PlannedFile, bytes: &[u8]) -> Resul
     let tree = &context.tree;
     tree.require_real_parents(&plan.relative)?;
     let destination = tree.path_of(&plan.relative);
-    if let Some(existing) = tree.open_identical_regular_file(&plan.relative, bytes) {
-        // Identical bytes keep their inode, but the mode and owner are still
-        // brought into line so a root-owned or 0600 copy does not stop the
-        // server from loading it.
-        set_mode(&existing, &destination, plan.mode)?;
-        return apply_owner(&existing, &destination, context.owner);
+    match tree.inspect_destination(&plan.relative, bytes) {
+        Destination::Identical(existing) => repair_existing(context, plan, &destination, &existing),
+        // Every other outcome is written afresh, and the rename replaces
+        // whatever is there rather than following it. The reason is logged
+        // because the cases are not alike: an absent or differing destination
+        // is the ordinary course of an install, while one that cannot be
+        // read, or that holds something other than a regular file, is worth
+        // an operator seeing named.
+        other => {
+            log_rewrite(&destination, &other);
+            write_afresh(context, plan, bytes)
+        }
     }
+}
+
+/// Records why a destination is being written afresh rather than reused.
+///
+/// Nothing is logged for an identical copy, which is not rewritten. The
+/// reason is a debug record rather than a warning even for an unreadable
+/// destination, because the install repairs it: the rename replaces whatever
+/// is there, and an operator reads this while explaining a repair rather than
+/// while chasing a failure.
+fn log_rewrite(destination: &Utf8Path, found: &Destination) {
+    if let Some(reason) = found.rewrite_reason() {
+        tracing::debug!(%destination, reason, "writing the file afresh");
+    }
+}
+
+/// Brings an identical copy's mode and ownership into line, writing nothing.
+///
+/// The bytes already match, so the file keeps its inode; a root-owned or
+/// `0600` copy left from an earlier run would otherwise stop the server
+/// loading it, and nothing else in the install would correct that.
+fn repair_existing(
+    context: &WriteContext,
+    plan: &PlannedFile,
+    destination: &Utf8Path,
+    existing: &File,
+) -> Result<(), Report> {
+    set_mode(existing, destination, plan.mode)?;
+    apply_owner(existing, destination, context.owner)
+}
+
+/// Writes the planned bytes to a fresh file and renames it into place.
+///
+/// The temporary file is discarded when either step fails, so a partial
+/// write never survives as a stray name beside the destination.
+fn write_afresh(context: &WriteContext, plan: &PlannedFile, bytes: &[u8]) -> Result<(), Report> {
+    let tree = &context.tree;
     tree.create_parents(&plan.relative)?;
     let (temp, temp_relative) = tree.create_temp_beside(&plan.relative)?;
     let placed = fill_temp(context, plan, bytes, &temp)

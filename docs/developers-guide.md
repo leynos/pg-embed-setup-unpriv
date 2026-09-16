@@ -373,6 +373,19 @@ the embedded tree between `Setup` and `Start`. Its user-facing contract is in
   `files` list) and only then written, each file to a temporary sibling that
   is renamed over the destination, with `0o755`/`0o644` modes and a chown to
   the tree owner.
+- `tree.rs` and `write.rs`: the installation tree as one `cap-std` directory
+  handle held until the last rename, and the per-file writer that goes
+  through it. Before writing, `inspect_destination` reports what is already
+  there as one of five outcomes: an identical regular file, which is reused
+  and only has its mode and ownership repaired; an absent, non-regular or
+  differing destination; or one that could not be opened, stated or read. A
+  symlink arrives as the last of those, because the open carries
+  `O_NOFOLLOW` and so refuses it rather than following it to a file outside
+  the tree. Only the identical case changes what the writer does, but the
+  outcomes are kept apart rather than collapsed into "not identical": an
+  absent or differing destination is the ordinary course of an install,
+  while an unreadable or non-regular one is a repair the operator should be
+  able to see named, and it is logged at debug with its reason.
 - `version.rs`: running-version detection from the versioned directory name,
   then `bin/pg_config --version`.
 - `name.rs` and `digest.rs`: validated newtypes and the `HashingWriter`.

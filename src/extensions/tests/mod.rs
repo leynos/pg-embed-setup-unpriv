@@ -2,6 +2,7 @@
 
 mod acquire;
 mod config;
+mod destination;
 mod digest;
 mod fixture;
 mod install;
