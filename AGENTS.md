@@ -229,10 +229,11 @@ project:
 ## Markdown Guidance
 
 - Validate Markdown files using `make markdownlint`. This target also enforces
-  en-GB-oxendict spelling with the pinned Typos release.
-- The spelling configuration `typos.toml` is generated; never edit it by hand.
-  Put narrow repository-specific exceptions in `typos.local.toml`, then run
-  `make spelling-config-write` to regenerate it with the commit-pinned builder.
+  en-GB-oxendict spelling.
+- Enforce spelling with `make spelling`. It regenerates `typos.toml` from the
+  live shared dictionary and the `typos.local.toml` overlay, then checks the
+  tracked Markdown. Never edit the generated file by hand; add narrow
+  repository-specific entries to `typos.local.toml` instead.
 - Quoted APIs and identifiers retain their upstream spelling. Put Markdown
   quotations in backticks or fenced code blocks where practical, and use only
   narrow exact patterns for source-code machine interfaces.

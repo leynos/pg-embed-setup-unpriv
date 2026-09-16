@@ -100,17 +100,17 @@ expose and pass it through.
 
 ## Spelling policy
 
-Run `make spelling` to enforce en-GB-oxendict spelling with Typos 1.48.0 and
-the companion phrase checker. Typos scans tracked Markdown, including hidden
-paths, while the phrase checker scans all tracked UTF-8 text so prohibited
-forms such as `hand-written` cannot hide in source comments or tests.
+Run `make spelling` to enforce en-GB-oxendict spelling. The target invokes the
+pinned shared `typos-config-builder` gate, which regenerates `typos.toml`,
+scans the tracked Markdown with the pinned Typos release, and enforces the
+shared phrase corrections that Typos cannot express.
 
-The tracked `typos.toml` is generated from the shared estate dictionary and the
-narrow repository policy in `typos.local.toml`; never edit the generated file
-by hand. Run `make spelling-config-write` to invoke the exact, commit-pinned
-`typos-config-builder`, refresh the untracked shared-dictionary cache only when
-its authority is newer, and write deterministic output. Run
-`make spelling-config` to verify cache and generated-config drift.
+The tracked `typos.toml` is regenerated on every run from the live shared
+dictionary and the narrow repository policy in `typos.local.toml`; never edit
+the generated file by hand. The gate refreshes the untracked shared-dictionary
+cache only when its authority is newer, and a valid cache remains usable when
+the network is unavailable. Because the dictionary is live, `typos.toml` must
+never be drift checked in continuous integration.
 
 Repository exceptions belong in `typos.local.toml` as narrow exact or full-line
 patterns. Preserve upstream APIs, command-line options, formal terminology and

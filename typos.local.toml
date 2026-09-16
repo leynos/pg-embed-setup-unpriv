@@ -27,6 +27,8 @@ ignore = [
   'system\s+catalog',
   # Act exposes this exact command-line option.
   '(?m)^        "--artifact-server-path",$',
+  # Inline code spans are masked; the shared dictionary does not mask them yet.
+  '`[^`\n]+`',
 ]
 
 [files]
