@@ -11,6 +11,8 @@ driven with controlled configurations.
 
 import pathlib
 
+from fractions import Fraction
+
 import pytest
 from coverage_lanes import WorkflowReadError, load_workflow_documents
 from nextest_budgets import (
@@ -465,3 +467,66 @@ def test_an_unreadable_workflow_is_reported_as_one(
     (tmp_path / name).write_bytes(contents)
     with pytest.raises(WorkflowReadError):
         load_workflow_documents(tmp_path)
+
+
+def test_budgets_beyond_the_exact_float_range_stay_distinguishable() -> None:
+    """Two budgets nextest reads as different must not compare equal here.
+
+    ``read`` returned a float, and above two to the fifty-third a float
+    no longer holds every integer second. ``9007199254740993s`` and
+    ``9007199254740992s`` are one second apart, both inside the ``u64``
+    range ``humantime`` accepts, and the same number once rounded. The
+    ordering tier compares the whole-run budget against the largest
+    per-test allowance directly, so a configuration where the per-test
+    allowance genuinely exceeds the whole run would have compared equal
+    and passed a strict ordering it violates.
+
+    The budgets are exact now. The float collapse is asserted alongside,
+    because it is the thing being avoided rather than an incidental
+    detail, and a reader of this test should not have to take it on
+    trust.
+    """
+    larger = seconds("9007199254740993s")
+    smaller = seconds("9007199254740992s")
+
+    assert larger != smaller, "budgets one second apart must not compare equal"
+    assert larger > smaller, "the larger budget must order above the smaller"
+    assert float(larger) == float(smaller), (
+        "the float collapse this guards against must still be real; if these "
+        "differ, the case no longer exercises what it was written for"
+    )
+
+
+def test_a_fractional_budget_is_exact_rather_than_rounded() -> None:
+    """A budget humantime reads exactly is held exactly, not to a float.
+
+    ``humantime`` refuses a fraction that does not divide into its unit,
+    so every duration it accepts has an exact value in seconds. Holding
+    that value as a float would reintroduce the rounding the grammar
+    went to some trouble to refuse.
+    """
+    assert seconds("0.1s") == Fraction(1, 10), "a tenth of a second is exact"
+    assert seconds("0.1s") * 3 == Fraction(3, 10), (
+        "exact budgets stay exact under the arithmetic the tiers apply"
+    )
+
+
+def test_the_terminate_after_product_is_exact() -> None:
+    """The per-test budget is a product, and the product must stay exact.
+
+    ``largest_test_allowance`` multiplies the period by
+    ``terminate-after``. Done in floating point, a tenth of a second
+    three times over is not three tenths, and the tier that compares
+    this against the whole-run budget inherits the error. The exactness
+    has to survive the multiplication, not only the reading, which is a
+    separate place to lose it and was lost there first.
+    """
+    config_text = _profile('slow-timeout = { period = "0.1s", terminate-after = 3 }')
+
+    assert largest_test_allowance(config_text) == Fraction(3, 10), (
+        "a tenth of a second taken three times is three tenths exactly"
+    )
+    assert float(Fraction(1, 10)) * 3.0 != 0.3, (
+        "the floating-point product this guards against must still be wrong; "
+        "if it is not, the case no longer exercises what it was written for"
+    )
