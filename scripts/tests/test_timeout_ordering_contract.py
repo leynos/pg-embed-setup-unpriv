@@ -145,7 +145,24 @@ def test_the_job_ceiling_contains_every_watchdog_and_the_work_around_them(
     A ceiling merely above one watchdog cancels the job partway through
     the second invocation, and a cancellation discards the log that would
     have explained it.
+
+    The comparison below is strict, as the estate's users' guide states
+    it: "job ceiling > sum of every coverage step's watchdog in that job
+    + measured work outside those steps + a stated margin above that
+    sum", and "the comparison is strict, by a margin stated in the
+    workflow". shared-actions' own `ceiling_is_sufficient` applies it
+    that way, so a non-strict comparison here would be this repository
+    diverging from the rule rather than restating it.
+
+    The margin is asserted positive alongside, because strictness and
+    the margin are two requirements and the strict comparison alone
+    would accept a ceiling one second above the watchdogs.
     """
+    assert CEILING_MARGIN_SECONDS > 0, (
+        "the ceiling requirement must carry a stated margin as a term; "
+        "strictness alone would accept a ceiling one second above the "
+        "watchdogs and the work around them"
+    )
     for job in coverage_jobs:
         budgets = [watchdog for watchdog in job.watchdogs if watchdog is not None]
         assert len(budgets) == job.steps, str(job)
@@ -156,15 +173,15 @@ def test_the_job_ceiling_contains_every_watchdog_and_the_work_around_them(
             f"job with no timeout-minutes; the outermost tier is missing and "
             f"GitHub's six-hour default applies"
         )
-        assert job.job_timeout == pytest.approx(REQUIRED_JOB_CEILING_SECONDS), (
+        assert job.job_timeout == REQUIRED_JOB_CEILING_SECONDS, (
             f"{job} has a ceiling of {job.job_timeout:.0f}s, not the "
             f"{REQUIRED_JOB_CEILING_SECONDS:.0f}s the developers' guide "
             f"states; the derivation below accepts a range, so only this "
             f"pin keeps the guide and the workflows one statement"
         )
-        assert job.job_timeout >= required, (
-            f"{job} has a ceiling of {job.job_timeout:.0f}s, below the "
-            f"{required:.0f}s needed to contain {job.steps} watchdog(s) "
+        assert job.job_timeout > required, (
+            f"{job} has a ceiling of {job.job_timeout:.0f}s, which does not "
+            f"clear the {required:.0f}s needed to contain {job.steps} watchdog(s) "
             f"totalling {sum(budgets):.0f}s, {allowance:.0f}s of measured "
             f"work outside them, and a {CEILING_MARGIN_SECONDS:.0f}s margin "
             f"above that sum; an overrun would be cancelled rather than "
@@ -189,7 +206,7 @@ def test_the_whole_run_budget_is_the_one_the_guide_states(
         "nothing bounds the whole run and the watchdog reports the cargo "
         "invocation rather than the suite"
     )
-    assert whole_run == pytest.approx(REQUIRED_GLOBAL_TIMEOUT_SECONDS), (
+    assert whole_run == REQUIRED_GLOBAL_TIMEOUT_SECONDS, (
         f"the global-timeout is {whole_run:.0f}s, not the "
         f"{REQUIRED_GLOBAL_TIMEOUT_SECONDS:.0f}s the developers' guide "
         f"states; change the guide with it or change it back"
