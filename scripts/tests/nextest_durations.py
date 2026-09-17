@@ -3,7 +3,9 @@
 Split from ``timeout_budgets`` so neither outgrows the 400-line limit
 ``AGENTS.md`` sets, and because this is one self-contained translation:
 the grammar and the arithmetic of ``humantime`` 2.3.0, the version
-``cargo-nextest`` 0.9.122 resolves through ``humantime_serde``.
+``cargo-nextest`` 0.9.122 resolves through ``humantime_serde``. The
+grammar itself lives in ``nextest_duration_grammar``; this module is the
+arithmetic that applies it.
 
 The arithmetic uses integers, and splits into seconds and nanoseconds
 the way ``humantime``'s does because reading a component as a float
@@ -24,131 +26,21 @@ would overflow and refuse it.
 """
 
 import re
-import typing as typ
 from fractions import Fraction
 
-
-class DurationGrammarError(ValueError):
-    """Raised when text is not a duration ``humantime`` would accept."""
-
-
-#: The largest value any intermediate may reach, matching the `u64`
-#: `humantime` does its arithmetic in.
-_U64_MAX: typ.Final[int] = 2**64 - 1
-
-#: Nanoseconds in one second.
-_NANOS_PER_SECOND: typ.Final[int] = 1_000_000_000
-
-#: Whitespace as Rust reads it, spelled as character-class content.
-#:
-#: ``humantime`` skips what ``char::is_whitespace`` accepts, which is the
-#: Unicode ``White_Space`` property. Python's ``\s`` is that same set plus
-#: U+001C to U+001F, the four information separators, which Rust rejects.
-#: Scanning every code point finds those four and nothing else, in either
-#: direction, so subtracting them makes the two sets identical. Spelled
-#: ``\s`` instead, this reader returns one second for ``"1\x1cs"`` while
-#: nextest refuses to load the same configuration. It is written out rather
-#: than as ``[^\S\x1c-\x1f]`` because a class cannot nest inside another,
-#: and the digit classes here need to carry it.
-_SPACE: typ.Final[str] = (
-    r"\t\n\v\f\r \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000"
+from nextest_duration_grammar import (
+    BARE_ZERO,
+    COMPONENT,
+    FRACTION,
+    NANOS_PER_SECOND,
+    SPACE_CHARS,
+    U64_MAX,
+    UNITS,
+    WHOLE,
+    DurationGrammarError,
 )
 
-#: The characters :data:`_SPACE` matches, for trimming the ends.
-_SPACE_CHARS: typ.Final[str] = "".join(
-    chr(code)
-    for code in (
-        *range(0x09, 0x0E),
-        0x20,
-        0x85,
-        0xA0,
-        0x1680,
-        *range(0x2000, 0x200B),
-        0x2028,
-        0x2029,
-        0x202F,
-        0x205F,
-        0x3000,
-    )
-)
-
-#: One value-and-unit component. The fractional part is optional, and
-#: ``humantime`` skips whitespace wherever a digit could go: inside a
-#: number, so ``"1 0s"`` is ten seconds, and around the decimal point,
-#: so ``"1.5m"`` and ``"1 . 5 m"`` are both ninety seconds. A leading
-#: point, a trailing point, a second point, a sign and a digit separator
-#: are all refused there and so are refused here.
-#:
-#: The digit classes are spelled ``[0-9]`` rather than ``\d`` because
-#: ``humantime`` matches ``'0'..='9'`` and nothing else, while Python's
-#: ``\d`` accepts every Unicode decimal digit: ``\d`` would read an
-#: Arabic-Indic one as a number that nextest then refuses to load. The
-#: whitespace class is spelled out for the mirror-image reason; see
-#: :data:`_SPACE`.
-_COMPONENT: typ.Final[re.Pattern[str]] = re.compile(
-    rf"(?P<whole>[0-9][0-9{_SPACE}]*)"
-    rf"(?:\.[{_SPACE}]*(?P<fraction>[0-9][0-9{_SPACE}]*))?"
-    rf"(?P<unit>[A-Za-zµ]+)[{_SPACE}]*"
-)
-
-#: The one duration ``humantime`` reads without a unit.
-#:
-#: ``parse_duration`` opens with ``if s == "0" { return Ok(ZERO) }``,
-#: compared against the untrimmed string. So ``"0"`` is zero and
-#: ``" 0 "`` is not: the special case misses, the parser then finds a
-#: number with no unit after it, and that is ``UnknownUnit``. The
-#: comparison here is against the untrimmed text for the same reason.
-_BARE_ZERO: typ.Final[str] = "0"
-
-#: Every unit spelling ``humantime`` accepts, mapped to a canonical
-#: name. Case is not folded: ``m`` is minutes and ``M`` is months, so
-#: folding would read a thirty-minute budget as a two-and-a-half-year
-#: one.
-_UNITS: typ.Final[dict[str, str]] = {
-    "nanos": "ns", "nsec": "ns", "ns": "ns",
-    "usec": "us", "us": "us", "µs": "us",
-    "millis": "ms", "msec": "ms", "ms": "ms",
-    "seconds": "s", "second": "s", "secs": "s", "sec": "s", "s": "s",
-    "minutes": "m", "minute": "m", "mins": "m", "min": "m", "m": "m",
-    "hours": "h", "hour": "h", "hrs": "h", "hr": "h", "h": "h",
-    "days": "d", "day": "d", "d": "d",
-    "weeks": "w", "week": "w", "wks": "w", "wk": "w", "w": "w",
-    "months": "M", "month": "M", "M": "M",
-    "years": "y", "year": "y", "yrs": "y", "yr": "y", "y": "y",
-}
-
-#: What one whole unit contributes, as (seconds, nanoseconds). Only one
-#: of the pair is ever non-zero, which is how ``humantime`` keeps long
-#: durations in range: a year is 31,557,600 seconds, never 3.15e16
-#: nanoseconds.
-_WHOLE: typ.Final[dict[str, tuple[int, int]]] = {
-    "ns": (0, 1),
-    "us": (0, 1_000),
-    "ms": (0, 1_000_000),
-    "s": (1, 0),
-    "m": (60, 0),
-    "h": (3_600, 0),
-    "d": (86_400, 0),
-    "w": (604_800, 0),
-    "M": (2_630_016, 0),
-    "y": (31_557_600, 0),
-}
-
-#: What a fraction of one unit scales by, and whether the quotient is
-#: seconds or nanoseconds. ``ns`` is absent: ``humantime`` refuses a
-#: fraction of a nanosecond outright rather than rounding it.
-_FRACTION: typ.Final[dict[str, tuple[int, bool]]] = {
-    "us": (1_000, False),
-    "ms": (1_000_000, False),
-    "s": (_NANOS_PER_SECOND, False),
-    "m": (60 * _NANOS_PER_SECOND, False),
-    "h": (3_600, True),
-    "d": (86_400, True),
-    "w": (604_800, True),
-    "M": (2_630_016, True),
-    "y": (31_557_600, True),
-}
-
+__all__ = ["DurationGrammarError", "read_exact"]
 
 def _in_range(value: int, duration: str) -> int:
     """Return `value`, or raise when it leaves the range of a `u64`.
@@ -170,7 +62,7 @@ def _in_range(value: int, duration: str) -> int:
     DurationGrammarError
         If `value` is outside the range `humantime` computes in.
     """
-    if value > _U64_MAX:
+    if value > U64_MAX:
         message = (
             f"nextest duration {duration!r} overflows the range humantime "
             f"computes in; it is not a duration the runner can hold"
@@ -235,7 +127,7 @@ def _fraction_of(unit: str, digits: str, duration: str) -> tuple[int, int]:
     DurationGrammarError
         If the unit takes no fraction, or the division is not exact.
     """
-    scale = _FRACTION.get(unit)
+    scale = FRACTION.get(unit)
     if scale is None:
         message = (
             f"nextest duration {duration!r} names a fraction of a nanosecond, "
@@ -265,7 +157,7 @@ def _component_contributions(
     Parameters
     ----------
     component : re.Match[str]
-        A match of `_COMPONENT`.
+        A match of `COMPONENT`.
     duration : str
         The whole duration, for the message.
 
@@ -281,7 +173,7 @@ def _component_contributions(
         If the unit is unknown, or the value is out of range or finer
         than `humantime` allows.
     """
-    unit = _UNITS.get(component["unit"])
+    unit = UNITS.get(component["unit"])
     if unit is None:
         message = (
             f"nextest duration {duration!r} names the unit "
@@ -290,7 +182,7 @@ def _component_contributions(
         )
         raise DurationGrammarError(message)
     whole = int("".join(component["whole"].split()))
-    per_second, per_nano = _WHOLE[unit]
+    per_second, per_nano = WHOLE[unit]
     contributions = [
         (
             _in_range(whole * per_second, duration),
@@ -346,15 +238,15 @@ def _add_current(
     total_seconds, total_nanos = total
     seconds, nanos = contribution
     nanos = _in_range(total_nanos + nanos, duration)
-    if nanos > _NANOS_PER_SECOND:
-        seconds = _in_range(seconds + nanos // _NANOS_PER_SECOND, duration)
-        nanos %= _NANOS_PER_SECOND
+    if nanos > NANOS_PER_SECOND:
+        seconds = _in_range(seconds + nanos // NANOS_PER_SECOND, duration)
+        nanos %= NANOS_PER_SECOND
     total_seconds = _in_range(total_seconds + seconds, duration)
-    if nanos >= _NANOS_PER_SECOND:
+    if nanos >= NANOS_PER_SECOND:
         total_seconds = _in_range(
-            total_seconds + nanos // _NANOS_PER_SECOND, duration
+            total_seconds + nanos // NANOS_PER_SECOND, duration
         )
-        nanos %= _NANOS_PER_SECOND
+        nanos %= NANOS_PER_SECOND
     return total_seconds, nanos
 
 
@@ -393,9 +285,9 @@ def read_exact(duration: str) -> Fraction:
     >>> read_exact("0") == 0
     True
     """
-    if duration == _BARE_ZERO:
+    if duration == BARE_ZERO:
         return Fraction(0)
-    text = duration.strip(_SPACE_CHARS)
+    text = duration.strip(SPACE_CHARS)
     if not text:
         message = (
             f"unrecognized nextest duration {duration!r}; nextest reads "
@@ -406,7 +298,7 @@ def read_exact(duration: str) -> Fraction:
     total = (0, 0)
     position = 0
     while position < len(text):
-        component = _COMPONENT.match(text, position)
+        component = COMPONENT.match(text, position)
         if component is None:
             message = (
                 f"unrecognized nextest duration {duration!r}; nextest reads "
@@ -418,40 +310,4 @@ def read_exact(duration: str) -> Fraction:
             total = _add_current(total, contribution, duration)
         position = component.end()
     total_seconds, total_nanos = total
-    return Fraction(total_seconds) + Fraction(total_nanos, _NANOS_PER_SECOND)
-
-
-def read(duration: str) -> float:
-    """Read a nextest duration as a float, for display and comparison by eye.
-
-    Prefer :func:`read_exact` wherever the value is compared with another
-    duration. Above two to the fifty-third a float no longer holds every
-    integer second, so two durations nextest reads as different become
-    the same number here: ``"9007199254740993s"`` and
-    ``"9007199254740992s"`` are one apart and indistinguishable as
-    floats, and an ordering that must hold strictly would compare them
-    equal.
-
-    Parameters
-    ----------
-    duration : str
-        The duration text.
-
-    Returns
-    -------
-    float
-        The duration in seconds, rounded to the nearest float.
-
-    Raises
-    ------
-    DurationGrammarError
-        If the text is not a duration ``humantime`` would accept.
-
-    Examples
-    --------
-    >>> read("120s")
-    120.0
-    >>> read("1.5m")
-    90.0
-    """
-    return float(read_exact(duration))
+    return Fraction(total_seconds) + Fraction(total_nanos, NANOS_PER_SECOND)
