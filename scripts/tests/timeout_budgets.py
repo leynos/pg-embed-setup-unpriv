@@ -38,7 +38,7 @@ COVERAGE_ACTION: typ.Final[str] = (
 #:
 #: Measured from the worst of many runs rather than one, and across runs
 #: of every conclusion rather than successful ones only. Across the last
-#: 115 `ci.yml` coverage jobs, 44 successful, 55 failed and 16
+#: 115 `ci.yml` coverage jobs, 44 successful, 55 failed, and 16
 #: cancelled, the widest gap between the coverage step and its job was
 #: 969 s on run 30024924292. Across all 19 `coverage-main.yml` runs it
 #: was 42 s on run 29354687551. No cancelled run came near the ceiling,
@@ -48,9 +48,12 @@ COVERAGE_ACTION: typ.Final[str] = (
 #: cold.
 OUTSIDE_WATCHDOG_ALLOWANCE_SECONDS: typ.Final[Fraction] = Fraction(20 * 60)
 
-#: What nextest allows a test between `SIGTERM` and `SIGKILL` when the
-#: configuration names no `grace-period`. This one names 5 s, so the
-#: default is a fallback rather than the value in force.
+#: What nextest allows a test between `SIGTERM` and `SIGKILL` when a
+#: `slow-timeout` table names no `grace-period`. The default is per
+#: declaration rather than per file: a table omitting the field gets
+#: this, whatever another table names. Every table in this repository's
+#: `.config/nextest.toml` names 5 s, so the value in force here is five
+#: seconds and this is what a new table omitting the field would allow.
 NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS: typ.Final[Fraction] = Fraction(10)
 
 #: Added to that grace period to cover the teardown and report writing
