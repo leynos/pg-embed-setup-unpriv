@@ -199,7 +199,7 @@ mod tests {
     /// The port is zero because no server can listen there: it is the
     /// kernel's request for an ephemeral port, never a stable listening
     /// one. A high fixed port is only probably free, and a developer
-    /// whose own PostgreSQL happened to hold it would have these tests
+    /// whose own `PostgreSQL` happened to hold it would have these tests
     /// connect to it and run `DROP DATABASE test_db` against a real
     /// server. That needs the URL's credentials to be accepted as well,
     /// so it is a narrow local risk rather than a likely one, but the
