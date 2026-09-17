@@ -401,14 +401,18 @@ a reader made merely stricter to refuse the second gets the first wrong.
 The whole set of inputs this was measured against, and the acceptance gate of
 zero disagreements, is the estate's humantime reader differential rather than
 anything invented here. The reading lives in
-`scripts/tests/nextest_durations.py`. The abbreviations `wk`, `wks`, `yr` and
-`yrs` and the micro sign in `µs` are accepted alongside the longer spellings. A
-reader taking a single short-unit component would reject `1m 30s`, `1day` and
-`1w`, which nextest loads, and the contract would then fail on a correct file
-and name the file rather than the reader. Case is significant, `m` being
-minutes and `M` months. A duration nextest would refuse raises
-`NextestConfigurationError`, the error the rest of these readings report faults
-with, rather than tripping an assertion that `python -O` would strip.
+`scripts/tests/nextest_durations.py`, and the unit tables and patterns it
+applies in `scripts/tests/nextest_duration_grammar.py`. The two are apart
+because they are different kinds of statement: one is a transcription of
+`humantime`'s tables, the other the checked arithmetic that applies them. The
+abbreviations `wk`, `wks`, `yr` and `yrs` and the micro sign in `µs` are
+accepted alongside the longer spellings. A reader taking a single short-unit
+component would reject `1m 30s`, `1day` and `1w`, which nextest loads, and the
+contract would then fail on a correct file and name the file rather than the
+reader. Case is significant, `m` being minutes and `M` months. A duration
+nextest would refuse raises `NextestConfigurationError`, the error the rest of
+these readings report faults with, rather than tripping an assertion that
+`python -O` would strip.
 
 Exactness has to survive the comparison as well as the reading, and that is a
 separate place to lose it. Every tier comparison is a sum, and each sum mixes a
