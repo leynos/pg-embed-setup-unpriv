@@ -7,6 +7,16 @@ expose most of the ways they can be: every ``terminate-after`` here is
 one, so a reader that ignored the multiplier entirely would give the
 same answer, and nothing here is commented out. So the readings are
 driven with controlled configurations.
+
+Every expectation is an exact ``Fraction`` compared with ``==`` rather
+than a float compared with ``pytest.approx``. The readings are exact, so
+an approximate expectation asks less of them than they promise, and at
+the ``u64::MAX`` boundary it asks almost nothing. Neighbouring floats
+are 2,048 apart around ``18446744073709551615``, so the nanosecond part
+of that case vanishes on conversion, and ``approx``'s relative tolerance
+of one part in a million admits an error of some eighteen million
+million seconds besides. A boundary-arithmetic regression of any
+plausible size would pass.
 """
 
 import pathlib
@@ -14,7 +24,11 @@ import pathlib
 from fractions import Fraction
 
 import pytest
-from coverage_lanes import WorkflowReadError, load_workflow_documents
+from coverage_lanes import (
+    WorkflowReadError,
+    coverage_jobs_in,
+    load_workflow_documents,
+)
 from nextest_budgets import (
     global_timeout,
     grace_period,
@@ -23,6 +37,7 @@ from nextest_budgets import (
 )
 from timeout_budgets import (
     CEILING_MARGIN_SECONDS,
+    COVERAGE_ACTION,
     NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS,
     TERMINATION_SAFETY_MARGIN_SECONDS,
     NextestConfigurationError,
@@ -30,7 +45,6 @@ from timeout_budgets import (
     required_ceiling,
     seconds,
 )
-
 
 
 def _profile(*lines: str) -> str:
@@ -54,17 +68,17 @@ def _profile(*lines: str) -> str:
     [
         pytest.param(
             _profile('slow-timeout = { period = "180s", terminate-after = 1 }'),
-            180.0,
+            Fraction(180),
             id="a-single-period",
         ),
         pytest.param(
             _profile('slow-timeout = { period = "60s", terminate-after = 5 }'),
-            300.0,
+            Fraction(300),
             id="five-warning-periods",
         ),
         pytest.param(
             _profile('slow-timeout = { period = "2m", terminate-after = 3 }'),
-            360.0,
+            Fraction(360),
             id="minutes-times-three",
         ),
         pytest.param(
@@ -76,7 +90,7 @@ def _profile(*lines: str) -> str:
                 'filter = "binary(=ui)"',
                 'slow-timeout = { period = "60s", terminate-after = 1 }',
             ),
-            60.0,
+            Fraction(60),
             id="the-largest-of-several",
         ),
         pytest.param(
@@ -87,13 +101,13 @@ def _profile(*lines: str) -> str:
                 'filter = "binary(=slow_timeout_probe)"',
                 'slow-timeout = { period = "45s", terminate-after = 1 }',
             ),
-            45.0,
+            Fraction(45),
             id="a-filter-naming-the-key-is-not-a-budget",
         ),
     ],
 )
 def test_the_largest_per_test_allowance_counts_the_multiplier(
-    config_text: str, expected: float
+    config_text: str, expected: Fraction
 ) -> None:
     """``terminate-after`` scales the period; the budget is their product.
 
@@ -103,8 +117,8 @@ def test_the_largest_per_test_allowance_counts_the_multiplier(
     against that file a reading that ignored the multiplier entirely
     would give the same answer, and the test would prove nothing.
     """
-    assert largest_test_allowance(config_text) == pytest.approx(expected), (
-        f"{config_text!r} must yield a {expected:.0f}s largest per-test "
+    assert largest_test_allowance(config_text) == expected, (
+        f"{config_text!r} must yield a {float(expected):.0f}s largest per-test "
         f"allowance; terminate-after scales the period"
     )
 
@@ -150,7 +164,7 @@ def test_a_commented_out_slow_timeout_is_not_a_budget() -> None:
         '# slow-timeout = { period = "30s", terminate-after = 1 }',
         'slow-timeout = { period = "180s", terminate-after = 1 }',
     )
-    assert largest_test_allowance(config_text) == pytest.approx(180.0), (
+    assert largest_test_allowance(config_text) == Fraction(180), (
         "a commented-out slow-timeout was read as a live one"
     )
     with pytest.raises(NextestConfigurationError, match=r"no slow-timeout"):
@@ -171,11 +185,12 @@ def test_a_commented_out_grace_period_is_not_in_force() -> None:
         'grace-period = "30m" }',
         'slow-timeout = { period = "180s", terminate-after = 1, grace-period = "5s" }',
     )
-    assert grace_period(config_text) == pytest.approx(5.0), (
+    assert grace_period(config_text) == Fraction(5), (
         "a commented-out grace period was read as the one in force"
     )
-    assert termination_allowance(config_text) == pytest.approx(
-        5.0 + TERMINATION_SAFETY_MARGIN_SECONDS
+    assert (
+        termination_allowance(config_text)
+        == Fraction(5) + TERMINATION_SAFETY_MARGIN_SECONDS
     )
 
 
@@ -190,7 +205,7 @@ def test_a_commented_out_global_timeout_is_absent() -> None:
     assert global_timeout(_profile('# global-timeout = "10m"')) is None, (
         "a commented-out global-timeout was read as the budget in force"
     )
-    assert global_timeout(_profile('global-timeout = "10m"')) == pytest.approx(600.0)
+    assert global_timeout(_profile('global-timeout = "10m"')) == Fraction(600)
 
 
 def test_the_whole_run_budget_is_read_from_the_default_profile() -> None:
@@ -220,7 +235,7 @@ def test_a_grace_period_is_not_read_as_a_per_test_budget() -> None:
     config_text = _profile(
         'slow-timeout = { period = "30s", terminate-after = 1, grace-period = "30m" }'
     )
-    assert largest_test_allowance(config_text) == pytest.approx(30.0), (
+    assert largest_test_allowance(config_text) == Fraction(30), (
         "the per-test ceiling read a grace period as a slow-timeout"
     )
 
@@ -238,7 +253,7 @@ def test_the_termination_allowance_is_the_grace_period_plus_the_margin() -> None
     unset = termination_allowance(
         _profile('slow-timeout = { period = "30s", terminate-after = 1 }')
     )
-    assert unset == pytest.approx(
+    assert unset == (
         NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS + TERMINATION_SAFETY_MARGIN_SECONDS
     ), "an unset grace period must fall back to nextest's own default"
     configured = termination_allowance(
@@ -247,7 +262,7 @@ def test_the_termination_allowance_is_the_grace_period_plus_the_margin() -> None
             'grace-period = "5s" }'
         )
     )
-    assert configured == pytest.approx(5.0 + TERMINATION_SAFETY_MARGIN_SECONDS), (
+    assert configured == Fraction(5) + TERMINATION_SAFETY_MARGIN_SECONDS, (
         "a grace period below the margin must still raise the allowance; "
         "a maximum over the two terms would have discarded it"
     )
@@ -262,7 +277,7 @@ def test_the_termination_allowance_is_the_grace_period_plus_the_margin() -> None
             'grace-period = "45s" }',
         )
     )
-    assert largest == pytest.approx(45.0 + TERMINATION_SAFETY_MARGIN_SECONDS), (
+    assert largest == Fraction(45) + TERMINATION_SAFETY_MARGIN_SECONDS, (
         "the largest configured grace period governs the allowance"
     )
 
@@ -275,13 +290,15 @@ def test_the_required_ceiling_carries_all_three_terms() -> None:
     Driving the derivation with controlled numbers is what makes the
     missing term visible.
     """
-    assert required_ceiling([1800.0, 2700.0], 1200.0) == pytest.approx(
-        4500.0 + 1200.0 + CEILING_MARGIN_SECONDS
-    ), "two watchdogs, the allowance and the margin are all added"
-    assert required_ceiling([1800.0], 0.0) == pytest.approx(
-        1800.0 + CEILING_MARGIN_SECONDS
+    assert required_ceiling(
+        [Fraction(1800), Fraction(2700)], Fraction(1200)
+    ) == Fraction(4500) + Fraction(1200) + CEILING_MARGIN_SECONDS, (
+        "two watchdogs, the allowance and the margin are all added"
+    )
+    assert required_ceiling([Fraction(1800)], Fraction(0)) == (
+        Fraction(1800) + CEILING_MARGIN_SECONDS
     ), "the margin applies even when nothing runs outside the watchdog"
-    assert required_ceiling([], 0.0) == pytest.approx(CEILING_MARGIN_SECONDS), (
+    assert required_ceiling([], Fraction(0)) == CEILING_MARGIN_SECONDS, (
         "the margin is a term of its own, not a fraction of the others"
     )
 
@@ -289,36 +306,36 @@ def test_the_required_ceiling_carries_all_three_terms() -> None:
 @pytest.mark.parametrize(
     ("duration", "expected"),
     [
-        pytest.param("120s", 120.0, id="one-component"),
-        pytest.param("1m 30s", 90.0, id="two-components-spaced"),
-        pytest.param("1m30s", 90.0, id="two-components-joined"),
-        pytest.param("1h 30m 15s", 5415.0, id="three-components"),
-        pytest.param("1day", 86400.0, id="an-extended-unit"),
-        pytest.param("1w", 604800.0, id="a-week"),
-        pytest.param("15min", 900.0, id="a-long-unit-spelling"),
-        pytest.param("500ms", 0.5, id="milliseconds"),
-        pytest.param("1.5m", 90.0, id="a-fractional-value"),
-        pytest.param("1 . 5 m", 90.0, id="a-fractional-value-spaced"),
-        pytest.param("2wk", 1209600.0, id="an-abbreviated-week"),
-        pytest.param("1yr", 31557600.0, id="an-abbreviated-year"),
-        pytest.param("500\u00b5s", 0.0005, id="the-micro-sign"),
-        pytest.param("1 0s", 10.0, id="whitespace-inside-a-number"),
-        pytest.param("0", 0.0, id="a-bare-zero"),
-        pytest.param("0.5s 0.5s", 1.0, id="two-halves-carry-to-one-second"),
+        pytest.param("120s", Fraction(120), id="one-component"),
+        pytest.param("1m 30s", Fraction(90), id="two-components-spaced"),
+        pytest.param("1m30s", Fraction(90), id="two-components-joined"),
+        pytest.param("1h 30m 15s", Fraction(5415), id="three-components"),
+        pytest.param("1day", Fraction(86400), id="an-extended-unit"),
+        pytest.param("1w", Fraction(604800), id="a-week"),
+        pytest.param("15min", Fraction(900), id="a-long-unit-spelling"),
+        pytest.param("500ms", Fraction(1, 2), id="milliseconds"),
+        pytest.param("1.5m", Fraction(90), id="a-fractional-value"),
+        pytest.param("1 . 5 m", Fraction(90), id="a-fractional-value-spaced"),
+        pytest.param("2wk", Fraction(1209600), id="an-abbreviated-week"),
+        pytest.param("1yr", Fraction(31557600), id="an-abbreviated-year"),
+        pytest.param("500\u00b5s", Fraction(1, 2000), id="the-micro-sign"),
+        pytest.param("1 0s", Fraction(10), id="whitespace-inside-a-number"),
+        pytest.param("0", Fraction(0), id="a-bare-zero"),
+        pytest.param("0.5s 0.5s", Fraction(1), id="two-halves-carry-to-one-second"),
         pytest.param(
             "18446744073709551615s 999999999ns",
-            18446744073709551615.0,
+            Fraction(18446744073709551615) + Fraction(999999999, 1_000_000_000),
             id="one-nanosecond-short-of-the-ceiling",
         ),
         pytest.param(
             "18446744073709551615ns 1ns",
-            18446744073.709551616,
+            Fraction(18446744073709551616, 1_000_000_000),
             id="nanoseconds-normalized-between-components",
         ),
     ],
 )
 def test_the_duration_grammar_matches_the_one_nextest_reads(
-    duration: str, expected: float
+    duration: str, expected: Fraction
 ) -> None:
     """nextest deserializes durations with ``humantime``, not one unit.
 
@@ -337,7 +354,7 @@ def test_the_duration_grammar_matches_the_one_nextest_reads(
     untrimmed string, so the bare form is zero and the padded form is
     not; the refusal list carries ``" 0 "`` for that reason.
     """
-    assert seconds(duration) == pytest.approx(expected), (
+    assert seconds(duration) == expected, (
         f"{duration!r} must read as {expected} seconds"
     )
 
@@ -442,8 +459,8 @@ def test_minutes_and_months_are_told_apart() -> None:
     two-and-a-half-year one, or the reverse, and either reading puts a
     plausible number on the wrong tier.
     """
-    assert seconds("10m") == pytest.approx(600.0), "m is minutes"
-    assert seconds("10M") == pytest.approx(10 * 2630016.0), "M is months"
+    assert seconds("10m") == Fraction(600), "m is minutes"
+    assert seconds("10M") == Fraction(10 * 2630016), "M is months"
 
 
 @pytest.mark.parametrize(
@@ -529,4 +546,82 @@ def test_the_terminate_after_product_is_exact() -> None:
     assert float(Fraction(1, 10)) * 3.0 != 0.3, (
         "the floating-point product this guards against must still be wrong; "
         "if it is not, the case no longer exercises what it was written for"
+    )
+
+
+def test_a_table_omitting_the_grace_period_takes_nextest_s_own_default() -> None:
+    """The default is per ``slow-timeout`` table, not per file.
+
+    ``grace-period`` is a field of the ``slow-timeout`` setting, and
+    nextest fills an omitted field with ten seconds wherever the table
+    appears. A reader that skipped tables without the field would report
+    this file's five seconds while nextest allows an overridden binary
+    ten, and the watchdog floor derived from it would be five seconds
+    short.
+
+    Both orderings are driven, because a reader could also take the
+    first table it saw rather than the largest.
+    """
+    omitted_second = _profile(
+        'slow-timeout = { period = "30s", terminate-after = 1, grace-period = "5s" }',
+        "",
+        "[[profile.default.overrides]]",
+        'filter = "binary(=ui)"',
+        'slow-timeout = { period = "60s", terminate-after = 1 }',
+    )
+    omitted_first = _profile(
+        'slow-timeout = { period = "30s", terminate-after = 1 }',
+        "",
+        "[[profile.default.overrides]]",
+        'filter = "binary(=ui)"',
+        'slow-timeout = { period = "60s", terminate-after = 1, '
+        'grace-period = "5s" }',
+    )
+    for config_text in (omitted_second, omitted_first):
+        assert grace_period(config_text) == NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS, (
+            "a table omitting grace-period allows nextest's ten-second "
+            "default, which is longer than the five seconds the other "
+            "table names"
+        )
+    assert NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS > Fraction(5), (
+        "this case only discriminates while the default exceeds the "
+        "configured five seconds; if it no longer does, the pair no "
+        "longer exercises what it was written for"
+    )
+
+
+def test_a_neighbouring_action_is_not_read_as_a_coverage_lane() -> None:
+    """The coordinate is matched exactly, not by containment.
+
+    A step whose path merely starts with the coverage action's, such as
+    a ``generate-coverage-old`` kept beside it through a migration, is a
+    different action with different steps. Read as a coverage lane it
+    would contribute its own watchdog to the ceiling arithmetic and be
+    required to declare one, so the contract would fail on a workflow
+    that is correct, or pass on the strength of an unrelated step.
+
+    The genuine coordinate is asserted alongside, so a matcher that
+    stopped recognizing coverage lanes altogether fails here rather than
+    turning every assertion above into a vacuous pass.
+    """
+    ref = "@" + "0" * 40
+    documents = {
+        "ci.yml": {
+            "jobs": {
+                "neighbour": {
+                    "timeout-minutes": 66,
+                    "steps": [{"uses": f"{COVERAGE_ACTION}-old{ref}"}],
+                },
+                "coverage": {
+                    "timeout-minutes": 66,
+                    "steps": [{"uses": f"{COVERAGE_ACTION}{ref}"}],
+                },
+            }
+        }
+    }
+
+    jobs = coverage_jobs_in(documents)
+
+    assert [job.job for job in jobs] == ["coverage"], (
+        "only the job using the coverage action itself is a coverage lane"
     )

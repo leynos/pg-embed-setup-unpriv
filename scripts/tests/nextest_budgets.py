@@ -255,12 +255,44 @@ def bounds_a_single_test(config_text: str, profile: str = "default") -> bool:
     return isinstance(table, dict) and table.get("terminate-after") is not None
 
 
+def _grace_period_of(value: object) -> Fraction | None:
+    """Return the grace period one ``slow-timeout`` value puts in force.
+
+    ``grace-period`` is a field of the ``slow-timeout`` setting rather
+    than a setting of its own, and nextest defaults it per declaration:
+    a table that omits it gets ten seconds, not the value some other
+    table names. A reader that skipped such a table would report five
+    seconds for a file whose override actually allows ten.
+
+    Parameters
+    ----------
+    value : object
+        The parsed ``slow-timeout`` value.
+
+    Returns
+    -------
+    Fraction or None
+        The grace period this declaration puts in force, or None when
+        the value is not a table and so declares no termination window.
+    """
+    if not isinstance(value, dict):
+        return None
+    table = typ.cast("dict[str, object]", value)
+    period = table.get("grace-period")
+    if isinstance(period, str):
+        return seconds(period)
+    return NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS
+
+
 def grace_period(config_text: str) -> Fraction:
-    """Return the longest grace period the configuration names, in seconds.
+    """Return the longest grace period the configuration puts in force.
 
     Read from the configuration rather than fixed, so a profile that
-    raised its grace period raises the requirement too. nextest's own
-    default applies only when none is named; this file names 5 s.
+    raised its grace period raises the requirement too. Every
+    ``slow-timeout`` table counts, including one that omits the field:
+    nextest gives that table its own ten-second default rather than
+    another table's value, so a file naming 5 s in one place and nothing
+    in another allows ten seconds, not five.
 
     Parameters
     ----------
@@ -270,13 +302,13 @@ def grace_period(config_text: str) -> Fraction:
     Returns
     -------
     Fraction
-        The largest configured grace period, or nextest's default.
+        The largest grace period in force, or nextest's default when the
+        configuration declares no ``slow-timeout`` table at all.
     """
     periods = [
-        seconds(period)
+        period
         for _, value in _slow_timeouts(_parsed(config_text))
-        if isinstance(value, dict)
-        and isinstance(period := value.get("grace-period"), str)
+        if (period := _grace_period_of(value)) is not None
     ]
     return max(periods, default=NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS)
 

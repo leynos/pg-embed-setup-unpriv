@@ -156,8 +156,35 @@ def load_workflow_documents(
     return documents
 
 
+def _action_coordinate(uses: object) -> str:
+    """Return the action a ``uses`` names, without its ref.
+
+    A `uses` value is a coordinate and a ref joined by the first `@`, and
+    the ref itself may contain one, so the split is on the first rather
+    than the last. A local action path carries no `@` at all and is its
+    own coordinate.
+
+    Parameters
+    ----------
+    uses : object
+        The step's `uses` value, whatever the YAML parser produced.
+
+    Returns
+    -------
+    str
+        The coordinate alone.
+    """
+    return str(uses).partition("@")[0]
+
+
 def _coverage_steps(job: dict[str, object]) -> list[dict[str, object]]:
     """Return the steps in one job that invoke the coverage action.
+
+    The coordinate is compared for equality rather than containment. A
+    substring test also selects a neighbour whose path merely starts
+    with this one, such as a `generate-coverage-old` kept beside it
+    during a migration, and the contract would then read an unrelated
+    action's steps as coverage lanes and assert its watchdogs.
 
     Parameters
     ----------
@@ -170,7 +197,11 @@ def _coverage_steps(job: dict[str, object]) -> list[dict[str, object]]:
         The matching steps, in the order the job runs them.
     """
     steps = [mapping_or_empty(step) for step in sequence_or_empty(job.get("steps"))]
-    return [step for step in steps if COVERAGE_ACTION in str(step.get("uses", ""))]
+    return [
+        step
+        for step in steps
+        if _action_coordinate(step.get("uses", "")) == COVERAGE_ACTION
+    ]
 
 
 def _coverage_job(
