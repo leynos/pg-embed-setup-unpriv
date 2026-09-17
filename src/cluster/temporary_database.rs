@@ -196,7 +196,16 @@ mod tests {
 
     /// An admin URL nothing listens on, with the attempt bounded.
     ///
-    /// Two details, and both are load-bearing on Windows. The host is
+    /// The port is zero because no server can listen there: it is the
+    /// kernel's request for an ephemeral port, never a stable listening
+    /// one. A high fixed port is only probably free, and a developer
+    /// whose own PostgreSQL happened to hold it would have these tests
+    /// connect to it and run `DROP DATABASE test_db` against a real
+    /// server. That needs the URL's credentials to be accepted as well,
+    /// so it is a narrow local risk rather than a likely one, but the
+    /// port costs nothing to make impossible.
+    ///
+    /// Two further details, both load-bearing on Windows. The host is
     /// `127.0.0.1` rather than `localhost`, because the name resolves to
     /// `::1` as well and the client tries the addresses in turn, so a
     /// host that refuses one slowly is waited on before the other is
@@ -208,11 +217,10 @@ mod tests {
     /// then exceeded the profile's 180 s per-test allowance on run
     /// 34274541426, ending the whole Windows lane.
     const UNREACHABLE_ADMIN_URL: &str =
-        "postgresql://user:pass@127.0.0.1:59999/postgres?connect_timeout=2";
+        "postgresql://user:pass@127.0.0.1:0/postgres?connect_timeout=2";
 
     /// The matching database URL. See [`UNREACHABLE_ADMIN_URL`].
-    const UNREACHABLE_DB_URL: &str =
-        "postgresql://user:pass@127.0.0.1:59999/test_db?connect_timeout=2";
+    const UNREACHABLE_DB_URL: &str = "postgresql://user:pass@127.0.0.1:0/test_db?connect_timeout=2";
 
     #[test]
     fn drop_database_returns_error_on_connection_failure() {
