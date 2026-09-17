@@ -337,7 +337,7 @@ they must be ordered lives in the `generate-coverage` README in
 | Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 360 s for two overrides |
 | nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 600 s (10 m)                                    |
 | Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
-| Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 65 m                                            |
+| Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 66 m                                            |
 
 *Table: the timers that can end a run, innermost first.*
 
@@ -390,18 +390,20 @@ needed it.
 duration less its coverage steps, so it is the work the job timer bounds and
 the watchdog does not.*
 
-The sample is the last 115 `ci.yml` coverage jobs, 44 successful, 55 failed and
-16 cancelled, and all 19 runs of `coverage-main.yml`, all successful. The worst
-cancelled job reached 727 s of its 3,600 s budget, so no run in the sample was
-ended by any of these four timers.
+The sample is the last 115 `ci.yml` coverage jobs, 44 successful, 55 failed,
+and 16 cancelled, and all 19 runs of `coverage-main.yml`, all successful. The
+worst cancelled job reached 727 s of its 3,600 s budget, so no run in the
+sample was ended by any of these four timers.
 
 The widest gap is 969 s, so the contract allows 20 minutes, making the
-requirement 50 minutes, and the ceilings are 65: fifteen above it, as the
-estate asks, rather than the ten that 60 gave. That is a rise from the 15
-minutes first written here, which the wider sample showed to be below the worst
-gap already observed. On the pull-request lane most of that gap is the suite's
-own `cargo nextest` step and the Loom models, which run outside the coverage
-step and so outside the watchdog.
+requirement 50 minutes. Fifteen minutes above it is the margin the estate asks
+for, and the estate's comparison is strict rather than inclusive, so the
+ceiling is the next whole minute above that sum: 66 rather than 65, and rather
+than the ten minutes of margin that 60 gave. That is a rise from the 15 minutes
+first written here, which the wider sample showed to be below the worst gap
+already observed. On the pull-request lane most of that gap is the suite's own
+`cargo nextest` step and the Loom models, which run outside the coverage step
+and so outside the watchdog.
 
 None of those runs was genuinely cold. One run is the coldest seen so far, not
 a measurement of the cold case.
@@ -506,22 +508,25 @@ losing or changing a condition has to change this section with it, and a lane
 appearing without an entry fails the contract too.
 
 It pins two values as well as ordering them: the 10 m `global-timeout` and the
-65 m job ceiling. Two numbers are involved and they are worth keeping apart.
+66 m job ceiling. Two numbers are involved and they are worth keeping apart.
 
 The **base requirement is 50 minutes**: the 1,800 s watchdog plus the 1,200 s
 of measured work outside its window. That is what the job has to be allowed to
 take.
 
-The **configured ceiling is 65 minutes**: the base requirement plus a 900 s
-margin. The margin is a term of what the contract demands rather than slack
-above it, because a ceiling equal to the base requirement cancels the job at
-the moment the watchdog would have reported the overrun, and the report is the
-only thing that makes an overrun actionable. The ceiling was 60 minutes, which
-left only ten. The ordering holds for a wide range of both values, so on its
-own it would let either drift away from the table above without failing
-anything. It also requires the `global-timeout` to be present rather than
-skipping when it is absent, since a skipped test would let this tier be deleted
-and leave a four-tier contract passing with three.
+The **configured ceiling is 66 minutes**: the base requirement plus a 900 s
+margin, and then the next whole minute above that sum. The margin is a term of
+what the contract demands rather than slack above it, because a ceiling equal
+to the base requirement cancels the job at the moment the watchdog would have
+reported the overrun, and the report is the only thing that makes an overrun
+actionable. The estate states the comparison as strict as well as margined, and
+`shared-actions`' own `ceiling_is_sufficient` applies it that way, so 65
+minutes would sit exactly on the requirement and fail it. The ceiling was 60
+minutes, which left only ten. The ordering holds for a wide range of both
+values, so on its own it would let either drift away from the table above
+without failing anything. It also requires the `global-timeout` to be present
+rather than skipping when it is absent, since a skipped test would let this
+tier be deleted and leave a four-tier contract passing with three.
 
 The termination allowance it demands between the whole-run budget and the
 watchdog is two terms, not one: the largest `grace-period` the configuration

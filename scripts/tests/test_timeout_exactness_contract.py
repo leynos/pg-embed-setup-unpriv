@@ -85,7 +85,7 @@ def _watchdog_read(watchdog: int) -> Fraction:
     Fraction
         What the reader made of it.
     """
-    (job,) = coverage_jobs_in(_workflow(watchdog, timeout_minutes=65))
+    (job,) = coverage_jobs_in(_workflow(watchdog, timeout_minutes=66))
     (budget,) = job.watchdogs
     assert budget is not None, "the job declares a watchdog at job level"
     return budget
@@ -240,7 +240,7 @@ def test_the_configured_tiers_are_exact_values() -> None:
     assert isinstance(_watchdog_read(1800), Fraction), (
         "a workflow watchdog must arrive exact"
     )
-    assert isinstance(_job_timeout_read(65), Fraction), (
+    assert isinstance(_job_timeout_read(66), Fraction), (
         "a job ceiling must arrive exact through its conversion to seconds"
     )
     assert isinstance(required_ceiling([Fraction(1800)], Fraction(1200)), Fraction), (

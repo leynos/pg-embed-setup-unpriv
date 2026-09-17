@@ -79,8 +79,11 @@ REQUIRED_GLOBAL_TIMEOUT_SECONDS: typ.Final[Fraction] = Fraction(10 * 60)
 CEILING_MARGIN_SECONDS: typ.Final[Fraction] = Fraction(15 * 60)
 
 #: The ceiling every coverage job must carry, likewise from the guide.
-#: The requirement is 50 minutes, and this is that plus the margin.
-REQUIRED_JOB_CEILING_SECONDS: typ.Final[Fraction] = Fraction(65 * 60)
+#: The requirement is 50 minutes, the margin takes it to 65, and the
+#: estate's comparison is strict, so the ceiling is the next whole
+#: minute above that: a ceiling equal to the requirement it contains
+#: cancels the job at the moment the watchdog would have reported.
+REQUIRED_JOB_CEILING_SECONDS: typ.Final[Fraction] = Fraction(66 * 60)
 
 
 class TimeoutBudgetError(ValueError):
