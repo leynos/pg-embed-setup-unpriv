@@ -50,6 +50,10 @@ fn to_settings_roundtrip() -> color_eyre::Result<()> {
         binary_cache_dir: None,
         embed_root: None,
         max_connections: None,
+        extensions: None,
+        extensions_manifest: None,
+        extensions_manifest_sha256: None,
+        extensions_cache_dir: None,
     };
     let settings = cfg.to_settings()?;
     let expected_version = VersionReq::parse("=16.4.0").map_err(|err| eyre!(err))?;

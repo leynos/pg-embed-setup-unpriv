@@ -345,3 +345,89 @@ that second bootstrap chose. Three things about it are deliberate.
   which stage fixtures through `std::fs`. A new test crate that touches those
   modules fails the lint until it is added, which is the point; the policy
   decision stays visible.
+
+## Extension hook
+
+The extension hook installs prebuilt, digest-verified extension archives into
+the embedded tree between `Setup` and `Start`. Its user-facing contract is in
+[`docs/extensions.md`](extensions.md); this section covers the internals.
+
+### Modules
+
+- `src/extensions/mod.rs`: the public surface (`ExtensionRequest`,
+  `InstalledExtension`, `install_extensions`, `install_extensions_async`,
+  `compile_target()`), the per-run span, and the two-phase orchestration: every
+  requested name is selected against the manifest first, then each archive is
+  acquired and installed.
+- `config.rs`: `PG_EXTENSIONS*` to `ExtensionRequest`, and the extension
+  cache directory resolution, which mirrors `cache::resolve_cache_dir`.
+- `manifest/`: four modules, one question each. `mod.rs` holds the schema-1
+  types, `Manifest::parse` and the validation; `select.rs` chooses one artefact
+  for the running server, matching the `PostgreSQL` major **and** minor and the
+  compile target, with no cross-minor fallback; `fetch.rs` is `load` (a
+  filesystem path, `https://`, or loopback `http://`; size-capped and
+  digest-verified); `source.rs` is `ManifestSource` and the redaction its
+  `location()` applies. The digest is mandatory for every URL source, loopback
+  included, and optional for a path.
+- `archive.rs`: per-digest cache under `cache::CacheLock`, downloads to a
+  permitted URL with a redirect policy that refuses any target the same rule
+  would refuse, bounded retries for connection failures and 5xx, streaming
+  SHA-256. Permitted means `https://` anywhere or `http://` to a loopback
+  address, which is the one rule `is_permitted_url`, the GET and the redirect
+  policy all consult; describing the download as HTTPS-only sends a reader
+  looking for a second policy that does not exist. A cache entry is classified
+  without following symlinks, so a link whose target hashes correctly is
+  cleared rather than reused.
+- `install.rs`: the archive is read into memory, re-hashed against the
+  manifest digest, validated in full (`classify_entry_path`, the manifest
+  `files` list) and only then written, each file to a temporary sibling that is
+  renamed over the destination, with `0o755`/`0o644` modes and a chown to the
+  tree owner.
+- `tree.rs` and `write.rs`: the installation tree as one `cap-std` directory
+  handle held until the last rename, and the per-file writer that goes through
+  it. Before writing, `inspect_destination` reports what is already there as
+  one of five outcomes: an identical regular file, which is reused and only has
+  its mode and ownership repaired; an absent, non-regular or differing
+  destination; or one that could not be opened, stated or read. A symlink
+  arrives as the last of those, because the open carries `O_NOFOLLOW` and so
+  refuses it rather than following it to a file outside the tree. A directory
+  reaches the non-regular outcome on Unix and the unreadable one on Windows,
+  where it cannot be opened for reading without backup semantics; both refuse
+  it, and the tests assert the outcome each platform actually produces rather
+  than accepting either. Only the identical case changes what the writer does,
+  but the outcomes are kept apart rather than collapsed into "not identical":
+  an absent or differing destination is the ordinary course of an install,
+  while an unreadable or non-regular one is a repair the operator should be
+  able to see named, and it is logged at debug with its reason.
+- `version.rs`: running-version detection from the versioned directory name,
+  then `bin/pg_config --version`.
+- `name.rs` and `digest.rs`: validated newtypes and the `HashingWriter`.
+
+### Lifecycle seam
+
+`src/cluster/extension_hook.rs` owns `run_post_setup` (and its async twin).
+`startup.rs` passes a `LifecycleContext` (runtime, environment, and a
+`PostSetup` carrying the binary-cache configuration and hit flag) through
+`run_lifecycle_steps`, which executes `Setup`, the hook, `Start` and the port
+refresh with a dispatcher closure for the root and unprivileged cases. The hook
+first refreshes the installation directory, then populates the binary cache on
+a miss, then installs. Ordering invariants: the binary cache sees the pristine
+Theseus tree, never extension files; extension files exist before `Start`; the
+CLI setup-only path (`startup_setup_only.rs`) runs the hook without a `Start`.
+
+### Compile target
+
+`build.rs` exports Cargo's `TARGET` as `PG_EMBED_TARGET`; `compile_target()` is
+a `const fn` over `env!`, which `tests/ui/pass/extensions_compile_target.rs`
+proves usable in a const context. Manifest artefacts match on that triple.
+
+### Tests
+
+Unit tests live under `src/extensions/tests/` with an in-memory archive builder
+that writes hostile names straight into GNU headers, a loopback HTTP server
+with canned response sequences (retries, redirects, 4xx), proptests over entry
+paths and the hashing writer, and end-to-end pipeline tests. The lifecycle
+ordering is asserted in `src/cluster/startup_tests.rs` through the
+root-operation hook. `tests/extensions_install.rs` is the rstest-bdd suite and
+`tests/test_cluster_extensions.rs` loads a probe module (a renamed `autoinc`)
+into a real cluster, synchronously and asynchronously.
