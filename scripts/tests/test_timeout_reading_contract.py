@@ -590,6 +590,38 @@ def test_a_table_omitting_the_grace_period_takes_nextest_s_own_default() -> None
     )
 
 
+def test_a_non_string_grace_period_is_refused_rather_than_defaulted() -> None:
+    """A present-but-invalid field is not an absent one.
+
+    nextest reads ``grace-period`` through ``humantime_serde``, which
+    takes a duration string, so ``grace-period = 10`` makes the whole
+    configuration unloadable. Folding that into the ten-second default
+    would have this reader report a budget for a file no run can use,
+    and the ordering contract would pass on it.
+
+    The two shapes are driven together because only the pair separates
+    the states: the omitting table must still take the default, or the
+    refusal could have been a reader that stopped reading the field.
+    """
+    invalid = _profile(
+        'slow-timeout = { period = "30s", terminate-after = 1, grace-period = 10 }'
+    )
+    with pytest.raises(NextestConfigurationError) as caught:
+        grace_period(invalid)
+    assert caught.value.field == "grace-period", (
+        "the refusal must name the field that is wrong"
+    )
+    assert caught.value.value == 10, (
+        "the refusal must carry the value it refused"
+    )
+
+    omitted = _profile('slow-timeout = { period = "30s", terminate-after = 1 }')
+    assert grace_period(omitted) == NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS, (
+        "an omitted grace-period is still nextest's own default; only a "
+        "present non-string is a configuration error"
+    )
+
+
 def test_a_neighbouring_action_is_not_read_as_a_coverage_lane() -> None:
     """The coordinate is matched exactly, not by containment.
 
