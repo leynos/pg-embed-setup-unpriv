@@ -255,7 +255,7 @@ def bounds_a_single_test(config_text: str, profile: str = "default") -> bool:
     return isinstance(table, dict) and table.get("terminate-after") is not None
 
 
-def _grace_period_of(value: object) -> Fraction | None:
+def _grace_period_of(path: str, value: object) -> Fraction | None:
     """Return the grace period one ``slow-timeout`` value puts in force.
 
     ``grace-period`` is a field of the ``slow-timeout`` setting rather
@@ -264,8 +264,17 @@ def _grace_period_of(value: object) -> Fraction | None:
     table names. A reader that skipped such a table would report five
     seconds for a file whose override actually allows ten.
 
+    Absent and present-but-not-a-string are different states. nextest
+    deserializes the field through ``humantime_serde``, which takes a
+    string, so ``grace-period = 10`` is a configuration error there and
+    the file does not load at all. Folding that into the default would
+    let this reader report a budget for a configuration no run could
+    use.
+
     Parameters
     ----------
+    path : str
+        The dotted path of the declaring table, for the message.
     value : object
         The parsed ``slow-timeout`` value.
 
@@ -274,14 +283,29 @@ def _grace_period_of(value: object) -> Fraction | None:
     Fraction or None
         The grace period this declaration puts in force, or None when
         the value is not a table and so declares no termination window.
+
+    Raises
+    ------
+    NextestConfigurationError
+        If ``grace-period`` is present and is not a duration string.
     """
     if not isinstance(value, dict):
         return None
     table = typ.cast("dict[str, object]", value)
-    period = table.get("grace-period")
-    if isinstance(period, str):
-        return seconds(period)
-    return NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS
+    match table:
+        case {"grace-period": str() as period}:
+            return seconds(period)
+        case {"grace-period": invalid}:
+            message = (
+                f"{path}.slow-timeout.grace-period is not a duration string: "
+                f"{invalid!r}; nextest reads the field through humantime and "
+                f"refuses the configuration"
+            )
+            raise NextestConfigurationError(
+                message, field="grace-period", value=invalid
+            )
+        case _:
+            return NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS
 
 
 def grace_period(config_text: str) -> Fraction:
@@ -304,11 +328,17 @@ def grace_period(config_text: str) -> Fraction:
     Fraction
         The largest grace period in force, or nextest's default when the
         configuration declares no ``slow-timeout`` table at all.
+
+    Raises
+    ------
+    NextestConfigurationError
+        If a ``slow-timeout`` table names a ``grace-period`` that is not
+        a duration string, which nextest itself refuses to load.
     """
     periods = [
         period
-        for _, value in _slow_timeouts(_parsed(config_text))
-        if (period := _grace_period_of(value)) is not None
+        for path, value in _slow_timeouts(_parsed(config_text))
+        if (period := _grace_period_of(path, value)) is not None
     ]
     return max(periods, default=NEXTEST_DEFAULT_GRACE_PERIOD_SECONDS)
 
