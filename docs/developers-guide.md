@@ -260,6 +260,233 @@ termination and Job Object assignment decisions against a reused-descendant-PID
 case. The serial lock tests cover missing, partial, malformed, and stale owner
 states around the grace window.
 
+## Test timeouts: four tiers, outermost last
+
+Four independent timers can end a test run, and the canonical statement of how
+they must be ordered lives in the `generate-coverage` README in
+[`leynos/shared-actions`][shared-actions-coverage]. All four are set here.
+
+| Tier                     | What it bounds                     | Where it is set                               | Current value                                   |
+| ------------------------ | ---------------------------------- | --------------------------------------------- | ----------------------------------------------- |
+| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 360 s for two overrides |
+| nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 600 s (10 m)                                    |
+| Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
+| Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 66 m                                            |
+
+*Table: the timers that can end a run, innermost first.*
+
+### The outermost tier was missing
+
+Neither coverage job declared `timeout-minutes` before this was written, so
+both inherited GitHub's six-hour default. The three inner tiers were correctly
+ordered, which is what made the gap easy to miss: nothing was wrong until
+something hung outside `cargo`, and then nothing would have stopped it for six
+hours.
+
+### The clocks do not start together
+
+Comparing the configured numbers is not enough because the timers start at
+different moments and cover different work.
+
+The watchdog starts when `cargo` starts, so it covers the build as well as the
+test run, while nextest's global timeout starts only once tests begin. A
+watchdog merely larger than the global timeout still pre-empts it whenever the
+build takes longer than the difference. Here the difference is 1,200 s, which
+is ample for this crate's build.
+
+Hitting the global timeout does not stop the run instantly either. nextest
+signals the process group and waits `slow-timeout.grace-period`, five seconds
+here, before killing it; on Windows termination is immediate and the grace
+period is ignored for timeouts. That allowance is seconds rather than minutes,
+but it is not zero, and the contract reads it from the configuration so a
+profile that raised it raises the requirement too.
+
+The job timer starts when the job starts, before the checkout and the toolchain
+setup, and it is still running through the plain `cargo nextest` step and the
+Loom models that follow coverage. So a ceiling merely above the watchdog still
+cancels the job before the watchdog can report an overrun, and a cancellation
+discards the log that would have explained it.
+
+### What the ceiling is sized against
+
+The watchdog plus the work outside its window, measured from the worst of many
+runs rather than one. Runs of every conclusion are read, not only successful
+ones: a run cancelled at its ceiling is the very case the sizing exists to
+prevent, so excluding it would size the ceiling against the runs that never
+needed it.
+
+| Lane                                  | Worst coverage step | Worst whole job | Widest gap | Run         |
+| ------------------------------------- | ------------------- | --------------- | ---------- | ----------- |
+| `ci.yml` `build-test`                 | 343 s               | 1,312 s         | 969 s      | 30024924292 |
+| `coverage-main.yml` `coverage-upload` | 303 s               | 353 s           | 42 s       | 29354687551 |
+
+*Table: measured coverage-step and whole-job durations. The gap is the job's
+duration less its coverage steps, so it is the work the job timer bounds and
+the watchdog does not.*
+
+The sample is the last 115 `ci.yml` coverage jobs, 44 successful, 55 failed,
+and 16 cancelled, and all 19 runs of `coverage-main.yml`, all successful. The
+worst cancelled job reached 727 s of its 3,600 s budget, so no run in the
+sample was ended by any of these four timers.
+
+The widest gap is 969 s, so the contract allows 20 minutes, making the
+requirement 50 minutes. Fifteen minutes above it is the margin the estate asks
+for, and the estate's comparison is strict rather than inclusive, so the
+ceiling is the next whole minute above that sum: 66 rather than 65, and rather
+than the ten minutes of margin that 60 gave. That is a rise from the 15 minutes
+first written here, which the wider sample showed to be below the worst gap
+already observed. On the pull-request lane most of that gap is the suite's own
+`cargo nextest` step and the Loom models, which run outside the coverage step
+and so outside the watchdog.
+
+None of those runs was genuinely cold. One run is the coldest seen so far, not
+a measurement of the cold case.
+
+### The contract
+
+`scripts/tests/test_timeout_ordering_contract.py`, run by `make test-scripts`,
+asserts the ordering by value over every job invoking the coverage action, in
+both the `.yml` and `.yaml` extensions. It reads the watchdog from the step,
+then the job, then the workflow, as GitHub resolves it, and it fails on a
+coverage-invoking job that declares no ceiling at all. The readings it rests on
+live in `scripts/tests/timeout_budgets.py`, `nextest_budgets.py` and
+`coverage_lanes.py`, and are exercised on their own in
+`test_timeout_reading_contract.py`.
+
+The nextest configuration is parsed as TOML rather than matched as text. A text
+match finds a `slow-timeout` inside a comment, inside a `filter` string, or in
+a table nextest never consults. The commented-out `global-timeout` is the case
+that matters most: a scraping reader would go on reporting a tier that had been
+switched off, and the four-tier contract would pass with three.
+
+`terminate-after` is optional, and a `slow-timeout` without it marks a test
+slow and never stops it, so the reading refuses that form rather than reporting
+one period as the budget. Every table in `.config/nextest.toml` sets it
+explicitly.
+
+Durations are read with the grammar `humantime` accepts, which is what nextest
+deserializes them with. A duration is a sequence of values each carrying a
+unit, written `180s`, `1m 30s` or `1m30s`, with the long unit spellings. The
+grammar was read from `humantime` 2.3.0, the version nextest resolves through
+`humantime_serde`, rather than assumed. A value may carry a fractional part,
+and whitespace is skipped wherever a digit could go: `1 0s` is ten seconds, and
+`1.5m` and `1 . 5 m` are both ninety. A leading point, a trailing point and a
+second point are refused. `0` is the one duration written without a unit, and
+only in that exact form: `parse_duration` compares the untrimmed string, so
+` 0 ` misses the shortcut and fails as a number with no unit.
+
+The arithmetic uses integers, and splits into seconds and nanoseconds the way
+`humantime` splits it because a floating-point reading accepts two classes of
+text the runner refuses. `humantime` divides a fraction into its unit and
+errors on any remainder, so `0.0000000002s` is an error rather than a rounding.
+Every intermediate is held in a `u64`, so an oversized value is refused rather
+than becoming a large float; the denominator is one of those intermediates, so
+twenty fractional digits are refused however small the numerator is. Digits are
+ASCII, `'0'..='9'` and nothing else, so an Arabic-Indic digit is not a number
+there. The split matters too: whole hours, days, weeks, months, and years are
+counted in seconds, so a duration of several centuries stays in range where a
+single nanosecond counter would overflow.
+
+Where the two halves meet is the subtle part, and the reading follows
+`humantime` step for step rather than summing and carrying once at the end. The
+running total is normalized after every whole part and every fraction, so a
+nanosecond part that passes the `u64` ceiling at one addition is refused
+however short the duration it names, and one that carries cleanly is read:
+`18446744073709551615ns` twice over is thirty-seven seconds and is refused,
+while the same value plus `1ns` is read. The carry itself is in two parts
+because `humantime`'s is. Its own normalization runs only when the nanosecond
+part is above one second, so a part of exactly one second reaches the duration
+constructor, which carries it and aborts if that carry overflows. That is why
+`0.5s 0.5s` is one second while `18446744073709551615s 500ms 500ms` is refused;
+a reader made merely stricter to refuse the second gets the first wrong.
+
+The whole set of inputs this was measured against, and the acceptance gate of
+zero disagreements, is the estate's humantime reader differential rather than
+anything invented here. The reading lives in
+`scripts/tests/nextest_durations.py`, and the unit tables and patterns it
+applies in `scripts/tests/nextest_duration_grammar.py`. The two are apart
+because they are different kinds of statement: one is a transcription of
+`humantime`'s tables, the other the checked arithmetic that applies them. The
+abbreviations `wk`, `wks`, `yr` and `yrs` and the micro sign in `µs` are
+accepted alongside the longer spellings. A reader taking a single short-unit
+component would reject `1m 30s`, `1day` and `1w`, which nextest loads, and the
+contract would then fail on a correct file and name the file rather than the
+reader. Case is significant, `m` being minutes and `M` months. A duration
+nextest would refuse raises `NextestConfigurationError`, the error the rest of
+these readings report faults with, rather than tripping an assertion that
+`python -O` would strip.
+
+Exactness has to survive the comparison as well as the reading, and that is a
+separate place to lose it. Every tier comparison is a sum, and each sum mixes a
+duration from `.config/nextest.toml` with a budget read from a workflow and
+with a constant declared in `timeout_budgets`. A sum is only as exact as its
+least exact term: one `float` among them converts the whole of it back, and the
+conversion is silent. So the workflow budgets are read as exact values too, and
+every constant the tiers add is one. Above two to the fifty-third a `float` no
+longer holds every integer second, and two budgets nextest reads as different
+compare equal there, so an ordering that must hold strictly would pass on a
+configuration that violates it.
+`scripts/tests/test_timeout_exactness_contract.py` drives each composition with
+inputs one second apart and far larger than anything this repository will
+configure, which is exactly why the loss cannot be exposed by the real files: a
+contract resting on them would pass with every term a `float`.
+
+The contract also pins the condition each lane carries. A skipped step runs no
+`cargo`, so its watchdog never arms and the tiers say nothing about it:
+`if: false` on the step or on its job would leave a lane that looks bounded and
+is not. The conditions are pinned rather than forbidden, because the one here
+is legitimate: `ci.yml` runs the coverage step on the unprivileged leg of a
+matrix that also runs as root, and only that leg measures coverage.
+`coverage-main.yml` runs on the trunk and carries no condition. A lane gaining,
+losing or changing a condition has to change this section with it, and a lane
+appearing without an entry fails the contract too.
+
+It pins two values as well as ordering them: the 10 m `global-timeout` and the
+66 m job ceiling. Two numbers are involved and they are worth keeping apart.
+
+The **base requirement is 50 minutes**: the 1,800 s watchdog plus the 1,200 s
+of measured work outside its window. That is what the job has to be allowed to
+take.
+
+The **configured ceiling is 66 minutes**: the base requirement plus a 900 s
+margin, and then the next whole minute above that sum. The margin is a term of
+what the contract demands rather than slack above it, because a ceiling equal
+to the base requirement cancels the job at the moment the watchdog would have
+reported the overrun, and the report is the only thing that makes an overrun
+actionable. The estate states the comparison as strict as well as margined, and
+`shared-actions`' own `ceiling_is_sufficient` applies it that way, so 65
+minutes would sit exactly on the requirement and fail it. The ceiling was 60
+minutes, which left only ten. The ordering holds for a wide range of both
+values, so on its own it would let either drift away from the table above
+without failing anything. It also requires the `global-timeout` to be present
+rather than skipping when it is absent, since a skipped test would let this
+tier be deleted and leave a four-tier contract passing with three.
+
+The termination allowance it demands between the whole-run budget and the
+watchdog is two terms, not one: the largest `grace-period` the configuration
+sets, five seconds here, plus a fixed 60-second safety margin. A grace period
+is what nextest promises a test after `SIGTERM`; the margin covers the process
+teardown and report writing that follow it. Folding them into a single floor
+would make raising the grace period from five seconds to thirty look free,
+since both would vanish below the margin.
+
+Two readings it makes explicit because both are easy to get wrong and neither
+is exercised by this repository's own values:
+
+- The per-test budget is `period` multiplied by `terminate-after`. Every
+  multiplier here is one, so a reading that ignored it entirely would give the
+  same answer against this file. The assertion is therefore driven with
+  controlled configurations rather than this one.
+- `period` and `grace-period` sit in the same inline table, so a matcher
+  reading the first as a substring would take a grace period for a per-test
+  budget whenever it were the larger.
+
+`cross-platform-tests` and `binstall-packaging` also declare no ceiling. They
+invoke no coverage step, so they are outside this contract, and bounding them
+is separate work.
+
+[shared-actions-coverage]: https://github.com/leynos/shared-actions/blob/main/.github/actions/generate-coverage/README.md
+
 ## Further reading
 
 - `tests/e2e_postgresql_embedded_diesel.rs` – example of combining the helper
