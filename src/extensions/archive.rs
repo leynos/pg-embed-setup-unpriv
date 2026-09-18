@@ -125,8 +125,15 @@ pub(super) enum CachedState {
 /// Every outcome other than [`CachedState::Valid`] leads to a re-download,
 /// which is the cache's self-healing path. A download that cannot then write
 /// reports its own error, so an unreadable entry is never silently swallowed.
+///
+/// The metadata call does not follow symlinks. `std::fs::metadata` does, so a
+/// symlink pointing at bytes that happen to hash correctly would classify as
+/// [`CachedState::Valid`], the caller would skip clearing it, and the cache
+/// would hand back an entry resolving outside the cache directory. The digest
+/// is checked again on read, so this was never an integrity bypass; it was a
+/// regular-file contract this function states and did not enforce.
 pub(super) fn cached_state(path: &Utf8Path, expected: &Sha256Hex) -> CachedState {
-    match std::fs::metadata(path) {
+    match std::fs::symlink_metadata(path) {
         Ok(meta) if meta.is_file() => {}
         Ok(_) => {
             return CachedState::Unreadable(std::io::Error::other(

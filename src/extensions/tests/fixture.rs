@@ -234,7 +234,17 @@ impl CannedResponse {
 }
 
 /// Serves the canned responses to successive HTTP requests on a loopback port
-/// and returns the URL to fetch. Requests beyond the list get `500`.
+/// and returns the URL to fetch.
+///
+/// The thread stops once the queue is exhausted, after serving one diagnostic
+/// `500` so a test that requests more than it queued fails with a readable
+/// status rather than a connection refusal. It previously looped forever,
+/// leaving a detached thread blocked in `accept` and a bound port held for the
+/// rest of the process: with one such server per case that is a leak the suite
+/// grows into, and nothing would have said so.
+///
+/// The retry case still gets both of its responses, because the stop happens
+/// after the queue empties rather than after the first response.
 pub(super) fn serve_sequence(responses: Vec<CannedResponse>) -> Result<String> {
     let listener = TcpListener::bind("127.0.0.1:0").context("bind loopback")?;
     let port = listener.local_addr().context("local addr")?.port();
@@ -248,9 +258,10 @@ pub(super) fn serve_sequence(responses: Vec<CannedResponse>) -> Result<String> {
             if stream.read(&mut request).is_err() {
                 return;
             }
-            let response = queue
-                .next()
-                .unwrap_or_else(|| CannedResponse::status("500 Internal Server Error"));
+            let (response, last) = queue.next().map_or_else(
+                || (CannedResponse::status("500 Internal Server Error"), true),
+                |queued| (queued, false),
+            );
             let header_lines = response
                 .headers
                 .iter()
@@ -268,7 +279,7 @@ pub(super) fn serve_sequence(responses: Vec<CannedResponse>) -> Result<String> {
                 .write_all(head.as_bytes())
                 .and_then(|()| stream.write_all(&response.body))
                 .and_then(|()| stream.flush());
-            if served.is_err() {
+            if served.is_err() || last {
                 return;
             }
         }

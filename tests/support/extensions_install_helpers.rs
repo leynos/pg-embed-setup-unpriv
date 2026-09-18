@@ -180,7 +180,23 @@ impl ExtensionWorld {
             .iter()
             .any(|(name, _)| self.install_dir.join(name).exists())
     }
+
+    /// Returns whether the escaping archive's destination exists.
+    ///
+    /// The escaping entry is `lib/../bin/evil`, which normalizes to `bin/evil`
+    /// *inside* the installation tree rather than outside it, so the sandbox
+    /// boundary is not what keeps it from being written; the archive
+    /// validator is. Checking only the three legitimate fixture paths would
+    /// therefore pass whether or not the hostile entry landed, which is the
+    /// one thing that scenario exists to establish.
+    #[must_use]
+    pub fn tree_has_escape_destination(&self) -> bool {
+        self.install_dir.join(ESCAPE_DESTINATION).exists()
+    }
 }
+
+/// Where `lib/../bin/evil` would land if the validator let it through.
+pub const ESCAPE_DESTINATION: &str = "bin/evil";
 
 /// Builds the fixture gzip tar, optionally adding an entry that escapes `lib/`.
 ///
@@ -193,7 +209,7 @@ pub fn fixture_archive(with_escape: bool) -> Result<Vec<u8>> {
         append_raw(&mut builder, name, body)?;
     }
     if with_escape {
-        append_raw(&mut builder, "lib/../bin/evil", b"x")?;
+        append_raw(&mut builder, concat!("lib/../", "bin/evil"), b"x")?;
     }
     let encoder = builder.into_inner().context("finish tar")?;
     encoder.finish().context("finish gzip")

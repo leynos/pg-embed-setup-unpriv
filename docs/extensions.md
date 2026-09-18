@@ -36,14 +36,23 @@ export PG_EXTENSIONS_MANIFEST="https://github.com/leynos/df12-pg-extensions/rele
 export PG_EXTENSIONS_MANIFEST_SHA256="<digest from manifest.json.sha256>"
 ```
 
-Matching is on the PostgreSQL major and the compile target triple
-(`PG_EMBED_TARGET`, exported by `build.rs`), never the minor: a module built
-for one major loads into every minor of that major, because the server's
-`Pg_magic_func` block checks the major and the layout constants only, and an
-archive built before 16.5 was measured loading into Theseus 16.15. The
-`postgresql` field of an artefact records the exact Theseus release it was
-built against as information. So `PG_VERSION_REQ` may pin a major (`^17`)
-rather than an exact release.
+Matching is on the PostgreSQL major **and minor** together with the compile
+target triple (`PG_EMBED_TARGET`, exported by `build.rs`). Theseus's third
+component is a build number rather than a PostgreSQL release, so it is not
+compared.
+
+Selection is deliberately narrower than loading. A module built for one major
+would load into every minor of that major, because the server's `Pg_magic_func`
+block checks the major and the layout constants only. The manifest nonetheless
+pins one digest per name, version and target, so accepting a neighbouring minor
+would install bytes the consumer's pinned manifest digest does not describe for
+the server actually running, and the exactness of that chain is the point of
+the hook. There is no cross-minor fallback; it is out of scope and would be an
+explicit opt-in.
+
+So `PG_VERSION_REQ` and the manifest have to agree on the minor: pinning `^17`
+while the manifest offers only 17.10 fails closed when the resolved server is
+17.11.
 
 ## Manifest schema
 
@@ -136,7 +145,7 @@ Table: Extension error kinds.
 
 | `BootstrapErrorKind`              | Trigger                                                                                             |
 | --------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `ExtensionConfigInvalid`          | Names declared without a manifest, an HTTPS manifest without a digest, a malformed name or digest   |
+| `ExtensionConfigInvalid`          | Names declared without a manifest, a URL manifest without a digest, a malformed name or digest      |
 | `ExtensionManifestUnavailable`    | The manifest path is missing or the URL cannot be fetched                                           |
 | `ExtensionManifestDigestMismatch` | The manifest bytes do not hash to `PG_EXTENSIONS_MANIFEST_SHA256`                                   |
 | `ExtensionManifestInvalid`        | Invalid JSON, wrong `schema_version`, missing field, malformed digest or version                    |

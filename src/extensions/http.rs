@@ -102,7 +102,7 @@ fn build_client() -> Result<reqwest::blocking::Client, Report> {
         } else if is_permitted(attempt.url()) {
             attempt.follow()
         } else {
-            attempt.error("redirect to a non-HTTPS URL is not permitted")
+            attempt.error("redirect to a URL that is not permitted")
         }
     });
     reqwest::blocking::Client::builder()
@@ -112,7 +112,14 @@ fn build_client() -> Result<reqwest::blocking::Client, Report> {
         .map_err(|err| eyre!("cannot build HTTP client: {err}"))
 }
 
-/// Performs a bounded HTTPS GET, streaming the body into `writer`.
+/// Performs a bounded GET against a permitted URL, streaming the body into
+/// `writer`.
+///
+/// Permitted means what [`is_permitted`] means: `https://` anywhere, and
+/// `http://` only to a loopback address. The wording matters because the
+/// predicate, this GET and the redirect policy all consult the same rule, and
+/// describing any of them as HTTPS-only sends a reader looking for a second
+/// policy that does not exist.
 ///
 /// Reads at most `cap + 1` bytes so a caller can detect an oversized body by
 /// comparing what it received against `cap`. Connection failures and 5xx

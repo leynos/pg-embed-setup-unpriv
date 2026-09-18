@@ -173,7 +173,9 @@ meanings are unchanged. See the failure table in
   it) so the shared binary cache never contains extension files; the cache
   layout and keys are unchanged.
 - Failures are fail-closed: an unresolvable name, an unmatched PostgreSQL
-  major, an unmatched target, a digest mismatch or an invalid archive stops the
-  bootstrap before the server starts and nothing is compiled.
+  major **or minor**, an unmatched target, a digest mismatch or an invalid
+  archive stops the bootstrap before the server starts and nothing is compiled.
+  A manifest offering 17.10 while the resolved server is 17.11 is an unmatched
+  minor and fails; there is no cross-minor fallback.
 - The crate now depends on `reqwest` (blocking, native TLS), `tar` and
   `flate2`.

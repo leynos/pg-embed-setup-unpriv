@@ -93,12 +93,20 @@ fn package_probe(install_dir: &Utf8Path, out_dir: &Utf8Path) -> Result<(Utf8Path
     let module = std::fs::read(install_dir.join("lib").join(&module_name))
         .with_context(|| format!("read {module_name} from the Theseus tree"))?;
     let control = format!(
-        "comment = 'df12 probe'\ndefault_version = '1.0'\nmodule_pathname = \
-         '$libdir/{PROBE}'\nrelocatable = true\n"
+        concat!(
+            "comment = 'df12 probe'\n",
+            "default_version = '1.0'\n",
+            "module_pathname = '$libdir/{PROBE}'\n",
+            "relocatable = true\n",
+        ),
+        PROBE = PROBE,
     );
     let sql = format!(
-        "CREATE FUNCTION {PROBE}_autoinc() RETURNS trigger AS 'MODULE_PATHNAME', 'autoinc' \
-         LANGUAGE C;\n"
+        concat!(
+            "CREATE FUNCTION {PROBE}_autoinc() RETURNS trigger ",
+            "AS 'MODULE_PATHNAME', 'autoinc' LANGUAGE C;\n",
+        ),
+        PROBE = PROBE,
     );
     let probe_module = format!("lib/{PROBE}.{MODULE_SUFFIX}");
     let entries: [(&str, &[u8]); 3] = [
