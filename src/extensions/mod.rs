@@ -73,6 +73,7 @@ pub use self::{
         Manifest,
         ManifestArtifact,
         ManifestExtension,
+        ManifestSource,
         ManifestSourceInfo,
         SUPPORTED_SCHEMA_VERSION,
         Selection,
@@ -84,39 +85,6 @@ use crate::error::{BootstrapError, BootstrapErrorKind, BootstrapResult};
 
 /// Observability target for extension installation events.
 pub(crate) const LOG_TARGET: &str = "pg_embed::extensions";
-
-/// Where the manifest comes from and how it is verified.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ManifestSource {
-    /// Fetched over HTTPS; the digest is mandatory so the pin is complete.
-    Url {
-        /// The `https://` URL of `manifest.json`.
-        url: String,
-        /// Expected SHA-256 of the manifest bytes.
-        sha256: Sha256Hex,
-    },
-    /// Read from the filesystem; a local manifest is trusted like local source,
-    /// so the digest is optional.
-    Path {
-        /// Path of `manifest.json`.
-        path: Utf8PathBuf,
-        /// Expected SHA-256 of the manifest bytes, when pinned.
-        sha256: Option<Sha256Hex>,
-    },
-}
-
-impl ManifestSource {
-    /// Renders the location for error messages and logs.
-    #[must_use]
-    pub fn location(&self) -> String {
-        match self {
-            // Redacted: this is used in log fields and error messages, and a
-            // consumer's URL can carry userinfo or a signed query parameter.
-            Self::Url { url, .. } => http::redact_url(url),
-            Self::Path { path, .. } => path.to_string(),
-        }
-    }
-}
 
 /// A validated declaration of which extensions to install and from where.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +126,20 @@ pub struct InstalledExtension {
 }
 
 /// The compile target of this crate, matching Theseus asset names.
+///
+/// Baked in by `build.rs` as `PG_EMBED_TARGET`, so it names the target this
+/// binary was built for rather than the host it runs on. It is one of the
+/// three artefact match keys, beside the `PostgreSQL` major and minor.
+///
+/// # Examples
+///
+/// ```
+/// use pg_embedded_setup_unpriv::extensions::compile_target;
+///
+/// let target = compile_target();
+/// assert!(!target.is_empty(), "the target triple is always known");
+/// assert_eq!(target.split('-').count() >= 3, true, "{target} is a triple");
+/// ```
 #[must_use]
 pub const fn compile_target() -> &'static str { env!("PG_EMBED_TARGET") }
 
@@ -170,10 +152,15 @@ pub(crate) const fn extension_error(kind: BootstrapErrorKind, report: Report) ->
 ///
 /// `install_dir` is the versioned `PostgreSQL` root (the directory holding
 /// `bin/`, `lib/` and `share/`). The manifest is fetched and verified, one
-/// artefact is selected per name for the running `PostgreSQL` major and the
-/// compile target (the minor is not a match key), each archive is verified against the manifest
-/// digest, and its files are validated in full before any file is written. Re-installing
-/// an archive that is already in place is a reporting no-op.
+/// artefact is selected per name for the running `PostgreSQL` major *and*
+/// minor and the compile target, each archive is verified against the manifest
+/// digest, and its files are validated in full before any file is written.
+/// Re-installing an archive that is already in place is a reporting no-op.
+///
+/// Both version components are match keys. There is no cross-minor fallback:
+/// the manifest pins one digest per name, version and target, so a
+/// neighbouring minor would install bytes the pinned digest does not describe
+/// for the running server.
 ///
 /// Every requested name is resolved against the manifest before any archive
 /// is acquired or written, so an unknown name or an unmatched version fails
@@ -239,10 +226,34 @@ pub fn install_extensions(
 /// Async form of [`install_extensions`] that runs the work on the Tokio
 /// blocking pool.
 ///
+/// The work is the same blocking install; only the caller's context differs.
+/// It takes owned arguments because the closure outlives the call.
+///
 /// # Errors
 ///
 /// Returns the same errors as [`install_extensions`], plus
 /// `ExtensionInstallFailed` when the blocking task cannot be joined.
+///
+/// # Examples
+///
+/// ```no_run
+/// use camino::Utf8PathBuf;
+/// use pg_embedded_setup_unpriv::{
+///     PgEnvCfg,
+///     extensions::{ExtensionRequest, install_extensions_async},
+/// };
+///
+/// # async fn run() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+/// let cfg = PgEnvCfg::load()?;
+/// if let Some(request) = ExtensionRequest::from_config(&cfg)? {
+///     let installed =
+///         install_extensions_async(request, Utf8PathBuf::from("/var/tmp/pg/install/17.11.0"))
+///             .await?;
+///     println!("installed {} extensions", installed.len());
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub async fn install_extensions_async(
     request: ExtensionRequest,
     install_dir: Utf8PathBuf,

@@ -427,13 +427,23 @@ the embedded tree between `Setup` and `Start`. Its user-facing contract is in
   acquired and installed.
 - `config.rs`: `PG_EXTENSIONS*` to `ExtensionRequest`, and the extension
   cache directory resolution, which mirrors `cache::resolve_cache_dir`.
-- `manifest.rs`: schema-1 types, `Manifest::parse` and `select` (pure), and
-  `load` (a filesystem path, `https://`, or loopback `http://`; size-capped and
-  digest-verified). The digest is mandatory for every URL source, loopback
+- `manifest/`: four modules, one question each. `mod.rs` holds the schema-1
+  types, `Manifest::parse` and the validation; `select.rs` chooses one artefact
+  for the running server, matching the `PostgreSQL` major **and** minor and the
+  compile target, with no cross-minor fallback; `fetch.rs` is `load` (a
+  filesystem path, `https://`, or loopback `http://`; size-capped and
+  digest-verified); `source.rs` is `ManifestSource` and the redaction its
+  `location()` applies. The digest is mandatory for every URL source, loopback
   included, and optional for a path.
-- `archive.rs`: per-digest cache under `cache::CacheLock`, HTTPS-only
-  downloads with a redirect policy that refuses non-HTTPS targets, bounded
-  retries for connection failures and 5xx, streaming SHA-256.
+- `archive.rs`: per-digest cache under `cache::CacheLock`, downloads to a
+  permitted URL with a redirect policy that refuses any target the same rule
+  would refuse, bounded retries for connection failures and 5xx, streaming
+  SHA-256. Permitted means `https://` anywhere or `http://` to a loopback
+  address, which is the one rule `is_permitted_url`, the GET and the redirect
+  policy all consult; describing the download as HTTPS-only sends a reader
+  looking for a second policy that does not exist. A cache entry is classified
+  without following symlinks, so a link whose target hashes correctly is
+  cleared rather than reused.
 - `install.rs`: the archive is read into memory, re-hashed against the
   manifest digest, validated in full (`classify_entry_path`, the manifest
   `files` list) and only then written, each file to a temporary sibling that is

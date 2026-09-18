@@ -1,4 +1,4 @@
-.PHONY: help all clean test test-loom test-scripts build release \
+.PHONY: help all clean test test-doc test-loom test-scripts build release \
 	release-archive lint fmt \
 	check-fmt markdownlint nixie spelling typecheck
 
@@ -86,9 +86,15 @@ clean: ## Remove build artefacts
 	$(CARGO) clean
 	rm -rf "$(DIST_DIR)" .uv-cache .uv-tools
 
-test: ## Run tests with warnings treated as errors
+test: test-doc ## Run tests with warnings treated as errors
 	RUSTFLAGS="-D warnings" $(CARGO) nextest run --all-targets --all-features $(BUILD_JOBS)
 	RUSTFLAGS="-D warnings" $(CARGO) nextest run --tests --workspace --no-default-features --features dev-worker $(BUILD_JOBS)
+
+# nextest cannot run documentation examples, so `make test` above never
+# compiled one: every `# Examples` block in this crate was unchecked prose
+# until this target existed.
+test-doc: ## Run the documentation examples
+	RUSTFLAGS="-D warnings" $(CARGO) test --doc --all-features $(BUILD_JOBS)
 
 test-loom: ## Run Loom concurrency tests
 	$(CARGO) test --features "loom-tests" --lib -- --ignored

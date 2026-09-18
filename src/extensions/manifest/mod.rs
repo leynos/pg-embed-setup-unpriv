@@ -1,23 +1,25 @@
-//! Manifest loading, verification, validation and artefact selection.
+//! Manifest schema, validation, acquisition and artefact selection.
 //!
 //! The manifest is published by `df12-pg-extensions` alongside the archives it
 //! describes. Every archive digest lives in the manifest, so pinning the
 //! manifest digest pins the archives transitively.
 
-use std::io::Read;
-
 use color_eyre::eyre::{Report, eyre};
 use postgresql_embedded::Version;
 use serde::Deserialize;
 
-use super::{
-    ExtensionName,
-    ManifestSource,
-    Sha256Hex,
-    extension_error,
-    http::{http_get, is_permitted_url},
-};
+use super::{ExtensionName, Sha256Hex, extension_error, http::is_permitted_url};
 use crate::error::{BootstrapError, BootstrapErrorKind, BootstrapResult};
+
+mod fetch;
+mod select;
+mod source;
+
+pub(super) use self::fetch::load;
+pub use self::{
+    select::{ArtifactQuery, Selection},
+    source::ManifestSource,
+};
 
 /// The only manifest schema this crate understands.
 pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
@@ -103,26 +105,6 @@ where
     Sha256Hex::parse(&raw).map_err(serde::de::Error::custom)
 }
 
-/// What to look for in a manifest: one name for one running server and target.
-#[derive(Debug, Clone, Copy)]
-pub struct ArtifactQuery<'a> {
-    /// Requested `CREATE EXTENSION` name.
-    pub name: &'a ExtensionName,
-    /// Version of the `PostgreSQL` installed in the tree.
-    pub running: &'a Version,
-    /// Compile target triple.
-    pub target: &'a str,
-}
-
-/// The extension and artefact chosen for a request.
-#[derive(Debug, Clone, Copy)]
-pub struct Selection<'a> {
-    /// The extension entry the artefact belongs to.
-    pub extension: &'a ManifestExtension,
-    /// The artefact to install.
-    pub artifact: &'a ManifestArtifact,
-}
-
 impl Manifest {
     /// Parses and validates manifest bytes.
     ///
@@ -132,6 +114,48 @@ impl Manifest {
     /// other than 1, a missing field, a malformed digest, an unparsable
     /// `postgresql` version, an archive `file` that is not a single path
     /// component, or an empty `files` list.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use pg_embedded_setup_unpriv::extensions::Manifest;
+    ///
+    /// # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+    /// let manifest = Manifest::parse(MANIFEST.as_bytes())?;
+    /// assert_eq!(manifest.extensions.len(), 1);
+    /// assert_eq!(manifest.extensions[0].name, "vector");
+    ///
+    /// // A schema this crate does not implement is refused rather than read
+    /// // on a best-effort basis.
+    /// let wrong = MANIFEST.replace("\"schema_version\": 1", "\"schema_version\": 2");
+    /// assert!(Manifest::parse(wrong.as_bytes()).is_err());
+    /// # Ok(())
+    /// # }
+    /// # const MANIFEST: &str = r#"{
+    /// #   "schema_version": 1,
+    /// #   "release": "v1.0.0",
+    /// #   "generated_at": "2026-09-05T00:00:00+00:00",
+    /// #   "extensions": [{
+    /// #     "name": "vector",
+    /// #     "package": "pgvector",
+    /// #     "version": "0.8.6",
+    /// #     "source": {
+    /// #       "repository": "https://github.com/pgvector/pgvector",
+    /// #       "tag": "v0.8.6",
+    /// #       "commit": "0123456789abcdef0123456789abcdef01234567"
+    /// #     },
+    /// #     "artifacts": [{
+    /// #       "postgresql": "17.11.0",
+    /// #       "target": "x86_64-unknown-linux-gnu",
+    /// #       "file": "vector.tar.gz",
+    /// #       "url": "https://example.invalid/vector.tar.gz",
+    /// #       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    /// #       "size": 1024,
+    /// #       "files": ["lib/vector.so"]
+    /// #     }]
+    /// #   }]
+    /// # }"#;
+    /// ```
     pub fn parse(bytes: &[u8]) -> BootstrapResult<Self> {
         let manifest: Self = serde_json::from_slice(bytes)
             .map_err(|err| invalid(eyre!("manifest is not valid JSON for schema 1: {err}")))?;
@@ -157,45 +181,6 @@ impl Manifest {
             }
         }
         Ok(())
-    }
-
-    /// Selects the artefact for `name` matching the running `PostgreSQL` major
-    /// and `target`; the minor is not a match key.
-    ///
-    /// # Errors
-    ///
-    /// Returns `ExtensionUnavailable` when no artefact matches; the message
-    /// lists what the manifest offers for that name.
-    pub fn select<'a>(
-        &'a self,
-        query: ArtifactQuery<'_>,
-        source: &ManifestSource,
-    ) -> BootstrapResult<Selection<'a>> {
-        let ArtifactQuery {
-            name,
-            running,
-            target,
-        } = query;
-        let Some(extension) = self
-            .extensions
-            .iter()
-            .find(|extension| extension.name == name.as_str())
-        else {
-            return Err(unavailable(eyre!(
-                "manifest at {} lists no extension named {name}; it offers: {}",
-                source.location(),
-                self.extension_names().join(", ")
-            )));
-        };
-        let artifact = extension
-            .artifacts
-            .iter()
-            .find(|artifact| artifact_matches(artifact, running, target))
-            .ok_or_else(|| unavailable(no_artifact_report(extension, running, target, source)))?;
-        Ok(Selection {
-            extension,
-            artifact,
-        })
     }
 
     /// The names this manifest offers, for the "no such extension" message.
@@ -254,128 +239,21 @@ fn is_single_component(file: &str) -> bool {
 }
 
 /// Parses an artefact's `postgresql` field as a Theseus version.
-#[must_use]
-pub fn artifact_version(artifact: &ManifestArtifact) -> Option<Version> {
+///
+/// `None` cannot arise for an artefact reached through a parsed [`Manifest`]:
+/// [`Manifest::parse`] rejects an unparsable `postgresql` field, so the
+/// option exists only because this function is also the thing that decides
+/// parsability.
+///
+/// Crate-private. It was `pub` inside a private module, which reaches no
+/// consumer: nothing re-exports it from [`super`], and `cargo doc` renders
+/// no page for it. The `pub` claimed a surface that did not exist, and the
+/// documentation rule asking every public function for an example does not
+/// reach a function no reader can find. (`cargo test --doc` does collect an
+/// example from such an item, so one would have been checked; it would
+/// simply have documented an unreachable function.)
+fn artifact_version(artifact: &ManifestArtifact) -> Option<Version> {
     Version::parse(&artifact.postgresql).ok()
-}
-
-/// An archive built for one `PostgreSQL` major loads into every minor of that
-/// major: the server's `Pg_magic_func` block checks the major and the layout
-/// constants, not the minor, and modules built before 16.5 load into 16.15.
-/// The Theseus release in the manifest is therefore information, not a key.
-fn artifact_matches(artifact: &ManifestArtifact, running: &Version, target: &str) -> bool {
-    artifact_version(artifact)
-        .is_some_and(|built| built.major == running.major && artifact.target == target)
-}
-
-/// Builds the `ExtensionUnavailable` message listing what the manifest offers.
-fn no_artifact_report(
-    extension: &ManifestExtension,
-    running: &Version,
-    target: &str,
-    source: &ManifestSource,
-) -> Report {
-    let offered: Vec<String> = extension
-        .artifacts
-        .iter()
-        .map(|artifact| format!("{} on {}", artifact.postgresql, artifact.target))
-        .collect();
-    eyre!(
-        "manifest at {} has no {} archive for PostgreSQL {} on {target}; it offers: {}",
-        source.location(),
-        extension.name,
-        running.major,
-        if offered.is_empty() {
-            "nothing".to_owned()
-        } else {
-            offered.join(", ")
-        }
-    )
-}
-
-/// Fetches, verifies and parses the manifest described by `source`.
-///
-/// # Errors
-///
-/// Returns `ExtensionManifestUnavailable` when the path or URL cannot be
-/// read, `ExtensionManifestDigestMismatch` when the bytes do not hash to the
-/// pinned digest, and `ExtensionManifestInvalid` when parsing fails.
-pub fn load(source: &ManifestSource) -> BootstrapResult<Manifest> {
-    let (bytes, pinned) = match source {
-        ManifestSource::Path { path, sha256 } => (read_path(path)?, sha256.as_ref()),
-        ManifestSource::Url { url, sha256 } => (fetch_url(url)?, Some(sha256)),
-    };
-    if let Some(expected) = pinned {
-        verify_digest(&bytes, expected, source)?;
-    }
-    let manifest = Manifest::parse(&bytes)?;
-    log_loaded(source, bytes.len(), pinned.is_some(), &manifest);
-    Ok(manifest)
-}
-
-/// Records what was loaded, how large it was, and whether a digest pinned it.
-fn log_loaded(source: &ManifestSource, bytes: usize, pinned: bool, manifest: &Manifest) {
-    tracing::info!(
-        target: super::LOG_TARGET,
-        location = %source.location(),
-        bytes,
-        pinned,
-        release = %manifest.release,
-        extensions = manifest.extensions.len(),
-        "loaded extension manifest"
-    );
-}
-
-/// Reads a manifest from disk, capped at [`MANIFEST_SIZE_CAP`] plus one byte
-/// so an oversized file is refused rather than buffered whole.
-fn read_path(path: &camino::Utf8Path) -> BootstrapResult<Vec<u8>> {
-    let file = std::fs::File::open(path)
-        .map_err(|err| unavailable_manifest(eyre!("cannot open manifest at {path}: {err}")))?;
-    let mut bytes = Vec::new();
-    file.take(MANIFEST_SIZE_CAP + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|err| unavailable_manifest(eyre!("cannot read manifest at {path}: {err}")))?;
-    check_size(bytes, path.as_str())
-}
-
-/// Fetches a manifest over HTTP, subject to the same size cap as a local one.
-fn fetch_url(url: &str) -> BootstrapResult<Vec<u8>> {
-    let mut bytes = Vec::new();
-    http_get(url, MANIFEST_SIZE_CAP, &mut bytes).map_err(|err| {
-        unavailable_manifest(eyre!(
-            "cannot fetch manifest from {}: {err}",
-            super::http::redact_url(url)
-        ))
-    })?;
-    check_size(bytes, &super::http::redact_url(url))
-}
-
-/// Rejects bytes over [`MANIFEST_SIZE_CAP`], naming where they came from.
-fn check_size(bytes: Vec<u8>, location: &str) -> BootstrapResult<Vec<u8>> {
-    if bytes.len() as u64 > MANIFEST_SIZE_CAP {
-        return Err(invalid(eyre!(
-            "manifest at {location} exceeds {MANIFEST_SIZE_CAP} bytes"
-        )));
-    }
-    Ok(bytes)
-}
-
-fn verify_digest(
-    bytes: &[u8],
-    expected: &Sha256Hex,
-    source: &ManifestSource,
-) -> BootstrapResult<()> {
-    let actual = Sha256Hex::of_bytes(bytes);
-    if &actual == expected {
-        return Ok(());
-    }
-    Err(extension_error(
-        BootstrapErrorKind::ExtensionManifestDigestMismatch,
-        eyre!(
-            "manifest at {} hashes to {actual} but PG_EXTENSIONS_MANIFEST_SHA256 pins {expected}",
-            source.location()
-        ),
-    ))
 }
 
 /// Wraps `report` as an `ExtensionManifestInvalid` failure.

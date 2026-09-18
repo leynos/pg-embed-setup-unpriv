@@ -76,8 +76,10 @@ impl ExtensionRequest {
     /// # Errors
     ///
     /// Returns `ExtensionConfigInvalid` when names are declared without a
-    /// manifest, when an HTTPS manifest has no digest, or when a name or
-    /// digest is malformed.
+    /// manifest, when a URL manifest has no digest, or when a name or digest
+    /// is malformed. Every URL manifest needs one, loopback `http://`
+    /// included: the digest is what makes the fetched bytes checkable, and
+    /// loopback does not supply that.
     ///
     /// # Examples
     ///

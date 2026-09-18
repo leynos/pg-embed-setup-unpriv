@@ -14,6 +14,7 @@ mod extensions_install_helpers;
 mod scenario;
 
 use extensions_install_helpers::{
+    ESCAPE_DESTINATION,
     ExtensionWorld,
     ExtensionWorldFixture,
     FIXTURE_FILES,
@@ -175,6 +176,15 @@ fn then_tree_untouched(world: &ExtensionWorldFixture) -> Result<()> {
     ensure!(
         !state.tree_has_fixture_files(),
         "files were written despite the failure"
+    );
+    // The escaping entry normalizes to `bin/evil` inside the tree rather than
+    // outside it, so nothing about the sandbox boundary prevents that write.
+    // The three fixture paths above say nothing about it, and the scenario
+    // that plants it would pass whether or not it landed.
+    ensure!(
+        !state.tree_has_escape_destination(),
+        "the escaping archive entry was written to {}",
+        ESCAPE_DESTINATION
     );
     Ok(())
 }

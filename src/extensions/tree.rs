@@ -145,7 +145,8 @@ impl InstallTree {
     /// The destination itself is not covered: a symlink there is replaced by
     /// the rename, which is how an installed file is meant to be rewritten.
     /// The branch that must not follow it is the identical-bytes one, which
-    /// [`InstallTree::open_identical_regular_file`] holds.
+    /// [`InstallTree::inspect_destination`] holds: a symlink there arrives as
+    /// [`Destination::Unreadable`], because the open carries `O_NOFOLLOW`.
     pub(super) fn require_real_parents(&self, relative: &Utf8Path) -> Result<(), Report> {
         let components: Vec<&str> = relative
             .components()

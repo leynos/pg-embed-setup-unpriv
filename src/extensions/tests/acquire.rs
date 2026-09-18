@@ -203,14 +203,23 @@ fn acquire_replaces_an_unusable_entry(#[case] as_directory: bool) {
 /// Each cache-entry outcome is reported distinctly, so the log says why an
 /// entry was not reused rather than blaming every fault on a digest mismatch.
 ///
-/// The four cases are exhaustive over `CachedState`: nothing written, the
-/// expected bytes, the wrong bytes, and a path occupied by something that is
-/// not a regular file.
+/// The cases are exhaustive over `CachedState`: nothing written, the expected
+/// bytes, the wrong bytes, and two paths occupied by something that is not a
+/// regular file.
+///
+/// The symlink case is the one worth naming, and it is Unix-only because
+/// creating a symlink on Windows needs a privilege this suite does not
+/// assume. It points at the *expected* bytes, so a classifier that follows
+/// the link finds a file whose digest matches and reports `Valid`; the caller
+/// then skips clearing the entry and hands back a path resolving outside the
+/// cache directory. Only a non-following stat tells the two apart, which is
+/// why the link's target is the good archive rather than a decoy.
 #[rstest]
 #[case::missing(EntryKind::Absent)]
 #[case::valid(EntryKind::ExpectedBytes)]
 #[case::corrupt(EntryKind::WrongBytes)]
 #[case::unreadable(EntryKind::Directory)]
+#[cfg_attr(unix, case::symlink(EntryKind::SymlinkToExpectedBytes))]
 fn cache_entry_states_are_distinct(#[case] kind: EntryKind) {
     let case = cache_case("https://example.invalid/fixture.tar.gz").expect("fixture");
     let path = case.entry_path();
@@ -225,6 +234,15 @@ fn cache_entry_states_are_distinct(#[case] kind: EntryKind) {
         EntryKind::Directory => {
             std::fs::create_dir_all(&path).expect("directory in place of an entry");
         }
+        #[cfg(unix)]
+        EntryKind::SymlinkToExpectedBytes => {
+            let target = case.entry_path().with_extension("target");
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).expect("cache directory");
+            }
+            std::fs::write(&target, &case.bytes).expect("link target holds the archive");
+            symlink_to(&target, &path).expect("symlink in place of an entry");
+        }
     }
     let state = cached_state(&path, &case.artifact.sha256);
     match (kind, &state) {
@@ -232,6 +250,8 @@ fn cache_entry_states_are_distinct(#[case] kind: EntryKind) {
         | (EntryKind::ExpectedBytes, CachedState::Valid)
         | (EntryKind::WrongBytes, CachedState::Corrupt)
         | (EntryKind::Directory, CachedState::Unreadable(_)) => {}
+        #[cfg(unix)]
+        (EntryKind::SymlinkToExpectedBytes, CachedState::Unreadable(_)) => {}
         (_, other) => panic!("{kind:?} was classified as {other:?}"),
     }
 }
@@ -247,6 +267,23 @@ enum EntryKind {
     WrongBytes,
     /// A directory, which is not an archive the cache can read.
     Directory,
+    /// A symlink whose target holds the archive the manifest describes.
+    ///
+    ///
+    /// The cache promises regular entries. A classifier that followed the
+    /// link would find the right bytes and reuse a path resolving outside
+    /// the cache directory.
+    #[cfg(unix)]
+    SymlinkToExpectedBytes,
+}
+
+/// Creates a symlink at `link` pointing at `target`.
+///
+/// Unix only, because Windows needs a privilege this suite does not assume;
+/// the case is skipped there.
+#[cfg(unix)]
+fn symlink_to(target: &Utf8PathBuf, link: &Utf8PathBuf) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
 }
 
 /// A consumer's URL can carry credentials, so none reaches a log or an error.
