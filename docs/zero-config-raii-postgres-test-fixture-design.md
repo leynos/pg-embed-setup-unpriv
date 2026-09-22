@@ -924,9 +924,16 @@ must respect:
   to just before the hook, so the shared binary cache only ever holds the
   pristine Theseus tree. Extension files live in the per-run install tree and
   are re-installed (idempotently, by digest) on every bootstrap.
-- **Matching.** An archive is selected on the running PostgreSQL major and
-  the crate's compile target; the minor is informational because the server's
-  magic block checks the major and layout constants only.
+- **Matching.** An archive is selected on the running PostgreSQL major
+  **and minor** together with the crate's compile target. Theseus's third
+  version component is a build number rather than a PostgreSQL release, so it
+  is not compared. Selection is deliberately narrower than loading: a module
+  built for one major would load into every minor of it, because the server's
+  magic block checks the major and the layout constants only, but the manifest
+  pins one digest per name, version and target, so accepting a neighbouring
+  minor would install bytes the consumer's pinned manifest digest does not
+  describe for the server actually running. There is no cross-minor fallback;
+  adding one would be an explicit opt-in.
 - **Fail closed.** Every failure is a `BootstrapErrorKind::Extension*` and
   the server does not start; nothing is ever compiled.
 - **Trust.** The manifest digest pins every archive digest; archives are
