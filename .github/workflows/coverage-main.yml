@@ -13,6 +13,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# One publisher at a time. Two pushes landing close together would otherwise
+# race to upload for the same project and to write the same ratchet baseline,
+# and the loser's report is the one a pull request then compares against.
+# In progress runs are not cancelled: a half-finished upload is worse than a
+# queued one.
+concurrency:
+  group: coverage-upload-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   coverage-upload:
     runs-on: ubuntu-latest
@@ -32,7 +41,7 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/generate-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           output-path: lcov.info
           format: lcov
@@ -42,9 +51,16 @@ jobs:
       - name: Upload coverage data to CodeScene
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        if: env.CS_ACCESS_TOKEN != ''
+        # Guarded on the ref as well as the token. This workflow also answers
+        # `workflow_dispatch`, which can be run from any branch, and an upload
+        # from one would be recorded by CodeScene as the trunk's coverage.
+        if: ${{ github.ref == 'refs/heads/main' && env.CS_ACCESS_TOKEN != '' }}
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@18bed1ca49a6de3d8882bd72635a32ae3f023d57
         with:
           format: lcov
+          # Stated rather than left to the action's default, because the
+          # difference between this and `check` is the whole of CV-005: the
+          # pull-request lane must not call the service and this one must.
+          mode: upload
           access-token: ${{ env.CS_ACCESS_TOKEN }}
           installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}

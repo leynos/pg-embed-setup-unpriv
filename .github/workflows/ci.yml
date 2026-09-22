@@ -109,24 +109,23 @@ jobs:
         run: make test-loom
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/generate-coverage@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/generate-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           output-path: lcov.info
           format: lcov
           features: dev-worker
           with-default-features: "false"
+          # Compare changed-line coverage against the baseline
+          # `coverage-main.yml` writes. Caches saved on main are readable by
+          # every pull-request run, so the comparison happens here, on the
+          # runner, with no call to any external service.
           with-ratchet: 'true'
-      - name: Check coverage against CodeScene gates
-        env:
-          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        if: ${{ matrix.privilege == 'unprivileged' && github.event_name == 'pull_request' && env.CS_ACCESS_TOKEN != '' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@18bed1ca49a6de3d8882bd72635a32ae3f023d57
-        with:
-          format: lcov
-          mode: check
-          project-url: https://api.codescene.io/v2/projects/81799
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
-          installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
+          # This lane measures and compares; it does not publish. The action
+          # archives the report it generated under a step of its own, which no
+          # scanner over this file's steps can see, so declining that archive
+          # is the only way the boundary is observable here. `coverage-main.yml`
+          # keeps the default and uploads.
+          publish-artefact: 'false'
       - name: Install cargo-nextest and test (root)
         if: ${{ matrix.privilege == 'root' }}
         run: |
