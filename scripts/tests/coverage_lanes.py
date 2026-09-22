@@ -24,12 +24,77 @@ WorkflowDocuments: typ.TypeAlias = cabc.Mapping[str, dict[str, object]]
 
 
 class WorkflowReadError(RuntimeError):
-    """Raised when a workflow file cannot be read or parsed.
+    """Raised when the workflow documents cannot be read or parsed.
 
-    The lane query is pure and takes documents. Reading them is the one
-    fallible step, so it reports its own failure rather than letting a
-    parser's exception surface from what reads like a query.
+    Reading is the one filesystem step, so it reports its own failure
+    rather than letting a parser's exception surface from what reads
+    like a query. An absent or empty directory raises too: returning no
+    documents would make every assertion over the lanes vacuous, and a
+    contract that passes because it found nothing to check is worse
+    than one that fails.
     """
+
+
+class WorkflowValueError(ValueError):
+    """Raised when a workflow declares a duration that is not a number.
+
+    `coverage_jobs_in` is a query over documents the caller supplied,
+    but a query still has to say what it does with a value it cannot
+    read. `timeout-minutes: ${{ inputs.ceiling }}` and a watchdog set
+    from an expression both reach `Fraction` as text, and the bare
+    `ValueError` that came back named neither the workflow nor the
+    field. This one does, and the query documents it.
+    """
+
+    def __init__(self, location: str, field: str, value: object) -> None:
+        """Record where the unreadable duration was found.
+
+        Parameters
+        ----------
+        location : str
+            The workflow, and the job within it where applicable.
+        field : str
+            The key whose value could not be read.
+        value : object
+            The value as parsed, quoted into the message.
+        """
+        super().__init__(
+            f"{location}: {field} is not a number of seconds: {value!r}"
+        )
+        self.location = location
+        self.field = field
+        self.value = value
+
+
+def _duration(location: str, field: str, raw: object) -> Fraction:
+    """Return one declared duration exactly, or refuse it by name.
+
+    Parameters
+    ----------
+    location : str
+        The workflow, and the job within it where applicable.
+    field : str
+        The key being read, for the message.
+    raw : object
+        The value as the YAML parser produced it.
+
+    Returns
+    -------
+    Fraction
+        The value, exactly.
+
+    Raises
+    ------
+    WorkflowValueError
+        If the value is not a number. `Fraction` accepts an `int`, a
+        `float` and a decimal string; an expression, a duration suffix
+        or a null are all refused here rather than escaping as a bare
+        `ValueError` from a function documented as a query.
+    """
+    try:
+        return Fraction(str(raw))
+    except (ValueError, ZeroDivisionError) as error:
+        raise WorkflowValueError(location, field, raw) from error
 
 
 class CoverageJob(typ.NamedTuple):
@@ -76,6 +141,7 @@ class CoverageJob(typ.NamedTuple):
 
 
 def _watchdog_of(
+    location: str,
     document: dict[str, object],
     job: dict[str, object],
     step: dict[str, object],
@@ -89,6 +155,8 @@ def _watchdog_of(
 
     Parameters
     ----------
+    location : str
+        The workflow and job, for a refusal message.
     document : dict[str, object]
         The whole workflow document.
     job : dict[str, object]
@@ -104,11 +172,17 @@ def _watchdog_of(
         ordering contract compares it against sums of nextest budgets
         that are themselves exact, and one ``float`` in a comparison
         converts the whole of it back.
+
+    Raises
+    ------
+    WorkflowValueError
+        If the innermost level that sets the variable sets it to
+        something that is not a number of seconds.
     """
     for owner in (step, job, document):
         raw = mapping_or_empty(owner.get("env")).get(WATCHDOG_VARIABLE)
         if raw is not None:
-            return Fraction(str(raw))
+            return _duration(location, WATCHDOG_VARIABLE, raw)
     return None
 
 
@@ -136,12 +210,21 @@ def load_workflow_documents(
     Raises
     ------
     WorkflowReadError
-        If a workflow file cannot be read, does not decode as UTF-8, or
+        If the directory does not exist, holds no workflow document, or
+        a workflow file cannot be read, does not decode as UTF-8, or
         does not parse as YAML. `UnicodeDecodeError` is a `ValueError`
         rather than an `OSError`, so it needs naming separately or a
         workflow with a stray byte escapes the contract this promises.
+
+        The empty cases raise rather than returning nothing, because
+        every assertion downstream quantifies over the lanes: with no
+        documents the ordering contract passes over an empty set and
+        reports success for a repository whose workflows it never read.
     """
     root = WORKFLOWS_DIRECTORY if directory is None else directory
+    if not root.is_dir():
+        message = f"no workflow directory at {root}"
+        raise WorkflowReadError(message)
     documents: dict[str, dict[str, object]] = {}
     for pattern in ("*.yml", "*.yaml"):
         for path in sorted(root.glob(pattern)):
@@ -153,6 +236,9 @@ def load_workflow_documents(
             document = mapping_or_empty(parsed)
             if document:
                 documents[path.name] = document
+    if not documents:
+        message = f"no workflow document parsed under {root}"
+        raise WorkflowReadError(message)
     return documents
 
 
@@ -227,17 +313,31 @@ def _coverage_job(
     -------
     CoverageJob or None
         The job's budgets, or None when it invokes no coverage step.
+
+    Raises
+    ------
+    WorkflowValueError
+        If the job's ``timeout-minutes`` or an in-force watchdog is not
+        a number of seconds.
     """
     steps = _coverage_steps(job)
     if not steps:
         return None
+    location = f"{workflow}:{job_name}"
     raw_timeout = job.get("timeout-minutes")
+    job_timeout = (
+        None
+        if raw_timeout is None
+        else _duration(location, "timeout-minutes", raw_timeout) * 60
+    )
     return CoverageJob(
         workflow=workflow,
         job=job_name,
         steps=len(steps),
-        watchdogs=tuple(_watchdog_of(document, job, step) for step in steps),
-        job_timeout=None if raw_timeout is None else Fraction(str(raw_timeout)) * 60,
+        watchdogs=tuple(
+            _watchdog_of(location, document, job, step) for step in steps
+        ),
+        job_timeout=job_timeout,
         conditions=tuple((step.get("if"), job.get("if")) for step in steps),
     )
 
@@ -263,6 +363,15 @@ def coverage_jobs_in(documents: WorkflowDocuments) -> tuple[CoverageJob, ...]:
     -------
     tuple[CoverageJob, ...]
         One entry per coverage-invoking job.
+
+    Raises
+    ------
+    WorkflowValueError
+        If a coverage-invoking job declares a ``timeout-minutes`` or a
+        watchdog that is not a number of seconds. The query does no
+        filesystem work, but it still reads declared values, and a
+        value it cannot read is a refusal with a location rather than a
+        bare `ValueError` from something documented as a query.
     """
     return tuple(
         found

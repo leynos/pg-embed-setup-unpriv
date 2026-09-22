@@ -48,6 +48,23 @@ COVERAGE_ACTION: typ.Final[str] = (
 #: cold.
 OUTSIDE_WATCHDOG_ALLOWANCE_SECONDS: typ.Final[Fraction] = Fraction(20 * 60)
 
+#: The watchdog every coverage step is required to declare, as a value
+#: rather than as a floor.
+#:
+#: The ordering contract elsewhere derives a floor from the nextest
+#: budgets and asserts each watchdog clears it. That is what catches a
+#: watchdog set too low, and it is not a substitute for this: a floor is
+#: satisfied by any larger number, so a lane raised to six hours by a
+#: paste would pass every derived comparison while quietly letting a
+#: wedged `cargo` burn the job's whole ceiling. This constant says what
+#: the value is. The two together mean a change has to be deliberate in
+#: both places and still has to clear the arithmetic.
+#:
+#: 1,800 s is also the shared action's own default, which is why writing
+#: it down matters: deleting the variable changes nothing observable
+#: until the run it kills.
+DECLARED_WATCHDOG_SECONDS: typ.Final[Fraction] = Fraction(30 * 60)
+
 #: What nextest allows a test between `SIGTERM` and `SIGKILL` when a
 #: `slow-timeout` table names no `grace-period`. The default is per
 #: declaration rather than per file: a table omitting the field gets

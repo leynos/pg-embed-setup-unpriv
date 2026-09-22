@@ -39,6 +39,7 @@ from timeout_budgets import (
     CEILING_MARGIN_SECONDS,
     COLD_BUILD_ALLOWANCE_SECONDS,
     COVERAGE_ACTION,
+    DECLARED_WATCHDOG_SECONDS,
     NEXTEST_CONFIG,
     OUTSIDE_WATCHDOG_ALLOWANCE_SECONDS,
     REQUIRED_GLOBAL_TIMEOUT_SECONDS,
@@ -128,6 +129,39 @@ def test_every_coverage_step_runs_under_an_explicit_watchdog(
         f"these coverage steps do not set {WATCHDOG_VARIABLE} and so inherit "
         f"the shared action's undocumented default: {missing}"
     )
+
+
+def test_every_coverage_step_declares_the_pinned_watchdog(
+    coverage_jobs: tuple[CoverageJob, ...],
+) -> None:
+    """The watchdog is pinned by value, not only bounded from below.
+
+    The ceiling and floor assertions around this one are derived: they
+    take the watchdog the workflow declares and check the arithmetic
+    holds. Every one of them is satisfied by a larger number, so a lane
+    raised to six hours by a paste would pass the lot while letting a
+    wedged `cargo` burn the job's whole ceiling before anything noticed.
+
+    So the value is asserted against `DECLARED_WATCHDOG_SECONDS`, which
+    is written down once and derived from nothing. Both halves are
+    needed: this one catches a raised watchdog, the derived floor
+    catches a lowered constant, and neither alone catches both.
+
+    Asserted per step rather than per job, because a job running the
+    action twice sets the variable once at job level and could set it
+    again on one step.
+    """
+    wrong = [
+        f"{job}: step {index + 1} of {job.steps} declares {watchdog}s"
+        for job in coverage_jobs
+        for index, watchdog in enumerate(job.watchdogs)
+        if watchdog != DECLARED_WATCHDOG_SECONDS
+    ]
+    assert not wrong, (
+        f"every coverage step must declare {WATCHDOG_VARIABLE} = "
+        f"{DECLARED_WATCHDOG_SECONDS:.0f}s; these do not: {wrong}"
+    )
+    assert coverage_jobs, "no coverage step was read, so nothing was pinned"
 
 
 def test_the_job_ceiling_contains_every_watchdog_and_the_work_around_them(

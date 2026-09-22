@@ -26,6 +26,7 @@ from fractions import Fraction
 import pytest
 from coverage_lanes import (
     WorkflowReadError,
+    WorkflowValueError,
     coverage_jobs_in,
     load_workflow_documents,
 )
@@ -484,6 +485,94 @@ def test_an_unreadable_workflow_is_reported_as_one(
     (tmp_path / name).write_bytes(contents)
     with pytest.raises(WorkflowReadError):
         load_workflow_documents(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("case", "prepare"),
+    [
+        pytest.param("absent", lambda root: root / "gone", id="no-directory"),
+        pytest.param("empty", lambda root: root, id="no-documents"),
+    ],
+)
+def test_a_directory_with_no_workflows_is_refused_rather_than_read_as_none(
+    tmp_path: pathlib.Path,
+    case: str,
+    prepare: object,
+) -> None:
+    """Finding nothing is a failure, not an empty answer.
+
+    Every assertion downstream quantifies over the coverage lanes, so a
+    loader returning no documents makes all of them vacuous: the
+    ordering contract iterates an empty tuple and reports success for a
+    repository whose workflows it never opened. A typo in the path, a
+    rename of `.github/workflows`, or a checkout without it would all
+    have read as "the workflows are fine".
+
+    Both empty shapes are driven, because they arrive by different
+    routes: a missing directory never globs, and a present one holding
+    nothing that parses globs and keeps nothing.
+    """
+    root = prepare(tmp_path)  # type: ignore[operator]
+    if case == "empty":
+        (root / "notes.txt").write_text("not a workflow", encoding="utf-8")
+    with pytest.raises(WorkflowReadError):
+        load_workflow_documents(root)
+
+
+@pytest.mark.parametrize(
+    ("field", "document"),
+    [
+        pytest.param(
+            "timeout-minutes",
+            {
+                "jobs": {
+                    "build": {
+                        "timeout-minutes": "${{ inputs.ceiling }}",
+                        "env": {"RUN_RUST_CARGO_WAIT_TIMEOUT": "1800"},
+                        "steps": [{"uses": f"{COVERAGE_ACTION}@0000000"}],
+                    }
+                }
+            },
+            id="job-ceiling",
+        ),
+        pytest.param(
+            "RUN_RUST_CARGO_WAIT_TIMEOUT",
+            {
+                "jobs": {
+                    "build": {
+                        "timeout-minutes": 66,
+                        "env": {"RUN_RUST_CARGO_WAIT_TIMEOUT": "30m"},
+                        "steps": [{"uses": f"{COVERAGE_ACTION}@0000000"}],
+                    }
+                }
+            },
+            id="watchdog",
+        ),
+    ],
+)
+def test_a_duration_that_is_not_a_number_is_refused_by_name(
+    field: str, document: dict[str, object]
+) -> None:
+    """The query says what it does with a value it cannot read.
+
+    `coverage_jobs_in` takes documents and does no filesystem work, but
+    it still reads declared durations, and both of these reach
+    `Fraction` as text. A workflow-expression ceiling and a watchdog
+    written with a duration suffix are the two shapes that actually
+    occur; either raised a bare `ValueError` naming neither the
+    workflow, the job, nor the field, from a function whose docstring
+    called it a query.
+
+    The refusal carries all three, and the failure names the field so a
+    reader knows which of the two durations was unreadable without
+    reconstructing it from a traceback.
+    """
+    with pytest.raises(WorkflowValueError) as caught:
+        coverage_jobs_in({"ci.yml": document})
+    assert caught.value.field == field, "the refusal must name the field"
+    assert caught.value.location == "ci.yml:build", (
+        "the refusal must name the workflow and the job"
+    )
 
 
 def test_budgets_beyond_the_exact_float_range_stay_distinguishable() -> None:
