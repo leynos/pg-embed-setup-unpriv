@@ -15,6 +15,7 @@ share one blind spot with every other rule written the same way.
 
 from __future__ import annotations
 
+import re
 import typing as typ
 
 from workflow_reader import Workflow, pull_request_closure, scalars
@@ -37,6 +38,13 @@ CODESCENE_HOST: typ.Final = "codescene.io"
 
 #: The one conjunct that confines an upload to the trunk.
 TRUNK_CONJUNCT: typ.Final = "github.ref == 'refs/heads/main'"
+
+#: A single-quoted expression literal, where `''` escapes a quote.
+QUOTED: typ.Final = re.compile(r"'(?:[^']|'')*'")
+
+#: What a literal is replaced by while the operators are read.
+MASK: typ.Final = "\x00"
+QUOTED_MASK: typ.Final = re.compile(MASK)
 
 Found = list[tuple[Workflow, str, dict[str, typ.Any]]]
 
@@ -80,24 +88,21 @@ def conjuncts(condition: object) -> list[str] | None:
     ["github.ref == 'refs/heads/main'", "env.T != ''"]
     >>> conjuncts("a && b || c") is None
     True
+    >>> conjuncts("x == 'a || b' && y")
+    ["x == 'a || b'", 'y']
     """
     text = str(condition).strip()
     if text.startswith("${{") and text.endswith("}}"):
         text = text[3:-2]
-    parts, current, quoted, index = [], "", False, 0
-    while index < len(text):
-        pair = text[index : index + 2]
-        if text[index] == "'":
-            quoted = not quoted
-        elif not quoted and pair == "||":
-            return None
-        elif not quoted and pair == "&&":
-            parts.append(current)
-            current, index = "", index + 2
-            continue
-        current += text[index]
-        index += 1
-    return [" ".join(part.split()) for part in [*parts, current]]
+    literals = iter(QUOTED.findall(text))
+    masked = QUOTED.sub(MASK, text)
+    if "||" in masked:
+        return None
+    # The literals come back in order, so one iterator restores every part.
+    return [
+        " ".join(QUOTED_MASK.sub(lambda _: next(literals), part).split())
+        for part in masked.split("&&")
+    ]
 
 
 def codescene_contacts(workflows: list[Workflow]) -> list[str]:

@@ -81,17 +81,38 @@ def triggers(document: dict[typ.Any, typ.Any]) -> dict[str, typ.Any]:
         If both the string and the boolean key are present, or the
         trigger is neither a scalar, a sequence nor a mapping.
     """
+    return _event_map(_trigger_declaration(document))
+
+
+def _trigger_declaration(document: dict[typ.Any, typ.Any]) -> object:
+    """Return the value under whichever trigger key the document used.
+
+    Raises
+    ------
+    ValueError
+        If both the string and the boolean key are present.
+    """
     keys = [key for key in ("on", True) if key in document]
     if len(keys) > 1:
         msg = "the workflow declares its triggers under both `on` and `true`"
         raise ValueError(msg)
-    raw = document[keys[0]] if keys else None
+    return document[keys[0]] if keys else None
+
+
+def _event_map(raw: object) -> dict[str, typ.Any]:
+    """Return a trigger declaration as event name to configuration.
+
+    Raises
+    ------
+    ValueError
+        If the declaration is neither a scalar, a sequence of names nor a
+        mapping.
+    """
     if isinstance(raw, dict):
         return {str(event): config for event, config in raw.items()}
-    if isinstance(raw, str):
-        return {raw: None}
-    if isinstance(raw, list) and all(isinstance(event, str) for event in raw):
-        return dict.fromkeys(raw)
+    events = [raw] if isinstance(raw, str) else raw
+    if isinstance(events, list) and all(isinstance(name, str) for name in events):
+        return dict.fromkeys(events)
     msg = f"unreadable trigger declaration: {raw!r}"
     raise ValueError(msg)
 

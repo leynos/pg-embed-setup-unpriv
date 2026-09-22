@@ -263,3 +263,16 @@ def test_a_second_publisher_is_named() -> None:
     """Two upload steps race to write one baseline."""
     found = publisher_faults(repository(callee=PUBLISHER))
     assert any("expected exactly one upload step" in fault for fault in found), found
+
+
+def test_an_operator_inside_a_string_literal_is_not_one() -> None:
+    """A `||` quoted in the guard is text, so the guard still holds.
+
+    The narrow half of the disjunction probe: refusing every condition
+    that contains the two characters would pass that probe while
+    rejecting guards that confine the upload perfectly well.
+    """
+    guarded = GUARD + " && github.actor != 'a || b'"
+    assert (
+        publisher_faults(repository(publisher=PUBLISHER.replace(GUARD, guarded))) == []
+    )
