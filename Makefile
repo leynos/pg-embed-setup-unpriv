@@ -21,9 +21,14 @@ HYPOTHESIS_VERSION ?= 6.167.1
 PYTEST_VERSION ?= 9.0.2
 PYYAML_VERSION ?= 6.0.3
 SCRIPT_PY_TESTS := scripts/tests/test_coverage_shape_contract.py \
+	scripts/tests/test_coverage_shape_probes.py \
 	scripts/tests/test_release_archive.py \
 	scripts/tests/test_release_archive_failures.py \
-	scripts/tests/test_release_workflow_contract.py
+	scripts/tests/test_release_workflow_contract.py \
+	scripts/tests/test_workflow_reader.py
+# Modules whose examples are collected as doctests alongside the suites.
+SCRIPT_PY_DOCTESTS := scripts/tests/coverage_shape_rules.py \
+	scripts/tests/workflow_reader.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \
 	--with cuprum==$(CUPRUM_VERSION) \
@@ -84,6 +89,7 @@ test-loom: ## Run Loom concurrency tests
 
 test-scripts: ## Run the Python release-tooling tests
 	$(SCRIPT_PYTEST) $(SCRIPT_PY_TESTS) -c /dev/null --rootdir=. -p no:cacheprovider
+	$(SCRIPT_PYTEST) --doctest-modules $(SCRIPT_PY_DOCTESTS) -c /dev/null --rootdir=. -p no:cacheprovider
 
 release-archive: ## Package release binaries for cargo-binstall
 	@test -n "$(TARGET)" || (echo "TARGET is required" >&2; exit 1)

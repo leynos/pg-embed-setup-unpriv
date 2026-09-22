@@ -36,6 +36,33 @@ coverage, which is a Linux/Unix allowlisted path. macOS root execution fails
 fast through the shared privilege-drop support predicate, while Windows follows
 the in-process unprivileged path.
 
+## Coverage publication
+
+Pull requests measure coverage and compare it with the ratchet baseline on the
+runner; they never contact CodeScene. `coverage-main.yml` is the only
+publisher: it uploads on a push to `main`, serialized by a concurrency group
+that queues rather than cancels, and its upload step is the only place the
+CodeScene token appears.
+
+`make test-scripts` holds the workflows to that shape through three modules
+under `scripts/tests/`:
+
+- `workflow_reader.py` parses workflows as GitHub reads them. It refuses a
+  mapping key declared twice, reads every trigger spelling (scalar, sequence or
+  mapping, under the bare `on` key that YAML 1.1 reads as `True` or the quoted
+  one), and follows calls to local reusable workflows, so a workflow that only
+  answers `workflow_call` is judged as a pull-request lane when one calls it.
+- `coverage_shape_rules.py` states each rule as a function returning its
+  offenders. `test_coverage_shape_contract.py` applies them to this
+  repository's workflows.
+- `test_coverage_shape_probes.py` and `test_workflow_reader.py` construct the
+  hazard each rule or reading exists for and assert it is named, so a rule that
+  could never fire does not pass unnoticed.
+
+The reader and the rules are scoped to these contract tests. A new workflow
+contract should reuse `workflow_reader.py` rather than parse workflows with
+`yaml.safe_load`, which keeps the last of two duplicate keys and says nothing.
+
 ## Lint and formatting toolchain
 
 The repository pins `rust-toolchain.toml` to `nightly-2026-04-25` because the
