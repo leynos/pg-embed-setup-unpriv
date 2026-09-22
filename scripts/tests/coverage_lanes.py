@@ -186,6 +186,59 @@ def _watchdog_of(
     return None
 
 
+def _workflow_paths(root: pathlib.Path) -> list[pathlib.Path]:
+    """Return every workflow file under `root`, in a stable order.
+
+    Both extensions are read. A coverage lane written in the other one
+    would otherwise escape every assertion downstream without failing
+    anything.
+
+    Parameters
+    ----------
+    root : pathlib.Path
+        The workflow directory.
+
+    Returns
+    -------
+    list[pathlib.Path]
+        The files, sorted by name so a failure names the same file on
+        every run.
+    """
+    found = [path for pattern in ("*.yml", "*.yaml") for path in root.glob(pattern)]
+    return sorted(found, key=lambda path: path.name)
+
+
+def _parsed_document(path: pathlib.Path) -> dict[str, object]:
+    """Return one workflow file's document, or an empty mapping.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        The workflow file.
+
+    Returns
+    -------
+    dict[str, object]
+        The parsed mapping, or an empty one when the file holds
+        something that is not a mapping at its root.
+
+    Raises
+    ------
+    WorkflowReadError
+        If the file cannot be read, does not decode as UTF-8, or does
+        not parse as YAML. `UnicodeDecodeError` is a `ValueError`
+        rather than an `OSError`, so it is named separately: a workflow
+        carrying a stray byte would otherwise escape the contract the
+        caller promises and surface as a decoding error.
+    """
+    try:
+        parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as error:
+        message = f"cannot read workflow {path}: {error}"
+        raise WorkflowReadError(message) from error
+    return mapping_or_empty(parsed)
+
+
 def load_workflow_documents(
     directory: pathlib.Path | None = None,
 ) -> dict[str, dict[str, object]]:
@@ -226,16 +279,10 @@ def load_workflow_documents(
         message = f"no workflow directory at {root}"
         raise WorkflowReadError(message)
     documents: dict[str, dict[str, object]] = {}
-    for pattern in ("*.yml", "*.yaml"):
-        for path in sorted(root.glob(pattern)):
-            try:
-                parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, yaml.YAMLError) as error:
-                message = f"cannot read workflow {path}: {error}"
-                raise WorkflowReadError(message) from error
-            document = mapping_or_empty(parsed)
-            if document:
-                documents[path.name] = document
+    for path in _workflow_paths(root):
+        document = _parsed_document(path)
+        if document:
+            documents[path.name] = document
     if not documents:
         message = f"no workflow document parsed under {root}"
         raise WorkflowReadError(message)
