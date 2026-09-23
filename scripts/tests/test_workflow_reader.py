@@ -95,8 +95,8 @@ def test_the_closure_follows_calls_transitively_and_stops_on_a_cycle() -> None:
     """A lane two calls away is reached, and a cycle does not hang."""
     flows = [
         call(".github/workflows/a.yml", "./.github/workflows/b.yml", "pull_request"),
-        call(".github/workflows/b.yml", ".github/workflows/c.yml"),
-        call(".github/workflows/c.yml", "./.github/workflows/b.yml"),
+        call(".github/workflows/b.yml", "$/.github/workflows/c.yml"),
+        call(".github/workflows/c.yml", ".github/workflows/b.yml"),
         call(".github/workflows/d.yml", "./.github/workflows/a.yml"),
     ]
     reached = [flow.path for flow in pull_request_closure(flows)]

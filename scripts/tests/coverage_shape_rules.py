@@ -39,6 +39,9 @@ CODESCENE_HOST: typ.Final = "codescene.io"
 #: The one conjunct that confines an upload to the trunk.
 TRUNK_CONJUNCT: typ.Final = "github.ref == 'refs/heads/main'"
 
+#: The one conjunct that requires the token, folded like the token name.
+TOKEN_CONJUNCT: typ.Final = "env.cs_access_token != ''"
+
 #: A single-quoted expression literal, where `''` escapes a quote.
 QUOTED: typ.Final = re.compile(r"'(?:[^']|'')*'")
 
@@ -98,9 +101,10 @@ def conjuncts(condition: object) -> list[str] | None:
     masked = QUOTED.sub(MASK, text)
     if "||" in masked:
         return None
-    # The literals come back in order, so one iterator restores every part.
+    # Whitespace is normalised before the literals come back, so their own
+    # text is untouched; they come back in order, so one iterator serves.
     return [
-        " ".join(QUOTED_MASK.sub(lambda _: next(literals), part).split())
+        QUOTED_MASK.sub(lambda _: next(literals), " ".join(part.split()))
         for part in masked.split("&&")
     ]
 
@@ -172,7 +176,37 @@ def publisher_faults(workflows: list[Workflow]) -> list[str]:
     ]
     if step_input(step, "mode") != "upload":
         faults.append(f"uploads in {step_input(step, 'mode')} mode")
-    return [f"{flow.path}:{job}: {fault}" for fault in faults]
+    return [
+        *(f"{flow.path}:{job}: {fault}" for fault in faults),
+        *_contacts_outside(workflows, step),
+    ]
+
+
+def _contacts_outside(workflows: list[Workflow], step: dict[str, typ.Any]) -> list[str]:
+    """Return every CodeScene contact in any workflow but the upload step.
+
+    A second publisher need not use the uploader action: a `cs-coverage`
+    command, a call to the host or the token in any other workflow can
+    race the one that does, so the contacts are read everywhere with the
+    upload step itself left out.
+    """
+    return [
+        f"{flow.path}: {what} outside the upload step"
+        for flow in workflows
+        for text in scalars(_without(flow.document, step))
+        for what in _contact_in(text.lower())
+    ]
+
+
+def _without(node: object, target: object) -> object:
+    """Return a copy of a parsed node with one sub-node, by identity, removed."""
+    if node is target:
+        return None
+    if isinstance(node, dict):
+        return {key: _without(value, target) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_without(item, target) for item in node]
+    return node
 
 
 def _trigger_faults(flow: Workflow) -> list[str]:
@@ -188,7 +222,10 @@ def _guard_faults(step: dict[str, typ.Any]) -> list[str]:
     parts = conjuncts(step.get("if", ""))
     if parts is None:
         return [f"condition {step.get('if')!r} has a disjunction"]
-    has_token = any(CODESCENE_TOKEN in part.lower() for part in parts)
+    # Both conjuncts are compared whole: a guard naming the token in any
+    # other way, `== ''` or `!env.CS_ACCESS_TOKEN`, runs the upload only
+    # when there is nothing to upload with.
+    has_token = any(part.lower() == TOKEN_CONJUNCT for part in parts)
     if TRUNK_CONJUNCT in parts and has_token:
         return []
     return [f"condition {step.get('if')!r} must require the trunk and the token"]
@@ -226,7 +263,7 @@ def _concurrency_faults(flow: Workflow, job: str) -> list[str]:
     """
     workflow_scope = flow.document.get("concurrency")
     job_scope = dict(flow.jobs()).get(job, {}).get("concurrency")
-    faults = [] if workflow_scope else ["declares no concurrency group"]
+    faults = [] if _names_a_group(workflow_scope) else ["declares no concurrency group"]
     for scope in (workflow_scope, job_scope):
         if (
             isinstance(scope, dict)
@@ -234,3 +271,15 @@ def _concurrency_faults(flow: Workflow, job: str) -> list[str]:
         ):
             faults.append("cancels the publisher in progress")
     return faults
+
+
+def _names_a_group(scope: object) -> bool:
+    """Return whether a `concurrency` value names a non-empty group.
+
+    Examples
+    --------
+    >>> _names_a_group("coverage"), _names_a_group({"cancel-in-progress": False})
+    (True, False)
+    """
+    group = scope.get("group") if isinstance(scope, dict) else scope
+    return isinstance(group, str) and bool(group.strip())

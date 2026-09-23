@@ -119,6 +119,10 @@ CONTACTS: typ.Final = {
         with_job("probe:\n  uses: .github/workflows/callee.yml"),
         ["callee.yml: references the access token"],
     ),
+    "a called workflow, reached through $/": (
+        with_job("probe:\n  uses: $/.github/workflows/callee.yml"),
+        ["callee.yml: references the access token"],
+    ),
     "the token in a run body, lower case": (
         with_step("- run: echo ${{ secrets.cs_access_token }}"),
         ["ci.yml: references the access token"],
@@ -205,6 +209,21 @@ PUBLISHER_HAZARDS: typ.Final = {
         "github.ref != 'refs/heads/main' && env.CS_ACCESS_TOKEN != ''",
         "must require",
     ),
+    "the token guard reversed": (
+        GUARD,
+        "github.ref == 'refs/heads/main' && env.CS_ACCESS_TOKEN == ''",
+        "must require",
+    ),
+    "the token guard negated": (
+        GUARD,
+        "github.ref == 'refs/heads/main' && !env.CS_ACCESS_TOKEN",
+        "must require",
+    ),
+    "the concurrency group dropped": (
+        "  group: coverage-upload\n",
+        "",
+        "no concurrency group",
+    ),
     "cancelled in progress": (
         "cancel-in-progress: false",
         "cancel-in-progress: true",
@@ -276,3 +295,22 @@ def test_an_operator_inside_a_string_literal_is_not_one() -> None:
     assert (
         publisher_faults(repository(publisher=PUBLISHER.replace(GUARD, guarded))) == []
     )
+
+
+#: Push workflows that publish without the uploader action.
+BYPASSES: typ.Final = {
+    "the CLI": "      - run: cs-coverage upload lcov.info\n",
+    "the host": "      - run: curl -X POST https://api.codescene.io/v2/projects\n",
+    "the token": "      - run: echo ${{ secrets.CS_ACCESS_TOKEN }}\n",
+}
+
+
+@pytest.mark.parametrize("step", BYPASSES.values(), ids=BYPASSES.keys())
+def test_a_publisher_bypassing_the_uploader_action_is_named(step: str) -> None:
+    """A second trunk publisher need not use the action to race the first."""
+    bypass = (
+        "on:\n  push:\n    branches: [main]\njobs:\n  publish:\n"
+        "    runs-on: ubuntu-latest\n    steps:\n" + step
+    )
+    found = publisher_faults(repository(callee=bypass))
+    assert any("callee.yml" in fault for fault in found), found

@@ -22,6 +22,7 @@ PYTEST_VERSION ?= 9.0.2
 PYYAML_VERSION ?= 6.0.3
 SCRIPT_PY_TESTS := scripts/tests/test_coverage_shape_contract.py \
 	scripts/tests/test_coverage_shape_probes.py \
+	scripts/tests/test_coverage_shape_properties.py \
 	scripts/tests/test_release_archive.py \
 	scripts/tests/test_release_archive_failures.py \
 	scripts/tests/test_release_workflow_contract.py \

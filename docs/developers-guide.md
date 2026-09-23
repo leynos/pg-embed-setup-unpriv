@@ -48,10 +48,11 @@ CodeScene token appears.
 under `scripts/tests/`:
 
 - `workflow_reader.py` parses workflows as GitHub reads them. It refuses a
-  mapping key declared twice, reads every trigger spelling (scalar, sequence or
-  mapping, under the bare `on` key that YAML 1.1 reads as `True` or the quoted
-  one), and follows calls to local reusable workflows, so a workflow that only
-  answers `workflow_call` is judged as a pull-request lane when one calls it.
+  mapping key declared twice, reads every trigger spelling (scalar, sequence,
+  or mapping, under the bare `on` key that YAML 1.1 reads as `True` or the
+  quoted one), and follows calls to local reusable workflows, so a workflow
+  that only answers `workflow_call` is judged as a pull-request lane when one
+  calls it.
 - `coverage_shape_rules.py` states each rule as a function returning its
   offenders. `test_coverage_shape_contract.py` applies them to this
   repository's workflows.

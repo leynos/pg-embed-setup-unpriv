@@ -12,8 +12,8 @@ here rather than assumed away.
   be written as a scalar, a sequence or a mapping. All six spellings are
   read; anything else is refused rather than read as "no triggers".
 - A job calling a local reusable workflow runs that workflow under the
-  caller's trigger. `pull_request_closure` follows those calls, matched
-  by shape rather than by an enumerated prefix.
+  caller's trigger. `pull_request_closure` follows those calls, written
+  with `./`, `$/` or no prefix, to any path under the workflow directory.
 - An extension test that is case-sensitive skips a `.YML` workflow in
   silence, so the suffix is folded.
 
@@ -120,18 +120,21 @@ def _event_map(raw: object) -> dict[str, typ.Any]:
 def local_callee(uses: object) -> str | None:
     """Return the workflow path a job-level `uses` calls locally, if any.
 
-    A leading `./` is stripped and the remainder is local when it names
-    a path under the workflow directory; no other prefix is enumerated.
+    A leading `./` or `$/` (GitHub's two spellings for this repository)
+    is stripped, and the remainder is local when it names a path under
+    the workflow directory with no ref.
 
     Examples
     --------
     >>> local_callee("./.github/workflows/build.yml")
     '.github/workflows/build.yml'
+    >>> local_callee("$/.github/workflows/build.yml")
+    '.github/workflows/build.yml'
     >>> local_callee("leynos/shared-actions/.github/workflows/x.yml@abc") is None
     True
     """
     text = str(uses).strip()
-    path = text.removeprefix("./")
+    path = text.removeprefix("./").removeprefix("$/")
     if "@" in path or not path.startswith(WORKFLOW_PREFIX):
         return None
     return path
