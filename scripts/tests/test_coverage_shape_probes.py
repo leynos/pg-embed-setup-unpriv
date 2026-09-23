@@ -204,6 +204,13 @@ PUBLISHER_HAZARDS: typ.Final = {
         GUARD + " || github.event_name == 'workflow_dispatch'",
         "has a disjunction",
     ),
+    # Every required conjunct stays whole here, so only the refusal of a bare
+    # `||` catches it: the disjunction hides in an extra, narrowing conjunct.
+    "a disjunction inside an extra conjunct": (
+        GUARD,
+        GUARD + " && github.actor != 'x' || github.event_name == 'workflow_dispatch'",
+        "has a disjunction",
+    ),
     "the ref guard dropped": (GUARD, "env.CS_ACCESS_TOKEN != ''", "must require"),
     "the ref guard negated": (
         GUARD,
