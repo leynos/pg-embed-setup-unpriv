@@ -15,6 +15,7 @@ import typing as typ
 import pytest
 from coverage_shape_rules import (
     codescene_contacts,
+    measuring_lanes,
     publisher_faults,
     unratcheted_lanes,
 )
@@ -259,6 +260,19 @@ PUBLISHER_HAZARDS: typ.Final = {
         "      - name: Upload\n",
         "does not declare the token",
     ),
+    "no coverage generated before the upload": (
+        "      - uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n",
+        "",
+        "generates no coverage",
+    ),
+    "coverage generated only conditionally": (
+        "      - uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n",
+        (
+            "      - if: false\n"
+            "        uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n"
+        ),
+        "generates no coverage",
+    ),
     "check mode": ("mode: upload", "mode: check", "uploads in check mode"),
     "a pull-request trigger": (
         "  workflow_dispatch:\n",
@@ -314,3 +328,51 @@ def test_a_publisher_bypassing_the_uploader_action_is_named(step: str) -> None:
     )
     found = publisher_faults(repository(callee=bypass))
     assert any("callee.yml" in fault for fault in found), found
+
+
+def test_the_base_pull_request_lane_measures() -> None:
+    """The narrow half: the unconditioned base step is a measuring lane."""
+    assert len(measuring_lanes(repository())) == 1
+
+
+#: Conditions that leave the pull-request coverage step unable to run.
+NEVER_RUNS: typ.Final = {
+    "the step disabled": ("        with:\n", "        if: false\n        with:\n"),
+    "the job disabled": (
+        "    runs-on: ubuntu-latest\n",
+        "    if: ${{ false }}\n    runs-on: ubuntu-latest\n",
+    ),
+    "a matrix value no leg carries": (
+        "    runs-on: ubuntu-latest\n",
+        "    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        privilege: [root]\n",
+    ),
+    "a push-only event guard": (
+        "        with:\n",
+        "        if: github.event_name == 'push'\n        with:\n",
+    ),
+}
+
+
+@pytest.mark.parametrize(("old", "new"), NEVER_RUNS.values(), ids=NEVER_RUNS.keys())
+def test_a_coverage_step_that_cannot_run_does_not_measure(old: str, new: str) -> None:
+    """A step found by its action but kept from running measures nothing."""
+    assert CI.count(old) == 1, f"the probe's anchor {old!r} is not unique"
+    ci = CI.replace(old, new)
+    if "matrix" in new:
+        ci = ci.replace(
+            "        with:\n",
+            "        if: ${{ matrix.privilege == 'unprivileged' }}\n        with:\n",
+        )
+    assert measuring_lanes(repository(ci=ci)) == []
+
+
+def test_a_matrix_guard_some_leg_satisfies_still_measures() -> None:
+    """The narrow half of the matrix probe: the repository's own shape runs."""
+    ci = CI.replace(
+        "    runs-on: ubuntu-latest\n",
+        "    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        privilege: [unprivileged, root]\n",
+    ).replace(
+        "        with:\n",
+        "        if: ${{ matrix.privilege == 'unprivileged' }}\n        with:\n",
+    )
+    assert len(measuring_lanes(repository(ci=ci))) == 1

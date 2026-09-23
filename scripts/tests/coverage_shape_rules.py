@@ -15,9 +15,9 @@ share one blind spot with every other rule written the same way.
 
 from __future__ import annotations
 
-import re
 import typing as typ
 
+from step_conditions import conjuncts, may_run
 from workflow_reader import Workflow, pull_request_closure, scalars
 
 #: The shared action that measures coverage, owner and repository folded
@@ -41,13 +41,6 @@ TRUNK_CONJUNCT: typ.Final = "github.ref == 'refs/heads/main'"
 
 #: The one conjunct that requires the token, folded like the token name.
 TOKEN_CONJUNCT: typ.Final = "env.cs_access_token != ''"
-
-#: A single-quoted expression literal, where `''` escapes a quote.
-QUOTED: typ.Final = re.compile(r"'(?:[^']|'')*'")
-
-#: What a literal is replaced by while the operators are read.
-MASK: typ.Final = "\x00"
-QUOTED_MASK: typ.Final = re.compile(MASK)
 
 Found = list[tuple[Workflow, str, dict[str, typ.Any]]]
 
@@ -76,37 +69,6 @@ def steps_using(workflows: list[Workflow], action: str) -> Found:
 def step_input(step: dict[str, typ.Any], key: str) -> str:
     """Return one `with:` input, folded, or `<unset>` when absent."""
     return str((step.get("with") or {}).get(key, "<unset>")).lower()
-
-
-def conjuncts(condition: object) -> list[str] | None:
-    """Split an `if:` expression on `&&`, or return None if it has `||`.
-
-    Quoted text is skipped, so an operator inside a string literal is
-    not an operator. A disjunction makes every conjunct optional, so a
-    condition carrying one is refused rather than read.
-
-    Examples
-    --------
-    >>> conjuncts("${{ github.ref == 'refs/heads/main' && env.T != '' }}")
-    ["github.ref == 'refs/heads/main'", "env.T != ''"]
-    >>> conjuncts("a && b || c") is None
-    True
-    >>> conjuncts("x == 'a || b' && y")
-    ["x == 'a || b'", 'y']
-    """
-    text = str(condition).strip()
-    if text.startswith("${{") and text.endswith("}}"):
-        text = text[3:-2]
-    literals = iter(QUOTED.findall(text))
-    masked = QUOTED.sub(MASK, text)
-    if "||" in masked:
-        return None
-    # Whitespace is normalised before the literals come back, so their own
-    # text is untouched; they come back in order, so one iterator serves.
-    return [
-        QUOTED_MASK.sub(lambda _: next(literals), " ".join(part.split()))
-        for part in masked.split("&&")
-    ]
 
 
 def codescene_contacts(workflows: list[Workflow]) -> list[str]:
@@ -148,6 +110,22 @@ def _contact_in(text: str) -> list[str]:
     return [what for mark, what in marks.items() if mark in text]
 
 
+def measuring_lanes(workflows: list[Workflow]) -> Found:
+    """Return the pull-request coverage steps whose conditions let them run.
+
+    A step discoverable by its action but guarded by `if: false`, or by a
+    matrix value no leg carries, measures nothing, so presence alone is
+    not enough.
+    """
+    lanes = pull_request_closure(workflows)
+    jobs = {(flow.path, name): job for flow in lanes for name, job in flow.jobs()}
+    return [
+        (flow, name, step)
+        for flow, name, step in steps_using(lanes, COVERAGE_ACTION)
+        if may_run(jobs[flow.path, name], step)
+    ]
+
+
 def unratcheted_lanes(workflows: list[Workflow]) -> list[str]:
     """Return pull-request coverage steps that do not compare locally."""
     required = (("with-ratchet", "true"), ("publish-artefact", "false"))
@@ -173,6 +151,7 @@ def publisher_faults(workflows: list[Workflow]) -> list[str]:
         *_guard_faults(step),
         *_token_scope_faults(flow, step),
         *_concurrency_faults(flow, job),
+        *_generation_faults(flow, job, step),
     ]
     if step_input(step, "mode") != "upload":
         faults.append(f"uploads in {step_input(step, 'mode')} mode")
@@ -283,3 +262,19 @@ def _names_a_group(scope: object) -> bool:
     """
     group = scope.get("group") if isinstance(scope, dict) else scope
     return isinstance(group, str) and bool(group.strip())
+
+
+def _generation_faults(
+    flow: Workflow, job: str, upload: dict[str, typ.Any]
+) -> list[str]:
+    """Return why the publisher might upload a report it never generated."""
+    mapping = dict(flow.jobs())[job]
+    before = (mapping.get("steps") or [])[: (mapping.get("steps") or []).index(upload)]
+    generates = [
+        step
+        for step in before
+        if isinstance(step, dict)
+        and coordinate(step.get("uses", "")) == COVERAGE_ACTION
+        and may_run({}, step)
+    ]
+    return [] if generates else ["generates no coverage before the upload step"]

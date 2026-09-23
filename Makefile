@@ -29,6 +29,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_coverage_shape_contract.py \
 	scripts/tests/test_workflow_reader.py
 # Modules whose examples are collected as doctests alongside the suites.
 SCRIPT_PY_DOCTESTS := scripts/tests/coverage_shape_rules.py \
+	scripts/tests/step_conditions.py \
 	scripts/tests/workflow_reader.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \

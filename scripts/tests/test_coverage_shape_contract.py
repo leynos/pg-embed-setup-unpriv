@@ -19,13 +19,12 @@ from pathlib import Path
 
 import pytest
 from coverage_shape_rules import (
-    COVERAGE_ACTION,
     codescene_contacts,
+    measuring_lanes,
     publisher_faults,
-    steps_using,
     unratcheted_lanes,
 )
-from workflow_reader import Workflow, load_workflows, pull_request_closure
+from workflow_reader import Workflow, load_workflows
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,16 +49,14 @@ def test_every_workflow_declares_a_trigger(workflows: list[Workflow]) -> None:
 def test_a_pull_request_lane_measures_coverage(
     workflows: list[Workflow],
 ) -> None:
-    """Some pull-request lane invokes the coverage action.
+    """Some pull-request coverage step exists and its conditions let it run.
 
     "No pull-request lane calls CodeScene" is satisfied by a repository
     with no pull-request coverage at all, which is the state this rule
     exists to avoid.
     """
-    lanes = pull_request_closure(workflows)
-    assert steps_using(lanes, COVERAGE_ACTION), (
-        "no pull-request workflow invokes the coverage action; the ratchet "
-        "has nothing to compare"
+    assert measuring_lanes(workflows), (
+        "no pull-request coverage step can run; the ratchet has nothing to compare"
     )
 
 

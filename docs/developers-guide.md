@@ -53,9 +53,15 @@ under `scripts/tests/`:
   quoted one), and follows calls to local reusable workflows, so a workflow
   that only answers `workflow_call` is judged as a pull-request lane when one
   calls it.
+- `step_conditions.py` reads `if:` conditions: it splits them on `&&`,
+  refuses a disjunction, and accepts a step as able to run only when every
+  conjunct is one it can show holds (a matrix value some leg carries, a
+  pull-request event, or a running status). Anything it does not recognize
+  reads as "may never run".
 - `coverage_shape_rules.py` states each rule as a function returning its
-  offenders. `test_coverage_shape_contract.py` applies them to this
-  repository's workflows.
+  offenders. A pull-request coverage step counts only when its conditions let
+  it run, and the publisher must generate coverage before it uploads.
+  `test_coverage_shape_contract.py` applies them to this repository's workflows.
 - `test_coverage_shape_probes.py` and `test_workflow_reader.py` construct the
   hazard each rule or reading exists for and assert it is named, so a rule that
   could never fire does not pass unnoticed.
