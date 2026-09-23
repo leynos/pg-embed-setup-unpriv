@@ -112,6 +112,17 @@ def test_a_call_to_a_missing_workflow_is_refused() -> None:
         pull_request_closure(flows)
 
 
+@pytest.mark.parametrize(
+    "uses",
+    ["./.github/workflows/b.yml@main", "$/.github/workflows/b.yml@v1"],
+)
+def test_a_local_call_carrying_a_ref_is_refused(uses: str) -> None:
+    """Read as remote, it would drop its callee from the closure in silence."""
+    flow = call(".github/workflows/a.yml", uses, "pull_request")
+    with pytest.raises(ValueError, match="carries a ref"):
+        flow.callees()
+
+
 def test_a_remote_workflow_is_not_a_local_call() -> None:
     """A pinned reference to another repository's workflow is not followed."""
     flow = call(

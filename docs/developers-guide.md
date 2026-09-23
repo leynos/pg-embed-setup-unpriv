@@ -41,10 +41,11 @@ the in-process unprivileged path.
 Pull requests measure coverage and compare it with the ratchet baseline on the
 runner; they never contact CodeScene. `coverage-main.yml` is the only
 publisher: it uploads on a push to `main`, serialized by a concurrency group
-that queues rather than cancels, and its upload step is the only place the
-CodeScene token appears.
+that queues rather than cancels. Its upload step is the only place the
+CodeScene token appears. That step binds the token from its secret, passes it
+to the uploader, and suppresses no failure with `continue-on-error`.
 
-`make test-scripts` holds the workflows to that shape through three modules
+`make test-scripts` holds the workflows to that shape through these modules
 under `scripts/tests/`:
 
 - `workflow_reader.py` parses workflows as GitHub reads them. It refuses a
@@ -52,19 +53,24 @@ under `scripts/tests/`:
   or mapping, under the bare `on` key that YAML 1.1 reads as `True` or the
   quoted one), and follows calls to local reusable workflows, so a workflow
   that only answers `workflow_call` is judged as a pull-request lane when one
-  calls it.
+  calls it. A local call carrying an `@` ref is refused.
 - `step_conditions.py` reads `if:` conditions: it splits them on `&&`,
   refuses a disjunction, and accepts a step as able to run only when every
-  conjunct is one it can show holds (a matrix value some leg carries, a
-  pull-request event, or a running status). Anything it does not recognize
+  conjunct is one it can show holds. Matrix comparisons must hold together in
+  one leg, expanded as GitHub expands `include` and `exclude`. Other conjuncts
+  must be a running status or hold in the run being asked about: a pull-request
+  event, or the trunk push for the publisher. Anything it does not recognize
   reads as "may never run".
 - `coverage_shape_rules.py` states each rule as a function returning its
   offenders. A pull-request coverage step counts only when its conditions let
   it run, and the publisher must generate coverage before it uploads.
   `test_coverage_shape_contract.py` applies them to this repository's workflows.
-- `test_coverage_shape_probes.py` and `test_workflow_reader.py` construct the
-  hazard each rule or reading exists for and assert it is named, so a rule that
-  could never fire does not pass unnoticed.
+- `test_coverage_shape_probes.py`, `test_coverage_shape_publisher.py`,
+  `test_coverage_shape_runnability.py` and `test_workflow_reader.py` construct
+  the hazard each rule or reading exists for and assert it is named, so a rule
+  that could never fire does not pass unnoticed.
+  `test_coverage_shape_properties.py` holds the readers to their invariants
+  over generated input.
 
 The reader and the rules are scoped to these contract tests. A new workflow
 contract should reuse `workflow_reader.py` rather than parse workflows with

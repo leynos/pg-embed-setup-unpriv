@@ -132,11 +132,21 @@ def local_callee(uses: object) -> str | None:
     '.github/workflows/build.yml'
     >>> local_callee("leynos/shared-actions/.github/workflows/x.yml@abc") is None
     True
+
+    Raises
+    ------
+    ValueError
+        If a call shaped as local carries an `@` ref.
     """
     text = str(uses).strip()
     path = text.removeprefix("./").removeprefix("$/")
-    if "@" in path or not path.startswith(WORKFLOW_PREFIX):
+    if not path.startswith(WORKFLOW_PREFIX):
         return None
+    if "@" in path:
+        # A call into this repository takes no ref; GitHub rejects one, and
+        # reading it as remote would drop the callee from the closure.
+        msg = f"a local workflow call carries a ref: {text}"
+        raise ValueError(msg)
     return path
 
 

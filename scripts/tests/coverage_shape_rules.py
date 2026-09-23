@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import typing as typ
 
-from step_conditions import conjuncts, may_run
+from step_conditions import TRUNK_CONTEXT, conjuncts, may_run
 from workflow_reader import Workflow, pull_request_closure, scalars
 
 #: The shared action that measures coverage, owner and repository folded
@@ -41,6 +41,11 @@ TRUNK_CONJUNCT: typ.Final = "github.ref == 'refs/heads/main'"
 
 #: The one conjunct that requires the token, folded like the token name.
 TOKEN_CONJUNCT: typ.Final = "env.cs_access_token != ''"
+
+#: The upload step's binding of the secret, and the uploader's input,
+#: folded and without whitespace.
+TOKEN_BINDING: typ.Final = "${{secrets.cs_access_token}}"
+TOKEN_INPUT: typ.Final = "${{env.cs_access_token}}"
 
 Found = list[tuple[Workflow, str, dict[str, typ.Any]]]
 
@@ -152,6 +157,7 @@ def publisher_faults(workflows: list[Workflow]) -> list[str]:
         *_token_scope_faults(flow, step),
         *_concurrency_faults(flow, job),
         *_generation_faults(flow, job, step),
+        *_suppression_faults(flow, job, step),
     ]
     if step_input(step, "mode") != "upload":
         faults.append(f"uploads in {step_input(step, 'mode')} mode")
@@ -217,8 +223,15 @@ def _token_scope_faults(flow: Workflow, step: dict[str, typ.Any]) -> list[str]:
     the upload step's own guard reading an empty value, so publishing
     stops without anything failing.
     """
-    own = step.get("env") or {}
-    faults = [] if _mentions_token(own) else ["upload step does not declare the token"]
+    bound = {
+        str(key).lower(): _folded(value)
+        for key, value in (step.get("env") or {}).items()
+    }
+    faults = []
+    if bound.get(CODESCENE_TOKEN) != TOKEN_BINDING:
+        faults.append("upload step does not bind the token from its secret")
+    if _folded(step_input(step, "access-token")) != TOKEN_INPUT:
+        faults.append("the uploader is not given the bound token")
     wider = [flow.document.get("env"), *(job.get("env") for _, job in flow.jobs())]
     if any(_mentions_token(scope) for scope in wider):
         faults.append("the token is declared at workflow or job scope")
@@ -275,6 +288,27 @@ def _generation_faults(
         for step in before
         if isinstance(step, dict)
         and coordinate(step.get("uses", "")) == COVERAGE_ACTION
-        and may_run({}, step)
+        and may_run(mapping, step, TRUNK_CONTEXT)
     ]
     return [] if generates else ["generates no coverage before the upload step"]
+
+
+def _suppression_faults(
+    flow: Workflow, job: str, upload: dict[str, typ.Any]
+) -> list[str]:
+    """Return where a failed upload would be reported as a success.
+
+    `continue-on-error` on the step or its job lets the upload fail while
+    the run stays green and the baseline silently stops moving.
+    """
+    scopes = {"upload step": upload, "upload job": dict(flow.jobs())[job]}
+    return [
+        f"{name} sets continue-on-error"
+        for name, scope in scopes.items()
+        if scope.get("continue-on-error", False) is not False
+    ]
+
+
+def _folded(value: object) -> str:
+    """Return a value as case-folded text with all whitespace removed."""
+    return "".join(str(value).split()).lower()

@@ -15,7 +15,6 @@ import typing as typ
 import pytest
 from coverage_shape_rules import (
     codescene_contacts,
-    measuring_lanes,
     publisher_faults,
     unratcheted_lanes,
 )
@@ -53,6 +52,7 @@ jobs:
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@abc
         with:
           mode: upload
+          access-token: ${{ env.CS_ACCESS_TOKEN }}
 """
 
 #: A workflow that only answers calls, reaching the service with the
@@ -69,14 +69,31 @@ jobs:
           T: ${{ secrets.CS_ACCESS_TOKEN }}
 """
 
+#: A callee that only declares the token among the secrets it accepts.
+DECLARES: typ.Final = """\
+on:
+  workflow_call:
+    secrets:
+      CS_ACCESS_TOKEN:
+        required: false
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+"""
+
 Rule = typ.Callable[[list[Workflow]], list[str]]
 
 
 def repository(
-    ci: str = CI, publisher: str = PUBLISHER, callee: str | None = None
+    ci: str = CI,
+    publisher: str = PUBLISHER,
+    callee: str | None = None,
+    extra: dict[str, str] | None = None,
 ) -> list[Workflow]:
     """Return a constructed repository's parsed workflows."""
-    files = {"ci.yml": ci, "coverage-main.yml": publisher}
+    files = {"ci.yml": ci, "coverage-main.yml": publisher, **(extra or {})}
     if callee is not None:
         files["callee.yml"] = callee
     return [
@@ -148,6 +165,15 @@ CONTACTS: typ.Final = {
         with_job("call:\n  uses: o/r/.github/workflows/x.yml@abc\n  secrets: inherit"),
         ["ci.yml:call: forwards every secret"],
     ),
+    "the host in the workflow's default shell": (
+        "defaults:\n  run:\n    shell: bash -c 'curl -s https://codescene.io; {0}'\n"
+        + CI,
+        ["ci.yml: names the CodeScene host"],
+    ),
+    "a callee declaring the token as a secret it accepts": (
+        with_job("probe:\n  uses: ./.github/workflows/declares.yml"),
+        ["declares.yml: references the access token"],
+    ),
     "the host, with no token or action": (
         with_step("- run: curl https://api.codescene.io/v2/projects"),
         ["ci.yml: names the CodeScene host"],
@@ -168,7 +194,9 @@ CONTACTS: typ.Final = {
 @pytest.mark.parametrize(("ci", "expected"), CONTACTS.values(), ids=CONTACTS.keys())
 def test_every_route_to_codescene_is_named(ci: str, expected: list[str]) -> None:
     """Each way a pull-request lane could reach the service is reported."""
-    found = codescene_contacts(repository(ci=ci, callee=CALLEE))
+    found = codescene_contacts(
+        repository(ci=ci, callee=CALLEE, extra={"declares.yml": DECLARES})
+    )
     missing = [
         fragment
         for fragment in expected
@@ -265,7 +293,7 @@ PUBLISHER_HAZARDS: typ.Final = {
     "the token moved off the upload step": (
         "      - name: Upload\n        env:\n          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}\n",
         "      - name: Upload\n",
-        "does not declare the token",
+        "does not bind the token",
     ),
     "no coverage generated before the upload": (
         "      - uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n",
@@ -276,6 +304,34 @@ PUBLISHER_HAZARDS: typ.Final = {
         "      - uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n",
         (
             "      - if: false\n"
+            "        uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n"
+        ),
+        "generates no coverage",
+    ),
+    "the token binding emptied": (
+        "CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}",
+        "CS_ACCESS_TOKEN: ''",
+        "does not bind the token",
+    ),
+    "the uploader's token input dropped": (
+        "          access-token: ${{ env.CS_ACCESS_TOKEN }}\n",
+        "",
+        "not given the bound token",
+    ),
+    "the upload step suppresses failure": (
+        "      - name: Upload\n",
+        "      - name: Upload\n        continue-on-error: true\n",
+        "upload step sets continue-on-error",
+    ),
+    "the upload job suppresses failure": (
+        "    runs-on: ubuntu-latest\n",
+        "    runs-on: ubuntu-latest\n    continue-on-error: ${{ true }}\n",
+        "upload job sets continue-on-error",
+    ),
+    "coverage generated only on a matrix value no leg carries": (
+        "      - uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n",
+        (
+            "      - if: matrix.shard == '2'\n"
             "        uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n"
         ),
         "generates no coverage",
@@ -297,89 +353,3 @@ def test_every_publisher_hazard_is_named(old: str, new: str, expected: str) -> N
     assert old in PUBLISHER, f"the probe's anchor {old!r} is not in the base"
     found = publisher_faults(repository(publisher=PUBLISHER.replace(old, new)))
     assert any(expected in fault for fault in found), found
-
-
-def test_a_second_publisher_is_named() -> None:
-    """Two upload steps race to write one baseline."""
-    found = publisher_faults(repository(callee=PUBLISHER))
-    assert any("expected exactly one upload step" in fault for fault in found), found
-
-
-def test_an_operator_inside_a_string_literal_is_not_one() -> None:
-    """A `||` quoted in the guard is text, so the guard still holds.
-
-    The narrow half of the disjunction probe: refusing every condition
-    that contains the two characters would pass that probe while
-    rejecting guards that confine the upload perfectly well.
-    """
-    guarded = GUARD + " && github.actor != 'a || b'"
-    assert (
-        publisher_faults(repository(publisher=PUBLISHER.replace(GUARD, guarded))) == []
-    )
-
-
-#: Push workflows that publish without the uploader action.
-BYPASSES: typ.Final = {
-    "the CLI": "      - run: cs-coverage upload lcov.info\n",
-    "the host": "      - run: curl -X POST https://api.codescene.io/v2/projects\n",
-    "the token": "      - run: echo ${{ secrets.CS_ACCESS_TOKEN }}\n",
-}
-
-
-@pytest.mark.parametrize("step", BYPASSES.values(), ids=BYPASSES.keys())
-def test_a_publisher_bypassing_the_uploader_action_is_named(step: str) -> None:
-    """A second trunk publisher need not use the action to race the first."""
-    bypass = (
-        "on:\n  push:\n    branches: [main]\njobs:\n  publish:\n"
-        "    runs-on: ubuntu-latest\n    steps:\n" + step
-    )
-    found = publisher_faults(repository(callee=bypass))
-    assert any("callee.yml" in fault for fault in found), found
-
-
-def test_the_base_pull_request_lane_measures() -> None:
-    """The narrow half: the unconditioned base step is a measuring lane."""
-    assert len(measuring_lanes(repository())) == 1
-
-
-#: Conditions that leave the pull-request coverage step unable to run.
-NEVER_RUNS: typ.Final = {
-    "the step disabled": ("        with:\n", "        if: false\n        with:\n"),
-    "the job disabled": (
-        "    runs-on: ubuntu-latest\n",
-        "    if: ${{ false }}\n    runs-on: ubuntu-latest\n",
-    ),
-    "a matrix value no leg carries": (
-        "    runs-on: ubuntu-latest\n",
-        "    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        privilege: [root]\n",
-    ),
-    "a push-only event guard": (
-        "        with:\n",
-        "        if: github.event_name == 'push'\n        with:\n",
-    ),
-}
-
-
-@pytest.mark.parametrize(("old", "new"), NEVER_RUNS.values(), ids=NEVER_RUNS.keys())
-def test_a_coverage_step_that_cannot_run_does_not_measure(old: str, new: str) -> None:
-    """A step found by its action but kept from running measures nothing."""
-    assert CI.count(old) == 1, f"the probe's anchor {old!r} is not unique"
-    ci = CI.replace(old, new)
-    if "matrix" in new:
-        ci = ci.replace(
-            "        with:\n",
-            "        if: ${{ matrix.privilege == 'unprivileged' }}\n        with:\n",
-        )
-    assert measuring_lanes(repository(ci=ci)) == []
-
-
-def test_a_matrix_guard_some_leg_satisfies_still_measures() -> None:
-    """The narrow half of the matrix probe: the repository's own shape runs."""
-    ci = CI.replace(
-        "    runs-on: ubuntu-latest\n",
-        "    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        privilege: [unprivileged, root]\n",
-    ).replace(
-        "        with:\n",
-        "        if: ${{ matrix.privilege == 'unprivileged' }}\n        with:\n",
-    )
-    assert len(measuring_lanes(repository(ci=ci))) == 1
