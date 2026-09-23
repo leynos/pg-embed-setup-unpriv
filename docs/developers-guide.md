@@ -40,10 +40,32 @@ the in-process unprivileged path.
 
 Pull requests measure coverage and compare it with the ratchet baseline on the
 runner; they never contact CodeScene. `coverage-main.yml` is the only
-publisher: it uploads on a push to `main`, serialized by a concurrency group
-that queues rather than cancels. Its upload step is the only place the
-CodeScene token appears. That step binds the token from its secret, passes it
-to the uploader, and suppresses no failure with `continue-on-error`.
+publisher: it uploads on a push to `main`, serialized by the concurrency group
+`${{ github.workflow }}-${{ github.ref }}`, which never cancels a run in
+progress.
+
+The token is kept out of every `env` mapping, because the upload action is a
+composite whose nested steps inherit its environment. A step with an id, no
+`if:` and no `env` runs one command,
+`echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"`.
+The upload step runs only when that output is `'true'` and the ref is
+`refs/heads/main`, takes the token directly from the secret through its
+`access-token` input, and suppresses no failure with `continue-on-error`.
+
+Two gaps are known. A merge made by the Dependabot automerge workflow uses the
+workflow token, and GitHub starts no workflow for a push made with that token.
+So this workflow does not run for those merges, and the baseline waits for the
+next push ([shared-actions issue 518][shared-actions-518] tracks a dispatch).
+Only one run waits in a concurrency group, and a newer run replaces a pending
+one. A dispatch that replaces a pending push therefore leaves the ratchet
+baseline one commit behind until the next push.
+
+Those orderings hold for triggered runs, a push or a dispatch. A manual "Re-run
+jobs" on an older `main` run is an operator action outside them: it keeps that
+run's commit, so it republishes that commit's coverage and ratchet baseline,
+and they stand until the next push supersedes them.
+
+[shared-actions-518]: https://github.com/leynos/shared-actions/issues/518
 
 `make test-scripts` holds the workflows to that shape through these modules
 under `scripts/tests/`:
@@ -61,16 +83,18 @@ under `scripts/tests/`:
   must be a running status or hold in the run being asked about: a pull-request
   event, or the trunk push for the publisher. Anything it does not recognize
   reads as "may never run".
+- `publisher_token.py` holds the token rules above: the one check step, the
+  upload's condition and input, and no `env` or other step naming the token.
 - `coverage_shape_rules.py` states each rule as a function returning its
   offenders. A pull-request coverage step counts only when its conditions let
   it run, and the publisher must generate coverage before it uploads.
   `test_coverage_shape_contract.py` applies them to this repository's workflows.
-- `test_coverage_shape_probes.py`, `test_coverage_shape_publisher.py`,
-  `test_coverage_shape_runnability.py` and `test_workflow_reader.py` construct
-  the hazard each rule or reading exists for and assert it is named, so a rule
-  that could never fire does not pass unnoticed.
-  `test_coverage_shape_properties.py` holds the readers to their invariants
-  over generated input.
+- `test_coverage_shape_probes.py`, `test_coverage_shape_contacts.py`,
+  `test_coverage_shape_publisher.py`, `test_coverage_shape_runnability.py` and
+  `test_workflow_reader.py` construct the hazard each rule or reading exists
+  for and assert it is named, so a rule that could never fire does not pass
+  unnoticed. `test_coverage_shape_properties.py` holds the readers to their
+  invariants over generated input.
 
 The reader and the rules are scoped to these contract tests. A new workflow
 contract should reuse `workflow_reader.py` rather than parse workflows with

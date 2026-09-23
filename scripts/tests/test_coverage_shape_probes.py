@@ -38,21 +38,22 @@ on:
     branches: [main]
   workflow_dispatch:
 concurrency:
-  group: coverage-upload
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   upload:
     runs-on: ubuntu-latest
     steps:
       - uses: leynos/shared-actions/.github/actions/generate-coverage@abc
+      - name: Check
+        id: codescene-token
+        run: echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
       - name: Upload
-        env:
-          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        if: ${{ github.ref == 'refs/heads/main' && env.CS_ACCESS_TOKEN != '' }}
+        if: ${{ steps.codescene-token.outputs.available == 'true' && github.ref == 'refs/heads/main' }}
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@abc
         with:
           mode: upload
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          access-token: ${{ secrets.CS_ACCESS_TOKEN }}
 """
 
 #: A workflow that only answers calls, reaching the service with the
@@ -125,86 +126,6 @@ def test_a_workflow_nothing_calls_is_not_a_lane() -> None:
     assert codescene_contacts(repository(callee=CALLEE)) == []
 
 
-CONTACTS: typ.Final = {
-    "a called workflow, reached through ./": (
-        with_job("probe:\n  uses: ./.github/workflows/callee.yml"),
-        [
-            "callee.yml: references the access token",
-            "callee.yml: names the CodeScene host",
-        ],
-    ),
-    "a called workflow, reached without ./": (
-        with_job("probe:\n  uses: .github/workflows/callee.yml"),
-        ["callee.yml: references the access token"],
-    ),
-    "a called workflow, reached through $/": (
-        with_job("probe:\n  uses: $/.github/workflows/callee.yml"),
-        ["callee.yml: references the access token"],
-    ),
-    "the token in a run body, lower case": (
-        with_step("- run: echo ${{ secrets.cs_access_token }}"),
-        ["ci.yml: references the access token"],
-    ),
-    "the token as an action input": (
-        with_step(
-            "- uses: some/action@abc\n  with:\n    key: ${{ secrets.CS_ACCESS_TOKEN }}"
-        ),
-        ["ci.yml: references the access token"],
-    ),
-    "the token at workflow scope": (
-        "env:\n  X: ${{ secrets.CS_ACCESS_TOKEN }}\n" + CI,
-        ["ci.yml: references the access token"],
-    ),
-    "the token forwarded by name": (
-        with_job(
-            "call:\n  uses: o/r/.github/workflows/x.yml@abc\n  secrets:\n    K: ${{ secrets.CS_ACCESS_TOKEN }}"
-        ),
-        ["ci.yml: references the access token"],
-    ),
-    "every secret forwarded": (
-        with_job("call:\n  uses: o/r/.github/workflows/x.yml@abc\n  secrets: inherit"),
-        ["ci.yml:call: forwards every secret"],
-    ),
-    "the host in the workflow's default shell": (
-        "defaults:\n  run:\n    shell: bash -c 'curl -s https://codescene.io; {0}'\n"
-        + CI,
-        ["ci.yml: names the CodeScene host"],
-    ),
-    "a callee declaring the token as a secret it accepts": (
-        with_job("probe:\n  uses: ./.github/workflows/declares.yml"),
-        ["declares.yml: references the access token"],
-    ),
-    "the host, with no token or action": (
-        with_step("- run: curl https://api.codescene.io/v2/projects"),
-        ["ci.yml: names the CodeScene host"],
-    ),
-    "the CodeScene CLI": (
-        with_step("- run: cs-coverage check lcov.info"),
-        ["ci.yml: runs the CodeScene CLI"],
-    ),
-    "the uploader action": (
-        with_step(
-            "- uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@abc"
-        ),
-        ["ci.yml:test: uses the uploader action"],
-    ),
-}
-
-
-@pytest.mark.parametrize(("ci", "expected"), CONTACTS.values(), ids=CONTACTS.keys())
-def test_every_route_to_codescene_is_named(ci: str, expected: list[str]) -> None:
-    """Each way a pull-request lane could reach the service is reported."""
-    found = codescene_contacts(
-        repository(ci=ci, callee=CALLEE, extra={"declares.yml": DECLARES})
-    )
-    missing = [
-        fragment
-        for fragment in expected
-        if not any(fragment in offence for offence in found)
-    ]
-    assert not missing, f"{missing} not among {found}"
-
-
 @pytest.mark.parametrize(
     ("old", "new", "expected"),
     [
@@ -224,7 +145,17 @@ def test_a_lane_that_does_not_compare_locally_is_named(
     assert any(expected in offence for offence in found), found
 
 
-GUARD: typ.Final = "github.ref == 'refs/heads/main' && env.CS_ACCESS_TOKEN != ''"
+AVAILABLE: typ.Final = "steps.codescene-token.outputs.available == 'true'"
+TRUNK: typ.Final = "github.ref == 'refs/heads/main'"
+GUARD: typ.Final = f"{AVAILABLE} && {TRUNK}"
+
+#: The token check step, as the base publisher writes it.
+CHECK: typ.Final = (
+    "      - name: Check\n"
+    "        id: codescene-token\n"
+    "        run: echo \"available=${{ secrets.CS_ACCESS_TOKEN != '' }}\""
+    ' >> "$GITHUB_OUTPUT"\n'
+)
 
 PUBLISHER_HAZARDS: typ.Final = {
     "a disjunction after the guard": (
@@ -239,26 +170,36 @@ PUBLISHER_HAZARDS: typ.Final = {
         GUARD + " && github.actor != 'x' || github.event_name == 'workflow_dispatch'",
         "has a disjunction",
     ),
-    "the ref guard dropped": (GUARD, "env.CS_ACCESS_TOKEN != ''", "must require"),
+    "the ref guard dropped": (GUARD, AVAILABLE, "must require"),
     "the ref guard negated": (
         GUARD,
-        "github.ref != 'refs/heads/main' && env.CS_ACCESS_TOKEN != ''",
+        f"{AVAILABLE} && github.ref != 'refs/heads/main'",
         "must require",
     ),
     "the token guard reversed": (
         GUARD,
-        "github.ref == 'refs/heads/main' && env.CS_ACCESS_TOKEN == ''",
+        f"steps.codescene-token.outputs.available == 'false' && {TRUNK}",
         "must require",
     ),
     "the token guard negated": (
         GUARD,
-        "github.ref == 'refs/heads/main' && !env.CS_ACCESS_TOKEN",
+        f"steps.codescene-token.outputs.available != 'true' && {TRUNK}",
+        "must require",
+    ),
+    "the guard reads another step's output": (
+        GUARD,
+        f"steps.other.outputs.available == 'true' && {TRUNK}",
         "must require",
     ),
     "the concurrency group dropped": (
-        "  group: coverage-upload\n",
+        "  group: ${{ github.workflow }}-${{ github.ref }}\n",
         "",
         "no concurrency group",
+    ),
+    "the concurrency group keyed on the event": (
+        "  group: ${{ github.workflow }}-${{ github.ref }}\n",
+        "  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}\n",
+        "is not the workflow and ref",
     ),
     "cancelled in progress": (
         "cancel-in-progress: false",
@@ -271,7 +212,10 @@ PUBLISHER_HAZARDS: typ.Final = {
         "cancels the publisher",
     ),
     "no concurrency group": (
-        "concurrency:\n  group: coverage-upload\n  cancel-in-progress: false\n",
+        (
+            "concurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n"
+            "  cancel-in-progress: false\n"
+        ),
         "",
         "no concurrency group",
     ),
@@ -285,15 +229,44 @@ PUBLISHER_HAZARDS: typ.Final = {
         "  push:\n",
         "does not run on push to main",
     ),
-    "the token moved to job scope": (
+    "the token bound at job scope": (
         "    runs-on: ubuntu-latest\n",
-        "    runs-on: ubuntu-latest\n    env:\n      CS_ACCESS_TOKEN: x\n",
-        "workflow or job scope",
+        "    runs-on: ubuntu-latest\n    env:\n      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}\n",
+        "the token is bound in an env",
     ),
-    "the token moved off the upload step": (
-        "      - name: Upload\n        env:\n          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}\n",
+    "the token bound in the upload step's env": (
         "      - name: Upload\n",
-        "does not bind the token",
+        "      - name: Upload\n        env:\n          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}\n",
+        "the token is bound in an env",
+    ),
+    "the token check deleted": (CHECK, "", "runs no single token check"),
+    "the token check's command changed": (
+        "!= '' }}",
+        "!= '' || true }}",
+        "runs no single token check",
+    ),
+    "the token check made conditional": (
+        "        id: codescene-token\n",
+        "        id: codescene-token\n        if: always()\n",
+        "the token check is conditional",
+    ),
+    "the token check given an env": (
+        "        id: codescene-token\n",
+        "        id: codescene-token\n        env:\n          A: b\n",
+        "the token check declares an env",
+    ),
+    "the token check given no id": (
+        "        id: codescene-token\n",
+        "",
+        "the token check has no id",
+    ),
+    "another step naming the token": (
+        "      - uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n",
+        (
+            "      - uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n"
+            "        with:\n          token: ${{ secrets.CS_ACCESS_TOKEN }}\n"
+        ),
+        "another step references the token",
     ),
     "no coverage generated before the upload": (
         "      - uses: leynos/shared-actions/.github/actions/generate-coverage@abc\n",
@@ -308,15 +281,15 @@ PUBLISHER_HAZARDS: typ.Final = {
         ),
         "generates no coverage",
     ),
-    "the token binding emptied": (
-        "CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}",
-        "CS_ACCESS_TOKEN: ''",
-        "does not bind the token",
-    ),
     "the uploader's token input dropped": (
-        "          access-token: ${{ env.CS_ACCESS_TOKEN }}\n",
+        "          access-token: ${{ secrets.CS_ACCESS_TOKEN }}\n",
         "",
-        "not given the bound token",
+        "not given the token from its secret",
+    ),
+    "the uploader given the token through env": (
+        "          access-token: ${{ secrets.CS_ACCESS_TOKEN }}\n",
+        "          access-token: ${{ env.CS_ACCESS_TOKEN }}\n",
+        "not given the token from its secret",
     ),
     "the upload step suppresses failure": (
         "      - name: Upload\n",

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import typing as typ
 
-from coverage_shape_rules import conjuncts
 from hypothesis import given
 from hypothesis import strategies as st
+from step_conditions import conjuncts
 from workflow_reader import Workflow, pull_request_closure, scalars
 
 #: The spellings GitHub accepts for a call into this repository.

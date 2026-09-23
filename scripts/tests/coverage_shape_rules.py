@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import typing as typ
 
-from step_conditions import TRUNK_CONTEXT, conjuncts, may_run
+from publisher_token import token_check, token_faults
+from step_conditions import TRUNK_CONTEXT, may_run
 from workflow_reader import Workflow, pull_request_closure, scalars
 
 #: The shared action that measures coverage, owner and repository folded
@@ -36,16 +37,9 @@ CODESCENE_TOKEN: typ.Final = "cs_access_token"
 #: The service's host, which no pull-request lane may contact.
 CODESCENE_HOST: typ.Final = "codescene.io"
 
-#: The one conjunct that confines an upload to the trunk.
-TRUNK_CONJUNCT: typ.Final = "github.ref == 'refs/heads/main'"
-
-#: The one conjunct that requires the token, folded like the token name.
-TOKEN_CONJUNCT: typ.Final = "env.cs_access_token != ''"
-
-#: The upload step's binding of the secret, and the uploader's input,
+#: The publisher's concurrency group: its workflow and ref, never the event,
 #: folded and without whitespace.
-TOKEN_BINDING: typ.Final = "${{secrets.cs_access_token}}"
-TOKEN_INPUT: typ.Final = "${{env.cs_access_token}}"
+PUBLISHER_GROUP: typ.Final = "${{github.workflow}}-${{github.ref}}"
 
 Found = list[tuple[Workflow, str, dict[str, typ.Any]]]
 
@@ -153,8 +147,7 @@ def publisher_faults(workflows: list[Workflow]) -> list[str]:
     flow, job, step = publishers[0]
     faults = [
         *_trigger_faults(flow),
-        *_guard_faults(step),
-        *_token_scope_faults(flow, step),
+        *token_faults(flow, job, step),
         *_concurrency_faults(flow, job),
         *_generation_faults(flow, job, step),
         *_suppression_faults(flow, job, step),
@@ -163,34 +156,34 @@ def publisher_faults(workflows: list[Workflow]) -> list[str]:
         faults.append(f"uploads in {step_input(step, 'mode')} mode")
     return [
         *(f"{flow.path}:{job}: {fault}" for fault in faults),
-        *_contacts_outside(workflows, step),
+        *_contacts_outside(workflows, (step, token_check(flow, job, step))),
     ]
 
 
-def _contacts_outside(workflows: list[Workflow], step: dict[str, typ.Any]) -> list[str]:
-    """Return every CodeScene contact in any workflow but the upload step.
+def _contacts_outside(workflows: list[Workflow], kept: tuple[object, ...]) -> list[str]:
+    """Return every CodeScene contact in any workflow but the kept steps.
 
     A second publisher need not use the uploader action: a `cs-coverage`
     command, a call to the host or the token in any other workflow can
-    race the one that does, so the contacts are read everywhere with the
-    upload step itself left out.
+    race the one that does, so the contacts are read everywhere with only
+    the upload step and its token check left out.
     """
     return [
         f"{flow.path}: {what} outside the upload step"
         for flow in workflows
-        for text in scalars(_without(flow.document, step))
+        for text in scalars(_without(flow.document, kept))
         for what in _contact_in(text.lower())
     ]
 
 
-def _without(node: object, target: object) -> object:
-    """Return a copy of a parsed node with one sub-node, by identity, removed."""
-    if node is target:
+def _without(node: object, kept: tuple[object, ...]) -> object:
+    """Return a copy of a parsed node with the kept sub-nodes, by identity, removed."""
+    if any(node is target for target in kept):
         return None
     if isinstance(node, dict):
-        return {key: _without(value, target) for key, value in node.items()}
+        return {key: _without(value, kept) for key, value in node.items()}
     if isinstance(node, list):
-        return [_without(item, target) for item in node]
+        return [_without(item, kept) for item in node]
     return node
 
 
@@ -202,50 +195,6 @@ def _trigger_faults(flow: Workflow) -> list[str]:
     return faults
 
 
-def _guard_faults(step: dict[str, typ.Any]) -> list[str]:
-    """Return why the upload step's condition does not confine it."""
-    parts = conjuncts(step.get("if", ""))
-    if parts is None:
-        return [f"condition {step.get('if')!r} has a disjunction"]
-    # Both conjuncts are compared whole: a guard naming the token in any
-    # other way, `== ''` or `!env.CS_ACCESS_TOKEN`, runs the upload only
-    # when there is nothing to upload with.
-    has_token = any(part.lower() == TOKEN_CONJUNCT for part in parts)
-    if TRUNK_CONJUNCT in parts and has_token:
-        return []
-    return [f"condition {step.get('if')!r} must require the trunk and the token"]
-
-
-def _token_scope_faults(flow: Workflow, step: dict[str, typ.Any]) -> list[str]:
-    """Return why the token is not held by the upload step alone.
-
-    A token moved to a wider scope, or to a neighbouring step, leaves
-    the upload step's own guard reading an empty value, so publishing
-    stops without anything failing.
-    """
-    bound = {
-        str(key).lower(): _folded(value)
-        for key, value in (step.get("env") or {}).items()
-    }
-    faults = []
-    if bound.get(CODESCENE_TOKEN) != TOKEN_BINDING:
-        faults.append("upload step does not bind the token from its secret")
-    if _folded(step_input(step, "access-token")) != TOKEN_INPUT:
-        faults.append("the uploader is not given the bound token")
-    wider = [flow.document.get("env"), *(job.get("env") for _, job in flow.jobs())]
-    if any(_mentions_token(scope) for scope in wider):
-        faults.append("the token is declared at workflow or job scope")
-    others = [other for _, other in flow.steps() if other is not step]
-    if any(_mentions_token(other) for other in others):
-        faults.append("another step references the token")
-    return faults
-
-
-def _mentions_token(node: object) -> bool:
-    """Return whether any scalar in a parsed node names the token."""
-    return any(CODESCENE_TOKEN in text.lower() for text in scalars(node))
-
-
 def _concurrency_faults(flow: Workflow, job: str) -> list[str]:
     """Return why the publisher might run twice at once or be cut short.
 
@@ -255,7 +204,12 @@ def _concurrency_faults(flow: Workflow, job: str) -> list[str]:
     """
     workflow_scope = flow.document.get("concurrency")
     job_scope = dict(flow.jobs()).get(job, {}).get("concurrency")
-    faults = [] if _names_a_group(workflow_scope) else ["declares no concurrency group"]
+    group = _group_of(workflow_scope)
+    faults = [] if group else ["declares no concurrency group"]
+    if group and "".join(group.split()).lower() != PUBLISHER_GROUP:
+        # Keyed on the event as well, a dispatch and a push to the same ref
+        # would run side by side and race to write one baseline.
+        faults.append(f"concurrency group {group!r} is not the workflow and ref")
     for scope in (workflow_scope, job_scope):
         if (
             isinstance(scope, dict)
@@ -265,16 +219,16 @@ def _concurrency_faults(flow: Workflow, job: str) -> list[str]:
     return faults
 
 
-def _names_a_group(scope: object) -> bool:
-    """Return whether a `concurrency` value names a non-empty group.
+def _group_of(scope: object) -> str:
+    """Return the group a `concurrency` value names, or an empty string.
 
     Examples
     --------
-    >>> _names_a_group("coverage"), _names_a_group({"cancel-in-progress": False})
-    (True, False)
+    >>> _group_of("coverage"), _group_of({"cancel-in-progress": False})
+    ('coverage', '')
     """
     group = scope.get("group") if isinstance(scope, dict) else scope
-    return isinstance(group, str) and bool(group.strip())
+    return group.strip() if isinstance(group, str) else ""
 
 
 def _generation_faults(
@@ -307,8 +261,3 @@ def _suppression_faults(
         for name, scope in scopes.items()
         if scope.get("continue-on-error", False) is not False
     ]
-
-
-def _folded(value: object) -> str:
-    """Return a value as case-folded text with all whitespace removed."""
-    return "".join(str(value).split()).lower()
