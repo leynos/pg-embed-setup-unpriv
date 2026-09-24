@@ -57,8 +57,10 @@ workflow token, and GitHub starts no workflow for a push made with that token.
 So this workflow does not run for those merges, and the baseline waits for the
 next push ([shared-actions issue 518][shared-actions-518] tracks a dispatch).
 Only one run waits in a concurrency group, and a newer run replaces a pending
-one. A dispatch that replaces a pending push therefore leaves the ratchet
-baseline one commit behind until the next push.
+one. A dispatch that replaces a pending push publishes its own commit's
+coverage to CodeScene when the token is available, but `generate-coverage`
+saves the ratchet baseline only on a push, so the baseline stays one commit
+behind until the next push.
 
 Those orderings hold for triggered runs, a push or a dispatch. A manual "Re-run
 jobs" on an older `main` run is an operator action outside them: it keeps that

@@ -255,6 +255,24 @@ PUBLISHER_HAZARDS: typ.Final = {
         "        id: codescene-token\n        env:\n          A: b\n",
         "the token check declares an env",
     ),
+    "the token check given a custom shell": (
+        "        id: codescene-token\n",
+        "        id: codescene-token\n        shell: bash -c 'curl -d x {0}'\n",
+        "the token check carries ['shell']",
+    ),
+    "the token check suppressing failure": (
+        "        id: codescene-token\n",
+        "        id: codescene-token\n        continue-on-error: true\n",
+        "the token check carries ['continue-on-error']",
+    ),
+    "the uploader given an empty with": (
+        (
+            "        with:\n          mode: upload\n"
+            "          access-token: ${{ secrets.CS_ACCESS_TOKEN }}\n"
+        ),
+        "        with:\n",
+        "not given the token from its secret",
+    ),
     "the token check given no id": (
         "        id: codescene-token\n",
         "",

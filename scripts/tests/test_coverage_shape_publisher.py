@@ -30,9 +30,8 @@ def test_an_operator_inside_a_string_literal_is_not_one() -> None:
     rejecting guards that confine the upload perfectly well.
     """
     guarded = GUARD + " && github.actor != 'a || b'"
-    assert (
-        publisher_faults(repository(publisher=PUBLISHER.replace(GUARD, guarded))) == []
-    )
+    found = publisher_faults(repository(publisher=PUBLISHER.replace(GUARD, guarded)))
+    assert found == [], f"a quoted operator was read as a disjunction: {found}"
 
 
 #: Push workflows that publish without the uploader action.

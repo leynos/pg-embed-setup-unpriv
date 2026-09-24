@@ -31,6 +31,11 @@ CHECK_COMMAND: typ.Final = (
 #: The uploader's token input, folded and without whitespace.
 TOKEN_INPUT: typ.Final = "${{secrets.cs_access_token}}"
 
+#: The keys the token check may carry. It is excluded from the scans for
+#: token references, so anything else it says (a custom `shell`, say, or a
+#: `continue-on-error`) would pass unread.
+CHECK_KEYS: typ.Final = frozenset({"name", "id", "run"})
+
 #: The conjunct that confines an upload to the trunk.
 TRUNK_CONJUNCT: typ.Final = "github.ref == 'refs/heads/main'"
 
@@ -53,7 +58,7 @@ def token_faults(flow: Workflow, job: str, upload: Step) -> list[str]:
         else ["runs no single token check before the upload step"]
     )
     faults += _check_faults(check) + _guard_faults(upload, check)
-    if _folded(upload.get("with", {}).get("access-token", "")) != TOKEN_INPUT:
+    if _folded((upload.get("with") or {}).get("access-token", "")) != TOKEN_INPUT:
         faults.append("the uploader is not given the token from its secret")
     return faults + _scope_faults(flow, upload, check)
 
@@ -79,6 +84,9 @@ def _check_faults(check: Step | None) -> list[str]:
         faults.append("the token check is conditional")
     if "env" in check:
         faults.append("the token check declares an env")
+    extra = sorted(set(check) - CHECK_KEYS - {"if", "env"})
+    if extra:
+        faults.append(f"the token check carries {extra}")
     return faults
 
 
