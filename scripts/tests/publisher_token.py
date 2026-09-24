@@ -91,38 +91,56 @@ def _guard_faults(upload: Step, check: Step | None) -> list[str]:
     parts = conjuncts(upload.get("if", ""))
     if parts is None:
         return [f"condition {upload.get('if')!r} has a disjunction"]
-    available = f"steps.{(check or {}).get('id')}.outputs.available == 'true'"
-    if check is not None and TRUNK_CONJUNCT in parts and available in parts:
+    if _requires_check_and_trunk(parts, check):
         return []
     return [
         f"condition {upload.get('if')!r} must require the token check and the trunk"
     ]
 
 
+def _requires_check_and_trunk(parts: list[str], check: Step | None) -> bool:
+    """Return whether the conjuncts include the check's output and the trunk ref."""
+    if check is None:
+        return False
+    available = f"steps.{check.get('id')}.outputs.available == 'true'"
+    return {TRUNK_CONJUNCT, available} <= set(parts)
+
+
 def _scope_faults(flow: Workflow, upload: Step, check: Step | None) -> list[str]:
     """Return where the token appears beyond the check and the upload input."""
+    faults: list[str] = []
+    if any(map(_mentions, _envs(flow))):
+        faults.append("the token is bound in an env")
+    if any(map(_mentions, _beyond_env(flow, upload, check))):
+        faults.append("another step references the token")
+    return faults
+
+
+def _envs(flow: Workflow) -> list[object]:
+    """Return the workflow's `env` mappings at every level, absent ones as None."""
     envs = [flow.document.get("env")] + [job.get("env") for _, job in flow.jobs()]
-    envs += [step.get("env") for _, step in flow.steps()]
-    faults = ["the token is bound in an env"] if any(map(_mentions, envs)) else []
-    # Envs are judged above; everything else a step says is judged here, and
-    # the upload may name the token only through its `access-token` input.
-    outside = [
-        {key: value for key, value in step.items() if key != "env"}
+    return envs + [step.get("env") for _, step in flow.steps()]
+
+
+def _beyond_env(flow: Workflow, upload: Step, check: Step | None) -> list[Step]:
+    """Return what each step says outside its `env`, less the upload's token input.
+
+    `_envs` judges the envs; everything else a step says is judged here,
+    and the upload may name the token only through its `access-token`
+    input.
+    """
+    others = [
+        _omitting(step, {"env"})
         for _, step in flow.steps()
         if step is not upload and step is not check
     ]
-    inputs = {
-        k: v for k, v in (upload.get("with") or {}).items() if k != "access-token"
-    }
-    outside.append(
-        {
-            **{k: v for k, v in upload.items() if k not in {"env", "with"}},
-            "with": inputs,
-        }
-    )
-    if any(map(_mentions, outside)):
-        faults.append("another step references the token")
-    return faults
+    inputs = _omitting(upload.get("with") or {}, {"access-token"})
+    return [*others, {**_omitting(upload, {"env", "with"}), "with": inputs}]
+
+
+def _omitting(mapping: dict[str, typ.Any], keys: set[str]) -> dict[str, typ.Any]:
+    """Return a mapping's items except those under `keys`."""
+    return {key: value for key, value in mapping.items() if key not in keys}
 
 
 def _mentions(node: object) -> bool:

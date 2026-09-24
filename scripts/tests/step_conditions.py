@@ -123,26 +123,38 @@ def may_run(
     parts = _conjuncts_of(job.get("if"), step.get("if"))
     if parts is None:
         return False
-    pairs = [match.groups() for match in map(MATRIX_EQUALS.fullmatch, parts) if match]
-    others = [part for part in parts if MATRIX_EQUALS.fullmatch(part) is None]
-    if not all(part in RUNNING_STATUS or part in context for part in others):
+    pairs, others = _split_matrix(parts)
+    if not all(_holds(part, context) for part in others):
         return False
-    return any(
-        all(row.get(key) == value for key, value in pairs) for row in matrix_rows(job)
-    )
+    return any(_satisfies(row, pairs) for row in matrix_rows(job))
 
 
 def _conjuncts_of(*conditions: object) -> list[str] | None:
     """Return the conjuncts of several conditions, or None if any has `||`."""
     parts: list[str] = []
-    for condition in conditions:
-        if condition is None or condition is True:
-            continue
+    for condition in filter(_is_conditional, conditions):
         found = conjuncts(condition)
         if found is None:
             return None
         parts += found
     return parts
+
+
+def _is_conditional(condition: object) -> bool:
+    """Return whether an `if:` value constrains anything (absent or `true` does not)."""
+    return condition is not None and condition is not True
+
+
+def _split_matrix(parts: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """Separate matrix comparisons, as key and value, from the other conjuncts."""
+    found = [(part, MATRIX_EQUALS.fullmatch(part)) for part in parts]
+    pairs = [match.groups() for _, match in found if match is not None]
+    return pairs, [part for part, match in found if match is None]
+
+
+def _holds(part: str, context: frozenset[str]) -> bool:
+    """Return whether a conjunct is a running status or holds in `context`."""
+    return part in RUNNING_STATUS or part in context
 
 
 def matrix_rows(job: dict[str, typ.Any]) -> list[Row]:
@@ -172,22 +184,41 @@ def matrix_rows(job: dict[str, typ.Any]) -> list[Row]:
     matrix = (job.get("strategy") or {}).get("matrix")
     if not isinstance(matrix, dict):
         return [{}]
-    axes = {
-        str(key): [str(value) for value in values]
-        for key, values in matrix.items()
-        if key not in {"include", "exclude"} and isinstance(values, list)
-    }
-    excluded = [_as_row(entry) for entry in matrix.get("exclude") or []]
-    legs = [
-        leg
-        for leg in (
-            dict(zip(axes, combo)) for combo in itertools.product(*axes.values())
-        )
-        if not any(_matches(leg, entry) for entry in excluded)
-    ]
-    for entry in (_as_row(item) for item in matrix.get("include") or []):
+    axes = _axes(matrix)
+    legs = _crossed(axes, _entries(matrix, "exclude"))
+    for entry in _entries(matrix, "include"):
         _include(legs, entry, set(axes))
     return legs or [{}]
+
+
+def _axes(matrix: dict[str, typ.Any]) -> dict[str, list[str]]:
+    """Return the matrix's list-valued axes, `include` and `exclude` aside."""
+    return {
+        str(key): [str(value) for value in values]
+        for key, values in matrix.items()
+        if _is_axis(key, values)
+    }
+
+
+def _is_axis(key: object, values: object) -> bool:
+    """Return whether a matrix key is an axis the legs are crossed over."""
+    return key not in {"include", "exclude"} and isinstance(values, list)
+
+
+def _entries(matrix: dict[str, typ.Any], key: str) -> list[Row]:
+    """Return the matrix's `include` or `exclude` objects with text values."""
+    return [_as_row(entry) for entry in matrix.get(key) or []]
+
+
+def _crossed(axes: dict[str, list[str]], excluded: list[Row]) -> list[Row]:
+    """Return every combination of the axes that no `exclude` object matches."""
+    combos = (dict(zip(axes, combo)) for combo in itertools.product(*axes.values()))
+    return [leg for leg in combos if not _excluded(leg, excluded)]
+
+
+def _excluded(leg: Row, excluded: list[Row]) -> bool:
+    """Return whether any `exclude` object matches the leg."""
+    return any(_matches(leg, entry) for entry in excluded)
 
 
 def _as_row(entry: object) -> Row:
@@ -197,19 +228,22 @@ def _as_row(entry: object) -> Row:
 
 def _matches(leg: Row, entry: Row) -> bool:
     """Return whether a leg carries every value an entry names."""
-    return all(leg.get(key) == value for key, value in entry.items())
+    return _satisfies(leg, entry.items())
+
+
+def _satisfies(leg: Row, pairs: typ.Iterable[tuple[str, str]]) -> bool:
+    """Return whether a leg carries every key and value in `pairs`.
+
+    Pairs rather than a mapping, so two comparisons of one key with
+    different values stay unsatisfiable instead of the last one winning.
+    """
+    return all(leg.get(key) == value for key, value in pairs)
 
 
 def _include(legs: list[Row], entry: Row, original: set[str]) -> None:
     """Extend the legs one `include` object fits, or add it as a leg."""
-    fits = [
-        leg
-        for leg in legs
-        if original
-        and all(
-            leg.get(key) == value for key, value in entry.items() if key in original
-        )
-    ]
+    shared = [(key, value) for key, value in entry.items() if key in original]
+    fits = [leg for leg in legs if original and _satisfies(leg, shared)]
     for leg in fits:
         leg.update(entry)
     if not fits:
