@@ -35,13 +35,13 @@ jobs:
       # instrumentation than the default 600s cargo wall-clock cap.
       RUN_RUST_CARGO_WAIT_TIMEOUT: '1800'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/setup-rust@22c1a57865e42ba7e2ca4f88ae49fa6f81f58013
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
+        uses: leynos/shared-actions/.github/actions/generate-coverage@22c1a57865e42ba7e2ca4f88ae49fa6f81f58013
         with:
           output-path: lcov.info
           format: lcov
@@ -59,7 +59,7 @@ jobs:
         # `workflow_dispatch`, which can be run from any branch, and an upload
         # from one would be recorded by CodeScene as the trunk's coverage.
         if: ${{ steps.codescene-token.outputs.available == 'true' && github.ref == 'refs/heads/main' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@22c1a57865e42ba7e2ca4f88ae49fa6f81f58013
         with:
           format: lcov
           # Stated rather than left to the action's default, because the
