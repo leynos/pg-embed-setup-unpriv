@@ -92,6 +92,20 @@ def test_the_owner_is_matched_without_regard_to_case() -> None:
     assert any("pinned to 'main'" in fault for fault in found), found
 
 
+def test_the_action_path_is_matched_as_written() -> None:
+    """The path inside the repository is case-sensitive, so it is not folded.
+
+    A step naming the action under another case resolves to nothing on
+    GitHub, so it is no uploader, and the approved pin on it is no proof.
+    """
+    recased = PINNED.replace(
+        "/upload-codescene-coverage@", "/Upload-CodeScene-Coverage@"
+    )
+    assert recased != PINNED, "the probe's anchor is not in the base"
+    found = pin_faults(repository(publisher=recased))
+    assert found == [NO_UPLOADER], found
+
+
 def test_a_commented_out_step_is_not_an_uploader() -> None:
     """With the step gone, a comment naming the approved pin does not count."""
     commented = PINNED.replace(
