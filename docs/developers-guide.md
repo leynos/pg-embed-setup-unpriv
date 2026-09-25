@@ -98,6 +98,11 @@ under `scripts/tests/`:
   other job declares it, and no pull-request-reachable job does.
   `test_codescene_environment.py` applies it to this repository and proves each
   clause against a constructed repository.
+- `uploader_pin.py` holds the uploader to its approved pin: every active
+  uploader step at that one SHA, owner and repository matched case-folded, no
+  `installer-checksum` input and no `CODESCENE_CLI_SHA256` variable, which the
+  uploader rejects at that pin, and no `get-codescene-sha.yml` dispatch.
+  `test_uploader_pin.py` applies it here and proves each clause.
 - `coverage_shape_rules.py` states each rule as a function returning its
   offenders. A pull-request coverage step counts only when its conditions let
   it run, and the publisher must generate coverage before it uploads.

@@ -45,14 +45,24 @@ Found = list[tuple[Workflow, str, dict[str, typ.Any]]]
 
 
 def coordinate(uses: object) -> str:
-    """Return the action a `uses` value names, folded, without its ref.
+    """Return the action a `uses` value names, without its ref.
+
+    GitHub resolves the owner and repository case-insensitively, so those
+    two components are folded. The path inside the repository is
+    case-sensitive and is kept as written: a differently cased path does
+    not resolve, so it names no action here either.
 
     Examples
     --------
     >>> coordinate("Leynos/Shared-Actions/x@v1@beta")
     'leynos/shared-actions/x'
+    >>> coordinate("leynos/shared-actions/.github/Actions/X@v1")
+    'leynos/shared-actions/.github/Actions/X'
+    >>> coordinate("")
+    ''
     """
-    return str(uses).partition("@")[0].lower()
+    parts = str(uses).partition("@")[0].split("/", 2)
+    return "/".join([part.lower() for part in parts[:2]] + parts[2:])
 
 
 def steps_using(workflows: list[Workflow], action: str) -> Found:
