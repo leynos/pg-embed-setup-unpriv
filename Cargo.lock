@@ -1085,6 +1085,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs4"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e72ed92b67c146290f88e9c89d60ca163ea417a446f61ffd7b72df3e7f1dfd5"
+dependencies = [
+ "rustix",
+ "windows-sys 0.61.1",
+]
+
+[[package]]
 name = "fslock"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2362,6 +2372,8 @@ dependencies = [
  "figment",
  "figment-json5",
  "filetime",
+ "flate2",
+ "fs4",
  "insta",
  "libc",
  "loom",
@@ -2374,6 +2386,7 @@ dependencies = [
  "postgresql_embedded",
  "pq-sys",
  "proptest",
+ "reqwest",
  "rstest",
  "rstest-bdd",
  "rstest-bdd-macros",
@@ -2383,6 +2396,7 @@ dependencies = [
  "serde_with",
  "serial_test",
  "sha2 0.11.0",
+ "tar",
  "temp-env",
  "tempfile",
  "thiserror 2.0.18",
@@ -2877,6 +2891,7 @@ checksum = "ab3f43e3283ab1488b624b44b0e988d0acea0b3214e694730a055cb6b2efa801"
 dependencies = [
  "base64",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",

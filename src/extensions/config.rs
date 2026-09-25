@@ -1,0 +1,199 @@
+//! Translates `PG_EXTENSIONS*` into an [`ExtensionRequest`] and resolves the
+//! extension cache directory.
+//!
+//! The cache directory travels as `ExtensionRequest.cache_dir`; there is no
+//! separate configuration type, because a wrapper around one field earns
+//! nothing until a second field exists.
+
+use std::path::PathBuf;
+
+use camino::Utf8PathBuf;
+use color_eyre::eyre::eyre;
+
+use super::{ExtensionName, ExtensionRequest, ManifestSource, Sha256Hex, extension_error};
+use crate::{
+    PgEnvCfg,
+    error::{BootstrapErrorKind, BootstrapResult},
+};
+
+/// Subdirectory path within the XDG cache home.
+const CACHE_SUBDIR: &str = "pg-embedded/extensions";
+
+/// Resolves the extension cache directory.
+///
+/// The resolution order mirrors the binary cache:
+///
+/// 1. `PG_EXTENSIONS_CACHE_DIR` if set, non-empty and valid UTF-8
+/// 2. `$XDG_CACHE_HOME/pg-embedded/extensions` if `XDG_CACHE_HOME` is set
+/// 3. `~/.cache/pg-embedded/extensions`
+/// 4. `std::env::temp_dir()/pg-embedded/extensions` as a last resort
+///
+/// # Examples
+///
+/// ```
+/// use pg_embedded_setup_unpriv::extensions::resolve_extension_cache_dir;
+///
+/// assert!(!resolve_extension_cache_dir().as_str().is_empty());
+/// ```
+#[must_use]
+pub fn resolve_extension_cache_dir() -> Utf8PathBuf {
+    non_empty_env("PG_EXTENSIONS_CACHE_DIR")
+        .map(Utf8PathBuf::from)
+        .or_else(|| {
+            non_empty_env("XDG_CACHE_HOME").map(|home| Utf8PathBuf::from(home).join(CACHE_SUBDIR))
+        })
+        .or_else(home_cache_dir)
+        .unwrap_or_else(temp_cache_dir)
+}
+
+/// Reads an environment variable, treating blank values as unset.
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|raw| raw.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+/// `~/.cache/pg-embedded/extensions` when the home directory is known.
+fn home_cache_dir() -> Option<Utf8PathBuf> {
+    let home = Utf8PathBuf::from_path_buf(dirs::home_dir()?).ok()?;
+    Some(home.join(".cache").join(CACHE_SUBDIR))
+}
+
+/// The last-resort cache directory under the platform temporary directory.
+fn temp_cache_dir() -> Utf8PathBuf {
+    let temp: PathBuf = std::env::temp_dir().join("pg-embedded").join("extensions");
+    Utf8PathBuf::from_path_buf(temp)
+        .unwrap_or_else(|path| Utf8PathBuf::from(path.to_string_lossy().into_owned()))
+}
+
+impl ExtensionRequest {
+    /// Builds a request from the `PG_EXTENSIONS*` variables captured in `cfg`.
+    ///
+    /// Returns `Ok(None)` when `PG_EXTENSIONS` is unset, empty or whitespace,
+    /// so the hook stays inert for consumers that do not declare extensions.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ExtensionConfigInvalid` when names are declared without a
+    /// manifest, when a URL manifest has no digest, or when a name or digest
+    /// is malformed. Every URL manifest needs one, loopback `http://`
+    /// included: the digest is what makes the fetched bytes checkable, and
+    /// loopback does not supply that.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use pg_embedded_setup_unpriv::{PgEnvCfg, extensions::ExtensionRequest};
+    ///
+    /// let cfg = PgEnvCfg {
+    ///     extensions: Some("vector, vector".into()),
+    ///     extensions_manifest: Some("/srv/extensions/manifest.json".into()),
+    ///     ..PgEnvCfg::default()
+    /// };
+    /// let request = ExtensionRequest::from_config(&cfg)?.expect("names were declared");
+    /// assert_eq!(request.names.len(), 1, "duplicates collapse in order");
+    /// # Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
+    /// ```
+    pub fn from_config(cfg: &PgEnvCfg) -> BootstrapResult<Option<Self>> {
+        let names = parse_names(cfg.extensions.as_deref().unwrap_or_default())?;
+        if names.is_empty() {
+            return Ok(None);
+        }
+        let manifest = parse_manifest_source(
+            cfg.extensions_manifest.as_deref(),
+            cfg.extensions_manifest_sha256.as_deref(),
+        )?;
+        let cache_dir = cfg
+            .extensions_cache_dir
+            .clone()
+            .unwrap_or_else(resolve_extension_cache_dir);
+        Ok(Some(Self {
+            names,
+            manifest,
+            cache_dir,
+        }))
+    }
+}
+
+/// Splits `PG_EXTENSIONS` on commas, trims, validates and deduplicates in order.
+fn parse_names(raw: &str) -> BootstrapResult<Vec<ExtensionName>> {
+    let mut names: Vec<ExtensionName> = Vec::new();
+    for item in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
+        let name = ExtensionName::new(item)?;
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
+
+/// Classifies the manifest location as a URL (digest required) or a path.
+///
+/// A location is a URL when [`is_permitted_url`](super::is_permitted_url)
+/// accepts it, which is the same rule the archive fetches apply: `https://`
+/// anywhere, and `http://` only to a loopback host. Sharing the rule keeps a
+/// local mirror from serving the archives a manifest names while the manifest
+/// itself is refused, and it parses the location, so `"https://"` and
+/// `"https://[bad"` fail here as configuration rather than later as an
+/// unavailable manifest. The digest stays mandatory for every URL source,
+/// loopback included: it is what pins the archives the manifest describes.
+fn parse_manifest_source(
+    raw_location: Option<&str>,
+    digest: Option<&str>,
+) -> BootstrapResult<ManifestSource> {
+    let Some(location) = raw_location
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(config_error(
+            "PG_EXTENSIONS is set but PG_EXTENSIONS_MANIFEST is not; the manifest pins which \
+             archives may be installed",
+        ));
+    };
+    let pinned = digest
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(parse_digest)
+        .transpose()?;
+    if super::is_permitted_url(location) {
+        let Some(sha256) = pinned else {
+            return Err(config_error(
+                "PG_EXTENSIONS_MANIFEST is a URL, so PG_EXTENSIONS_MANIFEST_SHA256 is required to \
+                 pin it",
+            ));
+        };
+        return Ok(ManifestSource::Url {
+            url: location.to_owned(),
+            sha256,
+        });
+    }
+    if location.contains("://") {
+        return Err(config_error(
+            "PG_EXTENSIONS_MANIFEST must be an https:// URL, a loopback http:// URL, or a \
+             filesystem path",
+        ));
+    }
+    Ok(ManifestSource::Path {
+        path: Utf8PathBuf::from(location),
+        sha256: pinned,
+    })
+}
+
+/// Parses `PG_EXTENSIONS_MANIFEST_SHA256`, mapping a bad digest to a config error.
+fn parse_digest(value: &str) -> BootstrapResult<Sha256Hex> {
+    Sha256Hex::parse(value)
+        .map_err(|err| config_error(&format!("PG_EXTENSIONS_MANIFEST_SHA256: {err}")))
+}
+
+/// Builds an `ExtensionConfigInvalid` error from a message.
+fn config_error(message: &str) -> crate::error::BootstrapError {
+    extension_error(
+        BootstrapErrorKind::ExtensionConfigInvalid,
+        eyre!("{message}"),
+    )
+}
