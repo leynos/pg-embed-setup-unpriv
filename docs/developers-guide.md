@@ -52,6 +52,12 @@ The upload step runs only when that output is `'true'` and the ref is
 `refs/heads/main`, takes the token directly from the secret through its
 `access-token` input, and suppresses no failure with `continue-on-error`.
 
+The publisher job runs in the `codescene` environment, whose deployment policy
+admits `main` alone. That job is the only one to declare it, and no workflow a
+pull request can start declares it in any job, since a declaration there would
+let branch code ask for the token. The environment is repository configuration
+and is not changed from this repository's files.
+
 Two gaps are known. A merge made by the Dependabot automerge workflow uses the
 workflow token, and GitHub starts no workflow for a push made with that token.
 So this workflow does not run for those merges, and the baseline waits for the
@@ -87,6 +93,11 @@ under `scripts/tests/`:
   reads as "may never run".
 - `publisher_token.py` holds the token rules above: the one check step, the
   upload's condition and input, and no `env` or other step naming the token.
+- `codescene_environment.py` holds the environment rule: every job calling
+  the uploader declares `codescene`, as the string or `{name: codescene}`, no
+  other job declares it, and no pull-request-reachable job does.
+  `test_codescene_environment.py` applies it to this repository and proves each
+  clause against a constructed repository.
 - `coverage_shape_rules.py` states each rule as a function returning its
   offenders. A pull-request coverage step counts only when its conditions let
   it run, and the publisher must generate coverage before it uploads.
