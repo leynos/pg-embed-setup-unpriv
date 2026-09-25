@@ -59,7 +59,7 @@ jobs:
         # `workflow_dispatch`, which can be run from any branch, and an upload
         # from one would be recorded by CodeScene as the trunk's coverage.
         if: ${{ steps.codescene-token.outputs.available == 'true' && github.ref == 'refs/heads/main' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@18bed1ca49a6de3d8882bd72635a32ae3f023d57
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           format: lcov
           # Stated rather than left to the action's default, because the
@@ -67,4 +67,3 @@ jobs:
           # pull-request lane must not call the service and this one must.
           mode: upload
           access-token: ${{ secrets.CS_ACCESS_TOKEN }}
-          installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
