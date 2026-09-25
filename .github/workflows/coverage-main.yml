@@ -1,17 +1,26 @@
 name: Coverage (main)
 
 # CodeScene accepts `cs-coverage upload` only for analysed branches, so
-# main-branch coverage is uploaded here on push; pull requests do not
-# run a changed-line gate yet (see the comment in ci.yml on the
-# `mode: check` step deferral). This workflow also advances the
-# coverage ratchet baseline: caches saved on main are readable by every
-# pull-request run, so the baseline written here is the one the PR
-# ratchet check compares against.
+# main-branch coverage is uploaded here on push, and only here: pull
+# requests measure and ratchet locally and never contact CodeScene. This
+# workflow also advances the coverage ratchet baseline: caches saved on
+# main are readable by every pull-request run, so the baseline written here
+# is the one the pull-request ratchet compares against.
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+# One publisher per ref at a time. Two pushes landing close together would
+# otherwise race to upload for the same project and to write the same ratchet
+# baseline, and the loser's report is the one a pull request then compares
+# against. The group is the workflow and the ref, never the event, so a
+# dispatch and a push to main share it. In-progress runs are not cancelled: a
+# half-finished upload is worse than a queued one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   coverage-upload:
@@ -32,19 +41,30 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/generate-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           output-path: lcov.info
           format: lcov
           features: dev-worker
           with-default-features: "false"
           with-ratchet: 'true'
+      # The token stays out of every `env`: the upload action is a composite
+      # whose nested steps inherit its environment. This step records only
+      # whether the secret is present, for the upload's condition to read.
+      - name: Check the CodeScene token is available
+        id: codescene-token
+        run: echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
       - name: Upload coverage data to CodeScene
-        env:
-          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        if: env.CS_ACCESS_TOKEN != ''
+        # Guarded on the ref as well as the token. This workflow also answers
+        # `workflow_dispatch`, which can be run from any branch, and an upload
+        # from one would be recorded by CodeScene as the trunk's coverage.
+        if: ${{ steps.codescene-token.outputs.available == 'true' && github.ref == 'refs/heads/main' }}
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@18bed1ca49a6de3d8882bd72635a32ae3f023d57
         with:
           format: lcov
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          # Stated rather than left to the action's default, because the
+          # difference between this and `check` is the whole of CV-005: the
+          # pull-request lane must not call the service and this one must.
+          mode: upload
+          access-token: ${{ secrets.CS_ACCESS_TOKEN }}
           installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
