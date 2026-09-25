@@ -30,6 +30,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_codescene_environment.py \
 	scripts/tests/test_release_archive.py \
 	scripts/tests/test_release_archive_failures.py \
 	scripts/tests/test_release_workflow_contract.py \
+	scripts/tests/test_uploader_pin.py \
 	scripts/tests/test_workflow_reader.py \
 	scripts/tests/test_timeout_exactness_contract.py \
 	scripts/tests/test_timeout_ordering_contract.py \
@@ -40,6 +41,7 @@ SCRIPT_PY_DOCTESTS := scripts/tests/codescene_environment.py \
 	scripts/tests/coverage_shape_rules.py \
 	scripts/tests/publisher_token.py \
 	scripts/tests/step_conditions.py \
+	scripts/tests/uploader_pin.py \
 	scripts/tests/workflow_reader.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \
