@@ -20,7 +20,8 @@ CMD_MOX_VERSION ?= 0.2.0
 HYPOTHESIS_VERSION ?= 6.167.1
 PYTEST_VERSION ?= 9.0.2
 PYYAML_VERSION ?= 6.0.3
-SCRIPT_PY_TESTS := scripts/tests/test_coverage_shape_contacts.py \
+SCRIPT_PY_TESTS := scripts/tests/test_codescene_environment.py \
+	scripts/tests/test_coverage_shape_contacts.py \
 	scripts/tests/test_coverage_shape_contract.py \
 	scripts/tests/test_coverage_shape_probes.py \
 	scripts/tests/test_coverage_shape_properties.py \
@@ -35,7 +36,8 @@ SCRIPT_PY_TESTS := scripts/tests/test_coverage_shape_contacts.py \
 	scripts/tests/test_timeout_reading_contract.py \
 	scripts/tests/test_timeout_reading_properties.py
 # Modules whose examples are collected as doctests alongside the suites.
-SCRIPT_PY_DOCTESTS := scripts/tests/coverage_shape_rules.py \
+SCRIPT_PY_DOCTESTS := scripts/tests/codescene_environment.py \
+	scripts/tests/coverage_shape_rules.py \
 	scripts/tests/publisher_token.py \
 	scripts/tests/step_conditions.py \
 	scripts/tests/workflow_reader.py

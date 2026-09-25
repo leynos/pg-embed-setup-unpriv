@@ -29,6 +29,9 @@ jobs:
     # watchdog plus the work either side. This job's own worst was 38 s
     # outside the coverage step, on run 29784541706.
     timeout-minutes: 66
+    # The `codescene` environment admits `main` alone, so the token it holds
+    # never reaches a run from any other ref. No other job declares it.
+    environment: codescene
     permissions:
       contents: read
     env:
