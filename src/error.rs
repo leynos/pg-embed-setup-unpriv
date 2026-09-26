@@ -113,6 +113,22 @@ pub(crate) struct LifecycleTimeout {
     pub(crate) seconds: f64,
 }
 
+/// A lifecycle failure that ran binaries copied from the shared binary cache.
+///
+/// The cache holds an extracted installation tree, so a retry would copy the
+/// same tree again. The marker tells the shared-cluster retry to treat I/O and
+/// archive failures after a cache hit as deterministic, and tells the reader
+/// how to clear the entry.
+#[derive(Debug, Error)]
+#[error(
+    "the PostgreSQL binaries came from the shared binary cache ({version}); remove that cache \
+     entry to download them afresh"
+)]
+pub(crate) struct CachedBinariesUsed {
+    /// The version requirement the cached entry satisfied.
+    pub(crate) version: String,
+}
+
 impl From<Report> for BootstrapError {
     fn from(report: Report) -> Self { Self::new(BootstrapErrorKind::Other, report) }
 }
