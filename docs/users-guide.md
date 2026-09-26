@@ -817,6 +817,65 @@ still running as `root`, follow these steps:
   automatically and, on Unix-like hosts, also seeds `TZDIR` when it discovers a
   valid timezone database.
 
+## Transient bootstrap failures in CI
+
+A shared cluster (`shared_cluster()`, `shared_cluster_handle()` and the
+fixtures built on them) remembers a failed bootstrap for the rest of the test
+process, so every later test in that binary reports the same failure. Under
+`cargo nextest`, each test binary runs in its own process and starts its own
+shared cluster. Two measures stop one network hiccup from failing a whole
+binary.
+
+### Bounded retry
+
+In releases after 0.6.0, a shared cluster retries a bootstrap that fails for a
+plainly transient reason:
+
+- an I/O or repository failure while downloading or extracting the
+  PostgreSQL archive;
+- a lifecycle timeout, such as a slow first start under load;
+- an extension archive that could not be downloaded
+  (`BootstrapErrorKind::ExtensionArchiveUnavailable`).
+
+It makes three attempts in all, one and then two seconds apart. A retry is
+logged as a `warn` event. If every attempt fails, the error keeps its
+`BootstrapErrorKind` and gains `bootstrap failed after 3 attempts`, and that
+failure is the one remembered. Any other failure, such as a configuration error
+or a version that does not exist, is returned at once without a retry.
+Root-privileged bootstraps report worker failures as text, so they are never
+retried. `TestCluster::new()` and `TestCluster::new_split()` called directly do
+not retry.
+
+### Warm the caches before the tests run
+
+Run the `pg_embedded_setup_unpriv` binary as a CI step before the test runner.
+It downloads and verifies the PostgreSQL archive and fills the shared binary
+cache (see [`cache.md`](cache.md)). When `PG_EXTENSIONS` is set, it also fills
+the extension cache, so the test processes then need no network. Give it
+throwaway installation and data directories, and the same cache, version and
+extension settings as the test step:
+
+```yaml
+- name: Warm the PostgreSQL caches
+  env:
+    PG_VERSION_REQ: "=17.4.0"
+    PG_BINARY_CACHE_DIR: ${{ runner.temp }}/pg-binaries
+    PG_RUNTIME_DIR: ${{ runner.temp }}/pg-warm/install
+    PG_DATA_DIR: ${{ runner.temp }}/pg-warm/data
+  run: pg_embedded_setup_unpriv
+- name: Test
+  env:
+    PG_VERSION_REQ: "=17.4.0"
+    PG_BINARY_CACHE_DIR: ${{ runner.temp }}/pg-binaries
+  run: cargo nextest run
+```
+
+Install the binary at the version of the library the tests use, for example with
+`cargo binstall pg-embed-setup-unpriv@<version>`. Cache population is best
+effort: it is skipped when the cache lock cannot be taken. To prove the tests
+will not download, assert that the cache directory holds a complete entry after
+the warm step.
+
 ## Known issues and mitigations
 
 - **TimeZone errors**: The embedded cluster loads timezone data from the host

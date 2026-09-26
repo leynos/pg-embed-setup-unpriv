@@ -127,6 +127,12 @@ path = "tests/settings.rs"
 
 [dependencies]
 postgresql_embedded = { version = "0.20.2", features = ["tokio"] }
+# Named directly only to classify `postgresql_embedded::Error::ArchiveError`
+# causes when deciding whether a bootstrap failure is transient. It must stay
+# the version `postgresql_embedded` uses: a test builds that error from this
+# crate's type, so a mismatch fails to compile rather than silently turning
+# the retry off.
+postgresql_archive = { version = "0.20.4", default-features = false }
 color-eyre = "0.6"
 tokio = { version = "1", features = ["rt", "macros", "time", "fs"] }
 serde = { version = "1", features = ["derive"] }

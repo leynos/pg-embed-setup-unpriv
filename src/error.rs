@@ -94,6 +94,23 @@ impl BootstrapError {
 
     /// Extracts the underlying diagnostic report.
     pub fn into_report(self) -> Report { self.report }
+
+    /// Borrows the underlying diagnostic report, so its cause chain can be
+    /// inspected without consuming the error.
+    pub(crate) const fn report(&self) -> &Report { &self.report }
+}
+
+/// A lifecycle operation that did not finish within its configured timeout.
+///
+/// Carried as a typed cause, rather than as text, so a caller deciding
+/// whether a failure is worth retrying can recognize it by type.
+#[derive(Debug, Error)]
+#[error("{context}: operation timed out after {seconds:.1}s")]
+pub(crate) struct LifecycleTimeout {
+    /// The operation that timed out, such as `postgresql_embedded::start()`.
+    pub(crate) context: &'static str,
+    /// The timeout that elapsed, in seconds.
+    pub(crate) seconds: f64,
 }
 
 impl From<Report> for BootstrapError {

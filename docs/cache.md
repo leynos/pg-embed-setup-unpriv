@@ -23,6 +23,13 @@ functions correctly across different operating systems and in restricted
 environments such as Continuous Integration (CI) containers where the home
 directory may be inaccessible.
 
+## Warming the cache in CI
+
+Run the `pg_embedded_setup_unpriv` binary before the test step with the same
+`PG_BINARY_CACHE_DIR` and `PG_VERSION_REQ`. It fills this cache, so the test
+processes copy from it and never download. The users' guide section "Transient
+bootstrap failures in CI" gives the full pattern.
+
 ## Cache structure
 
 ```plaintext
