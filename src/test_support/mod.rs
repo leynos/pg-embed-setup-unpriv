@@ -6,6 +6,7 @@
 //! helper registers a closure for the duration of a `HookGuard`, ensuring
 //! `TestCluster` calls are observable without leaking state across suites.
 
+pub(crate) mod bootstrap_retry;
 mod errors;
 mod filesystem;
 mod fixtures;

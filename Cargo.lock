@@ -2383,6 +2383,7 @@ dependencies = [
  "once_cell",
  "ortho_config",
  "postgres",
+ "postgresql_archive",
  "postgresql_embedded",
  "pq-sys",
  "proptest",
