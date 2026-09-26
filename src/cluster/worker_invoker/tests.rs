@@ -100,6 +100,20 @@ fn timeout_error_mentions_elapsed_duration() {
     );
 }
 
+/// A lifecycle timeout carries a typed cause, so the shared-cluster retry
+/// recognizes it without reading its message.
+#[test]
+fn timeout_error_is_recognized_as_transient() {
+    let err = timeout_error(
+        "postgresql_embedded::start()",
+        std::time::Duration::from_secs(3),
+    );
+    assert!(
+        crate::test_support::bootstrap_retry::is_transient(&err),
+        "a start timeout must be retryable, got: {err:?}"
+    );
+}
+
 #[test]
 fn unprivileged_operation_propagates_inner_error() -> Result<()> {
     let runtime = test_runtime()?;

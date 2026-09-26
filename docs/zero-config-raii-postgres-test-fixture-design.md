@@ -942,3 +942,47 @@ must respect:
 
 `docs/extensions.md` is the user-facing contract; the developers guide
 describes the modules.
+
+## Implementation update: bounded retry of transient bootstrap failures (after v0.6.0)
+
+The shared-cluster singletons cache their first failure for the life of the
+process, and under `cargo nextest` every test binary is its own process, so one
+failed download used to fail a whole binary's database tests.
+`test_support::bootstrap_retry` now sits between each singleton and
+`TestCluster::new_split` or `TestCluster::new`. The decisions a future change
+must respect:
+
+- **Classify by type, never by message.** A failure is transient when its
+  kind is `ExtensionArchiveUnavailable`, or when its report's cause chain holds
+  a `postgresql_embedded::Error::IoError`, an `ArchiveError` whose archive
+  error is `IoError` or `RepositoryFailure`, or the crate's `LifecycleTimeout`.
+  `LifecycleTimeout` replaces the text-only timeout report so that timeouts can
+  be recognized by type; its message is unchanged. Everything else, including
+  every untyped report, is deterministic and is returned at once.
+- **A cache hit is not re-downloaded.** The binary cache holds extracted
+  trees, not archives, so a retry after a cache hit would copy the same tree.
+  `start_postgres` wraps a lifecycle failure that followed a cache hit in
+  `CachedBinariesUsed`. With that marker, only a timeout stays transient, and
+  the report tells the user to remove the entry. The retry deliberately does
+  not invalidate the entry itself: another process may hold it under the shared
+  cache lock, and deleting a shared entry from inside a test is a heavier act
+  than failing once with a clear remedy.
+- **Bounded, and never masking.** Three attempts in all, one then two seconds
+  apart. A transient failure that persists is returned with its kind and the
+  attempt count, and the singleton caches that failure as before. The
+  singleton's cached-failure contract is unchanged; only what counts as the
+  first failure moves.
+- **Scope.** Only the singletons retry. `TestCluster` constructors called
+  directly do not, and root-privileged bootstraps report worker failures as
+  text, so they carry no typed cause and are never retried.
+- **Dependency lockstep.** Naming the archive error variants needs
+  `postgresql_archive` as a direct dependency at the version
+  `postgresql_embedded` uses. A unit test builds
+  `postgresql_embedded::Error::ArchiveError` from this crate's
+  `postgresql_archive::Error`, so a version split fails to compile rather than
+  silently disabling the retry.
+
+The warm-up half of the same problem needs no new code: the
+`pg_embedded_setup_unpriv` binary already downloads, verifies and fills the
+binary cache, and its setup-only path runs the extension hook. The users' guide
+documents it as the CI step that keeps network access out of the test processes.

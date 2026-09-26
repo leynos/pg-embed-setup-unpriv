@@ -14,7 +14,7 @@ use crate::{
     ExecutionPrivileges,
     TestBootstrapSettings,
     bootstrap::{root_privilege_drop_supported, unsupported_root_privilege_drop_error},
-    error::{BootstrapError, BootstrapResult},
+    error::{BootstrapError, BootstrapResult, LifecycleTimeout},
     observability::LOG_TARGET,
 };
 
@@ -179,10 +179,10 @@ fn log_worker_dispatch(operation: WorkerOperation, worker_binary: Option<&str>, 
 ///
 /// Used by both sync and async invokers to ensure consistent error messages.
 fn timeout_error(ctx: &'static str, timeout: std::time::Duration) -> BootstrapError {
-    BootstrapError::from(eyre!(
-        "{ctx}: operation timed out after {:.1}s",
-        timeout.as_secs_f64()
-    ))
+    BootstrapError::from(color_eyre::Report::new(LifecycleTimeout {
+        context: ctx,
+        seconds: timeout.as_secs_f64(),
+    }))
 }
 
 async fn run_with_timeout<Fut>(

@@ -7,6 +7,7 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::{
+    bootstrap_retry::{RetryPolicy, retry_transient},
     fixtures::ensure_worker_env,
     shared_singleton_core::{SharedInitState, get_or_try_init_shared},
 };
@@ -42,7 +43,11 @@ type SharedHandleState = SharedInitState<&'static ClusterHandle, Arc<BootstrapEr
 ///
 /// # Errors
 ///
-/// Returns a [`BootstrapError`] if the cluster cannot be started. Once
+/// Returns a [`BootstrapError`] if the cluster cannot be started. A transient
+/// failure (a download or extraction I/O error, a lifecycle timeout, or an
+/// extension archive that could not be fetched) is retried up to three
+/// attempts in all, one then two seconds apart, and reports the attempt count
+/// if it persists. Any other failure is returned at once. Once
 /// initialization fails, subsequent calls return an error with the same
 /// [`BootstrapErrorKind`](crate::error::BootstrapErrorKind) and a message
 /// indicating the previous failure.
@@ -83,7 +88,11 @@ pub fn shared_cluster_handle() -> BootstrapResult<&'static ClusterHandle> {
 fn initialize_shared_cluster_handle()
 -> Result<&'static ClusterHandle, (Arc<BootstrapError>, BootstrapError)> {
     let worker_guard = ensure_worker_env();
-    match TestCluster::new_split() {
+    match retry_transient(
+        RetryPolicy::SHARED_CLUSTER,
+        TestCluster::new_split,
+        std::thread::sleep,
+    ) {
         Ok((handle, cluster_guard)) => {
             // Attach worker guard to cluster guard, then leak it.
             // The guard manages shutdown; leaking it means the cluster
@@ -228,7 +237,11 @@ unsafe impl Sync for SharedClusterPtr {}
 ///
 /// # Errors
 ///
-/// Returns a [`BootstrapError`] if the cluster cannot be started. Once
+/// Returns a [`BootstrapError`] if the cluster cannot be started. A transient
+/// failure (a download or extraction I/O error, a lifecycle timeout, or an
+/// extension archive that could not be fetched) is retried up to three
+/// attempts in all, one then two seconds apart, and reports the attempt count
+/// if it persists. Any other failure is returned at once. Once
 /// initialization fails, subsequent calls return an error with the same
 /// [`BootstrapErrorKind`](crate::error::BootstrapErrorKind) and a message
 /// indicating the previous failure.
@@ -271,7 +284,11 @@ pub fn shared_cluster() -> BootstrapResult<&'static TestCluster> {
 
 fn initialize_shared_cluster() -> Result<SharedClusterPtr, (Arc<BootstrapError>, BootstrapError)> {
     let worker_guard = ensure_worker_env();
-    match TestCluster::new() {
+    match retry_transient(
+        RetryPolicy::SHARED_CLUSTER,
+        TestCluster::new,
+        std::thread::sleep,
+    ) {
         Ok(new_cluster) => {
             log_shared_cluster_event("shared cluster initialized");
             leak_shared_cluster_after_shutdown_hook(
