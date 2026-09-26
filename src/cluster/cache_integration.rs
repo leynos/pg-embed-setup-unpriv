@@ -19,8 +19,28 @@ use crate::{
         find_matching_cached_version,
         populate_cache,
     },
+    error::{BootstrapError, CachedBinariesUsed},
     observability::LOG_TARGET,
 };
+
+/// Marks a lifecycle failure that ran binaries copied from the cache.
+///
+/// A failure without a cache hit is returned unchanged.
+pub(super) fn note_cached_binaries(
+    cache_hit: bool,
+    bootstrap: &TestBootstrapSettings,
+    err: BootstrapError,
+) -> BootstrapError {
+    if !cache_hit {
+        return err;
+    }
+    let kind = err.kind();
+    let version = bootstrap.settings.version.to_string();
+    BootstrapError::new(
+        kind,
+        err.into_report().wrap_err(CachedBinariesUsed { version }),
+    )
+}
 
 /// Sets the exact version requirement in settings to skip GitHub API resolution.
 fn set_exact_version(settings: &mut Settings, version: &str) {
@@ -263,3 +283,7 @@ fn extract_version_from_path(path: &std::path::Path) -> Option<String> {
     postgresql_embedded::Version::parse(name).ok()?;
     Some(name.to_owned())
 }
+
+#[cfg(test)]
+#[path = "cache_integration_tests.rs"]
+mod tests;

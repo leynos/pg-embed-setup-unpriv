@@ -90,7 +90,8 @@ pub(super) fn start_postgres(
         },
     };
     let (is_managed_via_worker, postgres) =
-        handle_privilege_lifecycle(privileges, &context, &mut bootstrap)?;
+        handle_privilege_lifecycle(privileges, &context, &mut bootstrap)
+            .map_err(|err| cache_integration::note_cached_binaries(cache_hit, &bootstrap, err))?;
 
     log_lifecycle_complete(privileges, is_managed_via_worker, cache_hit, false);
 

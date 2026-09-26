@@ -11,7 +11,9 @@
 //! from `postgresql_embedded` or its archive layer (download and
 //! extraction), a lifecycle timeout, and an extension archive that could not
 //! be downloaded. Everything else, a configuration error or a missing
-//! version for instance, fails at once. A transient failure that persists
+//! version for instance, fails at once. So does an I/O or archive failure
+//! after the binaries came from the shared binary cache, which would only
+//! copy the same tree again. A transient failure that persists
 //! still fails after the last attempt, with the attempt count added to the
 //! report, so a retry never turns a real failure into a pass.
 //!
@@ -24,7 +26,13 @@ use std::time::Duration;
 use postgresql_archive::Error as ArchiveError;
 use postgresql_embedded::Error as EmbeddedError;
 
-use crate::error::{BootstrapError, BootstrapErrorKind, BootstrapResult, LifecycleTimeout};
+use crate::error::{
+    BootstrapError,
+    BootstrapErrorKind,
+    BootstrapResult,
+    CachedBinariesUsed,
+    LifecycleTimeout,
+};
 
 /// How many attempts a bootstrap gets, and how long to wait between them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,17 +101,26 @@ where
 }
 
 /// Returns whether a bootstrap failure is plainly transient.
+///
+/// After a cache hit the binaries were copied, not downloaded, so an I/O or
+/// archive failure points at the cached tree and would recur on every retry;
+/// only a timeout stays transient then.
 pub(crate) fn is_transient(err: &BootstrapError) -> bool {
+    let from_cache = err.report().downcast_ref::<CachedBinariesUsed>().is_some();
     err.kind() == BootstrapErrorKind::ExtensionArchiveUnavailable
-        || err.report().chain().any(is_transient_cause)
+        || err
+            .report()
+            .chain()
+            .any(|cause| is_transient_cause(cause, from_cache))
 }
 
 /// Returns whether one cause in a report's chain is transient.
-fn is_transient_cause(cause: &(dyn std::error::Error + 'static)) -> bool {
+fn is_transient_cause(cause: &(dyn std::error::Error + 'static), from_cache: bool) -> bool {
     cause.is::<LifecycleTimeout>()
-        || cause
-            .downcast_ref::<EmbeddedError>()
-            .is_some_and(is_transient_embedded)
+        || !from_cache
+            && cause
+                .downcast_ref::<EmbeddedError>()
+                .is_some_and(is_transient_embedded)
 }
 
 /// Returns whether a `postgresql_embedded` error comes from I/O or the

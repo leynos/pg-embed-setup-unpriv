@@ -846,6 +846,13 @@ Root-privileged bootstraps report worker failures as text, so they are never
 retried. `TestCluster::new()` and `TestCluster::new_split()` called directly do
 not retry.
 
+A failure on binaries copied from the shared binary cache is treated as
+deterministic, apart from a timeout. The cache holds an extracted installation
+tree rather than an archive, so a retry would copy the same tree again rather
+than download it afresh. Such an error says that the binaries came from the
+cache. Remove that version's directory from the cache (see
+[`cache.md`](cache.md)) to force a fresh download on the next run.
+
 ### Warm the caches before the tests run
 
 Run the `pg_embedded_setup_unpriv` binary as a CI step before the test runner.
