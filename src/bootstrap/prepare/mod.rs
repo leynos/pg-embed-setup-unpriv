@@ -22,6 +22,7 @@ use crate::{
 const PGPASS_MODE: u32 = 0o600;
 
 mod password;
+mod stale_password;
 pub use password::{PasswordReuseOutcome, reuse_existing_password, stored_cluster_password};
 
 /// Derives the default `install` and `data` directories under `root`.
@@ -94,6 +95,7 @@ fn bootstrap_unprivileged(
 
     ensure_dir_with_mode(&paths.install_dir, 0o755)?;
     ensure_dir_with_mode(&paths.data_dir, 0o700)?;
+    stale_password::discard_orphaned_password_file(&paths.data_dir, &paths.password_file)?;
     ensure_pgpass_permissions(&paths.password_file)?;
 
     let timezone = prepare_timezone_env()?;

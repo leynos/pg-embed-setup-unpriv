@@ -366,6 +366,10 @@ fn bootstrap_for_tests_sets_pgpass_permissions_and_owner() -> Result<()> {
     sandbox.reset()?;
     fs::create_dir_all(sandbox.install_dir().as_std_path()).context("create install dir")?;
     fs::create_dir_all(sandbox.data_dir().as_std_path()).context("create data dir")?;
+    // The data directory must hold a cluster for the password file to be
+    // kept: with no cluster, a leftover file is removed as stale (#259).
+    fs::write(sandbox.data_dir().join("PG_VERSION").as_std_path(), b"17\n")
+        .context("write PG_VERSION")?;
 
     let pgpass_path = sandbox.install_dir().join(".pgpass");
     fs::write(pgpass_path.as_std_path(), b"pgpass").context("write pgpass")?;

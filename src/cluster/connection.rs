@@ -3,7 +3,6 @@
 use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(feature = "diesel-support")]
 use color_eyre::eyre::WrapErr;
-use color_eyre::eyre::eyre;
 use postgres::{Client, NoTls};
 use postgresql_embedded::Settings;
 
@@ -20,9 +19,20 @@ pub(crate) fn escape_identifier(name: &str) -> String { name.replace('"', "\"\""
 /// This is a shared helper for admin database connections used by both
 /// `TestClusterConnection` and `TemporaryDatabase`.
 pub(crate) fn connect_admin(url: &str) -> BootstrapResult<Client> {
-    Client::connect(url, NoTls).map_err(|err| {
-        crate::error::BootstrapError::from(eyre!("failed to connect to admin database: {err}"))
-    })
+    Client::connect(url, NoTls).map_err(admin_connect_error)
+}
+
+/// Wraps a failed admin connection, keeping the driver's error as the source.
+///
+/// `tokio_postgres` displays a server-side failure as just `db error`, with
+/// the reason (such as `password authentication failed`, code `28P01`) in its
+/// source. The message therefore names that source too, and the error itself
+/// stays in the chain for callers that walk it.
+pub(crate) fn admin_connect_error(err: postgres::Error) -> crate::error::BootstrapError {
+    let reason = std::error::Error::source(&err)
+        .map_or_else(|| err.to_string(), |source| format!("{err}: {source}"));
+    let message = format!("failed to connect to admin database: {reason}");
+    crate::error::BootstrapError::from(color_eyre::Report::new(err).wrap_err(message))
 }
 
 /// Provides ergonomic accessors for connection-oriented cluster metadata.
@@ -221,5 +231,30 @@ mod tests {
         let expected = settings.settings.url("postgres");
 
         assert_eq!(connection.database_url("postgres"), expected);
+    }
+
+    /// A failed admin connection keeps the driver's error in the chain and
+    /// names its cause, so a caller sees why rather than a bare `db error`.
+    #[test]
+    fn a_failed_admin_connection_keeps_its_source() {
+        // Port 1 on loopback refuses at once; no server is involved.
+        let err = connect_admin("postgresql://postgres:x@127.0.0.1:1/postgres")
+            .err()
+            .expect("nothing listens on port 1");
+
+        let message = err.to_string();
+        let report = err.into_report();
+        let chain_has_driver_error = report
+            .chain()
+            .any(|cause| cause.downcast_ref::<postgres::Error>().is_some());
+        assert!(chain_has_driver_error, "the source was dropped: {report:?}");
+        assert!(
+            message.starts_with("failed to connect to admin database: "),
+            "{message}"
+        );
+        assert!(
+            message.to_lowercase().contains("refused"),
+            "the cause must reach the message: {message}"
+        );
     }
 }

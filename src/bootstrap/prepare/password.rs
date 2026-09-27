@@ -88,14 +88,14 @@ pub fn stored_cluster_password(
 ///
 /// The label travels with the error instead of being emitted here, so the
 /// query stays free of side effects and the command decides what to publish.
-struct PasswordQueryFailure {
+pub(super) struct PasswordQueryFailure {
     /// Bounded `outcome` label: `probe_failed`, `missing_file`,
     /// `unreadable_file` or `empty_file`.
     outcome: &'static str,
     /// The same outcome as a bounded metric label.
     metric: PasswordReuseOutcomeMetric,
     /// The categorized error to return.
-    error: BootstrapError,
+    pub(super) error: BootstrapError,
 }
 
 /// The query half proper: reads, categorizes, and emits nothing.
@@ -112,7 +112,7 @@ fn query_stored_password(
 /// Probes the `PG_VERSION` marker, treating only "not found" as "no
 /// cluster"; a permission failure or any other I/O error is propagated so a
 /// temporarily unsearchable data directory cannot masquerade as a fresh one.
-fn has_cluster_marker(data_dir: &Utf8Path) -> Result<bool, PasswordQueryFailure> {
+pub(super) fn has_cluster_marker(data_dir: &Utf8Path) -> Result<bool, PasswordQueryFailure> {
     match std::fs::metadata(data_dir.join(PG_VERSION_MARKER)) {
         Ok(metadata) => Ok(metadata.is_file()),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),

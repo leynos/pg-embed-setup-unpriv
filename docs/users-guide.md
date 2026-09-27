@@ -685,6 +685,23 @@ An explicit password short-circuits the whole check: the password file is not
 read at all, so setting `PG_PASSWORD` is a working escape from a cluster whose
 stored file has been lost.
 
+When the data directory holds no cluster, a password file left in the install
+tree by an earlier, reaped cluster is removed before the new cluster is
+initialized. In releases after 0.6.0 this applies whether or not `PG_PASSWORD`
+is set. `initdb` reads that file, so a stale one used to give the fresh cluster
+the old password while the bootstrap reported a new one, and every process
+after the first in a persistent install root (`PG_EMBED_ROOT`, or the default
+per-user root) failed with `password authentication failed`. Under
+`cargo nextest`, where each test is its own process, that was every test but
+the first. A stale path that cannot be removed fails the bootstrap with
+`ClusterPasswordUnreadable` rather than letting `initdb` read it.
+
+A failed connection to the admin database keeps the driver's error in the
+chain, and the message names its cause, for example
+`failed to connect to admin database: db error: FATAL: password authentication
+failed for user "postgres"`
+rather than a bare `db error`.
+
 The file itself must be a regular file of no more than 4 KiB. The bootstrap
 opens it once and takes both its type and its size from that one handle, so a
 path replaced after a check cannot redirect the read. A FIFO, a directory, or
