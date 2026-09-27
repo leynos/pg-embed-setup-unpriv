@@ -418,3 +418,38 @@ fn bootstrap_for_tests_sets_pgpass_permissions_and_owner() -> Result<()> {
 
     Ok(())
 }
+
+/// A password file left by a reaped cluster is removed during preparation,
+/// on whichever path this run takes (#259).
+///
+/// Run unprivileged, this covers the unprivileged preparation. Run as root
+/// with `PG_EMBEDDED_WORKER` set, as the CI root lane runs the suite, it
+/// covers the root preparation, which no child-process test reaches.
+#[test]
+fn bootstrap_for_tests_discards_a_stale_pgpass_without_a_cluster() -> Result<()> {
+    if detect_execution_privileges() == ExecutionPrivileges::Root
+        && worker_binary_for_tests().is_none()
+    {
+        tracing::warn!("Skipping stale pgpass test because PG_EMBEDDED_WORKER is unavailable.");
+        return Ok(());
+    }
+
+    let sandbox = TestSandbox::new("bootstrap-stale-pgpass")?;
+    sandbox.reset()?;
+    fs::create_dir_all(sandbox.install_dir().as_std_path()).context("create install dir")?;
+    fs::create_dir_all(sandbox.data_dir().as_std_path()).context("create data dir")?;
+    let pgpass_path = sandbox.install_dir().join(".pgpass");
+    fs::write(pgpass_path.as_std_path(), b"reaped-cluster-password")
+        .context("seed the stale pgpass")?;
+
+    let env_vars = sandbox.base_env();
+    sandbox
+        .with_env(env_vars, bootstrap_for_tests)
+        .context("bootstrap_for_tests")?;
+
+    ensure!(
+        !pgpass_path.as_std_path().exists(),
+        "a password file with no cluster beside it must be removed before initdb reads it"
+    );
+    Ok(())
+}
