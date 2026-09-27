@@ -7,7 +7,7 @@ use rstest::rstest;
 use super::note_cached_binaries;
 use crate::{
     ExecutionPrivileges,
-    error::{BootstrapError, LifecycleTimeout},
+    error::{BootstrapError, BootstrapErrorKind, LifecycleTimeout},
     test_support::{bootstrap_retry::is_transient, dummy_settings},
 };
 
@@ -55,4 +55,21 @@ fn a_marked_failure_says_how_to_clear_the_entry() {
     assert!(text.contains("shared binary cache"), "{text}");
     assert!(text.contains("remove that cache entry"), "{text}");
     assert_eq!(marked.kind(), kind);
+}
+
+/// An extension failure after a cache hit is left unmarked: clearing the
+/// binary cache cannot fix it, and an unavailable archive stays transient.
+#[test]
+fn an_extension_failure_after_a_cache_hit_is_not_marked() {
+    let bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
+    let err = BootstrapError::new(
+        BootstrapErrorKind::ExtensionArchiveUnavailable,
+        color_eyre::eyre::eyre!("no route to the archive host"),
+    );
+    let marked = note_cached_binaries(true, &bootstrap, err);
+    assert!(
+        !format!("{marked:?}").contains("shared binary cache"),
+        "{marked:?}"
+    );
+    assert!(is_transient(&marked), "{marked:?}");
 }

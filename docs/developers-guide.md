@@ -740,3 +740,31 @@ ordering is asserted in `src/cluster/startup_tests.rs` through the
 root-operation hook. `tests/extensions_install.rs` is the rstest-bdd suite and
 `tests/test_cluster_extensions.rs` loads a probe module (a renamed `autoinc`)
 into a real cluster, synchronously and asynchronously.
+
+## Shared-cluster retry
+
+`src/test_support/bootstrap_retry/` holds the bounded retry that the two
+shared-cluster singletons in `test_support/shared_singleton.rs` put around
+`TestCluster::new_split` and `TestCluster::new`. The design document records
+why ("Implementation update: bounded retry of transient bootstrap failures").
+This section covers the internals and the rules for changing them.
+
+- **Scope.** `retry_transient` is for the singletons alone, because they cache
+  their first failure for the life of the process. Do not wrap other
+  constructors in it: a direct `TestCluster::new` caller owns its own policy.
+- **Classification is by type.** `is_transient` reads the report's cause chain
+  for `postgresql_embedded::Error`, the crate's `LifecycleTimeout`, and the
+  `ExtensionArchiveUnavailable` kind. A new transient cause gets a typed error,
+  never a message match. `postgresql_archive` is a direct dependency only so
+  the archive variants can be named; it must stay at the version
+  `postgresql_embedded` uses, which the unit tests enforce by construction.
+- **Cache hits.** `cache_integration::note_cached_binaries` wraps a lifecycle
+  failure that followed a binary-cache hit in `CachedBinariesUsed`, except for
+  extension kinds (`BootstrapErrorKind::is_extension`). The marker turns an I/O
+  or archive cause deterministic and tells the user to remove the entry.
+- **Tests.** Unit and property tests for the retry live in
+  `bootstrap_retry/tests.rs`, and the marker's tests in
+  `cluster/cache_integration_tests.rs`. `tests/shared_cluster_retry.rs` drives
+  each singleton in a child process, with the fault injected through
+  `Command::env`. Keep it that way: the singletons are process-wide, and the
+  test rules forbid mutating the environment in process.

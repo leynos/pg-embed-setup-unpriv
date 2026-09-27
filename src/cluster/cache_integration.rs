@@ -25,13 +25,16 @@ use crate::{
 
 /// Marks a lifecycle failure that ran binaries copied from the cache.
 ///
-/// A failure without a cache hit is returned unchanged.
+/// A failure without a cache hit, or one from the extension hook, is
+/// returned unchanged.
 pub(super) fn note_cached_binaries(
     cache_hit: bool,
     bootstrap: &TestBootstrapSettings,
     err: BootstrapError,
 ) -> BootstrapError {
-    if !cache_hit {
+    // An extension failure comes from the hook, not the cached tree, so
+    // clearing the binary cache cannot fix it and the marker would mislead.
+    if !cache_hit || err.kind().is_extension() {
         return err;
     }
     let kind = err.kind();

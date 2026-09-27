@@ -851,7 +851,10 @@ deterministic, apart from a timeout. The cache holds an extracted installation
 tree rather than an archive, so a retry would copy the same tree again rather
 than download it afresh. Such an error says that the binaries came from the
 cache. Remove that version's directory from the cache (see
-[`cache.md`](cache.md)) to force a fresh download on the next run.
+[`cache.md`](cache.md)) to force a fresh download on the next run. Extension
+failures are not affected by the cache hit: they come from the extension hook,
+not the cached tree, so they carry no such advice, and an extension archive
+that could not be downloaded is still retried.
 
 ### Warm the caches before the tests run
 

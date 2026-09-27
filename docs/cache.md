@@ -26,9 +26,13 @@ directory may be inaccessible.
 ## Warming the cache in CI
 
 Run the `pg_embedded_setup_unpriv` binary before the test step with the same
-`PG_BINARY_CACHE_DIR` and `PG_VERSION_REQ`. It fills this cache, so the test
-processes copy from it and never download. The users' guide section "Transient
-bootstrap failures in CI" gives the full pattern.
+`PG_BINARY_CACHE_DIR` and `PG_VERSION_REQ`. It fills this cache, and the test
+processes then copy from it instead of downloading. Population is best effort:
+it is skipped when the cache lock cannot be taken, and the tests then download
+as before. So the tests are free of network access only once the warm step has
+left a complete entry (a version directory with its `.complete` marker and
+`bin/`), which CI should check. The users' guide section "Transient bootstrap
+failures in CI" gives the full pattern.
 
 ## Cache structure
 

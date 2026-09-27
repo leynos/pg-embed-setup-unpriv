@@ -73,6 +73,25 @@ pub enum BootstrapErrorKind {
     ExtensionInstallFailed,
 }
 
+impl BootstrapErrorKind {
+    /// Returns whether the failure came from the extension hook rather than
+    /// from the `PostgreSQL` installation itself.
+    pub(crate) const fn is_extension(self) -> bool {
+        matches!(
+            self,
+            Self::ExtensionConfigInvalid
+                | Self::ExtensionManifestUnavailable
+                | Self::ExtensionManifestDigestMismatch
+                | Self::ExtensionManifestInvalid
+                | Self::ExtensionUnavailable
+                | Self::ExtensionArchiveUnavailable
+                | Self::ExtensionArchiveDigestMismatch
+                | Self::ExtensionArchiveInvalid
+                | Self::ExtensionInstallFailed
+        )
+    }
+}
+
 /// Captures bootstrap-specific failures.
 #[derive(Debug, Error)]
 #[error("{report}")]

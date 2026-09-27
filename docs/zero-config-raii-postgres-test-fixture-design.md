@@ -962,11 +962,14 @@ must respect:
 - **A cache hit is not re-downloaded.** The binary cache holds extracted
   trees, not archives, so a retry after a cache hit would copy the same tree.
   `start_postgres` wraps a lifecycle failure that followed a cache hit in
-  `CachedBinariesUsed`. With that marker, only a timeout stays transient, and
-  the report tells the user to remove the entry. The retry deliberately does
-  not invalidate the entry itself: another process may hold it under the shared
-  cache lock, and deleting a shared entry from inside a test is a heavier act
-  than failing once with a clear remedy.
+  `CachedBinariesUsed`, unless its kind is an extension kind: those come from
+  the hook, not the cached tree. With the marker, an I/O or archive cause is no
+  longer transient, while a timeout stays transient, and the report tells the
+  user to remove the entry. An unmarked `ExtensionArchiveUnavailable` stays
+  transient after a cache hit. The retry deliberately does not invalidate the
+  entry itself: another process may hold it under the shared cache lock, and
+  deleting a shared entry from inside a test is a heavier act than failing once
+  with a clear remedy.
 - **Bounded, and never masking.** Three attempts in all, one then two seconds
   apart. A transient failure that persists is returned with its kind and the
   attempt count, and the singleton caches that failure as before. The
