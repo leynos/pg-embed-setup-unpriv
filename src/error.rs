@@ -73,6 +73,25 @@ pub enum BootstrapErrorKind {
     ExtensionInstallFailed,
 }
 
+impl BootstrapErrorKind {
+    /// Returns whether the failure came from the extension hook rather than
+    /// from the `PostgreSQL` installation itself.
+    pub(crate) const fn is_extension(self) -> bool {
+        matches!(
+            self,
+            Self::ExtensionConfigInvalid
+                | Self::ExtensionManifestUnavailable
+                | Self::ExtensionManifestDigestMismatch
+                | Self::ExtensionManifestInvalid
+                | Self::ExtensionUnavailable
+                | Self::ExtensionArchiveUnavailable
+                | Self::ExtensionArchiveDigestMismatch
+                | Self::ExtensionArchiveInvalid
+                | Self::ExtensionInstallFailed
+        )
+    }
+}
+
 /// Captures bootstrap-specific failures.
 #[derive(Debug, Error)]
 #[error("{report}")]
@@ -94,6 +113,39 @@ impl BootstrapError {
 
     /// Extracts the underlying diagnostic report.
     pub fn into_report(self) -> Report { self.report }
+
+    /// Borrows the underlying diagnostic report, so its cause chain can be
+    /// inspected without consuming the error.
+    pub(crate) const fn report(&self) -> &Report { &self.report }
+}
+
+/// A lifecycle operation that did not finish within its configured timeout.
+///
+/// Carried as a typed cause, rather than as text, so a caller deciding
+/// whether a failure is worth retrying can recognize it by type.
+#[derive(Debug, Error)]
+#[error("{context}: operation timed out after {seconds:.1}s")]
+pub(crate) struct LifecycleTimeout {
+    /// The operation that timed out, such as `postgresql_embedded::start()`.
+    pub(crate) context: &'static str,
+    /// The timeout that elapsed, in seconds.
+    pub(crate) seconds: f64,
+}
+
+/// A lifecycle failure that ran binaries copied from the shared binary cache.
+///
+/// The cache holds an extracted installation tree, so a retry would copy the
+/// same tree again. The marker tells the shared-cluster retry to treat I/O and
+/// archive failures after a cache hit as deterministic, and tells the reader
+/// how to clear the entry.
+#[derive(Debug, Error)]
+#[error(
+    "the PostgreSQL binaries came from the shared binary cache ({version}); remove that cache \
+     entry to download them afresh"
+)]
+pub(crate) struct CachedBinariesUsed {
+    /// The version requirement the cached entry satisfied.
+    pub(crate) version: String,
 }
 
 impl From<Report> for BootstrapError {
