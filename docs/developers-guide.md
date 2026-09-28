@@ -768,3 +768,33 @@ This section covers the internals and the rules for changing them.
   each singleton in a child process, with the fault injected through
   `Command::env`. Keep it that way: the singletons are process-wide, and the
   test rules forbid mutating the environment in process.
+
+## Stale password files
+
+`src/bootstrap/prepare/stale_password.rs` holds
+`discard_orphaned_password_file`. Both preparation paths call it:
+`bootstrap_unprivileged` in `prepare/mod.rs` and the root path in
+`prepare/root.rs`. Each calls it after the data directory is prepared and
+before the password file's permissions are set. When the data directory holds no
+`PG_VERSION`, it removes the install tree's password file, so that
+`postgresql_embedded` writes the password the bootstrap reports before `initdb`
+reads it (#259). The design document records the reasoning.
+
+- **Scope.** Call it only from preparation. It reuses `password.rs`'s
+  `has_cluster_marker`, so the "no cluster" test is the one password reuse
+  applies, including its refusal to read an unsearchable directory as empty.
+- **Failure.** A path that cannot be removed returns
+  `ClusterPasswordUnreadable` and logs a `warn` event naming the path and the
+  I/O error kind, never the password.
+- **Tests.** `stale_password_tests.rs` holds the unit cases.
+  `tests/bootstrap_cases/pgpass.rs`, a module of the `bootstrap_for_tests`
+  binary, drives preparation through `bootstrap_for_tests`, and it is the only
+  test that reaches the root path, in the CI root lane.
+  `tests/fresh_cluster_per_process.rs` runs two child processes in one root.
+  Each case creates its own temporary root, so the cases share no state and
+  stay out of the nextest `serial` group.
+
+`cluster::connection::admin_connect_error` wraps a failed admin connection. It
+keeps the `postgres` error as the source and appends that error's own source to
+the message, because `tokio_postgres` displays a server-side failure as
+`db error` alone.

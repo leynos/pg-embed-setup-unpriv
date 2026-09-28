@@ -13,7 +13,7 @@ use std::io::ErrorKind;
 
 use camino::Utf8Path;
 use color_eyre::eyre::Report;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::password::has_cluster_marker;
 use crate::{
@@ -43,14 +43,31 @@ pub(super) fn discard_orphaned_password_file(
             Ok(true)
         }
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(BootstrapError::new(
-            BootstrapErrorKind::ClusterPasswordUnreadable,
-            Report::new(err).wrap_err(format!(
-                "data directory {data_dir} holds no cluster, but the stale password file \
-                 {password_file} cannot be removed; remove it before bootstrapping"
-            )),
-        )),
+        Err(err) => Err(removal_failed(data_dir, password_file, err)),
     }
+}
+
+/// Logs a stale password file that could not be removed, and returns the
+/// error that stops the bootstrap before `initdb` reads it.
+fn removal_failed(
+    data_dir: &Utf8Path,
+    password_file: &Utf8Path,
+    err: std::io::Error,
+) -> BootstrapError {
+    warn!(
+        target: LOG_TARGET,
+        data_dir = %data_dir,
+        password_file = %password_file,
+        error_kind = ?err.kind(),
+        "stale password file could not be removed"
+    );
+    BootstrapError::new(
+        BootstrapErrorKind::ClusterPasswordUnreadable,
+        Report::new(err).wrap_err(format!(
+            "data directory {data_dir} holds no cluster, but the stale password file \
+             {password_file} cannot be removed; remove it before bootstrapping"
+        )),
+    )
 }
 
 /// Logs the removal; the path is logged, never the password.

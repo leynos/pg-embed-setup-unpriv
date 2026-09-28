@@ -696,6 +696,15 @@ per-user root) failed with `password authentication failed`. Under
 the first. A stale path that cannot be removed fails the bootstrap with
 `ClusterPasswordUnreadable` rather than letting `initdb` read it.
 
+The password file belongs to the install tree, not to a data directory, so an
+install tree serves one cluster at a time. Point two clusters at one
+`PG_RUNTIME_DIR` with different `PG_DATA_DIR` values and a fresh cluster in the
+second data directory removes the file the first cluster's reuse depends on.
+Before this change, the fresh cluster was instead initialized with the first
+cluster's password, and nobody could log in to it. Give each cluster its own
+install root, for example its own `PG_EMBED_ROOT`, or set `PG_PASSWORD` for
+both.
+
 A failed connection to the admin database keeps the driver's error in the
 chain, and the message names its cause, for example
 `failed to connect to admin database: db error: FATAL: password authentication
