@@ -35,7 +35,7 @@ jobs:
       # instrumentation than the default 600s cargo wall-clock cap.
       RUN_RUST_CARGO_WAIT_TIMEOUT: '1800'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -54,7 +54,7 @@ jobs:
         run: make check-fmt
       - name: Markdown lint
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25
+        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff
         with:
           globs: '**/*.md'
       - name: Setup uv
@@ -173,7 +173,7 @@ jobs:
       PG_VERSION_REQ: "=17.4.0"
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Setup Rust
@@ -233,7 +233,7 @@ jobs:
       CARGO_TERM_COLOR: always
       RELEASE_PORT: "8765"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Setup Rust
