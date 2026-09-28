@@ -77,7 +77,7 @@ jobs:
       # source in CI and verified nothing.
       - name: Install Whitaker Dylint suite
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/install-whitaker@e041cb75c35c3524201a32d5e57c87408fbd5874
+        uses: leynos/shared-actions/.github/actions/install-whitaker@774cc5a01e457714aede66e14a97b3e257812fc2
         with:
           installer-version: ${{ env.WHITAKER_INSTALLER_VERSION }}
       - name: Lint
