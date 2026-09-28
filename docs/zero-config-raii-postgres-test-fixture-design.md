@@ -989,3 +989,29 @@ The warm-up half of the same problem needs no new code: the
 `pg_embedded_setup_unpriv` binary already downloads, verifies and fills the
 binary cache, and its setup-only path runs the extension hook. The users' guide
 documents it as the CI step that keeps network access out of the test processes.
+
+## Implementation update: a reaped cluster's password file (after v0.6.0)
+
+`postgresql_embedded` writes the superuser password to the install tree's
+password file only when the file is absent, then hands it to `initdb`. The exit
+hook reaps the data directory but not that file. So in a persistent install
+root the next process initialized a fresh cluster with the reaped cluster's
+password, while its settings carried a new one, and could not log in. This was
+issue #259, reproduced in 0.6.0 with `PG_EMBED_ROOT`. The same shape existed in
+0.5.x under the default per-user root, where a per-run root masked it.
+
+- **Rule.** When the data directory holds no cluster (no `PG_VERSION`),
+  `prepare::stale_password` removes the password file before `setup`, on the
+  unprivileged and root paths alike, whatever `PG_PASSWORD` says.
+  `postgresql_embedded` then writes the password the bootstrap reports. A
+  cluster that exists keeps its file, because password reuse reads it.
+- **Fail closed.** A stale path that cannot be removed fails the bootstrap
+  with `ClusterPasswordUnreadable`. `initdb` never reads a file the bootstrap
+  could not clear.
+- **Diagnostics.** `connect_admin` keeps the `postgres` error as the report's
+  source and names its cause in the message. `tokio_postgres` displays a
+  server-side failure as `db error`, with the reason only in its source.
+- **Tests.** `tests/fresh_cluster_per_process.rs` runs two child processes in
+  one root, one after the other, and requires both to connect: once with
+  generated passwords, and once with `PG_PASSWORD` on the second. Without the
+  rule, both cases fail with `password authentication failed`.

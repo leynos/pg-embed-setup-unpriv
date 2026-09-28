@@ -3,7 +3,6 @@
 use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(feature = "diesel-support")]
 use color_eyre::eyre::WrapErr;
-use color_eyre::eyre::eyre;
 use postgres::{Client, NoTls};
 use postgresql_embedded::Settings;
 
@@ -20,9 +19,20 @@ pub(crate) fn escape_identifier(name: &str) -> String { name.replace('"', "\"\""
 /// This is a shared helper for admin database connections used by both
 /// `TestClusterConnection` and `TemporaryDatabase`.
 pub(crate) fn connect_admin(url: &str) -> BootstrapResult<Client> {
-    Client::connect(url, NoTls).map_err(|err| {
-        crate::error::BootstrapError::from(eyre!("failed to connect to admin database: {err}"))
-    })
+    Client::connect(url, NoTls).map_err(admin_connect_error)
+}
+
+/// Wraps a failed admin connection, keeping the driver's error as the source.
+///
+/// `tokio_postgres` displays a server-side failure as just `db error`, with
+/// the reason (such as `password authentication failed`, code `28P01`) in its
+/// source. The message therefore names that source too, and the error itself
+/// stays in the chain for callers that walk it.
+pub(crate) fn admin_connect_error(err: postgres::Error) -> crate::error::BootstrapError {
+    let reason = std::error::Error::source(&err)
+        .map_or_else(|| err.to_string(), |source| format!("{err}: {source}"));
+    let message = format!("failed to connect to admin database: {reason}");
+    crate::error::BootstrapError::from(color_eyre::Report::new(err).wrap_err(message))
 }
 
 /// Provides ergonomic accessors for connection-oriented cluster metadata.
@@ -221,5 +231,108 @@ mod tests {
         let expected = settings.settings.url("postgres");
 
         assert_eq!(connection.database_url("postgres"), expected);
+    }
+
+    /// Listens on a loopback port and serves one connection that rejects the
+    /// password, returning the address to connect to.
+    fn reject_password_once() -> std::io::Result<std::net::SocketAddr> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let address = listener.local_addr()?;
+        std::thread::spawn(move || {
+            // A failure here leaves the client with a transport error, which
+            // the test's message assertion then reports.
+            let _served = answer_with_28p01(&listener);
+        });
+        Ok(address)
+    }
+
+    /// Reads one startup message and answers it with a server-side `28P01`
+    /// error, as a server rejecting the password does.
+    #[expect(
+        clippy::big_endian_bytes,
+        reason = "the PostgreSQL wire protocol frames every length in network byte order"
+    )]
+    fn answer_with_28p01(listener: &std::net::TcpListener) -> std::io::Result<()> {
+        use std::io::{Error, Read, Write};
+
+        let (mut stream, _) = listener.accept()?;
+        let mut length = [0_u8; 4];
+        stream.read_exact(&mut length)?;
+        let body_len = usize::try_from(u32::from_be_bytes(length))
+            .map_err(Error::other)?
+            .saturating_sub(4);
+        let mut body = vec![0_u8; body_len];
+        stream.read_exact(&mut body)?;
+        let mut fields = Vec::new();
+        for (code, value) in [
+            (b'S', "FATAL"),
+            (b'V', "FATAL"),
+            (b'C', "28P01"),
+            (b'M', "password authentication failed for user \"postgres\""),
+        ] {
+            fields.push(code);
+            fields.extend_from_slice(value.as_bytes());
+            fields.push(0);
+        }
+        fields.push(0);
+        let reply_len = u32::try_from(fields.len() + 4).map_err(Error::other)?;
+        let mut reply = vec![b'E'];
+        reply.extend_from_slice(&reply_len.to_be_bytes());
+        reply.extend_from_slice(&fields);
+        stream.write_all(&reply)
+    }
+
+    /// A server-side failure, which `tokio_postgres` displays as just
+    /// `db error`, reaches the message with its cause and stays in the chain.
+    #[test]
+    fn a_rejected_password_names_its_cause() {
+        let address = reject_password_once().expect("a loopback port");
+        let url = format!("postgresql://postgres:wrong@{address}/postgres");
+
+        let err = connect_admin(&url)
+            .err()
+            .expect("the server rejects the password");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("db error: FATAL: password authentication failed"),
+            "the nested cause must reach the message: {message}"
+        );
+        let report = err.into_report();
+        let driver = report
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<postgres::Error>())
+            .expect("the postgres error stays in the chain");
+        let code = driver.code().map(postgres::error::SqlState::code);
+        assert_eq!(
+            code,
+            Some("28P01"),
+            "the server's code survives: {report:?}"
+        );
+    }
+
+    /// A failed admin connection keeps the driver's error in the chain and
+    /// names its cause, so a caller sees why rather than a bare `db error`.
+    #[test]
+    fn a_failed_admin_connection_keeps_its_source() {
+        // Port 1 on loopback refuses at once; no server is involved.
+        let err = connect_admin("postgresql://postgres:x@127.0.0.1:1/postgres")
+            .err()
+            .expect("nothing listens on port 1");
+
+        let message = err.to_string();
+        let report = err.into_report();
+        let chain_has_driver_error = report
+            .chain()
+            .any(|cause| cause.downcast_ref::<postgres::Error>().is_some());
+        assert!(chain_has_driver_error, "the source was dropped: {report:?}");
+        assert!(
+            message.starts_with("failed to connect to admin database: "),
+            "{message}"
+        );
+        assert!(
+            message.to_lowercase().contains("refused"),
+            "the cause must reach the message: {message}"
+        );
     }
 }

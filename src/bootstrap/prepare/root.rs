@@ -57,6 +57,7 @@ pub(super) fn bootstrap_with_root(
     let xdg = prepare_xdg_dirs(&paths.install_dir)?;
     ensure_xdg_dirs_owned_by_user(&xdg, &nobody_user)?;
 
+    super::stale_password::discard_orphaned_password_file(&paths.data_dir, &paths.password_file)?;
     ensure_pgpass_for_user(&paths.password_file, &nobody_user)?;
 
     ensure_tree_owned_by_user(&paths.install_dir, &nobody_user)?;
