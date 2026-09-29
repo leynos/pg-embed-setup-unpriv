@@ -22,6 +22,10 @@ use crate::{
 const PGPASS_MODE: u32 = 0o600;
 
 mod cluster_slot;
+pub(crate) use cluster_slot::has_live_peers;
+mod layout;
+pub(super) use self::layout::DataLayout;
+use self::layout::claim_derived_slot;
 mod orphan;
 mod password;
 mod stale_password;
@@ -55,6 +59,7 @@ pub(super) fn prepare_bootstrap(
     privileges: super::mode::ExecutionPrivileges,
     settings: Settings,
     cfg: &PgEnvCfg,
+    layout: DataLayout,
 ) -> BootstrapResult<PreparedBootstrap> {
     if privileges == super::mode::ExecutionPrivileges::Root && !root_privilege_drop_supported() {
         return Err(unsupported_root_privilege_drop_error());
@@ -63,8 +68,10 @@ pub(super) fn prepare_bootstrap(
     #[cfg(all(unix, privileged_unix_platform))]
     {
         match privileges {
-            super::mode::ExecutionPrivileges::Root => bootstrap_with_root(settings, cfg),
-            super::mode::ExecutionPrivileges::Unprivileged => bootstrap_unprivileged(settings, cfg),
+            super::mode::ExecutionPrivileges::Root => bootstrap_with_root(settings, cfg, layout),
+            super::mode::ExecutionPrivileges::Unprivileged => {
+                bootstrap_unprivileged(settings, cfg, layout)
+            }
         }
     }
 
@@ -74,7 +81,9 @@ pub(super) fn prepare_bootstrap(
             super::mode::ExecutionPrivileges::Root => {
                 unreachable!("root privilege drop support is checked before platform dispatch")
             }
-            super::mode::ExecutionPrivileges::Unprivileged => bootstrap_unprivileged(settings, cfg),
+            super::mode::ExecutionPrivileges::Unprivileged => {
+                bootstrap_unprivileged(settings, cfg, layout)
+            }
         }
     }
 }
@@ -87,9 +96,10 @@ pub(super) struct PreparedBootstrap {
 fn bootstrap_unprivileged(
     mut settings: Settings,
     cfg: &PgEnvCfg,
+    layout: DataLayout,
 ) -> BootstrapResult<PreparedBootstrap> {
     let mut paths = resolve_settings_paths_for_current_user(&mut settings, cfg)?;
-    claim_derived_slot(&mut settings, &mut paths)?;
+    claim_derived_slot(&mut settings, &mut paths, layout)?;
     reuse_existing_password(
         &mut settings,
         &paths.data_dir,
@@ -112,38 +122,6 @@ fn bootstrap_unprivileged(
         settings,
         environment,
     })
-}
-
-/// Gives a derived data directory a per-cluster slot of its own (#261).
-///
-/// A data directory derived from the root (`PG_EMBED_ROOT` or the per-user
-/// default) becomes the parent of one directory per cluster, so concurrent
-/// processes never share one. An explicit `PG_DATA_DIR` is left exactly as
-/// given, with its password file in the install tree as before.
-fn claim_derived_slot(settings: &mut Settings, paths: &mut SettingsPaths) -> BootstrapResult<()> {
-    if !paths.data_default {
-        return Ok(());
-    }
-    warn_on_old_layout(&paths.data_dir);
-    let slot = cluster_slot::claim_slot(&paths.data_dir)?;
-    settings.data_dir = slot.data_dir.clone().into_std_path_buf();
-    settings.password_file = slot.password_file.clone().into_std_path_buf();
-    paths.data_dir = slot.data_dir;
-    paths.password_file = slot.password_file;
-    Ok(())
-}
-
-/// Warns when a cluster from the single-directory layout of 0.6.0 and
-/// earlier still sits directly in the data parent, where nothing now uses it.
-fn warn_on_old_layout(data_parent: &Utf8Path) {
-    if data_parent.join("PG_VERSION").is_file() {
-        tracing::warn!(
-            target: LOG_TARGET,
-            data_parent = %data_parent,
-            "a cluster from the 0.6.0 layout remains here; clusters now use per-cluster \
-             directories beneath it, so the old one is unused and can be removed"
-        );
-    }
 }
 
 struct SettingsPaths {

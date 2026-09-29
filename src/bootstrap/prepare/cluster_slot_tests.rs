@@ -7,7 +7,7 @@ use color_eyre::eyre::{Result, eyre};
 use fs4::FileExt;
 use rstest::{fixture, rstest};
 
-use super::{claim_slot, sweep_dead_slots};
+use super::{claim_slot, has_live_peers, sweep_dead_slots};
 use crate::bootstrap::prepare::orphan::OrphanStop;
 
 /// A data parent directory under a temporary root.
@@ -83,6 +83,36 @@ fn each_claim_gets_its_own_slot(parent: Result<Parent>) {
     );
 }
 
+/// A cluster has live peers only when another slot beside it holds its lock,
+/// so a directory that is not a slot, a lone slot and a dead neighbour have
+/// none, and a held neighbour is one.
+#[rstest]
+fn peers_are_the_other_slots_whose_locks_are_held(parent: Result<Parent>) {
+    let dir = parent.expect("data parent");
+    let own = claim_slot(&dir.dir).expect("own slot");
+    assert!(
+        !has_live_peers(own.data_dir.as_std_path()),
+        "a lone slot has no peers"
+    );
+    assert!(
+        !has_live_peers(dir.dir.join("explicit").as_std_path()),
+        "a directory that is not a slot has no peers"
+    );
+
+    plant_dead_slot(&dir.dir, "4242-3-0").expect("plant a dead neighbour");
+    assert!(
+        !has_live_peers(own.data_dir.as_std_path()),
+        "a dead neighbour is not a peer"
+    );
+
+    let peer = claim_slot(&dir.dir).expect("a live peer");
+    assert!(
+        has_live_peers(own.data_dir.as_std_path()),
+        "a held neighbouring lock is a peer"
+    );
+    assert!(has_live_peers(peer.data_dir.as_std_path()));
+}
+
 /// A slot whose lock nobody holds is swept: directory, password file and
 /// lock file.
 #[rstest]
@@ -137,13 +167,11 @@ fn a_live_pid_in_the_name_does_not_keep_an_unlocked_slot(parent: Result<Parent>)
 fn a_dead_slot_with_an_unstoppable_server_is_kept(parent: Result<Parent>) {
     let dir = parent.expect("data parent");
     plant_dead_slot(&dir.dir, "4242-2-0").expect("plant a dead slot");
-    let server = crate::bootstrap::prepare::orphan::tests::FakePostgres::spawn()
-        .expect("a process named postgres");
-    std::fs::write(
-        dir.dir.join("4242-2-0").join("postmaster.pid"),
-        format!("{}\n", server.pid()),
-    )
-    .expect("point postmaster.pid at it");
+    let slot = dir.dir.join("4242-2-0");
+    let server = crate::bootstrap::prepare::orphan::tests::FakePostgres::spawn(&slot)
+        .expect("a postgres for the slot");
+    std::fs::write(slot.join("postmaster.pid"), format!("{}\n", server.pid()))
+        .expect("point postmaster.pid at it");
     let stop = RecordingStop::new(false);
     assert_eq!(
         crate::bootstrap::prepare::orphan::server_state(&dir.dir.join("4242-2-0")),

@@ -812,9 +812,18 @@ ADR 005 records the design; this section covers the code.
   process sweep a live cluster.
 - `src/bootstrap/prepare/orphan.rs` decides whether a dead slot's directory
   still has a server. `OrphanStop` is the seam the tests use to refuse a stop.
-  `SignalStop` sends `SIGQUIT` and waits. The `postgres` identity check reads
-  `/proc/<pid>/comm` on Linux and runs `ps -o comm=` on other Unix platforms;
-  on Windows a live PID keeps the directory.
+  `SignalStop` sends `SIGQUIT` and waits. The identity check binds a PID to the
+  slot: the process must be named `postgres` and serve the slot's directory. On
+  Linux it reads `/proc/<pid>/comm` and compares `/proc/<pid>/cwd` with the
+  directory; an unreadable working directory leaves the slot unconfirmed. On
+  other Unix platforms it runs `ps`, and a `postgres` whose command line does
+  not name the directory, or a `ps` that fails, is unconfirmed. On Windows a
+  live PID keeps the directory.
+- `DataLayout` (in `src/bootstrap/prepare/mod.rs`) says whether a derived data
+  directory becomes a slot: `PerCluster` for test bootstraps, `Persistent` for
+  the setup-only `run`. `has_live_peers` (in `cluster_slot.rs`) lets
+  `safe_cleanup_mode` in `src/cluster/cleanup.rs` demote `CleanupMode::Full` to
+  data-only while another slot in the root holds its lock.
 - `src/cluster/setup_lock.rs` holds `SetupLock`, taken by `start_postgres`,
   `start_postgres_async` (on the blocking pool) and the setup-only lifecycle.
   It spans the cache copy through the start.

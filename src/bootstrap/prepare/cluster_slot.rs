@@ -99,6 +99,48 @@ pub(super) fn sweep_dead_slots(parent: &Utf8Path, stop: &dyn OrphanStop) -> Boot
     Ok(swept)
 }
 
+/// Returns the lock file of the slot whose data directory is `data_dir`.
+pub(super) fn lock_path(data_dir: &Utf8Path) -> Utf8PathBuf {
+    Utf8PathBuf::from(format!("{data_dir}{LOCK_SUFFIX}"))
+}
+
+/// Returns whether another live cluster shares the slot parent of `data_dir`,
+/// and so the install tree beside it.
+///
+/// A cluster removes the shared install tree only when it is the last one
+/// using it: peers keep running from it after their startup lock is released,
+/// so deleting it would pull their binaries and extensions away. `data_dir` is
+/// a slot only if its own lock file sits beside it; any other directory,
+/// such as an explicit `PG_DATA_DIR`, has no peers. A peer is a slot whose lock
+/// is held, or whose lock cannot be probed, because doubt keeps the tree.
+pub(crate) fn has_live_peers(data_dir: &std::path::Path) -> bool {
+    let (Some(parent), Some(own)) = (
+        data_dir.parent(),
+        data_dir.file_name().and_then(std::ffi::OsStr::to_str),
+    ) else {
+        return false;
+    };
+    if !parent.join(format!("{own}{LOCK_SUFFIX}")).is_file() {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return false;
+    };
+    entries
+        .filter_map(|entry| lock_stem(&entry.ok()?))
+        .filter(|name| name != own)
+        .any(|name| !is_lock_free(&parent.join(format!("{name}{LOCK_SUFFIX}"))))
+}
+
+/// Returns whether nobody holds the lock file at `path`; a file that cannot be
+/// opened or probed counts as held.
+fn is_lock_free(path: &std::path::Path) -> bool {
+    let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
+        return false;
+    };
+    FileExt::try_lock(&file).is_ok()
+}
+
 /// Sweeps one slot if its owner is gone; returns whether it was removed.
 fn sweep_one(parent: &Utf8Path, name: &str, stop: &dyn OrphanStop) -> bool {
     let Some(_lock) = take_dead_lock(parent, name) else {

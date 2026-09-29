@@ -110,7 +110,8 @@ mod behaviour_tests {
             ),
             (OsString::from("TZ"), Some(OsString::from("UTC"))),
         ]);
-        let prepared = bootstrap_unprivileged(settings, &cfg).expect("bootstrap");
+        let prepared =
+            bootstrap_unprivileged(settings, &cfg, DataLayout::PerCluster).expect("bootstrap");
 
         assert_eq!(prepared.environment.home, runtime_dir);
         assert!(prepared.environment.xdg_cache_home.exists());
@@ -126,6 +127,49 @@ mod behaviour_tests {
             Utf8PathBuf::from_path_buf(prepared.settings.data_dir.clone()).expect("data dir utf8");
         assert_eq!(observed_install, runtime_dir);
         assert_eq!(observed_data, data_dir);
+    }
+
+    /// A test bootstrap claims a per-cluster slot under the derived `data`
+    /// directory, while the setup-only `run` keeps `data` itself, which must
+    /// outlive its process and so cannot be a slot that the next sweep removes.
+    #[rstest::rstest]
+    #[case::test_bootstrap(DataLayout::PerCluster, true)]
+    #[case::setup_only_run(DataLayout::Persistent, false)]
+    fn the_layout_decides_whether_a_derived_data_dir_is_a_slot(
+        #[case] layout: DataLayout,
+        #[case] is_slot: bool,
+    ) {
+        let root = tempdir().expect("root");
+        let root_dir =
+            Utf8PathBuf::from_path_buf(root.path().to_path_buf()).expect("root dir utf8");
+        let cfg = PgEnvCfg {
+            embed_root: Some(root_dir.clone()),
+            ..PgEnvCfg::default()
+        };
+        let settings = cfg.to_settings().expect("settings");
+        let _guard = scoped_env(vec![
+            (
+                OsString::from("TZDIR"),
+                Some(OsString::from(root_dir.as_str())),
+            ),
+            (OsString::from("TZ"), Some(OsString::from("UTC"))),
+        ]);
+
+        let prepared = bootstrap_unprivileged(settings, &cfg, layout).expect("bootstrap");
+
+        let data_parent = root_dir.join("data");
+        let observed = prepared.settings.data_dir.as_path();
+        if is_slot {
+            assert_eq!(observed.parent(), Some(data_parent.as_std_path()));
+        } else {
+            assert_eq!(observed, data_parent.as_std_path());
+        }
+        let locks = std::fs::read_dir(data_parent.as_std_path())
+            .expect("the data parent")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".lock"))
+            .count();
+        assert_eq!(locks, usize::from(is_slot), "slot lock files under data");
     }
 
     /// The unprivileged bootstrap adopts the stored password of an existing
@@ -160,7 +204,8 @@ mod behaviour_tests {
             ),
             (OsString::from("TZ"), Some(OsString::from("UTC"))),
         ]);
-        let prepared = bootstrap_unprivileged(settings, &cfg).expect("bootstrap");
+        let prepared =
+            bootstrap_unprivileged(settings, &cfg, DataLayout::PerCluster).expect("bootstrap");
         assert_eq!(prepared.settings.password, expected);
     }
 }

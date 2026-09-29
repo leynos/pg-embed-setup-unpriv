@@ -87,12 +87,22 @@ directory after the lock is gone. Before removing a dead slot, the sweep reads
 - A live process whose name is not `postgres`: the PID was reused, so there is
   no server. The name comes from `/proc/<pid>/comm` on Linux and from
   `ps -o comm=` on other Unix platforms.
-- A live `postgres` process: stopped as `pg_ctl stop -m immediate` stops it,
-  with `SIGQUIT` to the postmaster and a wait of up to ten seconds for it to
-  exit. The directory is removed only after it has exited.
+- A live `postgres` process that is not serving this slot's data directory:
+  the PID was reused by an unrelated server, so there is no server here and
+  nothing is signalled. On Linux the test is the process's working directory,
+  which a postmaster sets to its data directory and `/proc/<pid>/cwd` reports
+  whatever the process title says. A working directory that cannot be read, as
+  for another user's process, leaves the slot unconfirmed. Elsewhere the test
+  is a `ps -o command=` line that names the directory as a whole argument; a
+  `postgres` whose line does not is unconfirmed, not absent, because a server
+  may rewrite its process title.
+- A live `postgres` process serving this directory: stopped as
+  `pg_ctl stop -m immediate` stops it, with `SIGQUIT` to the postmaster and a
+  wait of up to ten seconds for it to exit. The directory is removed only after
+  it has exited.
 - A live process that cannot be confirmed (on Windows, which has no name
-  lookup here), or a server that does not stop: the slot is left in place, with
-  a warning, for a later sweep.
+  lookup here, or where `ps` fails), or a server that does not stop: the slot
+  is left in place, with a warning, for a later sweep.
 
 The stop sends the signal directly rather than running `pg_ctl`. This is what
 `pg_ctl -m immediate` does, and it needs no binary path from an install tree
@@ -115,6 +125,24 @@ Rewriting a running binary fails with `ETXTBSY` on Linux and, on macOS,
 invalidates the code signature so the kernel kills the server ("Killed: 9",
 seen on the macOS CI leg). A copy cut short has the wrong size and is copied
 again.
+
+### Setup-only bootstraps
+
+`run`, and the binary that calls it, initialize a cluster for use after they
+exit. A slot would be swept once its process is gone, so a bootstrap whose kind
+is setup-only keeps the derived `<root>/data` directory itself, as 0.6.0 did
+(`DataLayout::Persistent`). A `TestCluster` in the same root claims a slot and
+does not reuse that directory; `PG_DATA_DIR` shares one. Two setup-only runs in
+one root still share `<root>/data`, as before.
+
+### Full cleanup
+
+`CleanupMode::Full` removes the install tree. With clusters running side by
+side from it, that would pull the binaries and extensions from under the
+others, so a full cleanup demotes itself to removing the data directory when
+another slot in the root holds its lock. The rule applies before the in-process
+and worker paths choose what to delete, so they agree. If a peer's lock cannot
+be probed, the tree is kept.
 
 ### Explicit `PG_DATA_DIR`
 
