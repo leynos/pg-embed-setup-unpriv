@@ -94,6 +94,43 @@ def test_the_resolver_prefers_releases_the_version_can_build() -> None:
     assert msrv_check.RESOLVER_VARIABLE == "CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS"
 
 
+@pytest.mark.parametrize("override", msrv_check.COMPILER_OVERRIDES)
+def test_an_inherited_compiler_cannot_replace_the_declared_one(override: str) -> None:
+    """Cargo honours `RUSTC` over `+<version>`, so the check must not inherit it."""
+    inherited = {override: "/opt/newer/rustc", "HOME": "/home/x", "RUSTFLAGS": "-D warnings"}
+
+    environment = msrv_check.subprocess_environment(inherited)
+
+    assert override not in environment
+    assert environment["HOME"] == "/home/x"
+    assert environment["RUSTFLAGS"] == ""
+    assert environment[msrv_check.RESOLVER_VARIABLE] == "fallback"
+
+
+def test_run_in_passes_that_environment_to_the_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The command runs in the repository, with the cleaned environment, and must succeed."""
+    monkeypatch.setenv("RUSTC", "/opt/newer/rustc")
+    monkeypatch.setenv(msrv_check.RESOLVER_VARIABLE, "error")
+    calls: list[tuple[list[str], dict[str, typ.Any]]] = []
+    monkeypatch.setattr(
+        msrv_check.subprocess,
+        "run",
+        lambda command, **options: calls.append((command, options)),
+    )
+
+    msrv_check.run_in(["cargo", "check"], tmp_path)
+
+    [(command, options)] = calls
+    assert command == ["cargo", "check"]
+    assert options["cwd"] == tmp_path
+    assert options["check"] is True
+    assert "RUSTC" not in options["env"]
+    assert options["env"][msrv_check.RESOLVER_VARIABLE] == "fallback"
+    assert options["env"]["RUSTFLAGS"] == ""
+
+
 def jobs_running(command: str) -> list[str]:
     """Return the names of `ci.yml` jobs with a step that runs `command`."""
     document = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())

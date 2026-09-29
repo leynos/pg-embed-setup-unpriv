@@ -61,14 +61,33 @@ def commands_for(version: str) -> list[list[str]]:
     ]
 
 
-def run_in(command: list[str], repo: Path) -> None:
-    """Run one command in `repo`, failing loudly.
+#: Variables that select a compiler and would override `cargo +<version>`.
+COMPILER_OVERRIDES: typ.Final = ("RUSTC", "CARGO_BUILD_RUSTC", "RUSTDOC", "CARGO_BUILD_RUSTDOC")
+
+
+def subprocess_environment(inherited: typ.Mapping[str, str]) -> dict[str, str]:
+    """Return the environment a check command runs in.
 
     `RUSTFLAGS` is cleared because the repository's Cargo configuration sets
     nightly-only flags, which a stable toolchain rejects. The resolver
-    variable is set for every command; only `generate-lockfile` reads it.
+    variable is set for every command; only `generate-lockfile` reads it. An
+    inherited compiler override is dropped: Cargo honours `RUSTC` over the
+    `+<version>` toolchain, so a newer compiler in the caller's environment
+    would let the check pass on code the declared version cannot build.
+
+    Examples
+    --------
+    >>> env = subprocess_environment({"RUSTC": "/opt/rustc-1.99", "HOME": "/h"})
+    >>> sorted(env)
+    ['CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS', 'HOME', 'RUSTFLAGS']
     """
-    environment = {**os.environ, RESOLVER_VARIABLE: "fallback", "RUSTFLAGS": ""}
+    kept = {key: value for key, value in inherited.items() if key not in COMPILER_OVERRIDES}
+    return {**kept, RESOLVER_VARIABLE: "fallback", "RUSTFLAGS": ""}
+
+
+def run_in(command: list[str], repo: Path) -> None:
+    """Run one command in `repo` under `subprocess_environment`, failing loudly."""
+    environment = subprocess_environment(os.environ)
     subprocess.run(command, cwd=repo, env=environment, check=True)  # noqa: S603
 
 
