@@ -149,8 +149,11 @@ file, `<root>/data/.claim-guard`, closes that: every slot claim takes an
 exclusive lock on it, and a full cleanup holds it across the probe and the
 removal. A cluster then either claimed its slot before the probe, and is seen
 as a peer, or claims it after the removal, and provisions the tree afresh. A
-guard that cannot be taken keeps the tree. The file does not end in `.lock`, so
-the sweep never reads it as a slot.
+guard that cannot be taken keeps the tree. An explicit `PG_DATA_DIR` is not a
+slot, but its install tree can still be the derived `<root>/install`, so a full
+cleanup of it takes the same guard on `<root>/data` and keeps the tree while a
+slot there holds its lock. The file does not end in `.lock`, so the sweep never
+reads it as a slot.
 
 ### Explicit `PG_DATA_DIR`
 

@@ -16,7 +16,14 @@ pub use env::{TestBootstrapEnvironment, find_timezone_dir};
 pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
 pub(crate) use mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
 use postgresql_embedded::Settings;
-pub(crate) use prepare::{ClaimGuard, claim_guard_for, has_live_peers};
+pub(crate) use prepare::{
+    ClaimGuard,
+    claim_guard_at,
+    claim_guard_for,
+    derived_slot_parent,
+    has_live_peers,
+    has_live_slots_in,
+};
 pub use prepare::{
     PasswordReuseOutcome,
     default_paths_under,

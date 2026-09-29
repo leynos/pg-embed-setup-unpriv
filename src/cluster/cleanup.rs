@@ -8,7 +8,14 @@ use super::{worker_invoker::WorkerInvoker as ClusterWorkerInvoker, worker_operat
 use crate::{
     CleanupMode,
     TestBootstrapSettings,
-    bootstrap::{ClaimGuard, claim_guard_for, has_live_peers},
+    bootstrap::{
+        ClaimGuard,
+        claim_guard_at,
+        claim_guard_for,
+        derived_slot_parent,
+        has_live_peers,
+        has_live_slots_in,
+    },
     cleanup_helpers::{RemovalOutcome, has_parent_dir, try_remove_dir_all},
     observability::LOG_TARGET,
 };
@@ -148,15 +155,40 @@ pub(super) fn plan_cleanup(
         };
     }
     match claim_guard_for(&settings.data_dir) {
-        None => CleanupPlan {
-            mode: requested,
-            _guard: None,
-        },
+        None => plan_for_unslotted(settings, context),
         Some(Ok(guard)) if !has_live_peers(&settings.data_dir) => CleanupPlan {
             mode: requested,
             _guard: Some(guard),
         },
         Some(_) => {
+            log_install_kept(settings, context);
+            CleanupPlan {
+                mode: CleanupMode::DataOnly,
+                _guard: None,
+            }
+        }
+    }
+}
+
+/// Plans a full cleanup of a data directory that is not a slot, such as an
+/// explicit `PG_DATA_DIR`.
+///
+/// Its install tree may still be the derived `<root>/install` that slotted
+/// clusters run from, so the slot parent beside it is checked and guarded the
+/// same way. With no such parent nothing shares the tree.
+fn plan_for_unslotted(settings: &Settings, context: &str) -> CleanupPlan {
+    let full = |guard| CleanupPlan {
+        mode: CleanupMode::Full,
+        _guard: guard,
+    };
+    let Some(parent) = derived_slot_parent(&settings.installation_dir)
+        .filter(|parent| parent != &settings.data_dir)
+    else {
+        return full(None);
+    };
+    match claim_guard_at(&parent) {
+        Ok(guard) if !has_live_slots_in(&parent) => full(Some(guard)),
+        _ => {
             log_install_kept(settings, context);
             CleanupPlan {
                 mode: CleanupMode::DataOnly,

@@ -804,7 +804,7 @@ the message, because `tokio_postgres` displays a server-side failure as
 ADR 005 records the design; this section covers the code.
 
 - `src/bootstrap/prepare/cluster_slot.rs` holds `claim_slot` and
-  `sweep_dead_slots`. `claim_derived_slot` in `prepare/mod.rs` calls
+  `sweep_dead_slots`. `claim_derived_slot` in `prepare/layout.rs` calls
   `claim_slot` on both preparation paths, and only when the data directory was
   derived from a root. It sweeps first, then creates and locks `<name>.lock`
   with `create_new`, and keeps the `File` in a process-global list so the lock
@@ -819,9 +819,9 @@ ADR 005 records the design; this section covers the code.
   other Unix platforms it runs `ps` for the name and `lsof -d cwd` for the
   directory, and a missing or failing tool is unconfirmed. On Windows a live
   PID keeps the directory.
-- `DataLayout` (in `src/bootstrap/prepare/mod.rs`) says whether a derived data
-  directory becomes a slot: `PerCluster` for test bootstraps, `Persistent` for
-  the setup-only `run`. `has_live_peers` and `ClaimGuard` (in
+- `DataLayout` (in `src/bootstrap/prepare/layout.rs`) says whether a derived
+  data directory becomes a slot: `PerCluster` for test bootstraps, `Persistent`
+  for the setup-only `run`. `has_live_peers` and `ClaimGuard` (in
   `cluster_slot.rs`) let `plan_cleanup` in `src/cluster/cleanup.rs` demote
   `CleanupMode::Full` to data-only while another slot in the root holds its
   lock. The plan holds the claim guard across the probe and the removal, and
@@ -830,7 +830,7 @@ ADR 005 records the design; this section covers the code.
   `start_postgres_async` (on the blocking pool) and the setup-only lifecycle.
   It spans the cache copy through the start.
 - Tests: `cluster_slot_tests.rs` and `orphan_tests.rs` hold the unit cases.
-  Their `FakePostgres` is `sleep` copied under the name `postgres`.
+  Their `FakePostgres` copies `/bin/sh` as `postgres` and runs `read line`.
   `tests/per_cluster_directories.rs` drives real children through concurrent
   bootstraps, a live-kept and dead-swept sweep with an orphaned server, the
   explicit `PG_DATA_DIR` case, the setup-lock wait (Linux only: it reads the

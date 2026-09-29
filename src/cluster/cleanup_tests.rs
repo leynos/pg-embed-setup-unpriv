@@ -81,6 +81,38 @@ fn full_cleanup_keeps_an_install_tree_that_a_peer_runs_from(
     assert_eq!(settings.installation_dir.exists(), expect_install_exists);
 }
 
+// An explicit data directory can still share the derived install tree with
+// slotted clusters, so a full cleanup leaves it while one is running.
+#[rstest]
+#[case::slot_running(true, true)]
+#[case::none_running(false, false)]
+fn full_cleanup_of_an_explicit_data_dir_respects_slots_on_its_install_tree(
+    #[case] has_peer: bool,
+    #[case] expect_install_exists: bool,
+) {
+    let root = tempdir().expect("tempdir");
+    let slots = root.path().join("data");
+    let install_dir = root.path().join("install");
+    let explicit = root.path().join("elsewhere");
+    fs::create_dir_all(&slots).expect("slot parent");
+    fs::create_dir_all(&install_dir).expect("install dir");
+    fs::create_dir_all(&explicit).expect("explicit data dir");
+    let peer_lock = fs::File::create(slots.join("2-2-0.lock")).expect("peer lock file");
+    if has_peer {
+        fs4::FileExt::lock(&peer_lock).expect("hold the peer's lock");
+    }
+    let settings = Settings {
+        data_dir: explicit,
+        installation_dir: install_dir,
+        ..Settings::default()
+    };
+
+    cleanup_in_process(CleanupMode::Full, &settings, "explicit-test");
+
+    assert!(!settings.data_dir.exists(), "the explicit data goes");
+    assert_eq!(settings.installation_dir.exists(), expect_install_exists);
+}
+
 // A full cleanup that cannot take the root's claim guard cannot rule out a
 // cluster claiming a slot mid-cleanup, so it leaves the install tree.
 #[test]

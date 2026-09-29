@@ -199,16 +199,48 @@ pub(crate) fn has_live_peers(data_dir: &std::path::Path) -> bool {
     let Some(own) = data_dir.file_name().and_then(std::ffi::OsStr::to_str) else {
         return false;
     };
+    any_slot_held(parent, Some(own))
+}
+
+/// Returns whether any slot under `parent` other than `own` holds its lock. A
+/// parent that cannot be listed, or an entry that cannot be read, counts as
+/// held.
+fn any_slot_held(parent: &std::path::Path, own: Option<&str>) -> bool {
     let Ok(entries) = std::fs::read_dir(parent) else {
         return true;
     };
     entries.into_iter().any(|listed| {
         listed.map_or(true, |entry| {
             lock_stem(&entry).is_some_and(|name| {
-                name != own && !is_lock_free(&parent.join(format!("{name}{LOCK_SUFFIX}")))
+                Some(name.as_str()) != own
+                    && !is_lock_free(&parent.join(format!("{name}{LOCK_SUFFIX}")))
             })
         })
     })
+}
+
+/// Returns the slot parent that clusters sharing the install tree at
+/// `install_dir` claim under: `<root>/data` for `<root>/install`, or for a
+/// version directory inside it. None when `install_dir` is not laid out that
+/// way or the slot parent does not exist, so an explicit `PG_RUNTIME_DIR` has
+/// none.
+pub(crate) fn derived_slot_parent(install_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let named_install =
+        |dir: &&std::path::Path| dir.file_name().is_some_and(|name| name == "install");
+    let install_root = [Some(install_dir), install_dir.parent()]
+        .into_iter()
+        .flatten()
+        .find(named_install)?;
+    let parent = install_root.parent()?.join("data");
+    parent.is_dir().then_some(parent)
+}
+
+/// Returns whether any slot under `parent` holds its lock.
+pub(crate) fn has_live_slots_in(parent: &std::path::Path) -> bool { any_slot_held(parent, None) }
+
+/// Takes the claim guard of the slot parent `parent`.
+pub(crate) fn claim_guard_at(parent: &std::path::Path) -> io::Result<ClaimGuard> {
+    ClaimGuard::acquire(parent)
 }
 
 /// Returns whether nobody holds the lock file at `path`; a file that cannot be

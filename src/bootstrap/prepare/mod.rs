@@ -22,7 +22,14 @@ use crate::{
 const PGPASS_MODE: u32 = 0o600;
 
 mod cluster_slot;
-pub(crate) use cluster_slot::{ClaimGuard, claim_guard_for, has_live_peers};
+pub(crate) use cluster_slot::{
+    ClaimGuard,
+    claim_guard_at,
+    claim_guard_for,
+    derived_slot_parent,
+    has_live_peers,
+    has_live_slots_in,
+};
 mod layout;
 pub(super) use self::layout::DataLayout;
 use self::layout::claim_derived_slot;
