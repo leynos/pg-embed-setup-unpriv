@@ -35,21 +35,59 @@ RESOLVER_VARIABLE: typ.Final = "CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS"
 Runner: typ.TypeAlias = typ.Callable[[list[str], Path], None]
 
 
-def declared_rust_version(manifest: Path) -> str:
-    """Return the `package.rust-version` a manifest declares.
+class ManifestError(Exception):
+    """Raised when the manifest cannot be read or declares no `rust-version`."""
+
+
+def read_manifest(manifest: Path) -> str:
+    """Return the manifest's text.
 
     Raises
     ------
-    SystemExit
-        When the manifest declares none, since a check against no version
-        would pass over everything.
+    ManifestError
+        When the file cannot be read.
     """
-    package = tomllib.loads(manifest.read_text(encoding="utf-8")).get("package", {})
+    try:
+        return manifest.read_text(encoding="utf-8")
+    except OSError as err:
+        message = f"cannot read {manifest}: {err}"
+        raise ManifestError(message) from err
+
+
+def parse_rust_version(text: str, source: str) -> str:
+    """Return the `package.rust-version` declared in manifest `text`.
+
+    Raises
+    ------
+    ManifestError
+        When `text` is not TOML or declares no version, since a check
+        against no version would pass over everything.
+
+    Examples
+    --------
+    >>> parse_rust_version('[package]\\nrust-version = "1.92"\\n', "Cargo.toml")
+    '1.92'
+    """
+    try:
+        package = tomllib.loads(text).get("package", {})
+    except tomllib.TOMLDecodeError as err:
+        message = f"{source} is not valid TOML: {err}"
+        raise ManifestError(message) from err
     version = package.get("rust-version")
     if not isinstance(version, str) or not version:
-        message = f"{manifest} declares no package.rust-version"
-        raise SystemExit(message)
+        message = f"{source} declares no package.rust-version"
+        raise ManifestError(message)
     return version
+
+
+def declared_rust_version(
+    manifest: Path, reader: typ.Callable[[Path], str] = read_manifest
+) -> str:
+    """Return the `package.rust-version` a manifest declares.
+
+    Reading is injected so the query can be exercised without a file.
+    """
+    return parse_rust_version(reader(manifest), str(manifest))
 
 
 def commands_for(version: str) -> list[list[str]]:
@@ -116,8 +154,19 @@ def check_msrv(repo: Path, runner: Runner = run_in) -> str:
 
 
 def main() -> int:
-    """Check the repository at the current directory; return the exit code."""
-    version = check_msrv(Path.cwd())
+    """Check the repository at the current directory; return the exit code.
+
+    A manifest problem is reported on stderr with exit code 2, and a failed
+    build propagates Cargo's own failure as exit code 1.
+    """
+    try:
+        version = check_msrv(Path.cwd())
+    except ManifestError as err:
+        sys.stderr.write(f"msrv_check: {err}\n")
+        return 2
+    except subprocess.CalledProcessError as err:
+        sys.stderr.write(f"msrv_check: {' '.join(err.cmd)} failed with {err.returncode}\n")
+        return 1
     sys.stdout.write(f"builds at the declared rust-version {version}\n")
     return 0
 

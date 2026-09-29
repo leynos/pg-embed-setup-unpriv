@@ -9,6 +9,8 @@ through `make msrv`, so deleting the job or the target fails a test.
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
 import sys
 import typing as typ
 from pathlib import Path
@@ -85,8 +87,28 @@ def test_a_manifest_without_rust_version_is_refused(tmp_path: Path) -> None:
     """A check against no version would pass over everything, so it fails."""
     repo = make_repo(tmp_path, rust_version=None)
 
-    with pytest.raises(SystemExit, match="rust-version"):
+    with pytest.raises(msrv_check.ManifestError, match="rust-version"):
         msrv_check.check_msrv(repo, Recorder())
+
+
+def test_a_manifest_that_is_not_toml_is_named_as_such() -> None:
+    """Parsing reports a malformed manifest as a `ManifestError`, not a traceback."""
+    with pytest.raises(msrv_check.ManifestError, match="not valid TOML"):
+        msrv_check.parse_rust_version("[package\n", "Cargo.toml")
+
+
+def test_a_missing_manifest_is_a_manifest_error(tmp_path: Path) -> None:
+    """Reading reports an unreadable file through the same named error."""
+    with pytest.raises(msrv_check.ManifestError, match="cannot read"):
+        msrv_check.read_manifest(tmp_path / "Cargo.toml")
+
+
+def test_the_reader_is_injected() -> None:
+    """The declared version comes from whatever the reader returns."""
+    version = msrv_check.declared_rust_version(
+        Path("Cargo.toml"), reader=lambda _path: '[package]\nrust-version = "1.99"\n'
+    )
+    assert version == "1.99"
 
 
 def test_the_resolver_prefers_releases_the_version_can_build() -> None:
@@ -156,3 +178,94 @@ def test_the_make_target_runs_the_script() -> None:
 def test_the_declared_version_is_one_the_script_can_read() -> None:
     """The repository's own manifest declares a `rust-version`."""
     assert msrv_check.declared_rust_version(REPO_ROOT / "Cargo.toml")
+
+
+FAKE_TOOL = """#!/bin/sh
+# Records one line per call: tool, arguments, directory, and the variables the
+# check must control. `cargo generate-lockfile` rewrites the lockfile, and a
+# check fails when FAKE_FAIL names it.
+printf '%s|%s|%s|flags=[%s]|rustc=[%s]|resolver=[%s]\\n' \
+  "$(basename "$0")" "$*" "$PWD" "$RUSTFLAGS" "${RUSTC-unset}" \
+  "$CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS" >> "$FAKE_LOG"
+case "$*" in
+  *generate-lockfile*) echo resolved > Cargo.lock ;;
+esac
+case "$*" in
+  *"$FAKE_FAIL"*) exit 1 ;;
+esac
+"""
+
+
+def run_cli(repo: Path, bin_dir: Path, fail_on: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run `scripts/msrv_check.py` in `repo` with fake `rustup` and `cargo` first on PATH."""
+    bin_dir.mkdir()
+    for tool in ("rustup", "cargo"):
+        path = bin_dir / tool
+        path.write_text(FAKE_TOOL)
+        path.chmod(0o755)
+    log = repo / "calls.log"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_LOG": str(log),
+        "FAKE_FAIL": fail_on,
+        "RUSTC": "/opt/newer/rustc",
+        "RUSTFLAGS": "-D warnings",
+    }
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, str(SCRIPT_PATH)],
+        cwd=repo,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    lines = log.read_text().splitlines() if log.exists() else []
+    return result, lines
+
+
+def test_the_command_line_runs_the_steps_in_the_repository(tmp_path: Path) -> None:
+    """End to end through `main`: exit 0, the declared toolchain, the controlled environment."""
+    (tmp_path / "repo").mkdir()
+    repo = make_repo(tmp_path / "repo")
+
+    result, calls = run_cli(repo, tmp_path / "bin", fail_on="never-matches")
+
+    assert result.returncode == 0, result.stderr
+    assert "builds at the declared rust-version 1.92" in result.stdout
+    assert [call.split("|")[0:2] for call in calls] == [
+        ["rustup", "toolchain install 1.92 --profile minimal"],
+        ["cargo", "+1.92 generate-lockfile"],
+        ["cargo", "+1.92 check --locked --all-targets --all-features"],
+    ]
+    for call in calls:
+        _tool, _args, directory, flags, compiler, resolver = call.split("|")
+        assert Path(directory).resolve() == repo.resolve()
+        assert flags == "flags=[]"
+        assert compiler == "rustc=[unset]"
+        assert resolver == "resolver=[fallback]"
+    assert (repo / "Cargo.lock").read_text() == "committed\n"
+
+
+def test_a_failing_build_fails_the_command_and_restores_the_lockfile(tmp_path: Path) -> None:
+    """A failed `cargo check` exits 1, names the command, and leaves the lock as committed."""
+    (tmp_path / "repo").mkdir()
+    repo = make_repo(tmp_path / "repo")
+
+    result, _calls = run_cli(repo, tmp_path / "bin", fail_on="check")
+
+    assert result.returncode == 1
+    assert "check" in result.stderr
+    assert (repo / "Cargo.lock").read_text() == "committed\n"
+
+
+def test_a_manifest_without_rust_version_exits_with_two(tmp_path: Path) -> None:
+    """The command line reports the named manifest error and runs nothing."""
+    (tmp_path / "repo").mkdir()
+    repo = make_repo(tmp_path / "repo", rust_version=None)
+
+    result, calls = run_cli(repo, tmp_path / "bin", fail_on="never-matches")
+
+    assert result.returncode == 2
+    assert "rust-version" in result.stderr
+    assert calls == []
