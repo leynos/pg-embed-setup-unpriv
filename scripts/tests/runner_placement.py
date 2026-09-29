@@ -21,6 +21,7 @@ Examples
 
 from __future__ import annotations
 
+import re
 import typing as typ
 
 if typ.TYPE_CHECKING:
@@ -41,18 +42,16 @@ ESTATE_EXPRESSION: typ.Final = (
     "|| 'ubicloud-standard-2' }}"
 )
 
+#: The estate shape: a condition, a quoted hosted arm and a quoted other arm.
+_ESTATE_SHAPE: typ.Final = re.compile(
+    r"\$\{\{\s*(?P<condition>[^&|]+?)\s*&&\s*'(?P<hosted>[^']*)'"
+    r"\s*\|\|\s*'(?P<other>[^']*)'\s*\}\}"
+)
+
 #: The kinds of run a runner expression is evaluated for. A push and a
 #: dispatch have no pull request, so the fork value is null and they
 #: behave as a same-repository pull request does.
 ORIGINS: typ.Final = ("push", "same-repository", "fork")
-
-
-def _unquoted(term: str) -> str | None:
-    """Return a single-quoted term's text, or None for an unquoted one."""
-    text = term.strip()
-    if len(text) >= 2 and text[0] == "'" and text[-1] == "'":
-        return text[1:-1]
-    return None
 
 
 def selected_runner(runs_on: object, origin: str) -> str | None:
@@ -63,16 +62,10 @@ def selected_runner(runs_on: object, origin: str) -> str | None:
     shape: a lane that never falls back cannot serve a fork, and a lane
     that never leaves the hosted pool is not placed at all.
     """
-    if not isinstance(runs_on, str):
+    shape = _ESTATE_SHAPE.fullmatch(runs_on.strip()) if isinstance(runs_on, str) else None
+    if shape is None or shape["condition"] != FORK_CONDITION:
         return None
-    text = runs_on.strip()
-    if not (text.startswith("${{") and text.endswith("}}")):
-        return None
-    condition, separator, arms = text[3:-2].strip().partition(" && ")
-    fork_arm, arms_separator, other_arm = arms.partition(" || ")
-    if not (separator and arms_separator) or condition.strip() != FORK_CONDITION:
-        return None
-    return _unquoted(fork_arm if origin == "fork" else other_arm)
+    return shape["hosted" if origin == "fork" else "other"]
 
 
 def placement_faults(runs_on: object) -> list[str]:
