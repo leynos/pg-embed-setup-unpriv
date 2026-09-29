@@ -20,22 +20,16 @@
 //! Root runs take the worker path and are skipped with a logged reason.
 #![cfg(unix)]
 
-#[cfg(target_os = "linux")]
-use std::time::Instant;
 use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
 
-#[cfg(target_os = "linux")]
-use fs4::FileExt;
 use pg_embedded_setup_unpriv::{BootstrapError, test_support};
 
 #[path = "support/cluster_children.rs"]
 mod cluster_children;
 
-#[cfg(target_os = "linux")]
-use cluster_children::is_blocked_on_a_lock;
 use cluster_children::{
     KillOnDrop,
     alive,
@@ -44,7 +38,6 @@ use cluster_children::{
     connected_dir,
     fixed_root,
     lock_is_free,
-    open_lock,
     postmaster_pid,
     report,
     should_run,
@@ -199,23 +192,24 @@ fn startup_waits_for_the_setup_lock() {
     ambient(&root)
         .and_then(|dir| dir.create_dir_all("install"))
         .expect("the install tree");
-    let lock = open_lock(&root.join("install/.pg-embed-setup.lock"), true).expect("the lock file");
-    FileExt::lock(&lock).expect("hold the setup lock");
+    let lock = cluster_children::open_lock(&root.join("install/.pg-embed-setup.lock"), true)
+        .expect("the lock file");
+    fs4::FileExt::lock(&lock).expect("hold the setup lock");
 
     let mut child = spawn_child(&root, "connect", &[]).expect("child");
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while !is_blocked_on_a_lock(child.child.id()).expect("read /proc/locks") {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while !cluster_children::is_blocked_on_a_lock(child.child.id()).expect("read /proc/locks") {
         assert!(
             child.child.try_wait().expect("poll the child").is_none(),
             "the child finished without waiting for the setup lock"
         );
         assert!(
-            Instant::now() < deadline,
+            std::time::Instant::now() < deadline,
             "the child never waited for the setup lock"
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-    FileExt::unlock(&lock).expect("release the setup lock");
+    fs4::FileExt::unlock(&lock).expect("release the setup lock");
 
     connected_dir(&child.report().expect("report")).expect("connects once released");
     child.finish();
