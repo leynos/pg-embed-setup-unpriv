@@ -220,7 +220,7 @@ Enable the feature in your `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-pg-embed-setup-unpriv = { version = "0.6.1", features = ["async-api"] }
+pg-embed-setup-unpriv = { version = "0.6.2", features = ["async-api"] }
 ```
 
 Then use `start_async()` and `stop_async()` in your async tests:
