@@ -2,7 +2,7 @@
 
 A check parametrized over this repository's own correct workflow passes
 whether or not it discriminates anything, so the judgement is driven
-directly in both directions first: the estate expression must pass, and
+directly in both directions first: the runner-selection expression must pass, and
 each way of misplacing a lane must fail. The real files are asserted
 last, with an exact inventory of the jobs that can land on Ubicloud.
 """
@@ -88,7 +88,7 @@ def test_the_estate_expression_places_each_run(origin: str, wanted: str) -> None
     ],
 )
 def test_a_misplaced_lane_is_reported(runs_on: object, expected: int) -> None:
-    """Each careless edit is reported, and the estate expression is not."""
+    """Each careless edit is reported, and the runner-selection expression is not."""
     assert len(placement_faults(runs_on)) == expected
 
 
