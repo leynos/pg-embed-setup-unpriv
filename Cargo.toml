@@ -135,7 +135,7 @@ postgresql_embedded = { version = "0.20.2", features = ["tokio"] }
 # (0.20.2, which needs Rust 1.92), so a lockfile resolved for the declared
 # `rust-version` can pick it; 0.20.3 and later need 1.94 and would raise the
 # minimum supported Rust version if required here.
-postgresql_archive = { version = "0.20.2", default-features = false }
+postgresql_archive = { version = "0.21.0", default-features = false }
 color-eyre = "0.6"
 tokio = { version = "1", features = ["rt", "macros", "time", "fs"] }
 serde = { version = "1", features = ["derive"] }
