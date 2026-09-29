@@ -82,16 +82,18 @@ def selected_runner(runs_on: object, origin: str) -> str | None:
     return shape["hosted" if origin == "fork" else "other"]
 
 
-def placement_faults(runs_on: object) -> list[str]:
+def placement_faults(runs_on: object, label: str = UBICLOUD_LABEL) -> list[str]:
     """Return one entry per kind of run the expression places wrongly.
 
     Empty when a fork falls back to hosted and every other run is on
-    Ubicloud.
+    the Ubicloud runner class `label`.
 
     Parameters
     ----------
     runs_on : object
         The job's `runs-on` value as parsed.
+    label : str
+        The Ubicloud runner class every non-fork run must select.
 
     Returns
     -------
@@ -99,8 +101,8 @@ def placement_faults(runs_on: object) -> list[str]:
         One description per kind of run placed wrongly.
     """
     wanted = {
-        "push": UBICLOUD_LABEL,
-        "same-repository": UBICLOUD_LABEL,
+        "push": label,
+        "same-repository": label,
         "fork": HOSTED_LABEL,
     }
     chosen = {origin: selected_runner(runs_on, origin) for origin in ORIGINS}

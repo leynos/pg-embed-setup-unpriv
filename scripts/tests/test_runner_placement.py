@@ -22,12 +22,13 @@ from workflow_reader import Workflow, load_workflows
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
-#: Every job that can land on Ubicloud, with the ceiling it states in
-#: minutes. The inventory is exact, so a new Ubicloud lane without a
-#: ceiling, or a ceiling removed or changed, fails until it is reviewed.
-CEILINGS = [
-    (".github/workflows/ci.yml", "build-test", 66),
-    (".github/workflows/coverage-main.yml", "coverage-upload", 66),
+#: Every job that can land on Ubicloud, with the runner class it names and
+#: the ceiling it states in minutes. The inventory is exact, so a new
+#: Ubicloud lane without a ceiling, or a class or ceiling changed, fails
+#: until it is reviewed.
+PLACEMENTS = [
+    (".github/workflows/ci.yml", "build-test", "ubicloud-standard-4", 66),
+    (".github/workflows/coverage-main.yml", "coverage-upload", "ubicloud-standard-2", 66),
 ]
 
 
@@ -120,6 +121,15 @@ def test_every_ubicloud_lane_is_placed_by_the_estate_expression_and_states_a_cei
 ):
     """Exactly the inventoried jobs can land on Ubicloud, each ceiling stated."""
     placed = placed_jobs(load_workflows(REPOSITORY_ROOT))
-    assert [(path, job, ceiling) for path, job, _, ceiling in placed] == CEILINGS
-    for path, job, runs_on, _ in placed:
-        assert not placement_faults(runs_on), f"{path}: {job} is misplaced"
+    assert [(path, job, ceiling) for path, job, _, ceiling in placed] == [
+        (path, job, ceiling) for path, job, _, ceiling in PLACEMENTS
+    ]
+    for (path, job, runs_on, _), (_, _, label, _) in zip(placed, PLACEMENTS, strict=True):
+        assert not placement_faults(runs_on, label), f"{path}: {job} is misplaced"
+
+
+def test_a_runner_class_other_than_the_inventoried_one_is_reported() -> None:
+    """A lane on the wrong class of Ubicloud runner is a fault, in both directions."""
+    four = ESTATE_EXPRESSION.replace("standard-2", "standard-4")
+    assert placement_faults(four, "ubicloud-standard-4") == []
+    assert len(placement_faults(four, "ubicloud-standard-2")) == 2

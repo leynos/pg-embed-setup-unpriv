@@ -120,15 +120,18 @@ contract should reuse `workflow_reader.py` rather than parse workflows with
 
 ## Runner placement
 
-`ci.yml`'s `build-test` and `coverage-main.yml`'s `coverage-upload`, main's
-only cache writer, run on `ubicloud-standard-2`. `runs-on` selects it with the
-estate expression:
+`ci.yml`'s `build-test` runs on `ubicloud-standard-4` and `coverage-main.yml`'s
+`coverage-upload`, main's only cache writer, on `ubicloud-standard-2`.
+`runs-on` selects the class with the estate expression, shown here for
+`standard-2`:
 
 ```yaml
 runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-2' }}
 ```
 
-A pull request from a fork cannot obtain an Ubicloud runner, so it falls back to
+`build-test` is `standard-4` on a measured shortfall: its unprivileged leg ran
+out of disk on `standard-2` (`No space left on device`, run 36565376334). A
+pull request from a fork cannot obtain an Ubicloud runner, so it falls back to
 `ubuntu-latest`; a push and a dispatch have no pull request, so the fork value
 is null and they select Ubicloud.
 
