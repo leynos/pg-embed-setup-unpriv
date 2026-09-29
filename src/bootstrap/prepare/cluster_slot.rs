@@ -222,8 +222,9 @@ fn any_slot_held(parent: &std::path::Path, own: Option<&str>) -> bool {
 /// Returns the slot parent that clusters sharing the install tree at
 /// `install_dir` claim under: `<root>/data` for `<root>/install`, or for a
 /// version directory inside it. None when `install_dir` is not laid out that
-/// way or the slot parent does not exist, so an explicit `PG_RUNTIME_DIR` has
-/// none.
+/// way, so an explicit `PG_RUNTIME_DIR` has none. The parent need not exist
+/// yet: a bootstrap that creates it and claims a slot is exactly the race the
+/// caller guards against, by creating it first.
 pub(crate) fn derived_slot_parent(install_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let named_install =
         |dir: &&std::path::Path| dir.file_name().is_some_and(|name| name == "install");
@@ -231,15 +232,18 @@ pub(crate) fn derived_slot_parent(install_dir: &std::path::Path) -> Option<std::
         .into_iter()
         .flatten()
         .find(named_install)?;
-    let parent = install_root.parent()?.join("data");
-    parent.is_dir().then_some(parent)
+    Some(install_root.parent()?.join("data"))
 }
 
 /// Returns whether any slot under `parent` holds its lock.
 pub(crate) fn has_live_slots_in(parent: &std::path::Path) -> bool { any_slot_held(parent, None) }
 
 /// Takes the claim guard of the slot parent `parent`.
+///
+/// Creates the parent if it is missing, as a slot claim does, so a cleanup and
+/// a first claim contend on the same guard file.
 pub(crate) fn claim_guard_at(parent: &std::path::Path) -> io::Result<ClaimGuard> {
+    std::fs::create_dir_all(parent)?;
     ClaimGuard::acquire(parent)
 }
 

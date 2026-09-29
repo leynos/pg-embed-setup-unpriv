@@ -87,16 +87,17 @@ pub(super) fn cleanup_in_process(requested: CleanupMode, settings: &Settings, co
     if mode == CleanupMode::None {
         return;
     }
-    log_cleanup_start(mode, context);
+    log_cleanup_start(mode, plan.holds_guard(), context);
     cleanup_data_dir(mode, settings, context);
     cleanup_install_dir(mode, settings, context);
 }
 
-fn log_cleanup_start(cleanup_mode: CleanupMode, context: &str) {
+fn log_cleanup_start(cleanup_mode: CleanupMode, is_guarded: bool, context: &str) {
     tracing::info!(
         target: LOG_TARGET,
         context = %context,
         cleanup_mode = ?cleanup_mode,
+        is_guarded,
         "cleaning up postgres directories"
     );
 }
@@ -129,7 +130,12 @@ pub(super) struct CleanupPlan {
     /// The mode to clean up with.
     pub(super) mode: CleanupMode,
     /// Held across the cleanup when it may remove a shared install tree.
-    _guard: Option<ClaimGuard>,
+    guard: Option<ClaimGuard>,
+}
+
+impl CleanupPlan {
+    /// Returns whether the plan holds the claim guard.
+    const fn holds_guard(&self) -> bool { self.guard.is_some() }
 }
 
 /// Plans a cleanup that never removes an install tree other clusters are
@@ -151,20 +157,20 @@ pub(super) fn plan_cleanup(
     if requested != CleanupMode::Full {
         return CleanupPlan {
             mode: requested,
-            _guard: None,
+            guard: None,
         };
     }
     match claim_guard_for(&settings.data_dir) {
         None => plan_for_unslotted(settings, context),
         Some(Ok(guard)) if !has_live_peers(&settings.data_dir) => CleanupPlan {
             mode: requested,
-            _guard: Some(guard),
+            guard: Some(guard),
         },
         Some(_) => {
             log_install_kept(settings, context);
             CleanupPlan {
                 mode: CleanupMode::DataOnly,
-                _guard: None,
+                guard: None,
             }
         }
     }
@@ -179,7 +185,7 @@ pub(super) fn plan_cleanup(
 fn plan_for_unslotted(settings: &Settings, context: &str) -> CleanupPlan {
     let full = |guard| CleanupPlan {
         mode: CleanupMode::Full,
-        _guard: guard,
+        guard,
     };
     let Some(parent) = derived_slot_parent(&settings.installation_dir)
         .filter(|parent| parent != &settings.data_dir)
@@ -192,7 +198,7 @@ fn plan_for_unslotted(settings: &Settings, context: &str) -> CleanupPlan {
             log_install_kept(settings, context);
             CleanupPlan {
                 mode: CleanupMode::DataOnly,
-                _guard: None,
+                guard: None,
             }
         }
     }

@@ -152,8 +152,9 @@ as a peer, or claims it after the removal, and provisions the tree afresh. A
 guard that cannot be taken keeps the tree. An explicit `PG_DATA_DIR` is not a
 slot, but its install tree can still be the derived `<root>/install`, so a full
 cleanup of it takes the same guard on `<root>/data` and keeps the tree while a
-slot there holds its lock. The file does not end in `.lock`, so the sweep never
-reads it as a slot.
+slot there holds its lock. If `<root>/data` does not exist yet, the cleanup
+creates it first, as a first claim would, so the two contend on one guard file.
+The file does not end in `.lock`, so the sweep never reads it as a slot.
 
 ### Explicit `PG_DATA_DIR`
 

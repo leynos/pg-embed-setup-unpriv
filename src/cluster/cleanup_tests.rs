@@ -8,8 +8,13 @@ use postgresql_embedded::Settings;
 use rstest::rstest;
 use tempfile::tempdir;
 
-use super::{cleanup_in_process, is_dangerous_cleanup_path, should_remove_install_root};
-use crate::CleanupMode;
+use super::{
+    cleanup_in_process,
+    is_dangerous_cleanup_path,
+    plan_cleanup,
+    should_remove_install_root,
+};
+use crate::{CleanupMode, bootstrap::claim_guard_at};
 
 #[rstest]
 #[case::data_only(CleanupMode::DataOnly, false, true)]
@@ -113,10 +118,52 @@ fn full_cleanup_of_an_explicit_data_dir_respects_slots_on_its_install_tree(
     assert_eq!(settings.installation_dir.exists(), expect_install_exists);
 }
 
+// With no slot parent yet, a full cleanup creates it and holds its guard, so a
+// bootstrap that creates the parent and claims a slot waits for the removal
+// instead of racing it.
+#[test]
+fn full_cleanupguards_a_slot_parent_that_does_not_exist_yet() {
+    let root = tempdir().expect("tempdir");
+    let slots = root.path().join("data");
+    let install_dir = root.path().join("install");
+    fs::create_dir_all(&install_dir).expect("install dir");
+    let settings = Settings {
+        data_dir: root.path().join("elsewhere"),
+        installation_dir: install_dir,
+        ..Settings::default()
+    };
+    assert!(!slots.exists(), "the slot parent starts absent");
+
+    let plan = plan_cleanup(CleanupMode::Full, &settings, "absent-test");
+
+    assert_eq!(plan.mode, CleanupMode::Full, "nothing shares the tree");
+    assert!(plan.guard.is_some(), "the cleanup holds the guard");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let claimant = std::thread::spawn(move || {
+        let guard = claim_guard_at(&slots);
+        sender.send(()).expect("report the claim");
+        guard
+    });
+    assert!(
+        receiver
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .is_err(),
+        "a first claim must wait for the cleanup"
+    );
+    drop(plan);
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the claim proceeds once the cleanup is done");
+    claimant
+        .join()
+        .expect("join the claimant")
+        .expect("take the guard");
+}
+
 // A full cleanup that cannot take the root's claim guard cannot rule out a
 // cluster claiming a slot mid-cleanup, so it leaves the install tree.
 #[test]
-fn full_cleanup_keeps_the_install_tree_when_the_guard_is_unavailable() {
+fn full_cleanup_keeps_the_install_tree_when_theguard_is_unavailable() {
     let sandbox = tempdir().expect("tempdir");
     let slots = sandbox.path().join("data");
     let own = slots.join("1-1-0");
