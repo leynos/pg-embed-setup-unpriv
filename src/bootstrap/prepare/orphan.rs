@@ -22,10 +22,29 @@ use crate::observability::LOG_TARGET;
 #[cfg(unix)]
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// An operating-system process ID, kept apart from other integers so that a
+/// PID cannot be passed where a port or a count is meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ProcessId(u32);
+
+impl ProcessId {
+    /// Wraps a raw PID.
+    pub(super) const fn new(raw: u32) -> Self { Self(raw) }
+
+    /// Returns the raw PID.
+    pub(super) const fn get(self) -> u32 { self.0 }
+}
+
+impl std::fmt::Display for ProcessId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
 /// Stops one server by process ID; a seam so tests can refuse a stop.
 pub(super) trait OrphanStop {
     /// Asks the process to stop and waits for it; returns whether it exited.
-    fn stop(&self, pid: u32) -> bool;
+    fn stop(&self, pid: ProcessId) -> bool;
 }
 
 /// What a data directory's `postmaster.pid` says about its server.
@@ -35,10 +54,10 @@ pub(super) enum ServerState {
     /// running `postgres` process.
     Absent,
     /// A running `postgres` process with this PID.
-    Running(u32),
+    Running(ProcessId),
     /// A live process that cannot be confirmed as `postgres` on this
     /// platform; treated as a server that must not be deleted from under.
-    Unconfirmed(u32),
+    Unconfirmed(ProcessId),
 }
 
 /// Stops the orphaned server in `data_dir`, if there is one.
@@ -59,16 +78,16 @@ pub(super) fn stop_orphaned_server(data_dir: &Utf8Path, stop: &dyn OrphanStop) -
 
 /// Warns that a live process holds a dead slot's `postmaster.pid` but is not
 /// known to be `postgres`.
-fn warn_unconfirmed(pid: u32, data_dir: &Utf8Path) {
-    warn!(target: LOG_TARGET, pid, data_dir = %data_dir,
+fn warn_unconfirmed(pid: ProcessId, data_dir: &Utf8Path) {
+    warn!(target: LOG_TARGET, pid = %pid, data_dir = %data_dir,
         "a live process holds a dead slot's postmaster.pid and is not confirmed as postgres");
 }
 
 /// Stops the running server and logs it when it went.
-fn stop_running(pid: u32, data_dir: &Utf8Path, stop: &dyn OrphanStop) -> bool {
+fn stop_running(pid: ProcessId, data_dir: &Utf8Path, stop: &dyn OrphanStop) -> bool {
     let stopped = stop.stop(pid);
     if stopped {
-        info!(target: LOG_TARGET, pid, data_dir = %data_dir, "stopped a server orphaned by a dead owner");
+        info!(target: LOG_TARGET, pid = %pid, data_dir = %data_dir, "stopped a server orphaned by a dead owner");
     }
     stopped
 }
@@ -89,20 +108,16 @@ pub(super) fn server_state(data_dir: &Utf8Path) -> ServerState {
 }
 
 /// Returns the PID on the first line of `postmaster.pid`, if readable.
-fn postmaster_pid(data_dir: &Utf8Path) -> Option<u32> {
+fn postmaster_pid(data_dir: &Utf8Path) -> Option<ProcessId> {
     let text = std::fs::read_to_string(data_dir.join("postmaster.pid")).ok()?;
-    text.lines()
-        .next()?
-        .trim()
-        .parse()
-        .ok()
-        .filter(|pid| *pid > 0)
+    let raw: u32 = text.lines().next()?.trim().parse().ok()?;
+    (raw > 0).then_some(ProcessId::new(raw))
 }
 
 /// Returns whether a process with this PID exists.
 #[cfg(unix)]
-fn process_alive(pid: u32) -> bool {
-    let Ok(raw) = i32::try_from(pid) else {
+fn process_alive(pid: ProcessId) -> bool {
+    let Ok(raw) = i32::try_from(pid.get()) else {
         return false;
     };
     // Signal 0 checks existence and permission without delivering anything;
@@ -116,7 +131,7 @@ fn process_alive(pid: u32) -> bool {
 /// Without a signal-0 probe, any recorded PID is presumed alive, which keeps
 /// the directory rather than risking a running server.
 #[cfg(not(unix))]
-const fn process_alive(_pid: u32) -> bool { true }
+const fn process_alive(_pid: ProcessId) -> bool { true }
 
 /// Returns whether the process is a `postgres` server running `data_dir`, or
 /// None where the platform cannot say.
@@ -130,7 +145,7 @@ const fn process_alive(_pid: u32) -> bool { true }
 /// cannot be shown either way, such as another user's, is unconfirmed and
 /// keeps the slot.
 #[cfg(target_os = "linux")]
-fn is_server_for(pid: u32, data_dir: &Utf8Path) -> Option<bool> {
+fn is_server_for(pid: ProcessId, data_dir: &Utf8Path) -> Option<bool> {
     let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
     if !names_postgres(&comm) {
         return Some(false);
@@ -148,22 +163,36 @@ fn is_server_for(pid: u32, data_dir: &Utf8Path) -> Option<bool> {
 /// that cannot run, fails, or prints nothing is unconfirmed too: the caller
 /// has just seen the process alive.
 #[cfg(all(unix, not(target_os = "linux")))]
-fn is_server_for(pid: u32, data_dir: &Utf8Path) -> Option<bool> {
-    if !names_postgres(&ps_field("comm=", pid)?) {
+fn is_server_for(pid: ProcessId, data_dir: &Utf8Path) -> Option<bool> {
+    if !names_postgres(&ps_field(PsField::Comm, pid)?) {
         return Some(false);
     }
-    names_data_dir(&ps_field("command=", pid)?, data_dir.as_str()).then_some(true)
+    names_data_dir(&ps_field(PsField::Command, pid)?, data_dir).then_some(true)
 }
 
 /// Without a way to inspect a process, the directory is kept.
 #[cfg(not(unix))]
-const fn is_server_for(_pid: u32, _data_dir: &Utf8Path) -> Option<bool> { None }
+const fn is_server_for(_pid: ProcessId, _data_dir: &Utf8Path) -> Option<bool> { None }
+
+/// A column `ps` can print for one process.
+#[cfg(all(unix, not(target_os = "linux")))]
+#[derive(Clone, Copy)]
+enum PsField {
+    /// The command name, a path on macOS.
+    Comm,
+    /// The full command line.
+    Command,
+}
 
 /// Runs `ps -o <field> -p <pid>`, returning its non-empty output.
 #[cfg(all(unix, not(target_os = "linux")))]
-fn ps_field(field: &str, pid: u32) -> Option<String> {
+fn ps_field(field: PsField, pid: ProcessId) -> Option<String> {
+    let column = match field {
+        PsField::Comm => "comm=",
+        PsField::Command => "command=",
+    };
     let output = std::process::Command::new("ps")
-        .args(["-o", field, "-p", &pid.to_string()])
+        .args(["-o", column, "-p", &pid.to_string()])
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -183,12 +212,14 @@ fn names_postgres(comm: &str) -> bool {
 /// or the end of the line: `…/data/1-2-0` must not match a server for
 /// `…/data/1-2-01`.
 #[cfg(all(unix, not(target_os = "linux")))]
-fn names_data_dir(command_line: &str, data_dir: &str) -> bool {
-    command_line.match_indices(data_dir).any(|(start, _)| {
-        command_line
-            .get(start + data_dir.len()..)
-            .is_some_and(|rest| rest.chars().next().is_none_or(char::is_whitespace))
-    })
+fn names_data_dir(command_line: &str, data_dir: &Utf8Path) -> bool {
+    command_line
+        .match_indices(data_dir.as_str())
+        .any(|(start, _)| {
+            command_line
+                .get(start + data_dir.as_str().len()..)
+                .is_some_and(|rest| rest.chars().next().is_none_or(char::is_whitespace))
+        })
 }
 
 /// Stops a server as `pg_ctl stop -m immediate` does: `SIGQUIT` to the
@@ -197,9 +228,9 @@ pub(super) struct SignalStop;
 
 impl OrphanStop for SignalStop {
     #[cfg(unix)]
-    fn stop(&self, pid: u32) -> bool {
+    fn stop(&self, pid: ProcessId) -> bool {
         use nix::sys::signal::{Signal, kill};
-        let Ok(raw) = i32::try_from(pid) else {
+        let Ok(raw) = i32::try_from(pid.get()) else {
             return false;
         };
         if kill(nix::unistd::Pid::from_raw(raw), Signal::SIGQUIT).is_err() {
@@ -209,12 +240,12 @@ impl OrphanStop for SignalStop {
     }
 
     #[cfg(not(unix))]
-    fn stop(&self, _pid: u32) -> bool { false }
+    fn stop(&self, _pid: ProcessId) -> bool { false }
 }
 
 /// Polls until the process has gone, up to [`STOP_TIMEOUT`].
 #[cfg(unix)]
-fn wait_for_exit(pid: u32) -> bool {
+fn wait_for_exit(pid: ProcessId) -> bool {
     let deadline = Instant::now() + STOP_TIMEOUT;
     while Instant::now() < deadline {
         if !process_alive(pid) {

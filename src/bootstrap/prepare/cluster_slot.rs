@@ -155,7 +155,7 @@ fn sweep_one(parent: &Utf8Path, name: &str, stop: &dyn OrphanStop) -> bool {
         );
         return false;
     }
-    remove_slot(parent, name, &slot);
+    remove_slot(name, &slot);
     true
 }
 
@@ -172,8 +172,8 @@ fn take_dead_lock(parent: &Utf8Path, name: &str) -> Option<File> {
 
 /// Removes a dead slot's directory, password file and lock file, and logs
 /// the outcome.
-fn remove_slot(parent: &Utf8Path, name: &str, slot: &ClusterSlot) {
-    match remove_slot_files(parent, name, slot) {
+fn remove_slot(name: &str, slot: &ClusterSlot) {
+    match remove_slot_files(slot) {
         Ok(()) => log_swept(name),
         Err(err) => log_removal_failed(name, &err),
     }
@@ -191,13 +191,11 @@ fn log_removal_failed(name: &str, err: &io::Error) {
 
 /// Removes every file of a slot, reporting the first failure after trying
 /// them all so one stubborn leftover does not strand the others.
-fn remove_slot_files(parent: &Utf8Path, name: &str, slot: &ClusterSlot) -> io::Result<()> {
+fn remove_slot_files(slot: &ClusterSlot) -> io::Result<()> {
     let results = [
         remove_if_present(std::fs::remove_dir_all(&slot.data_dir)),
         remove_if_present(std::fs::remove_file(&slot.password_file)),
-        remove_if_present(std::fs::remove_file(
-            parent.join(format!("{name}{LOCK_SUFFIX}")),
-        )),
+        remove_if_present(std::fs::remove_file(lock_path(&slot.data_dir))),
     ];
     results.into_iter().collect()
 }

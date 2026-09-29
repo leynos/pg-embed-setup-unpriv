@@ -8,7 +8,7 @@ use fs4::FileExt;
 use rstest::{fixture, rstest};
 
 use super::{claim_slot, has_live_peers, sweep_dead_slots};
-use crate::bootstrap::prepare::orphan::OrphanStop;
+use crate::bootstrap::prepare::orphan::{OrphanStop, ProcessId};
 
 /// A data parent directory under a temporary root.
 struct Parent {
@@ -29,7 +29,7 @@ fn parent() -> Result<Parent> {
 
 /// Records the PIDs it is asked to stop and answers with a fixed result.
 struct RecordingStop {
-    stopped: RefCell<Vec<u32>>,
+    stopped: RefCell<Vec<ProcessId>>,
     succeeds: bool,
 }
 
@@ -44,7 +44,7 @@ impl RecordingStop {
 }
 
 impl OrphanStop for RecordingStop {
-    fn stop(&self, pid: u32) -> bool {
+    fn stop(&self, pid: ProcessId) -> bool {
         self.stopped.borrow_mut().push(pid);
         self.succeeds
     }

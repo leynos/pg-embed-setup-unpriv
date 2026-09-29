@@ -3,7 +3,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use color_eyre::eyre::{Result, eyre};
 
-use super::{OrphanStop, ServerState, server_state, stop_orphaned_server};
+use super::{OrphanStop, ProcessId, ServerState, server_state, stop_orphaned_server};
 
 /// A child process standing in for an orphaned server: a shell copied under
 /// the name `postgres`, so `/proc/<pid>/comm` reads `postgres`, and started in
@@ -55,7 +55,7 @@ impl FakePostgres {
     }
 
     /// Returns the stand-in's PID.
-    pub(crate) fn pid(&self) -> u32 { self.child.id() }
+    pub(crate) fn pid(&self) -> ProcessId { ProcessId::new(self.child.id()) }
 }
 
 #[cfg(target_os = "linux")]
@@ -70,7 +70,7 @@ impl Drop for FakePostgres {
 struct FixedStop(bool);
 
 impl OrphanStop for FixedStop {
-    fn stop(&self, _pid: u32) -> bool { self.0 }
+    fn stop(&self, _pid: ProcessId) -> bool { self.0 }
 }
 
 /// An empty data directory.
@@ -82,7 +82,7 @@ fn data_dir() -> Result<(tempfile::TempDir, Utf8PathBuf)> {
 }
 
 /// Writes a `postmaster.pid` naming `pid` into `dir`.
-fn write_pid(dir: &Utf8Path, pid: u32) -> Result<()> {
+fn write_pid(dir: &Utf8Path, pid: ProcessId) -> Result<()> {
     std::fs::write(dir.join("postmaster.pid"), format!("{pid}\n{dir}\n"))?;
     Ok(())
 }
@@ -105,7 +105,7 @@ fn a_dead_pid_means_no_server() {
     let pid = child.id();
     child.wait().expect("reap true");
     let (_temp, dir) = data_dir().expect("data dir");
-    write_pid(&dir, pid).expect("pid file");
+    write_pid(&dir, ProcessId::new(pid)).expect("pid file");
     assert_eq!(server_state(&dir), ServerState::Absent);
 }
 
@@ -115,7 +115,7 @@ fn a_dead_pid_means_no_server() {
 #[test]
 fn a_live_non_postgres_pid_means_no_server() {
     let (_temp, dir) = data_dir().expect("data dir");
-    write_pid(&dir, std::process::id()).expect("pid file");
+    write_pid(&dir, ProcessId::new(std::process::id())).expect("pid file");
     assert_eq!(server_state(&dir), ServerState::Absent);
     assert!(stop_orphaned_server(&dir, &FixedStop(false)));
 }
@@ -190,7 +190,7 @@ fn the_signal_stop_ends_the_process() {
     let reaper = std::thread::spawn(move || child.wait());
 
     assert!(
-        SignalStop.stop(pid),
+        SignalStop.stop(ProcessId::new(pid)),
         "the process should exit after SIGQUIT"
     );
     let _status = reaper.join().expect("join the reaper");
@@ -224,5 +224,8 @@ fn a_command_line_names_a_directory_as_a_whole_argument(
     #[case] command_line: &str,
     #[case] expected: bool,
 ) {
-    assert_eq!(super::names_data_dir(command_line, "/d/1-2-0"), expected);
+    assert_eq!(
+        super::names_data_dir(command_line, Utf8Path::new("/d/1-2-0")),
+        expected
+    );
 }
