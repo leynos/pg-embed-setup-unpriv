@@ -21,11 +21,28 @@ use crate::{
 
 const PGPASS_MODE: u32 = 0o600;
 
+mod cluster_slot;
+pub(crate) use cluster_slot::{
+    ClaimGuard,
+    claim_guard_at,
+    claim_guard_for,
+    derived_slot_parent,
+    has_live_peers,
+    has_live_slots_in,
+};
+mod layout;
+pub(super) use self::layout::DataLayout;
+use self::layout::claim_derived_slot;
+mod orphan;
 mod password;
 mod stale_password;
 pub use password::{PasswordReuseOutcome, reuse_existing_password, stored_cluster_password};
 
 /// Derives the default `install` and `data` directories under `root`.
+///
+/// The derived `data` path is the parent of one directory per cluster (ADR
+/// 005): each bootstrap claims `data/<name>/` beneath it, so concurrent
+/// processes sharing a root never share a data directory.
 ///
 /// # Examples
 /// ```
@@ -49,6 +66,7 @@ pub(super) fn prepare_bootstrap(
     privileges: super::mode::ExecutionPrivileges,
     settings: Settings,
     cfg: &PgEnvCfg,
+    layout: DataLayout,
 ) -> BootstrapResult<PreparedBootstrap> {
     if privileges == super::mode::ExecutionPrivileges::Root && !root_privilege_drop_supported() {
         return Err(unsupported_root_privilege_drop_error());
@@ -57,8 +75,10 @@ pub(super) fn prepare_bootstrap(
     #[cfg(all(unix, privileged_unix_platform))]
     {
         match privileges {
-            super::mode::ExecutionPrivileges::Root => bootstrap_with_root(settings, cfg),
-            super::mode::ExecutionPrivileges::Unprivileged => bootstrap_unprivileged(settings, cfg),
+            super::mode::ExecutionPrivileges::Root => bootstrap_with_root(settings, cfg, layout),
+            super::mode::ExecutionPrivileges::Unprivileged => {
+                bootstrap_unprivileged(settings, cfg, layout)
+            }
         }
     }
 
@@ -68,7 +88,9 @@ pub(super) fn prepare_bootstrap(
             super::mode::ExecutionPrivileges::Root => {
                 unreachable!("root privilege drop support is checked before platform dispatch")
             }
-            super::mode::ExecutionPrivileges::Unprivileged => bootstrap_unprivileged(settings, cfg),
+            super::mode::ExecutionPrivileges::Unprivileged => {
+                bootstrap_unprivileged(settings, cfg, layout)
+            }
         }
     }
 }
@@ -81,8 +103,10 @@ pub(super) struct PreparedBootstrap {
 fn bootstrap_unprivileged(
     mut settings: Settings,
     cfg: &PgEnvCfg,
+    layout: DataLayout,
 ) -> BootstrapResult<PreparedBootstrap> {
-    let paths = resolve_settings_paths_for_current_user(&mut settings, cfg)?;
+    let mut paths = resolve_settings_paths_for_current_user(&mut settings, cfg)?;
+    claim_derived_slot(&mut settings, &mut paths, layout)?;
     reuse_existing_password(
         &mut settings,
         &paths.data_dir,

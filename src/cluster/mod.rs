@@ -62,6 +62,7 @@ mod lifecycle_template;
 pub(crate) mod panic_utils;
 mod runtime;
 mod runtime_mode;
+mod setup_lock;
 mod shutdown;
 #[cfg(any(unix, windows))]
 mod shutdown_hook;

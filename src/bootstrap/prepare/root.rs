@@ -6,7 +6,7 @@
 
 use std::net::TcpListener;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use color_eyre::eyre::{Context, eyre};
 use nix::unistd::User;
 use postgresql_embedded::Settings;
@@ -29,6 +29,7 @@ use crate::{
 pub(super) fn bootstrap_with_root(
     mut settings: Settings,
     cfg: &PgEnvCfg,
+    layout: super::DataLayout,
 ) -> BootstrapResult<PreparedBootstrap> {
     // Worker subprocesses drop after each operation; keep the data dir so start can
     // proceed after setup.
@@ -39,7 +40,8 @@ pub(super) fn bootstrap_with_root(
         .context("failed to resolve user 'nobody'")?
         .ok_or_else(|| color_eyre::eyre::eyre!("user 'nobody' not found"))?;
 
-    let paths = resolve_settings_paths_for_uid(&mut settings, cfg, nobody_user.uid)?;
+    let mut paths = resolve_settings_paths_for_uid(&mut settings, cfg, nobody_user.uid)?;
+    let has_slot = super::claim_derived_slot(&mut settings, &mut paths, layout)?;
     super::reuse_existing_password(
         &mut settings,
         &paths.data_dir,
@@ -59,6 +61,9 @@ pub(super) fn bootstrap_with_root(
 
     super::stale_password::discard_orphaned_password_file(&paths.data_dir, &paths.password_file)?;
     ensure_pgpass_for_user(&paths.password_file, &nobody_user)?;
+    if has_slot {
+        ensure_slot_lock_owned_by_user(&paths.data_dir, &nobody_user)?;
+    }
 
     ensure_tree_owned_by_user(&paths.install_dir, &nobody_user)?;
     if paths.data_default {
@@ -70,6 +75,23 @@ pub(super) fn bootstrap_with_root(
         settings,
         environment,
     })
+}
+
+/// Hands a claimed slot's lock file to `user`.
+///
+/// The claim runs as root, so the lock file is root's, and a later bootstrap
+/// running as `user` could not open it to try the sweep. The held kernel lock
+/// belongs to the open descriptor, not to the file's owner, so the chown does
+/// not disturb it.
+///
+/// # Errors
+///
+/// Returns an error when the lock file cannot be handed over.
+fn ensure_slot_lock_owned_by_user(data_dir: &Utf8Path, user: &User) -> BootstrapResult<()> {
+    let lock = super::cluster_slot::lock_path(data_dir);
+    nix::unistd::chown(lock.as_std_path(), Some(user.uid), Some(user.gid))
+        .with_context(|| format!("failed to hand the slot lock {lock} to {}", user.name))
+        .map_err(BootstrapError::from)
 }
 
 fn ensure_root_port(settings: &mut Settings) -> BootstrapResult<()> {
@@ -145,6 +167,43 @@ mod tests {
         }
     }
 
+    /// A claimed slot's lock file is handed to the user the cluster runs as.
+    #[test]
+    fn a_slot_lock_is_handed_to_the_cluster_user() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("1-1-0")).expect("utf8");
+        let lock = super::super::cluster_slot::lock_path(&data_dir);
+        std::fs::write(&lock, b"").expect("lock file");
+        let user = current_user();
+
+        ensure_slot_lock_owned_by_user(&data_dir, &user).expect("hand over the lock");
+
+        let metadata = std::fs::metadata(lock.as_std_path()).expect("lock metadata");
+        assert_eq!(metadata.uid(), user.uid.as_raw());
+        assert_eq!(metadata.gid(), user.gid.as_raw());
+    }
+
+    /// As root, the lock goes to `nobody`, which a non-root host cannot prove
+    /// by chowning to itself; the root lane in CI runs this case.
+    #[test]
+    fn a_slot_lock_is_handed_to_nobody_when_root() {
+        if !geteuid().is_root() {
+            return;
+        }
+        let nobody = User::from_name("nobody")
+            .expect("look up nobody")
+            .expect("nobody exists");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("1-1-0")).expect("utf8");
+        let lock = super::super::cluster_slot::lock_path(&data_dir);
+        std::fs::write(&lock, b"").expect("lock file");
+
+        ensure_slot_lock_owned_by_user(&data_dir, &nobody).expect("hand over the lock");
+
+        let metadata = std::fs::metadata(lock.as_std_path()).expect("lock metadata");
+        assert_eq!(metadata.uid(), nobody.uid.as_raw());
+    }
+
     /// As root, `bootstrap_with_root` adopts the password stored beside an
     /// existing cluster instead of minting a fresh one. The staging needs the
     /// `nobody` user and chown rights, so a non-root host reports a skip.
@@ -167,7 +226,8 @@ mod tests {
             ..PgEnvCfg::default()
         };
         let settings = cfg.to_settings().expect("settings");
-        let prepared = bootstrap_with_root(settings, &cfg).expect("root bootstrap");
+        let prepared = bootstrap_with_root(settings, &cfg, super::super::DataLayout::PerCluster)
+            .expect("root bootstrap");
         assert_eq!(prepared.settings.password, "stored-secret");
     }
 

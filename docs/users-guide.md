@@ -92,9 +92,11 @@ cargo binstall pg-embed-setup-unpriv
    `/var/tmp/pg-embed-{uid}` on Linux and the BSDs, one tree per user that
    every project on the host shares. Set `PG_EMBED_ROOT` to give a project or a
    test run its own base (`<root>/install` and `<root>/data`); the two leaf
-   variables still win when set. On macOS and Windows there is no per-user
-   default tree: without `PG_EMBED_ROOT` the `postgresql_embedded` defaults
-   apply, and with it the same two leaves are derived.
+   variables still win when set. A derived `<root>/data` holds one directory
+   per cluster, so concurrent test processes can share one root (see
+   "Per-cluster data directories" below). On macOS and Windows there is no
+   per-user default tree: without `PG_EMBED_ROOT` the `postgresql_embedded`
+   defaults apply, and with it the same two leaves are derived.
 
    Test clusters cap `max_connections` at 20 (a `postgres` container defaults
    to 100); set `PG_MAX_CONNECTIONS` when parallel test runners need more. The
@@ -696,14 +698,14 @@ per-user root) failed with `password authentication failed`. Under
 the first. A stale path that cannot be removed fails the bootstrap with
 `ClusterPasswordUnreadable` rather than letting `initdb` read it.
 
-The password file belongs to the install tree, not to a data directory, so an
-install tree serves one cluster at a time. Point two clusters at one
-`PG_RUNTIME_DIR` with different `PG_DATA_DIR` values and a fresh cluster in the
-second data directory removes the file the first cluster's reuse depends on.
-Before this change, the fresh cluster was instead initialized with the first
-cluster's password, and nobody could log in to it. Give each cluster its own
-install root, for example its own `PG_EMBED_ROOT`, or set `PG_PASSWORD` for
-both.
+With an explicit `PG_DATA_DIR`, the password file belongs to the install tree,
+not to a data directory, so an install tree serves one such cluster at a time.
+Point two clusters at one `PG_RUNTIME_DIR` with different `PG_DATA_DIR` values
+and a fresh cluster in the second data directory removes the file the first
+cluster's reuse depends on. Before this change, the fresh cluster was instead
+initialized with the first cluster's password, and nobody could log in to it.
+Give each cluster its own install root, for example its own `PG_EMBED_ROOT`, or
+set `PG_PASSWORD` for both.
 
 A failed connection to the admin database keeps the driver's error in the
 chain, and the message names its cause, for example
@@ -779,6 +781,65 @@ branches, and `ProbeFailed`, `MissingFile`, `UnreadableFile` and `EmptyFile`
 for the failures. `ProbeFailed` and `UnreadableFile` stay distinct even though
 both return `ClusterPasswordUnreadable`. With no recorder installed, recording
 costs a branch and a return.
+
+## Per-cluster data directories
+
+**Layout change in releases after 0.6.0.** When the data directory is derived
+from a root, `PG_EMBED_ROOT` or the per-user default, each cluster gets a data
+directory of its own under the root. This lets concurrent processes, such as
+`cargo nextest` running one process per test, each bootstrap a working cluster
+in one root. Up to 0.6.0 they shared one directory, and every process but the
+first failed with `pg_ctl: another server might be running`.
+
+|                | 0.6.0 and earlier        | Later releases              |
+| -------------- | ------------------------ | --------------------------- |
+| Data directory | `<root>/data`            | `<root>/data/<name>/`       |
+| Password file  | `<root>/install/.pgpass` | `<root>/data/<name>.pgpass` |
+| Liveness lock  | none                     | `<root>/data/<name>.lock`   |
+
+_Table: Data layout under a derived root._
+
+`<name>` is `<pid>-<nanoseconds>-<counter>`, unique to each cluster. The
+install tree, `<root>/install`, is still shared. A cluster left directly in
+`<root>/data` by an earlier release is no longer used, and the bootstrap logs a
+warning naming it; it can be deleted.
+
+- **Explicit `PG_DATA_DIR` is unchanged.** Setting it keeps a single data
+  directory at that path, with its password file in the install tree, and skips
+  everything below.
+- **Clean-up.** Each process holds a kernel lock on its cluster's `.lock` file
+  until it exits. The next bootstrap in the root removes every cluster whose
+  lock it can take, which are those whose process has gone, however it ended. A
+  reused process ID cannot fool this, because the held lock decides, not the
+  ID. A cluster whose data directory is removed while its process lives, for
+  example by `TestCluster`'s drop, leaves its `.lock` and `.pgpass` files until
+  the process exits.
+- **Orphaned servers.** If a test process dies abruptly, its `postgres`
+  server can outlive it. Before removing a dead cluster's directory, the
+  bootstrap reads its `postmaster.pid`. A live process counts as that cluster's
+  server only if it is a `postgres` serving that directory (its working
+  directory is the cluster's, read from `/proc` on Linux and with `lsof`
+  elsewhere), so a recycled process ID that now belongs to another database is
+  left alone. The bootstrap stops the server the way `pg_ctl stop -m immediate`
+  does, and removes the directory only after the server has exited. A server it
+  cannot stop, or cannot confirm, keeps its directory, and a warning is logged.
+- **`run` and the binary keep one directory.** The setup-only `run` function
+  and the `pg_embedded_setup_unpriv` binary initialize a cluster to be used
+  after they exit, so they keep the derived `<root>/data` directory as in 0.6.0
+  rather than taking a slot that the next bootstrap would sweep. A
+  `TestCluster` in the same root claims a slot of its own and does not reuse
+  it; set `PG_DATA_DIR` to share one directory.
+- **`CleanupMode::Full` shares the install tree.** Clusters run side by side
+  from one install tree, so a full clean-up removes it only when no other
+  cluster in the root is running from it. Otherwise it removes just its own
+  data directory. The check and the removal hold a guard file, `.claim-guard`,
+  that new clusters wait on when claiming a directory.
+- **Startup turns.** Clusters sharing an install tree take turns starting,
+  under a lock on `<root>/install/.pg-embed-setup.lock`, so a cold root is set
+  up once rather than raced. The servers then run side by side. A wide test
+  group therefore queues briefly at startup.
+
+ADR 005 records the design.
 
 ## Prebuilt extensions
 

@@ -44,7 +44,8 @@ fn bootstrap_under(
     env::with_scoped_env(vars, bootstrap_for_tests)
 }
 
-/// `PG_EMBED_ROOT` alone places both leaves beneath the root.
+/// `PG_EMBED_ROOT` alone places both leaves beneath the root; the data leaf is
+/// a per-cluster directory in `data`, never `data` itself (ADR 005).
 #[test]
 fn embed_root_derives_both_leaves_at_the_public_boundary() -> Result<()> {
     let (_temp, root) = scratch_root()?;
@@ -55,8 +56,8 @@ fn embed_root_derives_both_leaves_at_the_public_boundary() -> Result<()> {
         bootstrap.settings.installation_dir.display()
     );
     ensure!(
-        bootstrap.settings.data_dir == root.join("data").as_std_path(),
-        "data leaf not under root: {}",
+        bootstrap.settings.data_dir.parent() == Some(root.join("data").as_std_path()),
+        "data leaf not a cluster directory under root: {}",
         bootstrap.settings.data_dir.display()
     );
     Ok(())

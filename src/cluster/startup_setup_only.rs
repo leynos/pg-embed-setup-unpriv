@@ -58,6 +58,8 @@ pub(in crate::cluster) fn setup_lifecycle(
 ) -> BootstrapResult<TestBootstrapSettings> {
     let privileges = bootstrap.privileges;
     log_lifecycle_start(privileges, &bootstrap, false);
+    // The same install-tree lock a full start takes (#261).
+    let _setup = crate::cluster::setup_lock::SetupLock::acquire(&bootstrap)?;
 
     let version_req = bootstrap.settings.version.clone();
     let cache_hit =

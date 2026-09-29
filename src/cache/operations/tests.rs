@@ -132,6 +132,36 @@ fn copy_from_cache_copies_files() {
     assert!(target.join("bin/pg_ctl").exists());
 }
 
+/// A file the target already holds at the cached size is left alone, because
+/// a server from another process may be running it; one cut short is copied
+/// again.
+#[test]
+fn copy_from_cache_leaves_an_installed_file_alone() {
+    let source_temp = tempdir().expect("source tempdir");
+    let target_temp = tempdir().expect("target tempdir");
+    let source = Utf8Path::from_path(source_temp.path()).expect("utf8 source");
+    let target = Utf8Path::from_path(target_temp.path()).expect("utf8 target");
+    create_mock_binaries(source).expect("create mock binaries");
+    fs::create_dir_all(target.join("bin")).expect("target bin");
+    // Same size as "mock postgres binary" but different bytes, so a rewrite
+    // is visible; the other is shorter than its cached original.
+    fs::write(target.join("bin/postgres"), "MOCK POSTGRES BINARY").expect("installed file");
+    fs::write(target.join("bin/pg_ctl"), "mock").expect("truncated file");
+
+    copy_from_cache(source, target).expect("copy from cache");
+
+    assert_eq!(
+        fs::read_to_string(target.join("bin/postgres")).expect("read"),
+        "MOCK POSTGRES BINARY",
+        "an installed file must not be rewritten"
+    );
+    assert_eq!(
+        fs::read_to_string(target.join("bin/pg_ctl")).expect("read"),
+        "mock pg_ctl binary",
+        "a truncated file must be copied again"
+    );
+}
+
 #[test]
 fn populate_cache_creates_version_directory() {
     let source_temp = tempdir().expect("source tempdir");

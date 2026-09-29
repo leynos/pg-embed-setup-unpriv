@@ -16,6 +16,14 @@ pub use env::{TestBootstrapEnvironment, find_timezone_dir};
 pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
 pub(crate) use mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
 use postgresql_embedded::Settings;
+pub(crate) use prepare::{
+    ClaimGuard,
+    claim_guard_at,
+    claim_guard_for,
+    derived_slot_parent,
+    has_live_peers,
+    has_live_slots_in,
+};
 pub use prepare::{
     PasswordReuseOutcome,
     default_paths_under,
@@ -27,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use self::{
     env::{shutdown_timeout_from_env, worker_binary_from_env},
     mode::determine_execution_mode,
-    prepare::prepare_bootstrap,
+    prepare::{DataLayout, prepare_bootstrap},
 };
 use crate::{
     PgEnvCfg,
@@ -49,6 +57,20 @@ static SETUP_ONLY_LIFECYCLE_HOOK: OnceLock<Mutex<Option<SetupOnlyLifecycleHook>>
 enum BootstrapKind {
     Default,
     Test,
+}
+
+impl BootstrapKind {
+    /// Returns the data layout this kind of bootstrap needs (ADR 005).
+    ///
+    /// The setup-only `run` initializes a cluster to be used later, possibly
+    /// by another process, so it keeps the persistent `data` directory. A test
+    /// bootstrap takes a per-cluster slot that dies with its process.
+    const fn data_layout(self) -> DataLayout {
+        match self {
+            Self::Default => DataLayout::Persistent,
+            Self::Test => DataLayout::PerCluster,
+        }
+    }
 }
 
 /// Controls cleanup behaviour when a cluster is dropped.
@@ -99,7 +121,10 @@ pub struct TestBootstrapSettings {
 /// and initializes the data directory via `initdb`.
 ///
 /// The server is **not** started — the resulting installation is ready for
-/// subsequent use by [`TestCluster`](crate::TestCluster) or other tools.
+/// subsequent use by other tools. A derived data directory stays at
+/// `<root>/data`, where a [`TestCluster`](crate::TestCluster) would not look:
+/// it claims a per-cluster directory of its own (ADR 005). Set `PG_DATA_DIR` for
+/// both to share one directory.
 ///
 /// The function honours the following environment variables when present:
 /// - `PG_EMBED_ROOT`: Replaces the per-user `/var/tmp/pg-embed-{uid}` base under which the default
@@ -175,7 +200,7 @@ fn orchestrate_bootstrap(kind: BootstrapKind) -> BootstrapResult<TestBootstrapSe
     let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
     let shutdown_timeout = shutdown_timeout_from_env()?;
     let extensions = ExtensionRequest::from_config(&cfg)?;
-    let prepared = prepare_bootstrap(privileges, settings, &cfg)?;
+    let prepared = prepare_bootstrap(privileges, settings, &cfg, kind.data_layout())?;
 
     Ok(TestBootstrapSettings {
         privileges,

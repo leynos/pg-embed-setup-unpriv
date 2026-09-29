@@ -102,11 +102,28 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Copies a file preserving its permissions.
+/// Copies a file preserving its permissions, unless `dst` already holds it.
 fn copy_file_with_permissions(src: &Path, dst: &Path) -> io::Result<()> {
+    if is_already_installed(src, dst) {
+        return Ok(());
+    }
     fs::copy(src, dst)?;
     copy_permissions(src, dst);
     Ok(())
+}
+
+/// Returns whether `dst` already holds a copy of `src`, judged by size.
+///
+/// A versioned tree is immutable, and with per-cluster data directories
+/// (ADR 005) another process may be running a server from `dst`. Rewriting
+/// that binary fails with `ETXTBSY` on Linux, and on macOS invalidates its
+/// code signature so the kernel kills the running server. A file cut short by
+/// an interrupted copy has the wrong size and is copied again.
+fn is_already_installed(src: &Path, dst: &Path) -> bool {
+    match (fs::metadata(src), fs::metadata(dst)) {
+        (Ok(source), Ok(target)) => target.is_file() && source.len() == target.len(),
+        _ => false,
+    }
 }
 
 /// Best-effort permission copy from source to destination.

@@ -76,6 +76,9 @@ pub(super) fn start_postgres(
 ) -> BootstrapResult<StartupOutcome> {
     let privileges = bootstrap.privileges;
     log_lifecycle_start(privileges, &bootstrap, false);
+    // Held from the cache copy through the start, so concurrent processes
+    // sharing the install tree take turns setting it up (#261).
+    let _setup = crate::cluster::setup_lock::SetupLock::acquire(&bootstrap)?;
 
     let version_req = bootstrap.settings.version.clone();
     let cache_hit =
@@ -250,6 +253,10 @@ pub(super) async fn start_postgres_async(
 ) -> BootstrapResult<StartupOutcome> {
     let privileges = bootstrap.privileges;
     log_lifecycle_start(privileges, &bootstrap, true);
+    // The same install-tree lock as the synchronous start (#261), taken off
+    // the runtime so a second bootstrap in this process waits without
+    // blocking the task that holds it.
+    let _setup = crate::cluster::setup_lock::SetupLock::acquire_async(&bootstrap).await?;
 
     // Try to use cached binaries before starting the lifecycle
     let version_req = bootstrap.settings.version.clone();

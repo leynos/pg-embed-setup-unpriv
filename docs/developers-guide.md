@@ -836,3 +836,43 @@ reads it (#259). The design document records the reasoning.
 keeps the `postgres` error as the source and appends that error's own source to
 the message, because `tokio_postgres` displays a server-side failure as
 `db error` alone.
+
+## Per-cluster data directories
+
+ADR 005 records the design; this section covers the code.
+
+- `src/bootstrap/prepare/cluster_slot.rs` holds `claim_slot` and
+  `sweep_dead_slots`. `claim_derived_slot` in `prepare/layout.rs` calls
+  `claim_slot` on both preparation paths, and only when the data directory was
+  derived from a root. It sweeps first, then creates and locks `<name>.lock`
+  with `create_new`, and keeps the `File` in a process-global list so the lock
+  lasts until exit. Do not drop those files early: a dropped lock lets another
+  process sweep a live cluster.
+- `src/bootstrap/prepare/orphan.rs` decides whether a dead slot's directory
+  still has a server. `OrphanStop` is the seam the tests use to refuse a stop.
+  `SignalStop` sends `SIGQUIT` and waits. The identity check binds a PID to the
+  slot: the process must be named `postgres` and serve the slot's directory. On
+  Linux it reads `/proc/<pid>/comm` and compares `/proc/<pid>/cwd` with the
+  directory; an unreadable working directory leaves the slot unconfirmed. On
+  other Unix platforms it runs `ps` for the name and `lsof -d cwd` for the
+  directory, and a missing or failing tool is unconfirmed. On Windows a live
+  PID keeps the directory.
+- `DataLayout` (in `src/bootstrap/prepare/layout.rs`) says whether a derived
+  data directory becomes a slot: `PerCluster` for test bootstraps, `Persistent`
+  for the setup-only `run`. `has_live_peers` and `ClaimGuard` (in
+  `cluster_slot.rs`) let `plan_cleanup` in `src/cluster/cleanup.rs` demote
+  `CleanupMode::Full` to data-only while another slot in the root holds its
+  lock. The plan holds the claim guard across the probe and the removal, and
+  `claim_slot` takes the same guard, so a claim cannot slip between them.
+- `src/cluster/setup_lock.rs` holds `SetupLock`, taken by `start_postgres`,
+  `start_postgres_async` (on the blocking pool) and the setup-only lifecycle.
+  It spans the cache copy through the start.
+- Tests: `cluster_slot_tests.rs` and `orphan_tests.rs` hold the unit cases.
+  Their `FakePostgres` copies `/bin/sh` as `postgres` and runs `read line`.
+  `tests/per_cluster_directories.rs` drives real children through concurrent
+  bootstraps, a live-kept and dead-swept sweep with an orphaned server, the
+  explicit `PG_DATA_DIR` case, the setup-lock wait (Linux only: it reads the
+  blocked waiter from `/proc/locks`), and a run killed mid-test. Each case uses
+  a fixed root under `CARGO_TARGET_TMPDIR`, so the next run's sweep reclaims
+  whatever a killed run left. A `Running` guard closes each child's stdin,
+  waits, then kills it.
