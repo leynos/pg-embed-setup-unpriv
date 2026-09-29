@@ -1,9 +1,11 @@
 """Read GitHub Actions workflows the way GitHub does, and refuse the rest.
 
-The coverage-shape contract reasons about every workflow in the
+The runner-placement and timeout contracts reason about every workflow in the
 repository, so each way this reader could see less than GitHub runs is a
-way the contract passes over a file that violates it. Four are closed
-here rather than assumed away.
+way a contract passes over a file that violates it. Three are closed here
+rather than assumed away. (The CV-005 CodeScene contract, which also followed
+local reusable-workflow calls, now runs from the shared library through
+`make test-workflow-contracts`.)
 
 - PyYAML keeps the last of two duplicate mapping keys and says nothing,
   so a lane could carry one `runs-on` in the discarded half. The loader
@@ -11,9 +13,6 @@ here rather than assumed away.
 - YAML 1.1 reads a bare `on:` as the boolean `True`, and a trigger may
   be written as a scalar, a sequence or a mapping. All six spellings are
   read; anything else is refused rather than read as "no triggers".
-- A job calling a local reusable workflow runs that workflow under the
-  caller's trigger. `pull_request_closure` follows those calls, written
-  with `./`, `$/` or no prefix, to any path under the workflow directory.
 - An extension test that is case-sensitive skips a `.YML` workflow in
   silence, so the suffix is folded.
 
@@ -33,7 +32,7 @@ import yaml
 #: The events that make a workflow a pull-request lane.
 PULL_REQUEST_EVENTS: typ.Final = ("pull_request", "pull_request_target")
 
-#: Where a local reusable workflow lives, relative to the repository.
+#: Where GitHub reads a repository's workflows, relative to the repository.
 WORKFLOW_PREFIX: typ.Final = ".github/workflows/"
 
 #: The suffixes GitHub loads as workflows, folded.
@@ -117,39 +116,6 @@ def _event_map(raw: object) -> dict[str, typ.Any]:
     raise ValueError(msg)
 
 
-def local_callee(uses: object) -> str | None:
-    """Return the workflow path a job-level `uses` calls locally, if any.
-
-    A leading `./` or `$/` (GitHub's two spellings for this repository)
-    is stripped, and the remainder is local when it names a path under
-    the workflow directory with no ref.
-
-    Examples
-    --------
-    >>> local_callee("./.github/workflows/build.yml")
-    '.github/workflows/build.yml'
-    >>> local_callee("$/.github/workflows/build.yml")
-    '.github/workflows/build.yml'
-    >>> local_callee("leynos/shared-actions/.github/workflows/x.yml@abc") is None
-    True
-
-    Raises
-    ------
-    ValueError
-        If a call shaped as local carries an `@` ref.
-    """
-    text = str(uses).strip()
-    path = text.removeprefix("./").removeprefix("$/")
-    if not path.startswith(WORKFLOW_PREFIX):
-        return None
-    if "@" in path:
-        # A call into this repository takes no ref; GitHub rejects one, and
-        # reading it as remote would drop the callee from the closure.
-        msg = f"a local workflow call carries a ref: {text}"
-        raise ValueError(msg)
-    return path
-
-
 class Workflow(typ.NamedTuple):
     """One parsed workflow and what it needs to be judged.
 
@@ -191,18 +157,6 @@ class Workflow(typ.NamedTuple):
         """Return whether the workflow answers a pull-request event."""
         return any(event in self.triggers for event in PULL_REQUEST_EVENTS)
 
-    @property
-    def on_push_to_main_only(self) -> bool:
-        """Return whether its push trigger names exactly the `main` branch.
-
-        A push trigger naming no branch also answers tag pushes, which
-        is how a release workflow would qualify as the trunk publisher.
-        """
-        push = self.triggers.get("push")
-        if not isinstance(push, dict) or "tags" in push:
-            return False
-        return push.get("branches") == ["main"]
-
     def jobs(self) -> list[tuple[str, dict[str, typ.Any]]]:
         """Return every job mapping with its identifier."""
         jobs = self.document.get("jobs")
@@ -217,12 +171,6 @@ class Workflow(typ.NamedTuple):
             for step in job.get("steps") or []
             if isinstance(step, dict)
         ]
-
-    def callees(self) -> list[str]:
-        """Return the local workflow paths this workflow's jobs call."""
-        found = (local_callee(job.get("uses", "")) for _, job in self.jobs())
-        return [path for path in found if path is not None]
-
 
 def load_workflows(root: Path) -> list[Workflow]:
     """Return every workflow under the repository's workflow directory.
@@ -243,56 +191,3 @@ def load_workflows(root: Path) -> list[Workflow]:
     ]
     assert found, f"no workflow parsed under {directory}"
     return found
-
-
-def pull_request_closure(workflows: list[Workflow]) -> list[Workflow]:
-    """Return every workflow a pull request runs, following local calls.
-
-    Examples
-    --------
-    >>> caller = Workflow.parse(
-    ...     ".github/workflows/a.yml",
-    ...     "on: pull_request\\njobs: {x: {uses: ./.github/workflows/b.yml}}\\n",
-    ... )
-    >>> callee = Workflow.parse(
-    ...     ".github/workflows/b.yml", "on: workflow_call\\njobs: {}\\n"
-    ... )
-    >>> [flow.path for flow in pull_request_closure([caller, callee])]
-    ['.github/workflows/a.yml', '.github/workflows/b.yml']
-
-    Raises
-    ------
-    AssertionError
-        If a local call names a workflow that is not in the list, since
-        the closure would otherwise stop at it in silence.
-    """
-    by_path = {flow.path: flow for flow in workflows}
-    pending = [flow.path for flow in workflows if flow.on_pull_request]
-    reached: list[str] = []
-    while pending:
-        path = pending.pop(0)
-        if path in reached:
-            continue
-        assert path in by_path, f"a pull-request lane calls missing {path}"
-        reached.append(path)
-        pending.extend(by_path[path].callees())
-    return [by_path[path] for path in reached]
-
-
-def scalars(node: object) -> list[str]:
-    """Return every key and scalar value in a parsed document, as text.
-
-    Examples
-    --------
-    >>> scalars({"env": {"A": "${{ secrets.B }}"}, "on": ["push"]})
-    ['env', 'A', '${{ secrets.B }}', 'on', 'push']
-    """
-    if isinstance(node, dict):
-        return [
-            text
-            for key, value in node.items()
-            for text in [*scalars(key), *scalars(value)]
-        ]
-    if isinstance(node, list):
-        return [text for item in node for text in scalars(item)]
-    return [] if node is None else [str(node)]

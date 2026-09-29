@@ -75,48 +75,33 @@ and they stand until the next push supersedes them.
 
 [shared-actions-518]: https://github.com/leynos/shared-actions/issues/518
 
-`make test-scripts` holds the workflows to that shape through these modules
-under `scripts/tests/`:
+`make test-workflow-contracts` holds the workflows to that shape by running
+`cv005-contracts check`, the shared contract library in `leynos/shared-actions`
+(`packages/cv005-contracts`), from a full commit named by `CV005_CONTRACTS_REF`
+in the Makefile; CI runs it in a "Check the CV-005 contracts" step. A fix to
+the rules is therefore a pin bump. The target needs `uv`, which fetches the
+Python 3.13 the library runs under. The repository's parameters are in
+`.github/cv005.toml`: its `repository` name and one `[[pairing]]` for the
+pull-request coverage step, which runs on the unprivileged leg of the
+`build-test` matrix alone, so its condition is the pull-request guard plus
+`matrix.privilege == 'unprivileged'`. The library's own suite proves each rule
+refuses the shape it exists to refuse, so this repository keeps no copy of the
+readers or the refusal cases. It reads workflows strictly, refusing a mapping
+key declared twice and reading every trigger spelling, and it follows calls to
+local reusable workflows, so a workflow that only answers `workflow_call` is
+judged as a pull-request lane when one calls it. It also holds the uploader's
+retired inputs retired: no `installer-checksum` input and no
+`CODESCENE_CLI_SHA256` variable. The generator and uploader actions must share
+one commit.
 
-- `workflow_reader.py` parses workflows as GitHub reads them. It refuses a
-  mapping key declared twice, reads every trigger spelling (scalar, sequence,
-  or mapping, under the bare `on` key that YAML 1.1 reads as `True` or the
-  quoted one), and follows calls to local reusable workflows, so a workflow
-  that only answers `workflow_call` is judged as a pull-request lane when one
-  calls it. A local call carrying an `@` ref is refused.
-- `step_conditions.py` reads `if:` conditions: it splits them on `&&`,
-  refuses a disjunction, and accepts a step as able to run only when every
-  conjunct is one it can show holds. Matrix comparisons must hold together in
-  one leg, expanded as GitHub expands `include` and `exclude`. Other conjuncts
-  must be a running status or hold in the run being asked about: a pull-request
-  event, or the trunk push for the publisher. Anything it does not recognize
-  reads as "may never run".
-- `publisher_token.py` holds the token rules above: the one check step, the
-  upload's condition and input, and no `env` or other step naming the token.
-- `codescene_environment.py` holds the environment rule: every job calling
-  the uploader declares `codescene`, as the string or `{name: codescene}`, no
-  other job declares it, and no pull-request-reachable job does.
-  `test_codescene_environment.py` applies it to this repository and proves each
-  clause against a constructed repository.
-- `uploader_pin.py` holds the uploader to its approved pin: every active
-  uploader step at that one SHA, owner and repository matched case-folded, no
-  `installer-checksum` input and no `CODESCENE_CLI_SHA256` variable, which the
-  uploader rejects at that pin, and no `get-codescene-sha.yml` dispatch.
-  `test_uploader_pin.py` applies it here and proves each clause.
-- `coverage_shape_rules.py` states each rule as a function returning its
-  offenders. A pull-request coverage step counts only when its conditions let
-  it run, and the publisher must generate coverage before it uploads.
-  `test_coverage_shape_contract.py` applies them to this repository's workflows.
-- `test_coverage_shape_probes.py`, `test_coverage_shape_contacts.py`,
-  `test_coverage_shape_publisher.py`, `test_coverage_shape_runnability.py` and
-  `test_workflow_reader.py` construct the hazard each rule or reading exists
-  for and assert it is named, so a rule that could never fire does not pass
-  unnoticed. `test_coverage_shape_properties.py` holds the readers to their
-  invariants over generated input.
-
-The reader and the rules are scoped to these contract tests. A new workflow
-contract should reuse `workflow_reader.py` rather than parse workflows with
-`yaml.safe_load`, which keeps the last of two duplicate keys and says nothing.
+`make test-scripts` holds the rest of the workflow contracts through
+`scripts/tests/workflow_reader.py`, which parses workflows as GitHub reads
+them: it refuses a mapping key declared twice and reads every trigger spelling
+(scalar, sequence, or mapping, under the bare `on` key that YAML 1.1 reads as
+`True` or the quoted one). `test_workflow_reader.py` constructs the hazards it
+exists for. A new workflow contract should reuse `workflow_reader.py` rather
+than parse workflows with `yaml.safe_load`, which keeps the last of two
+duplicate keys and says nothing.
 
 ## Runner placement
 

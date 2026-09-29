@@ -1,0 +1,9 @@
+repository = "leynos/pg-embed-setup-unpriv"
+
+# The pull-request coverage step runs on the unprivileged leg of the privilege
+# matrix, so its condition is the pull-request guard plus that leg.
+[[pairing]]
+lane = "ci.yml:build-test:Test and Measure Coverage (unprivileged)"
+publisher = "coverage-main.yml:coverage-upload:Generate coverage"
+differs = []
+guards = ["matrix.privilege == 'unprivileged'"]
