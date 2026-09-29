@@ -61,6 +61,20 @@ def selected_runner(runs_on: object, origin: str) -> str | None:
     `<fork> && '<hosted>' || '<label>'` shape. A literal label is not the
     shape: a lane that never falls back cannot serve a fork, and a lane
     that never leaves the hosted pool is not placed at all.
+
+    Parameters
+    ----------
+    runs_on : object
+        The job's `runs-on` value as parsed; anything but a string has no
+        selection.
+    origin : str
+        The kind of run: `push` (also a dispatch), `same-repository` or
+        `fork`.
+
+    Returns
+    -------
+    str or None
+        The selected label, or None when the value is not the estate shape.
     """
     shape = _ESTATE_SHAPE.fullmatch(runs_on.strip()) if isinstance(runs_on, str) else None
     if shape is None or shape["condition"] != FORK_CONDITION:
@@ -73,6 +87,16 @@ def placement_faults(runs_on: object) -> list[str]:
 
     Empty when a fork falls back to hosted and every other run is on
     Ubicloud.
+
+    Parameters
+    ----------
+    runs_on : object
+        The job's `runs-on` value as parsed.
+
+    Returns
+    -------
+    list[str]
+        One description per kind of run placed wrongly.
     """
     wanted = {
         "push": UBICLOUD_LABEL,
@@ -96,6 +120,16 @@ def placed_jobs(
     `timeout-minutes` it states (None when it states none). A matrix
     expression such as `${{ matrix.runner }}` is not a name, so it is
     not listed: the matrix values are covered where they are written.
+
+    Parameters
+    ----------
+    workflows : list[Workflow]
+        The parsed workflows to search.
+
+    Returns
+    -------
+    list[tuple[str, str, object, object]]
+        Path, job, `runs-on` value and stated ceiling, in file and job order.
     """
     return [
         (flow.path, job_id, job.get("runs-on"), job.get("timeout-minutes"))
