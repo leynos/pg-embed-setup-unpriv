@@ -24,7 +24,11 @@ concurrency:
 
 jobs:
   coverage-upload:
-    runs-on: ubuntu-latest
+    # Ubicloud's cache proxy is scoped by ref, so a pull request's Ubicloud
+    # build-test reads a warm main scope only if a main job on Ubicloud
+    # writes it. This is that writer. The fork arm never applies on push or
+    # dispatch; it is kept so every Ubicloud lane reads the same way.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-2' }}
     # Kept in step with ci.yml's coverage lane: above the 1,800 s cargo
     # watchdog plus the work either side. This job's own worst was 38 s
     # outside the coverage step, on run 29784541706.
