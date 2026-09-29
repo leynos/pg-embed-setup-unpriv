@@ -813,7 +813,8 @@ ADR 005 records the design; this section covers the code.
 - `src/bootstrap/prepare/orphan.rs` decides whether a dead slot's directory
   still has a server. `OrphanStop` is the seam the tests use to refuse a stop.
   `SignalStop` sends `SIGQUIT` and waits. The `postgres` identity check reads
-  `/proc/<pid>/comm` on Linux only; elsewhere a live PID keeps the directory.
+  `/proc/<pid>/comm` on Linux and runs `ps -o comm=` on other Unix platforms;
+  on Windows a live PID keeps the directory.
 - `src/cluster/setup_lock.rs` holds `SetupLock`, taken by `start_postgres`,
   `start_postgres_async` (on the blocking pool) and the setup-only lifecycle.
   It spans the cache copy through the start.

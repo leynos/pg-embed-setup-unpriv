@@ -84,13 +84,14 @@ directory after the lock is gone. Before removing a dead slot, the sweep reads
 `<name>/postmaster.pid`:
 
 - No file, an unreadable file, or a PID that is not running: no server.
-- On Linux, a live process whose `/proc/<pid>/comm` is not `postgres`: the
-  PID was reused, so there is no server.
+- A live process whose name is not `postgres`: the PID was reused, so there is
+  no server. The name comes from `/proc/<pid>/comm` on Linux and from
+  `ps -o comm=` on other Unix platforms.
 - A live `postgres` process: stopped as `pg_ctl stop -m immediate` stops it,
   with `SIGQUIT` to the postmaster and a wait of up to ten seconds for it to
   exit. The directory is removed only after it has exited.
-- A live process that cannot be confirmed (on platforms without a cheap
-  name lookup), or a server that does not stop: the slot is left in place, with
+- A live process that cannot be confirmed (on Windows, which has no name
+  lookup here), or a server that does not stop: the slot is left in place, with
   a warning, for a later sweep.
 
 The stop sends the signal directly rather than running `pg_ctl`. This is what

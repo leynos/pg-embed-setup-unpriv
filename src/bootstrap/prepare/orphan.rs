@@ -123,12 +123,33 @@ const fn process_alive(_pid: u32) -> bool { true }
 #[cfg(target_os = "linux")]
 fn is_postgres(pid: u32) -> Option<bool> {
     let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
-    Some(comm.trim_end() == "postgres")
+    Some(names_postgres(&comm))
 }
 
-/// Other platforms cannot confirm the name cheaply, so the directory is kept.
-#[cfg(not(target_os = "linux"))]
+/// Asks `ps` for the process's command name, as macOS and the BSDs have no
+/// `/proc`. `ps -o comm=` prints the executable's path there, so only its
+/// final component is compared.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn is_postgres(pid: u32) -> Option<bool> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    Some(names_postgres(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Without a way to name a process, the directory is kept.
+#[cfg(not(unix))]
 const fn is_postgres(_pid: u32) -> Option<bool> { None }
+
+/// Returns whether a command name, possibly a path, is that of `postgres`.
+///
+/// An empty name means the process is gone, so it is not a server.
+#[cfg(unix)]
+fn names_postgres(comm: &str) -> bool {
+    let name = comm.trim();
+    name.rsplit('/').next() == Some("postgres")
+}
 
 /// Stops a server as `pg_ctl stop -m immediate` does: `SIGQUIT` to the
 /// postmaster, then a wait for it to exit.

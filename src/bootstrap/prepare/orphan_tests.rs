@@ -140,3 +140,18 @@ fn the_signal_stop_ends_the_process() {
     );
     let _status = reaper.join().expect("join the reaper");
 }
+
+/// A command name counts as `postgres` by its final path component, which is
+/// what `ps -o comm=` prints on macOS; an empty name is a process that is
+/// gone.
+#[cfg(unix)]
+#[rstest::rstest]
+#[case::bare("postgres\n", true)]
+#[case::path("/opt/pg/17.4.0/bin/postgres\n", true)]
+#[case::other("sleep\n", false)]
+#[case::prefix("/usr/bin/postgres-helper\n", false)]
+#[case::suffix("/usr/bin/notpostgres\n", false)]
+#[case::gone("", false)]
+fn a_command_name_is_postgres_by_its_last_component(#[case] comm: &str, #[case] expected: bool) {
+    assert_eq!(super::names_postgres(comm), expected);
+}
