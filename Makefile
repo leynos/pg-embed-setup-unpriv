@@ -1,6 +1,6 @@
 .PHONY: help all clean test test-doc test-loom test-scripts msrv build release \
 	release-archive lint fmt \
-	check-fmt markdownlint nixie spelling typecheck
+	check-fmt markdownlint nixie spelling typecheck test-workflow-contracts
 
 APP ?= pg_embedded_setup_unpriv
 CARGO ?= cargo
@@ -10,6 +10,15 @@ RELEASE_BINARIES ?= pg_embedded_setup_unpriv pg_worker
 TARGET ?=
 UV ?= uv
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
+
+# The CV-005 CodeScene contracts live in shared-actions and run from a full
+# commit, so a fix is a pin bump. `.github/cv005.toml` holds this repository's
+# only parameters.
+CV005_CONTRACTS_REF ?= a38feb9be25755c30eca5bda96bd3786a5b89c6b
+CV005_CONTRACTS = $(UV_ENV) $(UV) tool run --python 3.13 \
+	--from 'git+https://github.com/leynos/shared-actions@$(CV005_CONTRACTS_REF)\#subdirectory=packages/cv005-contracts' \
+	cv005-contracts
+
 CUPRUM_VERSION ?= 0.1.0
 CYCLOPTS_VERSION ?= 4.19.0
 TYPOS_CONFIG_BUILDER_VERSION ?= v0.1.1
@@ -20,32 +29,19 @@ CMD_MOX_VERSION ?= 0.2.0
 HYPOTHESIS_VERSION ?= 6.167.1
 PYTEST_VERSION ?= 9.0.2
 PYYAML_VERSION ?= 6.0.3
-SCRIPT_PY_TESTS := scripts/tests/test_codescene_environment.py \
-	scripts/tests/test_coverage_shape_contacts.py \
-	scripts/tests/test_coverage_shape_contract.py \
-	scripts/tests/test_coverage_shape_probes.py \
-	scripts/tests/test_coverage_shape_properties.py \
-	scripts/tests/test_coverage_shape_publisher.py \
-	scripts/tests/test_coverage_shape_runnability.py \
-	scripts/tests/test_msrv_check.py \
+SCRIPT_PY_TESTS := scripts/tests/test_msrv_check.py \
 	scripts/tests/test_release_archive.py \
 	scripts/tests/test_release_archive_failures.py \
 	scripts/tests/test_release_workflow_contract.py \
 	scripts/tests/test_runner_placement.py \
-	scripts/tests/test_uploader_pin.py \
 	scripts/tests/test_workflow_reader.py \
 	scripts/tests/test_timeout_exactness_contract.py \
 	scripts/tests/test_timeout_ordering_contract.py \
 	scripts/tests/test_timeout_reading_contract.py \
 	scripts/tests/test_timeout_reading_properties.py
 # Modules whose examples are collected as doctests alongside the suites.
-SCRIPT_PY_DOCTESTS := scripts/tests/codescene_environment.py \
-	scripts/tests/coverage_shape_rules.py \
-	scripts/tests/publisher_token.py \
-	scripts/msrv_check.py \
+SCRIPT_PY_DOCTESTS := scripts/msrv_check.py \
 	scripts/tests/runner_placement.py \
-	scripts/tests/step_conditions.py \
-	scripts/tests/uploader_pin.py \
 	scripts/tests/workflow_reader.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \
@@ -86,13 +82,16 @@ INTERROGATE ?= interrogate
 INTERROGATE_EXCLUDES := --exclude .uv-cache --exclude .uv-tools
 PY_DOCSTRING_COVERAGE ?= 100
 
+test-workflow-contracts: ## Check the CV-005 CodeScene workflow contracts
+	$(CV005_CONTRACTS) check --repository .
+
 build: ## Build debug binary
 	$(CARGO) build $(BUILD_JOBS) --bin "$(APP)"
 
 release: ## Build release binaries
 	$(CARGO) build $(BUILD_JOBS) --release $(foreach bin,$(RELEASE_BINARIES),--bin $(bin))
 
-all: check-fmt lint test test-scripts spelling ## Perform all commit gate checks
+all: check-fmt lint test test-scripts spelling test-workflow-contracts ## Perform all commit gate checks
 
 clean: ## Remove build artefacts
 	$(CARGO) clean

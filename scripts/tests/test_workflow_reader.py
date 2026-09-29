@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from workflow_reader import Workflow, load_workflows, pull_request_closure
+from workflow_reader import Workflow, load_workflows
 
 TRIGGER_SPELLINGS = [
     "on: pull_request",
@@ -84,50 +84,3 @@ def test_an_upper_case_suffix_is_loaded(tmp_path: Path) -> None:
     assert [flow.path for flow in load_workflows(tmp_path)] == [
         ".github/workflows/LANE.YML"
     ]
-
-
-def call(path: str, target: str, trigger: str = "workflow_call") -> Workflow:
-    """Return a workflow whose one job calls `target`."""
-    return Workflow.parse(path, f"on: {trigger}\njobs: {{x: {{uses: {target}}}}}\n")
-
-
-def test_the_closure_follows_calls_transitively_and_stops_on_a_cycle() -> None:
-    """A lane two calls away is reached, and a cycle does not hang."""
-    flows = [
-        call(".github/workflows/a.yml", "./.github/workflows/b.yml", "pull_request"),
-        call(".github/workflows/b.yml", "$/.github/workflows/c.yml"),
-        call(".github/workflows/c.yml", ".github/workflows/b.yml"),
-        call(".github/workflows/d.yml", "./.github/workflows/a.yml"),
-    ]
-    reached = [flow.path for flow in pull_request_closure(flows)]
-    assert reached == [f".github/workflows/{name}.yml" for name in "abc"]
-
-
-def test_a_call_to_a_missing_workflow_is_refused() -> None:
-    """The closure cannot stop at a file it failed to read."""
-    flows = [
-        call(".github/workflows/a.yml", "./.github/workflows/gone.yml", "pull_request")
-    ]
-    with pytest.raises(AssertionError, match="gone.yml"):
-        pull_request_closure(flows)
-
-
-@pytest.mark.parametrize(
-    "uses",
-    ["./.github/workflows/b.yml@main", "$/.github/workflows/b.yml@v1"],
-)
-def test_a_local_call_carrying_a_ref_is_refused(uses: str) -> None:
-    """Read as remote, it would drop its callee from the closure in silence."""
-    flow = call(".github/workflows/a.yml", uses, "pull_request")
-    with pytest.raises(ValueError, match="carries a ref"):
-        flow.callees()
-
-
-def test_a_remote_workflow_is_not_a_local_call() -> None:
-    """A pinned reference to another repository's workflow is not followed."""
-    flow = call(
-        ".github/workflows/a.yml",
-        "leynos/shared-actions/.github/workflows/x.yml@abc",
-        "pull_request",
-    )
-    assert flow.callees() == []

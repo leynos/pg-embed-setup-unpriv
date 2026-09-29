@@ -59,10 +59,14 @@ from timeout_budgets import (
 #: changing a condition changes when it runs at all.
 #:
 #: `ci.yml`'s coverage step is the unprivileged leg of a matrix that
-#: also runs as root, and only the unprivileged leg measures coverage.
+#: also runs as root, and only the unprivileged leg measures coverage, on a
+#: pull request (the shape the CV-005 pairing in `.github/cv005.toml` declares).
 #: `coverage-main.yml` runs on the trunk and carries no condition.
 REQUIRED_CONDITIONS: typ.Final[dict[tuple[str, str], tuple[object, object]]] = {
-    ("ci.yml", "build-test"): ("${{ matrix.privilege == 'unprivileged' }}", None),
+    ("ci.yml", "build-test"): (
+        "${{ github.event_name == 'pull_request' && matrix.privilege == 'unprivileged' }}",
+        None,
+    ),
     ("coverage-main.yml", "coverage-upload"): (None, None),
 }
 
