@@ -73,7 +73,8 @@ fn cluster_child() {
     }
     let line = match bootstrap_and_connect() {
         Ok(dir) => format!("connected {}", dir.display()),
-        Err(err) => format!("failed {err:?}"),
+        // One line, because the parent reads a report a line at a time.
+        Err(err) => format!("failed {}", format!("{err:?}").replace('\n', " | ")),
     };
     report(&line).expect("stdout is writable");
     if mode == "hold" {

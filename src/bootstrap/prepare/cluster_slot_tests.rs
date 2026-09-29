@@ -145,11 +145,10 @@ fn a_dead_slot_with_an_unstoppable_server_is_kept(parent: Result<Parent>) {
     )
     .expect("point postmaster.pid at it");
     let stop = RecordingStop::new(false);
-    let comm = std::fs::read_to_string(format!("/proc/{}/comm", server.pid()));
     assert_eq!(
         crate::bootstrap::prepare::orphan::server_state(&dir.dir.join("4242-2-0")),
         crate::bootstrap::prepare::orphan::ServerState::Running(server.pid()),
-        "the stand-in must read as a running postgres; comm was {comm:?}"
+        "the stand-in must read as a running postgres"
     );
 
     let swept = sweep_dead_slots(&dir.dir, &stop).expect("sweep");

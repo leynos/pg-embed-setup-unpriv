@@ -22,7 +22,27 @@ impl FakePostgres {
         let binary = dir.path().join("postgres");
         std::fs::copy("/bin/sleep", &binary)?;
         let child = std::process::Command::new(&binary).arg("60").spawn()?;
-        Ok(Self { child, _dir: dir })
+        let server = Self { child, _dir: dir };
+        server.wait_for_name()?;
+        Ok(server)
+    }
+
+    /// Waits until the process has exec'd and reads as `postgres`.
+    ///
+    /// A spawned child can be observed between the fork and the exec, when
+    /// `/proc/<pid>/comm` still holds the parent's name. That window is wide
+    /// enough on a busy CI runner to make a fresh stand-in read as some other
+    /// process, so the constructor does not return until the name is right.
+    fn wait_for_name(&self) -> Result<()> {
+        let comm = format!("/proc/{}/comm", self.pid());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            if std::fs::read_to_string(&comm).is_ok_and(|name| name.trim_end() == "postgres") {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        Err(eyre!("the stand-in never read as postgres"))
     }
 
     /// Returns the stand-in's PID.
