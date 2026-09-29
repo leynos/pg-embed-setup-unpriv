@@ -11,7 +11,10 @@ concurrency:
 jobs:
   build-test:
     name: Linux Build and Test (${{ matrix.privilege }})
-    runs-on: ubuntu-latest
+    # Ubicloud, to avoid the hosted queue. A pull request from a fork cannot
+    # obtain an Ubicloud runner, so it falls back to the hosted pool. Main's
+    # Ubicloud coverage-upload writes the cache scope this reads.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-2' }}
     # Above the 1,800 s cargo watchdog on the coverage step plus the work
     # either side of it, which reached 830 s on run 33982759833. The job
     # had no ceiling before this and so inherited GitHub's six-hour

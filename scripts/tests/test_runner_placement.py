@@ -26,6 +26,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 #: minutes. The inventory is exact, so a new Ubicloud lane without a
 #: ceiling, or a ceiling removed or changed, fails until it is reviewed.
 CEILINGS = [
+    (".github/workflows/ci.yml", "build-test", 66),
     (".github/workflows/coverage-main.yml", "coverage-upload", 66),
 ]
 
