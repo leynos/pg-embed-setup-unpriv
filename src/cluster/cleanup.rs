@@ -8,7 +8,7 @@ use super::{worker_invoker::WorkerInvoker as ClusterWorkerInvoker, worker_operat
 use crate::{
     CleanupMode,
     TestBootstrapSettings,
-    bootstrap::has_live_peers,
+    bootstrap::{ClaimGuard, claim_guard_for, has_live_peers},
     cleanup_helpers::{RemovalOutcome, has_parent_dir, try_remove_dir_all},
     observability::LOG_TARGET,
 };
@@ -43,8 +43,8 @@ pub(super) fn cleanup_worker_managed_with_runtime(
     env_vars: &[(String, Option<String>)],
     context: &str,
 ) {
-    let mode = safe_cleanup_mode(bootstrap.cleanup_mode, &bootstrap.settings, context);
-    let Some(operation) = cleanup_operation(mode) else {
+    let plan = plan_cleanup(bootstrap.cleanup_mode, &bootstrap.settings, context);
+    let Some(operation) = cleanup_operation(plan.mode) else {
         return;
     };
     tracing::info!(
@@ -75,7 +75,8 @@ pub(super) fn cleanup_worker_managed_with_runtime(
 /// # Ok::<(), pg_embedded_setup_unpriv::error::BootstrapError>(())
 /// ```
 pub(super) fn cleanup_in_process(requested: CleanupMode, settings: &Settings, context: &str) {
-    let mode = safe_cleanup_mode(requested, settings, context);
+    let plan = plan_cleanup(requested, settings, context);
+    let mode = plan.mode;
     if mode == CleanupMode::None {
         return;
     }
@@ -116,29 +117,63 @@ fn cleanup_install_dir(cleanup_mode: CleanupMode, settings: &Settings, context: 
     }
 }
 
-/// Returns the mode to clean up with, which never removes an install tree that
-/// other clusters are running from.
+/// What a cleanup will do, and the lock that keeps it true until it is done.
+pub(super) struct CleanupPlan {
+    /// The mode to clean up with.
+    pub(super) mode: CleanupMode,
+    /// Held across the cleanup when it may remove a shared install tree.
+    _guard: Option<ClaimGuard>,
+}
+
+/// Plans a cleanup that never removes an install tree other clusters are
+/// running from.
 ///
 /// Per-cluster data directories (ADR 005) let clusters run side by side from
 /// one install tree, so a [`CleanupMode::Full`] cleanup of one would pull the
 /// binaries and extensions from under the others. It then removes only its own
-/// data directory. Applying the rule here, before either the in-process or the
-/// worker path chooses what to delete, keeps the two consistent.
-pub(super) fn safe_cleanup_mode(
-    cleanup_mode: CleanupMode,
+/// data directory. The plan holds the root's claim guard across the probe for
+/// live peers and the removal, so a cluster cannot claim a slot in between; a
+/// guard that cannot be taken counts as a peer. Deciding here, before either
+/// the in-process or the worker path chooses what to delete, keeps the two
+/// consistent.
+pub(super) fn plan_cleanup(
+    requested: CleanupMode,
     settings: &Settings,
     context: &str,
-) -> CleanupMode {
-    if cleanup_mode != CleanupMode::Full || !has_live_peers(&settings.data_dir) {
-        return cleanup_mode;
+) -> CleanupPlan {
+    if requested != CleanupMode::Full {
+        return CleanupPlan {
+            mode: requested,
+            _guard: None,
+        };
     }
+    match claim_guard_for(&settings.data_dir) {
+        None => CleanupPlan {
+            mode: requested,
+            _guard: None,
+        },
+        Some(Ok(guard)) if !has_live_peers(&settings.data_dir) => CleanupPlan {
+            mode: requested,
+            _guard: Some(guard),
+        },
+        Some(_) => {
+            log_install_kept(settings, context);
+            CleanupPlan {
+                mode: CleanupMode::DataOnly,
+                _guard: None,
+            }
+        }
+    }
+}
+
+/// Logs that a full cleanup left the shared install tree in place.
+fn log_install_kept(settings: &Settings, context: &str) {
     tracing::info!(
         target: LOG_TARGET,
         context = %context,
         path = %settings.installation_dir.display(),
-        "kept the installation directory: other clusters are running from it"
+        "kept the installation directory: other clusters may be running from it"
     );
-    CleanupMode::DataOnly
 }
 
 const fn should_remove_data(cleanup_mode: CleanupMode) -> bool {
@@ -236,145 +271,9 @@ fn warn_cleanup_removal_failure(
 }
 
 #[cfg(test)]
-mod tests {
-    //! Tests for cluster cleanup behaviour.
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-    };
+#[path = "cleanup_tests.rs"]
+mod tests;
 
-    use postgresql_embedded::Settings;
-    use rstest::rstest;
-    use tempfile::tempdir;
-
-    use super::{cleanup_in_process, is_dangerous_cleanup_path, should_remove_install_root};
-    use crate::CleanupMode;
-
-    #[rstest]
-    #[case::data_only(CleanupMode::DataOnly, false, true)]
-    #[case::full(CleanupMode::Full, false, false)]
-    #[case::none(CleanupMode::None, true, true)]
-    fn cleanup_in_process_respects_mode(
-        #[case] mode: CleanupMode,
-        #[case] expect_data_exists: bool,
-        #[case] expect_install_exists: bool,
-    ) {
-        let sandbox = tempdir().expect("tempdir");
-        let data_dir = sandbox.path().join("data");
-        let install_dir = sandbox.path().join("install");
-        fs::create_dir_all(&data_dir).expect("create data dir");
-        fs::create_dir_all(&install_dir).expect("create install dir");
-        fs::write(data_dir.join("marker"), b"data").expect("write data marker");
-        fs::write(install_dir.join("marker"), b"install").expect("write install marker");
-
-        let settings = Settings {
-            data_dir,
-            installation_dir: install_dir,
-            ..Settings::default()
-        };
-
-        cleanup_in_process(mode, &settings, "cleanup-test");
-        cleanup_in_process(mode, &settings, "cleanup-test");
-
-        assert_eq!(
-            settings.data_dir.exists(),
-            expect_data_exists,
-            "data directory presence should match cleanup mode",
-        );
-        assert_eq!(
-            settings.installation_dir.exists(),
-            expect_install_exists,
-            "installation directory presence should match cleanup mode",
-        );
-    }
-
-    // A full cleanup of one cluster must not pull the install tree from under
-    // another cluster that is still running from it (ADR 005).
-    #[rstest]
-    #[case::peer_running(true, true)]
-    #[case::alone(false, false)]
-    fn full_cleanup_keeps_an_install_tree_that_a_peer_runs_from(
-        #[case] has_peer: bool,
-        #[case] expect_install_exists: bool,
-    ) {
-        let sandbox = tempdir().expect("tempdir");
-        let slots = sandbox.path().join("data");
-        let own = slots.join("1-1-0");
-        let install_dir = sandbox.path().join("install");
-        fs::create_dir_all(&own).expect("own slot");
-        fs::create_dir_all(&install_dir).expect("install dir");
-        fs::write(slots.join("1-1-0.lock"), b"").expect("own lock file");
-        let peer_lock = fs::File::create(slots.join("2-2-0.lock")).expect("peer lock file");
-        if has_peer {
-            fs4::FileExt::lock(&peer_lock).expect("hold the peer's lock");
-        }
-        let settings = Settings {
-            data_dir: own,
-            installation_dir: install_dir,
-            ..Settings::default()
-        };
-
-        cleanup_in_process(CleanupMode::Full, &settings, "peer-test");
-
-        assert!(!settings.data_dir.exists(), "the cluster's own data goes");
-        assert_eq!(settings.installation_dir.exists(), expect_install_exists);
-    }
-
-    // The installation root is only ever removed when it lives under the
-    // installation directory, so removing the installation directory always
-    // cascades to it. That makes filesystem state an unreliable oracle for the
-    // dedicated installation-root branch, so assert the decision directly; this
-    // fails if `should_remove_install_root` stops guarding the branch.
-    #[rstest]
-    #[case::nested_under_install("/opt/pg/install", "/opt/pg/install/secrets", true)]
-    #[case::equal_to_install("/opt/pg/install", "/opt/pg/install", false)]
-    #[case::outside_install("/opt/pg/install", "/elsewhere/secrets", false)]
-    #[case::parent_dir_traversal("/opt/pg/install", "/opt/pg/install/../evil", false)]
-    fn should_remove_install_root_classifies_parent(
-        #[case] install: &str,
-        #[case] parent: &str,
-        #[case] expected: bool,
-    ) {
-        let settings = Settings {
-            installation_dir: PathBuf::from(install),
-            ..Settings::default()
-        };
-        assert_eq!(
-            should_remove_install_root(Path::new(parent), &settings),
-            expected,
-            "unexpected installation-root removal decision",
-        );
-    }
-
-    // Validate the dangerous-path guard directly rather than driving
-    // `cleanup_in_process` against the real filesystem root. The root is
-    // resolved at runtime because a literal "/" is not an absolute path on
-    // Windows; the test fails if the guard stops flagging the root or an empty
-    // path.
-    #[test]
-    fn is_dangerous_cleanup_path_flags_root_and_empty() {
-        assert!(
-            is_dangerous_cleanup_path(Path::new("")),
-            "an empty path must be flagged as dangerous"
-        );
-
-        let root = std::env::current_dir()
-            .expect("resolve current dir")
-            .ancestors()
-            .last()
-            .expect("an absolute directory has a root ancestor")
-            .to_path_buf();
-        assert!(
-            is_dangerous_cleanup_path(&root),
-            "filesystem root {root:?} must be flagged as dangerous"
-        );
-
-        assert!(
-            !is_dangerous_cleanup_path(Path::new("data/pg-embed")),
-            "an ordinary relative path must not be flagged"
-        );
-    }
-}
 #[cfg(test)]
 #[path = "property_tests.rs"]
 mod property_tests;

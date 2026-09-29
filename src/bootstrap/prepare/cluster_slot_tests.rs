@@ -7,7 +7,7 @@ use color_eyre::eyre::{Result, eyre};
 use fs4::FileExt;
 use rstest::{fixture, rstest};
 
-use super::{claim_slot, has_live_peers, sweep_dead_slots};
+use super::{claim_guard_for, claim_slot, has_live_peers, sweep_dead_slots};
 use crate::bootstrap::prepare::orphan::{OrphanStop, ProcessId};
 
 /// A data parent directory under a temporary root.
@@ -81,6 +81,66 @@ fn each_claim_gets_its_own_slot(parent: Result<Parent>) {
         FileExt::try_lock(&lock).is_err(),
         "a claimed slot's lock must be held for the life of the process"
     );
+}
+
+/// A slot claim waits for the claim guard, so a full cleanup that holds it
+/// across its probe and removal cannot be overtaken by a cluster claiming a
+/// slot in between.
+#[rstest]
+fn a_claim_waits_for_the_claim_guard(parent: Result<Parent>) {
+    let dir = parent.expect("data parent");
+    let own = claim_slot(&dir.dir).expect("own slot");
+    let guard = claim_guard_for(own.data_dir.as_std_path())
+        .expect("the slot has a guard")
+        .expect("take the guard");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let parent_dir = dir.dir.clone();
+    let claimer = std::thread::spawn(move || {
+        let claimed = claim_slot(&parent_dir);
+        sender.send(()).expect("report the claim");
+        claimed
+    });
+
+    assert!(
+        receiver
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .is_err(),
+        "a claim must wait while the guard is held"
+    );
+    drop(guard);
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the claim proceeds once the guard is free");
+    claimer
+        .join()
+        .expect("join the claimer")
+        .expect("the claim succeeds");
+}
+
+/// The claim guard sits among the slots but is not one: a sweep leaves it, and
+/// counts nothing removed for it.
+#[rstest]
+fn the_claim_guard_is_not_a_slot(parent: Result<Parent>) {
+    let dir = parent.expect("data parent");
+    let own = claim_slot(&dir.dir).expect("own slot");
+    assert!(dir.dir.join(".claim-guard").is_file(), "a claim leaves it");
+    drop(claim_guard_for(own.data_dir.as_std_path()));
+
+    let swept = sweep_dead_slots(&dir.dir, &RecordingStop::new(true)).expect("sweep");
+
+    assert_eq!(swept, 0, "nothing here is a dead slot");
+    assert!(dir.dir.join(".claim-guard").is_file(), "the sweep keeps it");
+    assert!(
+        !has_live_peers(own.data_dir.as_std_path()),
+        "the guard is not a peer"
+    );
+}
+
+/// A directory that is not a slot has no claim guard to take.
+#[rstest]
+fn only_a_slot_has_a_claim_guard(parent: Result<Parent>) {
+    let dir = parent.expect("data parent");
+    assert!(claim_guard_for(dir.dir.join("explicit").as_std_path()).is_none());
 }
 
 /// A cluster has live peers only when another slot beside it holds its lock,

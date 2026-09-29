@@ -212,21 +212,18 @@ fn a_command_name_is_postgres_by_its_last_component(#[case] comm: &str, #[case] 
     assert_eq!(super::names_postgres(comm), expected);
 }
 
-/// A command line names a data directory only as a whole argument: after it
-/// comes the end of the line or a space, as `ps` prints.
+/// `lsof -Fn` prints one field per line, led by its letter: the process, the
+/// descriptor and the path. Only the path is wanted, and none is an error.
 #[cfg(all(unix, not(target_os = "linux")))]
 #[rstest::rstest]
-#[case::spaces("postgres -D /d/1-2-0 -p 5432", true)]
-#[case::end("postgres -D /d/1-2-0", true)]
-#[case::longer_name("postgres -D /d/1-2-01", false)]
-#[case::other_dir("postgres -D /d/9-9-9", false)]
-#[case::none("postgres", false)]
-fn a_command_line_names_a_directory_as_a_whole_argument(
-    #[case] command_line: &str,
-    #[case] expected: bool,
-) {
+#[case::plain("p123\nfcwd\nn/d/1-2-0\n", Some("/d/1-2-0"))]
+#[case::spaces("p123\nfcwd\nn/d/one two\n", Some("/d/one two"))]
+#[case::no_path("p123\nfcwd\n", None)]
+#[case::empty_path("p123\nfcwd\nn\n", None)]
+#[case::nothing("", None)]
+fn lsof_output_yields_the_working_directory(#[case] output: &str, #[case] expected: Option<&str>) {
     assert_eq!(
-        super::names_data_dir(command_line, camino::Utf8Path::new("/d/1-2-0")),
-        expected
+        super::parse_lsof_cwd(output),
+        expected.map(std::path::PathBuf::from)
     );
 }

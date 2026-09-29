@@ -60,6 +60,55 @@ pub(super) struct ClusterSlot {
     pub(super) password_file: Utf8PathBuf,
 }
 
+/// Name of the guard file that orders slot claims against a full cleanup. It
+/// does not end in [`LOCK_SUFFIX`], so it is never read as a slot.
+const CLAIM_GUARD: &str = ".claim-guard";
+
+/// An exclusive lock on a slot parent's claim guard, held until dropped.
+///
+/// A slot claim takes it, and so does a full cleanup across its probe for live
+/// peers and its removal of the install tree. A cluster starting during the
+/// cleanup therefore either claimed its slot before the probe, and is seen as
+/// a peer, or claims it after the removal, and provisions the tree afresh.
+#[derive(Debug)]
+pub(crate) struct ClaimGuard {
+    _file: File,
+}
+
+impl ClaimGuard {
+    /// Blocks until the guard under `parent` is free, then holds it.
+    fn acquire(parent: &std::path::Path) -> io::Result<Self> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(parent.join(CLAIM_GUARD))?;
+        FileExt::lock(&file)?;
+        Ok(Self { _file: file })
+    }
+}
+
+/// Takes the claim guard for the slot whose data directory is `data_dir`.
+///
+/// Returns None when `data_dir` is not a slot, so nothing shares its install
+/// tree and there is nothing to order.
+pub(crate) fn claim_guard_for(data_dir: &std::path::Path) -> Option<io::Result<ClaimGuard>> {
+    let parent = slot_parent(data_dir)?;
+    Some(ClaimGuard::acquire(parent))
+}
+
+/// Returns the parent of `data_dir` if `data_dir` is a slot, which is so when
+/// its own lock file sits beside it.
+fn slot_parent(data_dir: &std::path::Path) -> Option<&std::path::Path> {
+    let parent = data_dir.parent()?;
+    let own = data_dir.file_name()?.to_str()?;
+    parent
+        .join(format!("{own}{LOCK_SUFFIX}"))
+        .is_file()
+        .then_some(parent)
+}
+
 /// Sweeps dead slots under `parent`, then claims a new one for this cluster.
 ///
 /// # Errors
@@ -70,6 +119,8 @@ pub(super) fn claim_slot(parent: &Utf8Path) -> BootstrapResult<ClusterSlot> {
     std::fs::create_dir_all(parent).map_err(|err| slot_error(parent, "create", err))?;
     sweep_dead_slots(parent, &orphan::SignalStop)?;
     let name = slot_name();
+    let _guard = ClaimGuard::acquire(parent.as_std_path())
+        .map_err(|err| slot_error(&parent.join(CLAIM_GUARD), "lock", err))?;
     let lock = lock_new_slot(parent, &name)?;
     HELD.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -115,14 +166,11 @@ pub(super) fn lock_path(data_dir: &Utf8Path) -> Utf8PathBuf {
 /// is held, or whose lock cannot be probed, because doubt keeps the tree.
 pub(crate) fn has_live_peers(data_dir: &std::path::Path) -> bool {
     let (Some(parent), Some(own)) = (
-        data_dir.parent(),
+        slot_parent(data_dir),
         data_dir.file_name().and_then(std::ffi::OsStr::to_str),
     ) else {
         return false;
     };
-    if !parent.join(format!("{own}{LOCK_SUFFIX}")).is_file() {
-        return false;
-    }
     let Ok(entries) = std::fs::read_dir(parent) else {
         return false;
     };

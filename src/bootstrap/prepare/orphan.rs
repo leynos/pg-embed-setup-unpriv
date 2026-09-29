@@ -154,49 +154,59 @@ fn is_server_for(pid: ProcessId, data_dir: &Utf8Path) -> Option<bool> {
     Some(cwd == std::fs::canonicalize(data_dir).ok()?)
 }
 
-/// Asks `ps` where `/proc` does not exist, as on macOS and the BSDs.
+/// Asks `ps` and `lsof` where `/proc` does not exist, as on macOS and the BSDs.
 ///
-/// A name other than `postgres` is not a server. A `postgres` whose command
-/// line names the directory as an argument is. One that does not is
-/// unconfirmed rather than absent, because a server may rewrite its process
-/// title and a wrong "absent" would delete a live server's directory. A `ps`
-/// that cannot run, fails, or prints nothing is unconfirmed too: the caller
-/// has just seen the process alive.
+/// A name other than `postgres` is not a server. A `postgres` is this slot's
+/// server only if its working directory, which `lsof` reports and no process
+/// can rewrite the way it can its title, is the slot's directory. A tool that
+/// cannot run, fails or prints nothing, or a working directory that cannot be
+/// read, leaves the slot unconfirmed: the caller has just seen the process
+/// alive, and a wrong "absent" would delete a live server's directory.
 #[cfg(all(unix, not(target_os = "linux")))]
 fn is_server_for(pid: ProcessId, data_dir: &Utf8Path) -> Option<bool> {
-    if !names_postgres(&ps_field(PsField::Comm, pid)?) {
+    if !names_postgres(&ps_comm(pid)?) {
         return Some(false);
     }
-    names_data_dir(&ps_field(PsField::Command, pid)?, data_dir).then_some(true)
+    Some(lsof_cwd(pid)? == std::fs::canonicalize(data_dir).ok()?)
 }
 
 /// Without a way to inspect a process, the directory is kept.
 #[cfg(not(unix))]
 const fn is_server_for(_pid: ProcessId, _data_dir: &Utf8Path) -> Option<bool> { None }
 
-/// A column `ps` can print for one process.
+/// Runs `ps -o comm= -p <pid>`, returning its non-empty output.
 #[cfg(all(unix, not(target_os = "linux")))]
-#[derive(Clone, Copy)]
-enum PsField {
-    /// The command name, a path on macOS.
-    Comm,
-    /// The full command line.
-    Command,
-}
-
-/// Runs `ps -o <field> -p <pid>`, returning its non-empty output.
-#[cfg(all(unix, not(target_os = "linux")))]
-fn ps_field(field: PsField, pid: ProcessId) -> Option<String> {
-    let column = match field {
-        PsField::Comm => "comm=",
-        PsField::Command => "command=",
-    };
+fn ps_comm(pid: ProcessId) -> Option<String> {
     let output = std::process::Command::new("ps")
-        .args(["-o", column, "-p", &pid.to_string()])
+        .args(["-o", "comm=", "-p", &pid.to_string()])
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout).into_owned();
     (output.status.success() && !text.trim().is_empty()).then_some(text)
+}
+
+/// Asks `lsof` for the process's working directory.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn lsof_cwd(pid: ProcessId) -> Option<std::path::PathBuf> {
+    let output = std::process::Command::new("lsof")
+        .args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_lsof_cwd(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Returns the path in `lsof -Fn` output, where each field is one line led by
+/// its letter and the path's is `n`.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn parse_lsof_cwd(output: &str) -> Option<std::path::PathBuf> {
+    output
+        .lines()
+        .find_map(|line| line.strip_prefix('n'))
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
 }
 
 /// Returns whether a command name, possibly a path, is that of `postgres`.
@@ -204,22 +214,6 @@ fn ps_field(field: PsField, pid: ProcessId) -> Option<String> {
 fn names_postgres(comm: &str) -> bool {
     let name = comm.trim();
     name.rsplit('/').next() == Some("postgres")
-}
-
-/// Returns whether a command line names `data_dir` as a whole argument.
-///
-/// `ps` separates arguments with spaces, so the match must end at whitespace
-/// or the end of the line: `…/data/1-2-0` must not match a server for
-/// `…/data/1-2-01`.
-#[cfg(all(unix, not(target_os = "linux")))]
-fn names_data_dir(command_line: &str, data_dir: &Utf8Path) -> bool {
-    command_line
-        .match_indices(data_dir.as_str())
-        .any(|(start, _)| {
-            command_line
-                .get(start + data_dir.as_str().len()..)
-                .is_some_and(|rest| rest.chars().next().is_none_or(char::is_whitespace))
-        })
 }
 
 /// Stops a server as `pg_ctl stop -m immediate` does: `SIGQUIT` to the

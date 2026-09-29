@@ -817,12 +817,12 @@ warning naming it; it can be deleted.
 - **Orphaned servers.** If a test process dies abruptly, its `postgres`
   server can outlive it. Before removing a dead cluster's directory, the
   bootstrap reads its `postmaster.pid`. A live process counts as that cluster's
-  server only if it is a `postgres` serving that directory (on Linux, its
-  working directory is the cluster's), so a recycled process ID that now
-  belongs to another database is left alone. The bootstrap stops the server the
-  way `pg_ctl stop -m immediate` does, and removes the directory only after the
-  server has exited. A server it cannot stop, or cannot confirm, keeps its
-  directory, and a warning is logged.
+  server only if it is a `postgres` serving that directory (its working
+  directory is the cluster's, read from `/proc` on Linux and with `lsof`
+  elsewhere), so a recycled process ID that now belongs to another database is
+  left alone. The bootstrap stops the server the way `pg_ctl stop -m immediate`
+  does, and removes the directory only after the server has exited. A server it
+  cannot stop, or cannot confirm, keeps its directory, and a warning is logged.
 - **`run` and the binary keep one directory.** The setup-only `run` function
   and the `pg_embedded_setup_unpriv` binary initialize a cluster to be used
   after they exit, so they keep the derived `<root>/data` directory as in 0.6.0
@@ -832,7 +832,8 @@ warning naming it; it can be deleted.
 - **`CleanupMode::Full` shares the install tree.** Clusters run side by side
   from one install tree, so a full clean-up removes it only when no other
   cluster in the root is running from it. Otherwise it removes just its own
-  data directory.
+  data directory. The check and the removal hold a guard file, `.claim-guard`,
+  that new clusters wait on when claiming a directory.
 - **Startup turns.** Clusters sharing an install tree take turns starting,
   under a lock on `<root>/install/.pg-embed-setup.lock`, so a cold root is set
   up once rather than raced. The servers then run side by side. A wide test

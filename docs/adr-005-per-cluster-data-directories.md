@@ -92,17 +92,17 @@ directory after the lock is gone. Before removing a dead slot, the sweep reads
   nothing is signalled. On Linux the test is the process's working directory,
   which a postmaster sets to its data directory and `/proc/<pid>/cwd` reports
   whatever the process title says. A working directory that cannot be read, as
-  for another user's process, leaves the slot unconfirmed. Elsewhere the test
-  is a `ps -o command=` line that names the directory as a whole argument; a
-  `postgres` whose line does not is unconfirmed, not absent, because a server
-  may rewrite its process title.
+  for another user's process, leaves the slot unconfirmed. Elsewhere the name
+  comes from `ps` and the working directory from `lsof -d cwd`, which no
+  process can rewrite as it can its title; a missing or failing `lsof`, or an
+  unreadable directory, leaves the slot unconfirmed, not absent.
 - A live `postgres` process serving this directory: stopped as
   `pg_ctl stop -m immediate` stops it, with `SIGQUIT` to the postmaster and a
   wait of up to ten seconds for it to exit. The directory is removed only after
   it has exited.
 - A live process that cannot be confirmed (on Windows, which has no name
-  lookup here, or where `ps` fails), or a server that does not stop: the slot
-  is left in place, with a warning, for a later sweep.
+  lookup here, or where `ps` or `lsof` fails), or a server that does not stop:
+  the slot is left in place, with a warning, for a later sweep.
 
 The stop sends the signal directly rather than running `pg_ctl`. This is what
 `pg_ctl -m immediate` does, and it needs no binary path from an install tree
@@ -143,6 +143,14 @@ others, so a full cleanup demotes itself to removing the data directory when
 another slot in the root holds its lock. The rule applies before the in-process
 and worker paths choose what to delete, so they agree. If a peer's lock cannot
 be probed, the tree is kept.
+
+A cluster could still claim its slot between the probe and the removal. A guard
+file, `<root>/data/.claim-guard`, closes that: every slot claim takes an
+exclusive lock on it, and a full cleanup holds it across the probe and the
+removal. A cluster then either claimed its slot before the probe, and is seen
+as a peer, or claims it after the removal, and provisions the tree afresh. A
+guard that cannot be taken keeps the tree. The file does not end in `.lock`, so
+the sweep never reads it as a slot.
 
 ### Explicit `PG_DATA_DIR`
 
