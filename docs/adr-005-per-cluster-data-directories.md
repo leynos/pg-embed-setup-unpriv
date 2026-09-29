@@ -107,6 +107,14 @@ start. Each process still gets its own server; only their startups take turns.
 The asynchronous API takes the lock on the blocking pool, so a second bootstrap
 in the same process waits without blocking the runtime.
 
+The install tree also stays in use after a startup: the first process's server
+runs from it while later processes start. The binary-cache copy therefore
+leaves a file alone when the target already holds one of the cached size.
+Rewriting a running binary fails with `ETXTBSY` on Linux and, on macOS,
+invalidates the code signature so the kernel kills the server ("Killed: 9",
+seen on the macOS CI leg). A copy cut short has the wrong size and is copied
+again.
+
 ### Explicit `PG_DATA_DIR`
 
 An explicit `PG_DATA_DIR` claims no slot and triggers no sweep. Its password
