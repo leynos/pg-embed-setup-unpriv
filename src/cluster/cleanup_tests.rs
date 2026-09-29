@@ -106,6 +106,37 @@ fn full_cleanup_keeps_the_install_tree_when_the_guard_is_unavailable() {
     assert!(settings.installation_dir.exists(), "the install tree stays");
 }
 
+// A data directory whose slot lock cannot be looked up, because its parent
+// cannot be searched, may be a slot with peers, so a full cleanup keeps the
+// install tree. Root searches any directory, so the case is skipped there.
+#[cfg(unix)]
+#[test]
+fn full_cleanup_keeps_the_install_tree_when_the_slot_lookup_is_denied() {
+    use std::os::unix::fs::PermissionsExt;
+
+    if nix::unistd::geteuid().is_root() {
+        return;
+    }
+    let sandbox = tempdir().expect("tempdir");
+    let slots = sandbox.path().join("data");
+    let own = slots.join("1-1-0");
+    let install_dir = sandbox.path().join("install");
+    fs::create_dir_all(&own).expect("own slot");
+    fs::create_dir_all(&install_dir).expect("install dir");
+    fs::write(slots.join("1-1-0.lock"), b"").expect("own lock file");
+    fs::set_permissions(&slots, fs::Permissions::from_mode(0o600)).expect("deny search");
+    let settings = Settings {
+        data_dir: own,
+        installation_dir: install_dir,
+        ..Settings::default()
+    };
+
+    cleanup_in_process(CleanupMode::Full, &settings, "denied-test");
+
+    fs::set_permissions(&slots, fs::Permissions::from_mode(0o700)).expect("restore search");
+    assert!(settings.installation_dir.exists(), "the install tree stays");
+}
+
 // The installation root is only ever removed when it lives under the
 // installation directory, so removing the installation directory always
 // cascades to it. That makes filesystem state an unreliable oracle for the

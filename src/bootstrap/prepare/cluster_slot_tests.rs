@@ -168,6 +168,35 @@ fn an_unlistable_parent_counts_as_a_peer(parent: Result<Parent>) {
     assert!(has_peers, "an unlistable parent must keep the install tree");
 }
 
+/// A parent that cannot be searched hides the slot's own lock file, so the
+/// directory cannot be told from an explicit `PG_DATA_DIR`. That is unknown,
+/// not "not a slot": there may be peers, and no guard can be taken.
+#[cfg(unix)]
+#[rstest]
+fn an_unsearchable_parent_is_unknown_not_a_lone_directory(parent: Result<Parent>) {
+    use std::os::unix::fs::PermissionsExt;
+
+    if nix::unistd::geteuid().is_root() {
+        return;
+    }
+    let dir = parent.expect("data parent");
+    let own = claim_slot(&dir.dir).expect("own slot");
+    // Read without search: the lock file's name is listed but not reachable.
+    std::fs::set_permissions(&dir.dir, std::fs::Permissions::from_mode(0o600))
+        .expect("make the parent unsearchable");
+
+    let has_peers = has_live_peers(own.data_dir.as_std_path());
+    let guard = claim_guard_for(own.data_dir.as_std_path());
+
+    std::fs::set_permissions(&dir.dir, std::fs::Permissions::from_mode(0o700))
+        .expect("restore the parent");
+    assert!(has_peers, "unknown peers keep the install tree");
+    assert!(
+        matches!(guard, Some(Err(_))),
+        "an unknown slot has no guard, and is not a non-slot"
+    );
+}
+
 /// A cluster has live peers only when another slot beside it holds its lock,
 /// so a directory that is not a slot, a lone slot and a dead neighbour have
 /// none, and a held neighbour is one.

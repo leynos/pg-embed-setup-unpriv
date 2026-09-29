@@ -92,21 +92,45 @@ impl ClaimGuard {
 /// Takes the claim guard for the slot whose data directory is `data_dir`.
 ///
 /// Returns None when `data_dir` is not a slot, so nothing shares its install
-/// tree and there is nothing to order.
+/// tree and there is nothing to order. A directory that cannot be told from a
+/// slot, because its parent cannot be searched, is an error, not None:
+/// unknown is not "not a slot".
 pub(crate) fn claim_guard_for(data_dir: &std::path::Path) -> Option<io::Result<ClaimGuard>> {
-    let parent = slot_parent(data_dir)?;
-    Some(ClaimGuard::acquire(parent))
+    match slot_lookup(data_dir) {
+        SlotLookup::NotSlot => None,
+        SlotLookup::Slot(parent) => Some(ClaimGuard::acquire(parent)),
+        SlotLookup::Unknown => Some(Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "cannot tell whether the data directory is a slot",
+        ))),
+    }
 }
 
-/// Returns the parent of `data_dir` if `data_dir` is a slot, which is so when
-/// its own lock file sits beside it.
-fn slot_parent(data_dir: &std::path::Path) -> Option<&std::path::Path> {
-    let parent = data_dir.parent()?;
-    let own = data_dir.file_name()?.to_str()?;
-    parent
-        .join(format!("{own}{LOCK_SUFFIX}"))
-        .is_file()
-        .then_some(parent)
+/// Whether a data directory is a slot.
+enum SlotLookup<'a> {
+    /// A slot, whose lock file sits beside it under this parent.
+    Slot(&'a std::path::Path),
+    /// Not a slot, such as an explicit `PG_DATA_DIR`.
+    NotSlot,
+    /// The lock file's presence could not be read, so the answer is unknown.
+    Unknown,
+}
+
+/// Looks for `data_dir`'s own lock file beside it. Only "not found" means it
+/// is not a slot; any other failure to look leaves the answer unknown.
+fn slot_lookup(data_dir: &std::path::Path) -> SlotLookup<'_> {
+    let (Some(parent), Some(own)) = (
+        data_dir.parent(),
+        data_dir.file_name().and_then(std::ffi::OsStr::to_str),
+    ) else {
+        return SlotLookup::NotSlot;
+    };
+    match std::fs::metadata(parent.join(format!("{own}{LOCK_SUFFIX}"))) {
+        Ok(metadata) if metadata.is_file() => SlotLookup::Slot(parent),
+        Ok(_) => SlotLookup::NotSlot,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => SlotLookup::NotSlot,
+        Err(_) => SlotLookup::Unknown,
+    }
 }
 
 /// Sweeps dead slots under `parent`, then claims a new one for this cluster.
@@ -167,10 +191,12 @@ pub(super) fn lock_path(data_dir: &Utf8Path) -> Utf8PathBuf {
 /// or an entry that cannot be read counts as a peer too, because doubt keeps
 /// the tree.
 pub(crate) fn has_live_peers(data_dir: &std::path::Path) -> bool {
-    let (Some(parent), Some(own)) = (
-        slot_parent(data_dir),
-        data_dir.file_name().and_then(std::ffi::OsStr::to_str),
-    ) else {
+    let parent = match slot_lookup(data_dir) {
+        SlotLookup::Slot(parent) => parent,
+        SlotLookup::NotSlot => return false,
+        SlotLookup::Unknown => return true,
+    };
+    let Some(own) = data_dir.file_name().and_then(std::ffi::OsStr::to_str) else {
         return false;
     };
     let Ok(entries) = std::fs::read_dir(parent) else {
