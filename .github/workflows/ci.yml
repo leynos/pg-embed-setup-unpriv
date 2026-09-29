@@ -157,6 +157,33 @@ jobs:
               "$@"
           }
           run_as_root make test
+  msrv:
+    name: Build at the declared rust-version
+    # The same placement as `build-test`: a fork cannot obtain an Ubicloud
+    # runner and falls back to the hosted pool.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-4' }}
+    # A cold build of every target on a stable toolchain, with no coverage
+    # instrumentation, takes about five minutes.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+      - name: Setup uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
+        with:
+          enable-cache: false
+      # `scripts/msrv_check.py` reads `rust-version` from Cargo.toml,
+      # installs that toolchain, resolves a lockfile as a project on it
+      # would, and builds every target against it.
+      - name: Build at the declared rust-version
+        run: make msrv
   cross-platform-tests:
     name: Test (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}

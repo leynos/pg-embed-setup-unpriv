@@ -176,7 +176,7 @@ fn bootstrap_postgres_environment(config: &TestConfig) -> Result<Option<Bootstra
             if geteuid().is_root() {
                 settings.temporary = false;
             }
-            settings.timeout = Some(Duration::from_secs(60));
+            settings.timeout = Some(Duration::from_mins(1));
 
             let password_file = config.password_file();
             settings.password_file = password_file.clone().into_std_path_buf();
@@ -307,7 +307,7 @@ fn start_postgres(
 ) -> Result<(PostgresHandle, String)> {
     if geteuid().is_root() {
         let worker = worker_from_env()?;
-        let timeout = settings.timeout.unwrap_or(Duration::from_secs(60));
+        let timeout = settings.timeout.unwrap_or(Duration::from_mins(1));
         run_worker_operation(worker.as_path(), settings, timeout, WorkerOperation::Setup)?;
         run_worker_operation(worker.as_path(), settings, timeout, WorkerOperation::Start)?;
         let database_url = settings.url(config.database_name);

@@ -22,6 +22,6 @@ fn main() -> Result<()> {
     let _: WorkerPayload =
         serde_json::from_slice(&config_bytes).wrap_err("failed to parse worker config")?;
 
-    thread::sleep(Duration::from_secs(120));
+    thread::sleep(Duration::from_mins(2));
     Ok(())
 }

@@ -1,4 +1,4 @@
-.PHONY: help all clean test test-doc test-loom test-scripts build release \
+.PHONY: help all clean test test-doc test-loom test-scripts msrv build release \
 	release-archive lint fmt \
 	check-fmt markdownlint nixie spelling typecheck
 
@@ -27,6 +27,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_codescene_environment.py \
 	scripts/tests/test_coverage_shape_properties.py \
 	scripts/tests/test_coverage_shape_publisher.py \
 	scripts/tests/test_coverage_shape_runnability.py \
+	scripts/tests/test_msrv_check.py \
 	scripts/tests/test_release_archive.py \
 	scripts/tests/test_release_archive_failures.py \
 	scripts/tests/test_release_workflow_contract.py \
@@ -41,6 +42,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_codescene_environment.py \
 SCRIPT_PY_DOCTESTS := scripts/tests/codescene_environment.py \
 	scripts/tests/coverage_shape_rules.py \
 	scripts/tests/publisher_token.py \
+	scripts/msrv_check.py \
 	scripts/tests/runner_placement.py \
 	scripts/tests/step_conditions.py \
 	scripts/tests/uploader_pin.py \
@@ -112,6 +114,9 @@ test-loom: ## Run Loom concurrency tests
 test-scripts: ## Run the Python release-tooling tests
 	$(SCRIPT_PYTEST) $(SCRIPT_PY_TESTS) -c /dev/null --rootdir=. -p no:cacheprovider
 	$(SCRIPT_PYTEST) --doctest-modules $(SCRIPT_PY_DOCTESTS) -c /dev/null --rootdir=. -p no:cacheprovider
+
+msrv: ## Build at the declared rust-version against a lockfile resolved for it
+	$(UV) run --no-project --python 3.13 scripts/msrv_check.py
 
 release-archive: ## Package release binaries for cargo-binstall
 	@test -n "$(TARGET)" || (echo "TARGET is required" >&2; exit 1)

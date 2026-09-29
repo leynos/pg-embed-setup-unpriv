@@ -66,11 +66,11 @@ fn caches_successful_initialization() {
     // Handle skip conditions (e.g., PostgreSQL not available, or another
     // server already running - which can happen when running test binaries
     // in parallel)
-    if let Err(ref err) = result1 {
-        if let Some(reason) = skip_reason(err) {
-            warn!("SKIP: {reason}");
-            return;
-        }
+    if let Err(ref err) = result1
+        && let Some(reason) = skip_reason(err)
+    {
+        warn!("SKIP: {reason}");
+        return;
     }
 
     let handle1 = result1.expect("first call should succeed");

@@ -195,7 +195,7 @@ fn should_restage_returns_false_when_staged_is_newer() {
 
     // Set source mtime to 1 hour ago to ensure staged is newer.
     // This avoids flaky tests due to filesystem mtime resolution.
-    let past = SystemTime::now() - Duration::from_secs(3600);
+    let past = SystemTime::now() - Duration::from_hours(1);
     let past_filetime = filetime::FileTime::from_system_time(past);
     filetime::set_file_mtime(&source, past_filetime).expect("set source mtime");
 

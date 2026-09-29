@@ -43,8 +43,8 @@ use crate::{
     extensions::{ExtensionRequest, InstalledExtension},
 };
 
-const DEFAULT_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
-const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_SETUP_TIMEOUT: Duration = Duration::from_mins(3);
+const DEFAULT_START_TIMEOUT: Duration = Duration::from_mins(1);
 
 #[cfg(test)]
 type SetupOnlyLifecycleHook =

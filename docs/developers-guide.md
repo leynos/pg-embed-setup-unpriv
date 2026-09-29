@@ -290,6 +290,29 @@ archive packager and the workflow contract tests in
 `contents: write`, and that the staged archive name and members render the
 `[package.metadata.binstall]` templates exactly.
 
+## Minimum supported Rust version
+
+`rust-version` in `Cargo.toml` is a promise to downstream projects. It is 1.92
+because `postgresql_embedded` 0.20.2, the floor this crate requires, needs
+1.92. The committed `Cargo.lock` resolves to the newest releases, so building
+from it proves nothing about that promise: 0.6.1 declared 1.85 while a direct
+`postgresql_archive` requirement resolved to a release that needs 1.94, and a
+project on 1.93 could not build it.
+
+`make msrv` closes that gap, and CI runs it as the `msrv` job. It runs
+`scripts/msrv_check.py`, which installs the declared toolchain, resolves a
+lockfile with Cargo's rust-version-aware resolver
+(`CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback`), and builds every target
+with `cargo +<version> check --locked --all-targets --all-features`. It clears
+`RUSTFLAGS`, because the repository's Cargo configuration sets nightly-only
+flags. The committed `Cargo.lock` is restored afterwards.
+
+Raising a dependency requirement past what the declared version can build now
+fails that job. Fix it by relaxing the requirement to the lowest release that
+does what is needed, or raise `rust-version` deliberately and say so in the
+change log. `scripts/tests/test_msrv_check.py` holds the script's steps and the
+contract that CI runs `make msrv`.
+
 ## Path resolution
 
 `bootstrap()` resolves the installation and data directories once, in

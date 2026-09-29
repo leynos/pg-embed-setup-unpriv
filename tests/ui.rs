@@ -81,3 +81,18 @@ mod extensions_compile_target;
 fn extensions_public_surface_smoke_compiles() {
     extensions_compile_target::verify_surface().expect("extension surface should compile and run");
 }
+
+#[test]
+#[cfg(not(windows))]
+fn const_connection_accessors_compile() {
+    let tests = trybuild::TestCases::new();
+    tests.pass("tests/ui/pass/const_connection_accessors.rs");
+}
+
+#[cfg(windows)]
+#[path = "ui/pass/const_connection_accessors.rs"]
+mod const_connection_accessors;
+
+#[test]
+#[cfg(windows)]
+fn const_connection_accessors_smoke_compiles() { const_connection_accessors::verify_surface(); }
