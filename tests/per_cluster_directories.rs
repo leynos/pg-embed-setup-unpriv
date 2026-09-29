@@ -89,7 +89,7 @@ fn orchestrate() -> std::io::Result<()> {
     let root = std::env::var("PG_EMBED_ROOT").map_err(std::io::Error::other)?;
     let mut held = spawn_child(Path::new(&root), "hold", &[])?;
     report(&held.report()?)?;
-    std::thread::sleep(Duration::from_secs(600));
+    std::thread::sleep(Duration::from_mins(10));
     Ok(())
 }
 
@@ -198,7 +198,7 @@ fn startup_waits_for_the_setup_lock() {
     fs4::FileExt::lock(&lock).expect("hold the setup lock");
 
     let mut child = spawn_child(&root, "connect", &[]).expect("child");
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let deadline = std::time::Instant::now() + Duration::from_mins(1);
     while !cluster_children::is_blocked_on_a_lock(child.child.id()).expect("read /proc/locks") {
         assert!(
             child.child.try_wait().expect("poll the child").is_none(),

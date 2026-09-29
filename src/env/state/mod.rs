@@ -205,11 +205,13 @@ impl<L: EnvLockOps> ThreadStateCore<L> {
     ) -> Option<OsString> {
         debug_assert!(
             validation::is_valid_env_key(key),
-            "invalid env var name: {key:?}"
+            "invalid env var name: {}",
+            key.to_string_lossy().escape_debug()
         );
         debug_assert!(
             validation::is_valid_env_value(new_value.as_ref()),
-            "invalid env var value for {key:?}"
+            "invalid env var value for {}",
+            key.to_string_lossy().escape_debug()
         );
         let previous = L::var_os(guard, key);
         match new_value {

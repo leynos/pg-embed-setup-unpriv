@@ -16,7 +16,7 @@ use tracing::{debug, warn};
 use super::LOG_TARGET;
 
 /// Overall timeout for one HTTP request.
-const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
+const HTTP_TIMEOUT: Duration = Duration::from_mins(2);
 /// Attempts made for connection failures and 5xx responses.
 const HTTP_ATTEMPTS: u32 = 3;
 /// Delay before the second attempt; doubles for each later attempt.

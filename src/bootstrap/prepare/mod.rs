@@ -287,10 +287,10 @@ fn ensure_pgpass_permissions(path: &Utf8PathBuf) -> BootstrapResult<()> {
     match set_permissions(path, PGPASS_MODE) {
         Ok(()) => Ok(()),
         Err(err) => {
-            if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
-                if io_err.kind() == std::io::ErrorKind::NotFound {
-                    return Ok(());
-                }
+            if let Some(io_err) = err.downcast_ref::<std::io::Error>()
+                && io_err.kind() == std::io::ErrorKind::NotFound
+            {
+                return Ok(());
             }
             Err(BootstrapError::from(err))
         }

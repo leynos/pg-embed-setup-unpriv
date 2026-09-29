@@ -64,7 +64,7 @@ impl ConnectionMetadata {
 
     /// Returns the configured database host.
     #[must_use]
-    pub fn host(&self) -> &str { self.settings.host.as_str() }
+    pub const fn host(&self) -> &str { self.settings.host.as_str() }
 
     /// Returns the configured port.
     #[must_use]
@@ -72,11 +72,11 @@ impl ConnectionMetadata {
 
     /// Returns the configured superuser name.
     #[must_use]
-    pub fn superuser(&self) -> &str { self.settings.username.as_str() }
+    pub const fn superuser(&self) -> &str { self.settings.username.as_str() }
 
     /// Returns the generated superuser password.
     #[must_use]
-    pub fn password(&self) -> &str { self.settings.password.as_str() }
+    pub const fn password(&self) -> &str { self.settings.password.as_str() }
 
     /// Returns the prepared `.pgpass` file path.
     #[must_use]
@@ -118,7 +118,7 @@ impl TestClusterConnection {
 
     /// Returns host metadata without exposing internal storage.
     #[must_use]
-    pub fn host(&self) -> &str { self.metadata.host() }
+    pub const fn host(&self) -> &str { self.metadata.host() }
 
     /// Returns the configured port.
     #[must_use]
@@ -126,11 +126,11 @@ impl TestClusterConnection {
 
     /// Returns the configured superuser account name.
     #[must_use]
-    pub fn superuser(&self) -> &str { self.metadata.superuser() }
+    pub const fn superuser(&self) -> &str { self.metadata.superuser() }
 
     /// Returns the generated password for the superuser.
     #[must_use]
-    pub fn password(&self) -> &str { self.metadata.password() }
+    pub const fn password(&self) -> &str { self.metadata.password() }
 
     /// Returns the `.pgpass` file prepared during bootstrap.
     #[must_use]

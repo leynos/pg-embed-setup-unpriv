@@ -130,7 +130,7 @@ fn partial_data_dir_recovery_then_fresh_init(local_serial_guard: ScenarioLocalGu
         settings: &bootstrap.settings,
         env_vars: &env_pairs,
         operation: WorkerOperation::Setup,
-        timeout: Duration::from_secs(120),
+        timeout: Duration::from_mins(2),
     };
     let request = WorkerRequest::new(args);
 

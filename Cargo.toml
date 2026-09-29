@@ -2,7 +2,7 @@
 name = "pg-embed-setup-unpriv"
 version = "0.6.1"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.92"
 description = "Initializes postgresql_embedded clusters with platform-appropriate setup"
 license = "ISC"
 documentation = "https://docs.rs/pg-embed-setup-unpriv/latest/pg_embedded_setup_unpriv"
@@ -131,8 +131,11 @@ postgresql_embedded = { version = "0.20.2", features = ["tokio"] }
 # causes when deciding whether a bootstrap failure is transient. It must stay
 # the version `postgresql_embedded` uses: a test builds that error from this
 # crate's type, so a mismatch fails to compile rather than silently turning
-# the retry off.
-postgresql_archive = { version = "0.20.4", default-features = false }
+# the retry off. The requirement is the floor `postgresql_embedded` names
+# (0.20.2, which needs Rust 1.92), so a lockfile resolved for the declared
+# `rust-version` can pick it; 0.20.3 and later need 1.94 and would raise the
+# minimum supported Rust version if required here.
+postgresql_archive = { version = "0.20.2", default-features = false }
 color-eyre = "0.6"
 tokio = { version = "1", features = ["rt", "macros", "time", "fs"] }
 serde = { version = "1", features = ["derive"] }
