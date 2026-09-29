@@ -118,6 +118,35 @@ The reader and the rules are scoped to these contract tests. A new workflow
 contract should reuse `workflow_reader.py` rather than parse workflows with
 `yaml.safe_load`, which keeps the last of two duplicate keys and says nothing.
 
+## Runner placement
+
+`coverage-main.yml`'s `coverage-upload`, main's only cache writer, runs on
+`ubicloud-standard-2`. `runs-on` selects it with the estate expression
+`${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' ||
+'ubicloud-standard-2' }}`.
+A pull request from a fork cannot obtain an Ubicloud runner, so it falls back
+to `ubuntu-latest`; a push and a dispatch have no pull request, so the fork
+value is null and they select Ubicloud.
+
+The writer sits on Ubicloud because Ubicloud's cache proxy is scoped by ref. A
+pull request's Ubicloud lane reads a warm main scope only when a main job on
+Ubicloud writes it, so a lane can move to Ubicloud only after its main writer
+has.
+
+An Ubicloud runner is a self-hosted just-in-time runner, so GitHub's six-hour
+cap for hosted jobs does not bound it and a hung job would hold a billable
+runner. Every job whose `runs-on` can select Ubicloud therefore states its own
+`timeout-minutes`. `coverage-upload` keeps its 66 minutes, which the timeout
+ordering contract holds above the 1,800 s cargo watchdog; a `build-test`
+ceiling is twice a measured warm Ubicloud run.
+
+`scripts/tests/test_runner_placement.py` holds this to the files. It evaluates
+the expression for a push or dispatch, a same-repository pull request and a
+fork, rejects a literal label, inverted arms, another label and another
+condition, and asserts an exact inventory of the jobs that can land on Ubicloud
+with their ceilings. A change that adds, removes or re-times such a job fails
+it until the inventory is updated in the same commit.
+
 ## Lint and formatting toolchain
 
 The repository pins `rust-toolchain.toml` to `nightly-2026-04-25` because the
