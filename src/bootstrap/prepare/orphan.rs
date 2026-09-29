@@ -37,7 +37,7 @@ impl ProcessId {
 
 impl std::fmt::Display for ProcessId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
+        self.get().fmt(formatter)
     }
 }
 

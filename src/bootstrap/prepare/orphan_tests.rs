@@ -1,6 +1,6 @@
 //! Tests for stopping a server orphaned in a dead slot.
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use color_eyre::eyre::{Result, eyre};
 
 use super::{OrphanStop, ProcessId, ServerState, server_state, stop_orphaned_server};
@@ -18,7 +18,7 @@ pub(crate) struct FakePostgres {
 #[cfg(target_os = "linux")]
 impl FakePostgres {
     /// Starts the stand-in for a server running `data_dir`.
-    pub(crate) fn spawn(data_dir: &Utf8Path) -> Result<Self> {
+    pub(crate) fn spawn(data_dir: &camino::Utf8Path) -> Result<Self> {
         let dir = tempfile::tempdir()?;
         let binary = dir.path().join("postgres");
         std::fs::copy("/bin/sh", &binary)?;
@@ -43,7 +43,7 @@ impl FakePostgres {
     /// `/proc` still shows the parent's name and command line. That window is
     /// wide enough on a busy CI runner to make a fresh stand-in read as some
     /// other process, so the constructor does not return until it is right.
-    fn wait_for_identity(&self, data_dir: &Utf8Path) -> Result<()> {
+    fn wait_for_identity(&self, data_dir: &camino::Utf8Path) -> Result<()> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while std::time::Instant::now() < deadline {
             if super::is_server_for(self.pid(), data_dir) == Some(true) {
@@ -82,7 +82,8 @@ fn data_dir() -> Result<(tempfile::TempDir, Utf8PathBuf)> {
 }
 
 /// Writes a `postmaster.pid` naming `pid` into `dir`.
-fn write_pid(dir: &Utf8Path, pid: ProcessId) -> Result<()> {
+#[cfg(unix)]
+fn write_pid(dir: &camino::Utf8Path, pid: ProcessId) -> Result<()> {
     std::fs::write(dir.join("postmaster.pid"), format!("{pid}\n{dir}\n"))?;
     Ok(())
 }
@@ -225,7 +226,7 @@ fn a_command_line_names_a_directory_as_a_whole_argument(
     #[case] expected: bool,
 ) {
     assert_eq!(
-        super::names_data_dir(command_line, Utf8Path::new("/d/1-2-0")),
+        super::names_data_dir(command_line, camino::Utf8Path::new("/d/1-2-0")),
         expected
     );
 }
