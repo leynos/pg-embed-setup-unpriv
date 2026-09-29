@@ -1,0 +1,224 @@
+//! Per-cluster data directories under a shared root.
+//!
+//! Every process that bootstraps from a derived root (`PG_EMBED_ROOT`, or the
+//! per-user default) gets a data directory of its own, so concurrent test
+//! processes never share one (#261). Under `<root>/data` each cluster owns a
+//! "slot": the data directory `<name>/`, its password file `<name>.pgpass`,
+//! and a lock file `<name>.lock`.
+//!
+//! The lock file carries an exclusive kernel lock (`fs4`: `flock(2)` on Unix,
+//! `LockFileEx` on Windows) that the owning process holds until it exits. The
+//! kernel releases it when the process dies, however it dies. A later
+//! bootstrap sweeps slots whose lock it can take, which are exactly the slots
+//! whose owner is gone. Liveness is the held lock, never the PID in the name,
+//! so a reused PID cannot make a dead slot look alive or a live one dead. The
+//! lock file is opened by `std`, which sets `O_CLOEXEC`, so the `postgres` and
+//! `pg_ctl` children a bootstrap spawns do not inherit it and cannot keep a
+//! dead owner's slot "alive".
+
+use std::{
+    fs::{File, OpenOptions},
+    io,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use camino::{Utf8Path, Utf8PathBuf};
+use color_eyre::eyre::{Report, eyre};
+use fs4::{FileExt, TryLockError};
+use tracing::{info, warn};
+
+use super::orphan::{self, OrphanStop};
+use crate::{
+    error::{BootstrapError, BootstrapResult},
+    observability::LOG_TARGET,
+};
+
+/// Suffix of a slot's lock file.
+const LOCK_SUFFIX: &str = ".lock";
+
+/// Suffix of a slot's password file.
+const PASSWORD_SUFFIX: &str = ".pgpass";
+
+/// Lock files held for the life of the process, one per claimed slot.
+///
+/// A slot's lock must outlive every handle to its cluster, and a shared
+/// cluster lives until the process exits, so the files are kept here rather
+/// than in the cluster. Dropping one would let another process sweep a live
+/// cluster's directory.
+static HELD: Mutex<Vec<File>> = Mutex::new(Vec::new());
+
+/// A claimed slot: the data directory and password file for one cluster.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ClusterSlot {
+    /// The cluster's own data directory, `<parent>/<name>`.
+    pub(super) data_dir: Utf8PathBuf,
+    /// The cluster's own password file, `<parent>/<name>.pgpass`.
+    pub(super) password_file: Utf8PathBuf,
+}
+
+/// Sweeps dead slots under `parent`, then claims a new one for this cluster.
+///
+/// # Errors
+///
+/// Returns an error when `parent` cannot be created or listed, or when the
+/// new slot's lock file cannot be created and locked.
+pub(super) fn claim_slot(parent: &Utf8Path) -> BootstrapResult<ClusterSlot> {
+    std::fs::create_dir_all(parent).map_err(|err| slot_error(parent, "create", err))?;
+    sweep_dead_slots(parent, &orphan::SignalStop)?;
+    let name = slot_name();
+    let lock = lock_new_slot(parent, &name)?;
+    HELD.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(lock);
+    let slot = slot_paths(parent, &name);
+    info!(target: LOG_TARGET, data_dir = %slot.data_dir, "claimed a per-cluster data directory");
+    Ok(slot)
+}
+
+/// Removes every slot under `parent` whose owner no longer holds its lock.
+///
+/// A slot whose directory still holds a live, orphaned server is stopped
+/// through `stop` first, and skipped with a warning when it cannot be.
+///
+/// # Errors
+///
+/// Returns an error only when `parent` cannot be listed. Per-slot failures
+/// are logged and skipped, so one stubborn leftover never blocks a bootstrap.
+pub(super) fn sweep_dead_slots(parent: &Utf8Path, stop: &dyn OrphanStop) -> BootstrapResult<usize> {
+    let entries = std::fs::read_dir(parent).map_err(|err| slot_error(parent, "list", err))?;
+    let mut swept = 0;
+    for name in entries.filter_map(|entry| lock_stem(&entry.ok()?)) {
+        if sweep_one(parent, &name, stop) {
+            swept += 1;
+        }
+    }
+    Ok(swept)
+}
+
+/// Sweeps one slot if its owner is gone; returns whether it was removed.
+fn sweep_one(parent: &Utf8Path, name: &str, stop: &dyn OrphanStop) -> bool {
+    let Some(_lock) = take_dead_lock(parent, name) else {
+        return false;
+    };
+    let slot = slot_paths(parent, name);
+    if !orphan::stop_orphaned_server(&slot.data_dir, stop) {
+        warn!(
+            target: LOG_TARGET,
+            data_dir = %slot.data_dir,
+            "a dead owner's server could not be stopped; leaving its directory"
+        );
+        return false;
+    }
+    remove_slot(parent, name, &slot);
+    true
+}
+
+/// Takes a slot's lock without blocking, which succeeds only if its owner
+/// is gone. The lock is held while the slot is removed.
+fn take_dead_lock(parent: &Utf8Path, name: &str) -> Option<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(parent.join(format!("{name}{LOCK_SUFFIX}")))
+        .ok()?;
+    FileExt::try_lock(&file).ok().map(|()| file)
+}
+
+/// Removes a dead slot's directory, password file and lock file, and logs
+/// the outcome.
+fn remove_slot(parent: &Utf8Path, name: &str, slot: &ClusterSlot) {
+    match remove_slot_files(parent, name, slot) {
+        Ok(()) => log_swept(name),
+        Err(err) => log_removal_failed(name, &err),
+    }
+}
+
+/// Logs that a dead slot was removed.
+fn log_swept(name: &str) {
+    info!(target: LOG_TARGET, slot = name, "swept a dead cluster's data directory");
+}
+
+/// Logs that a dead slot could not be fully removed.
+fn log_removal_failed(name: &str, err: &io::Error) {
+    warn!(target: LOG_TARGET, slot = name, error = %err, "could not fully remove a dead slot");
+}
+
+/// Removes every file of a slot, reporting the first failure after trying
+/// them all so one stubborn leftover does not strand the others.
+fn remove_slot_files(parent: &Utf8Path, name: &str, slot: &ClusterSlot) -> io::Result<()> {
+    let results = [
+        remove_if_present(std::fs::remove_dir_all(&slot.data_dir)),
+        remove_if_present(std::fs::remove_file(&slot.password_file)),
+        remove_if_present(std::fs::remove_file(
+            parent.join(format!("{name}{LOCK_SUFFIX}")),
+        )),
+    ];
+    results.into_iter().collect()
+}
+
+/// Treats "already gone" as success.
+fn remove_if_present(result: io::Result<()>) -> io::Result<()> {
+    match result {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Creates and locks a new slot's lock file, refusing an existing one.
+fn lock_new_slot(parent: &Utf8Path, name: &str) -> BootstrapResult<File> {
+    let path = parent.join(format!("{name}{LOCK_SUFFIX}"));
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|err| slot_error(&path, "create", err))?;
+    match FileExt::try_lock(&file) {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => Err(BootstrapError::from(eyre!(
+            "slot lock {path} is already held"
+        ))),
+        Err(TryLockError::Error(err)) => Err(slot_error(&path, "lock", err)),
+    }
+}
+
+/// Returns a slot name unique to this cluster: the process ID, the time,
+/// and a per-process counter, so one process can hold several slots.
+fn slot_name() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{nanos}-{count}", std::process::id())
+}
+
+/// Returns a slot's data directory and password file.
+fn slot_paths(parent: &Utf8Path, name: &str) -> ClusterSlot {
+    ClusterSlot {
+        data_dir: parent.join(name),
+        password_file: parent.join(format!("{name}{PASSWORD_SUFFIX}")),
+    }
+}
+
+/// Returns the slot name of a lock file, or None for anything else.
+fn lock_stem(entry: &std::fs::DirEntry) -> Option<String> {
+    let file_name = entry.file_name().into_string().ok()?;
+    file_name
+        .strip_suffix(LOCK_SUFFIX)
+        .filter(|stem| !stem.is_empty())
+        .map(str::to_owned)
+}
+
+/// Wraps an I/O failure on a slot path.
+fn slot_error(path: &Utf8Path, action: &str, err: io::Error) -> BootstrapError {
+    BootstrapError::from(Report::new(err).wrap_err(format!("cannot {action} {path}")))
+}
+
+#[cfg(test)]
+#[path = "cluster_slot_tests.rs"]
+mod tests;

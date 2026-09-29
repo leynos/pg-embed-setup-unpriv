@@ -39,7 +39,8 @@ pub(super) fn bootstrap_with_root(
         .context("failed to resolve user 'nobody'")?
         .ok_or_else(|| color_eyre::eyre::eyre!("user 'nobody' not found"))?;
 
-    let paths = resolve_settings_paths_for_uid(&mut settings, cfg, nobody_user.uid)?;
+    let mut paths = resolve_settings_paths_for_uid(&mut settings, cfg, nobody_user.uid)?;
+    super::claim_derived_slot(&mut settings, &mut paths)?;
     super::reuse_existing_password(
         &mut settings,
         &paths.data_dir,
