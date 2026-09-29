@@ -163,7 +163,9 @@ pub(super) fn lock_path(data_dir: &Utf8Path) -> Utf8PathBuf {
 /// so deleting it would pull their binaries and extensions away. `data_dir` is
 /// a slot only if its own lock file sits beside it; any other directory,
 /// such as an explicit `PG_DATA_DIR`, has no peers. A peer is a slot whose lock
-/// is held, or whose lock cannot be probed, because doubt keeps the tree.
+/// is held, or whose lock cannot be probed. A slot parent that cannot be listed
+/// or an entry that cannot be read counts as a peer too, because doubt keeps
+/// the tree.
 pub(crate) fn has_live_peers(data_dir: &std::path::Path) -> bool {
     let (Some(parent), Some(own)) = (
         slot_parent(data_dir),
@@ -172,12 +174,15 @@ pub(crate) fn has_live_peers(data_dir: &std::path::Path) -> bool {
         return false;
     };
     let Ok(entries) = std::fs::read_dir(parent) else {
-        return false;
+        return true;
     };
-    entries
-        .filter_map(|entry| lock_stem(&entry.ok()?))
-        .filter(|name| name != own)
-        .any(|name| !is_lock_free(&parent.join(format!("{name}{LOCK_SUFFIX}"))))
+    entries.into_iter().any(|listed| {
+        listed.map_or(true, |entry| {
+            lock_stem(&entry).is_some_and(|name| {
+                name != own && !is_lock_free(&parent.join(format!("{name}{LOCK_SUFFIX}")))
+            })
+        })
+    })
 }
 
 /// Returns whether nobody holds the lock file at `path`; a file that cannot be
