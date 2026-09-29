@@ -28,6 +28,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 #: until it is reviewed.
 PLACEMENTS = [
     (".github/workflows/ci.yml", "build-test", "ubicloud-standard-4", 66),
+    (".github/workflows/ci.yml", "msrv", "ubicloud-standard-4", 30),
     (".github/workflows/coverage-main.yml", "coverage-upload", "ubicloud-standard-2", 66),
 ]
 
