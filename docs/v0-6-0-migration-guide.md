@@ -5,6 +5,19 @@ change a consumer has to make, breaking changes first.
 
 Each v0.6.0 feature has its own section.
 
+## Rust version: 1.92 or newer (from v0.6.2)
+
+The crate's `rust-version` is 1.92. Earlier releases declared 1.85, which no
+release of `postgresql_embedded` that they accept could build with, and v0.6.1
+needed 1.94 through a direct `postgresql_archive` requirement, so it could not
+be built at all on 1.93 or older.
+
+A consumer on Rust older than 1.92 must upgrade the toolchain before adopting
+v0.6.x; v0.6.2 is the first release whose declared version is true, and the
+first that CI checks against it (`make msrv`). A consumer on 1.92 or 1.93 that
+found v0.6.1 unbuildable needs only to move to v0.6.2. Nothing else in the API
+changes.
+
 ## Bootstrap overrides: `PG_EMBED_ROOT` and `PG_MAX_CONNECTIONS`
 
 Nothing changes for a consumer that sets neither variable. Both are opt-in, and

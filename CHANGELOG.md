@@ -9,8 +9,9 @@ All notable changes to this crate are recorded here. The format follows
 
 - 0.6.1 could not be built on Rust 1.93 or earlier. A direct
   `postgresql_archive` requirement of 0.20.4 pulled in a release that needs
-  Rust 1.94. The requirement is now `0.20.2`, the floor `postgresql_embedded`
-  names, so a lockfile resolved for an older compiler can pick it.
+  Rust 1.94 (#286). The requirement is now `0.20.2`, the floor
+  `postgresql_embedded` names, so a lockfile resolved for an older compiler can
+  pick it.
 
 ### Minimum supported Rust version
 

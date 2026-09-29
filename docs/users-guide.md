@@ -13,7 +13,13 @@ tool and integrate it into automated test flows.
 - Linux, macOS, or Windows host. Linux supports both the root
   privilege-dropping path and the unprivileged path; macOS and Windows support
   the unprivileged path.
-- Rust toolchain specified in `rust-toolchain.toml`.
+- Rust toolchain specified in `rust-toolchain.toml` for developing this crate.
+  A project that depends on it needs Rust 1.92 or newer, the crate's
+  `rust-version`. Releases before 0.6.2 declared 1.85, but no release of
+  `postgresql_embedded` that this crate accepts builds on anything older than
+  1.92, and 0.6.1 additionally required 1.94 through a direct
+  `postgresql_archive` requirement. The `msrv` CI job now enforces the declared
+  version, and the change log records any later change to it.
 - Outbound network access to crates.io and the PostgreSQL binary archive.
 - System timezone database where required. On Unix-like systems, this package is
   usually named `tzdata`; Windows uses the platform timezone database.
