@@ -247,6 +247,10 @@ pinned shared `typos-config-builder` gate, which regenerates `typos.toml`,
 scans the tracked Markdown with the pinned Typos release, and enforces the
 shared phrase corrections that Typos cannot express.
 
+`TYPOS_CONFIG_BUILDER_VERSION` in the `Makefile` pins the
+`typos-config-builder` release the gate runs (currently `v0.1.3`). Raise it
+together with the regenerated `typos.toml`, never on its own.
+
 The tracked `typos.toml` is regenerated on every run from the live shared
 dictionary and the narrow repository policy in `typos.local.toml`; never edit
 the generated file by hand. The gate refreshes the untracked shared-dictionary
