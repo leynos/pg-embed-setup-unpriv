@@ -194,3 +194,29 @@ fn a_missing_or_garbage_pid_file_ends_quietly(#[case] contents: Option<&str>) ->
     ensure!(status.success(), "the watcher ends cleanly: {status:?}");
     Ok(())
 }
+
+/// A cluster stopped normally ends its watcher, which then cannot act on
+/// the server it was guarding: a later owner death signals nothing.
+#[test]
+fn a_released_watcher_no_longer_acts_on_owner_death() -> Result<()> {
+    use super::{release_watcher, watch_slot_owner};
+
+    let mut slot = Slot::new()?;
+    let holder = tempfile::tempdir()?;
+    let mut server = stand_in("postgres", &slot.data_dir, holder.path())?;
+    slot.name_pid_file(server.0.id())?;
+    ensure!(watch_slot_owner(&slot.data_dir), "a slot gets a watcher");
+
+    ensure!(release_watcher(&slot.data_dir), "the watcher is released");
+    ensure!(
+        !release_watcher(&slot.data_dir),
+        "a second release finds nothing"
+    );
+    slot.owner_dies();
+
+    ensure!(
+        wait_exit(&mut server.0, SETTLE)?.is_none(),
+        "a released watcher must not signal the server"
+    );
+    Ok(())
+}

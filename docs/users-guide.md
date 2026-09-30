@@ -840,6 +840,17 @@ warning naming it; it can be deleted.
   cluster in the root is running from it. Otherwise it removes just its own
   data directory. The check and the removal hold a guard file, `.claim-guard`,
   that new clusters wait on when claiming a directory.
+- **A killed owner's server is stopped at once (Linux).** A test process
+  killed by `SIGKILL` or the out-of-memory killer runs no destructor, and the
+  `postgres` it started would keep running until the next bootstrap's sweep. So
+  after each start the library spawns a detached watcher,
+  `setsid flock <slot.lock> sh -c <script>`, that waits for the kernel to
+  release the owner's slot lock and then sends `SIGQUIT` to the server, but
+  only if the process in `postmaster.pid` is named `postgres` and its working
+  directory is the cluster's. A stale file naming a recycled process ID is left
+  alone. The watcher is skipped where `setsid` or `flock` is missing, as on
+  macOS, where the sweep is the only reclaim; a stopped cluster ends its own
+  watcher.
 - **Setup turns.** Clusters sharing an install tree take turns populating it,
   under a lock on `<root>/install/.pg-embed-setup.lock`, so a cold root is set
   up once rather than raced. Once the tree is populated, clusters initialize

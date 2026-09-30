@@ -20,8 +20,9 @@
 //! nothing, and the sweep stays the reclaim.
 
 use std::{
+    collections::HashMap,
     io,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
 };
@@ -47,11 +48,13 @@ kill -QUIT "$pid" 2>/dev/null
 exit 0
 "#;
 
-/// Watchers spawned by this process, kept so their handles are not dropped.
+/// Watchers spawned by this process, by data directory.
 ///
-/// A watcher is meant to outlive its owner, so the handles are never waited
-/// on; the process exit that releases the slot lock is what wakes them.
-static WATCHERS: Mutex<Vec<Child>> = Mutex::new(Vec::new());
+/// A watcher is meant to outlive its owner, so a live process never waits on
+/// one; the exit that releases the slot lock is what wakes it. A cluster that
+/// is stopped normally ends its own watcher through [`release_watcher`], so a
+/// long-lived test process does not accumulate one per cluster it has started.
+static WATCHERS: Mutex<Option<HashMap<PathBuf, Child>>> = Mutex::new(None);
 
 /// Builds the watcher command for a slot: blocks on `lock`, then runs the
 /// script against `data_dir`, in a session of its own with no standard streams.
@@ -91,7 +94,8 @@ pub(crate) fn watch_slot_owner(data_dir: &Path) -> bool {
             WATCHERS
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(child);
+                .get_or_insert_with(HashMap::new)
+                .insert(data_dir.to_path_buf(), child);
             true
         }
         Err(err) => {
@@ -99,6 +103,24 @@ pub(crate) fn watch_slot_owner(data_dir: &Path) -> bool {
             false
         }
     }
+}
+
+/// Ends the watcher for `data_dir`, after its server was stopped normally.
+///
+/// Returns whether there was one. The watcher is killed and reaped, so it
+/// neither lingers nor becomes a zombie.
+pub(crate) fn release_watcher(data_dir: &Path) -> bool {
+    let removed = WATCHERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_mut()
+        .and_then(|watchers| watchers.remove(data_dir));
+    let Some(mut child) = removed else {
+        return false;
+    };
+    let _killed = child.kill();
+    let _reaped = child.wait();
+    true
 }
 
 #[cfg(test)]

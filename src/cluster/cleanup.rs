@@ -50,6 +50,7 @@ pub(super) fn cleanup_worker_managed_with_runtime(
     env_vars: &[(String, Option<String>)],
     context: &str,
 ) {
+    release_orphan_watcher(&bootstrap.settings);
     let plan = plan_cleanup(bootstrap.cleanup_mode, &bootstrap.settings, context);
     let Some(operation) = cleanup_operation(plan.mode) else {
         return;
@@ -82,6 +83,7 @@ pub(super) fn cleanup_worker_managed_with_runtime(
 /// # Ok::<(), pg_embedded_setup_unpriv::error::BootstrapError>(())
 /// ```
 pub(super) fn cleanup_in_process(requested: CleanupMode, settings: &Settings, context: &str) {
+    release_orphan_watcher(settings);
     let plan = plan_cleanup(requested, settings, context);
     let mode = plan.mode;
     if mode == CleanupMode::None {
@@ -90,6 +92,15 @@ pub(super) fn cleanup_in_process(requested: CleanupMode, settings: &Settings, co
     log_cleanup_start(mode, plan.holds_guard(), context);
     cleanup_data_dir(mode, settings, context);
     cleanup_install_dir(mode, settings, context);
+}
+
+/// Ends the watcher that guarded this cluster: it has been stopped normally,
+/// so nothing is left for a watcher to stop.
+fn release_orphan_watcher(settings: &Settings) {
+    #[cfg(target_os = "linux")]
+    let _released = crate::bootstrap::release_watcher(&settings.data_dir);
+    #[cfg(not(target_os = "linux"))]
+    let _ = settings;
 }
 
 fn log_cleanup_start(cleanup_mode: CleanupMode, is_guarded: bool, context: &str) {

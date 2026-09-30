@@ -37,7 +37,7 @@ mod orphan;
 #[cfg(target_os = "linux")]
 mod orphan_watch;
 #[cfg(target_os = "linux")]
-pub(crate) use orphan_watch::watch_slot_owner;
+pub(crate) use orphan_watch::{release_watcher, watch_slot_owner};
 mod password;
 mod stale_password;
 pub use password::{PasswordReuseOutcome, reuse_existing_password, stored_cluster_password};
