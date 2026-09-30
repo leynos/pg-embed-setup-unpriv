@@ -3,6 +3,16 @@
 All notable changes to this crate are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Windows scenario lock
+
+- The Windows scenario-lock test helper retries when creating its lock
+  directory reports access denied, which Windows returns while another
+  process's removal of the directory is still pending, instead of panicking.
+  A path that really cannot be created still fails, at the deadline, with the
+  last error in the message (#279).
+
 ## 0.6.3
 
 ### Concurrent starts

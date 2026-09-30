@@ -75,11 +75,27 @@ fn scenario_lock_path() -> PathBuf {
     target_dir.join("pg-embed-setup-unpriv.serial.lockdir")
 }
 
+/// Whether a failed `create_dir` of the lock directory means another process
+/// holds it, or is still deleting it, rather than that the path is unusable.
+///
+/// Windows reports `ERROR_ACCESS_DENIED`, not `AlreadyExists`, when the
+/// directory is delete-pending: the holder's `remove_dir` has been issued but
+/// an open handle, such as a scanner's or a sweeper's `remove_dir_all`, keeps
+/// the entry alive. That is contention to retry (#279). A lock path that really
+/// cannot be created keeps failing until the deadline, whose message names it.
+const fn is_lock_contention(kind: std::io::ErrorKind) -> bool {
+    match kind {
+        std::io::ErrorKind::AlreadyExists => true,
+        std::io::ErrorKind::PermissionDenied => cfg!(windows),
+        _ => false,
+    }
+}
+
 fn try_acquire_process_lock_once(lock_path: &Path, deadline: Instant) -> Option<ProcessLock> {
     match std::fs::create_dir(lock_path) {
         Ok(()) => write_process_lock_owner(lock_path),
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-            handle_contended_process_lock(lock_path, deadline);
+        Err(err) if is_lock_contention(err.kind()) => {
+            handle_contended_process_lock(lock_path, deadline, &err);
             None
         }
         Err(err) => {
@@ -91,7 +107,7 @@ fn try_acquire_process_lock_once(lock_path: &Path, deadline: Instant) -> Option<
     }
 }
 
-fn handle_contended_process_lock(lock_path: &Path, deadline: Instant) {
+fn handle_contended_process_lock(lock_path: &Path, deadline: Instant, cause: &std::io::Error) {
     match process_lock_state(lock_path) {
         ProcessLockState::Stale(_reason) => {
             if std::fs::remove_dir_all(lock_path).is_ok() {
@@ -103,7 +119,7 @@ fn handle_contended_process_lock(lock_path: &Path, deadline: Instant) {
 
     assert!(
         Instant::now() < deadline,
-        "timed out waiting to acquire scenario lock at {}",
+        "timed out waiting to acquire scenario lock at {} (last error: {cause})",
         lock_path.display()
     );
     std::thread::sleep(Duration::from_millis(50));
@@ -241,6 +257,21 @@ mod tests {
         super::{ScenarioSerialGuard, serial_guard},
         *,
     };
+
+    /// A failed lock-directory creation counts as contention when the path
+    /// exists or, on Windows, is delete-pending and reports access denied;
+    /// anything else is a real failure that must not be retried silently.
+    #[rstest]
+    #[case::exists(std::io::ErrorKind::AlreadyExists, true)]
+    #[case::access_denied(std::io::ErrorKind::PermissionDenied, cfg!(windows))]
+    #[case::not_found(std::io::ErrorKind::NotFound, false)]
+    #[case::other(std::io::ErrorKind::Other, false)]
+    fn lock_contention_is_classified_by_error_kind(
+        #[case] kind: std::io::ErrorKind,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(is_lock_contention(kind), expected);
+    }
 
     #[rstest]
     #[expect(
