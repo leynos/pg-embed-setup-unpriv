@@ -865,6 +865,25 @@ ADR 005 records the design; this section covers the code.
   other Unix platforms it runs `ps` for the name and `lsof -d cwd` for the
   directory, and a missing or failing tool is unconfirmed. On Windows a live
   PID keeps the directory.
+- `src/bootstrap/prepare/orphan_watch.rs` (Linux only) stops a server the moment
+  its owner dies (#287). `watch_slot_owner`, called after a successful start on
+  the synchronous and asynchronous paths, spawns
+  `setsid flock --exclusive <slot.lock> sh -c WATCHER_SCRIPT`. The flock blocks
+  until the kernel releases the owner's slot lock, held for the life of the
+  process, and the script then sends `SIGQUIT` only to the PID in
+  `postmaster.pid` if `/proc/<pid>/comm` is `postgres` and `/proc/<pid>/cwd` is
+  the data directory: the same identity check as the sweep, in shell, so a
+  library-only binary needs no helper. `slot_lock_path` distinguishes "not a
+  slot" from "cannot tell". Handles are kept per data directory, and
+  `cleanup_in_process` and `cleanup_worker_managed_with_runtime` call
+  `release_watcher`, because the slot lock outlives the cluster and the watcher
+  would otherwise wait until process exit. A missing `setsid` or `flock`, an
+  unreadable slot, or `PG_EMBED_ORPHAN_WATCHER=off` skips the watcher, each
+  logged as a bounded `outcome`. While a watcher runs it holds the slot lock,
+  so a sweep in that moment skips the slot and the next bootstrap reclaims it.
+  The sweep tests set the opt-out so they exercise the sweep alone. A
+  non-interactive bash ignores `SIGQUIT`, so the tests use a copy of `sleep`
+  named `postgres`.
 - `DataLayout` (in `src/bootstrap/prepare/layout.rs`) says whether a derived
   data directory becomes a slot: `PerCluster` for test bootstraps, `Persistent`
   for the setup-only `run`. `has_live_peers` and `ClaimGuard` (in

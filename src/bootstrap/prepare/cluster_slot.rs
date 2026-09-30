@@ -179,15 +179,24 @@ pub(super) fn lock_path(data_dir: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{data_dir}{LOCK_SUFFIX}"))
 }
 
-/// Returns the lock file of `data_dir` when it is a slot, and None otherwise.
+/// Returns the lock file of `data_dir` when it is a slot, `Ok(None)` when it is
+/// not, and an error, as [`claim_guard_for`] does, when that cannot be told.
+///
+/// # Errors
+///
+/// Returns `PermissionDenied` when the slot parent cannot be searched.
 #[cfg(target_os = "linux")]
-pub(crate) fn slot_lock_path(data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+pub(crate) fn slot_lock_path(data_dir: &std::path::Path) -> io::Result<Option<std::path::PathBuf>> {
     match slot_lookup(data_dir) {
-        SlotLookup::Slot(parent) => {
-            let own = data_dir.file_name()?.to_str()?;
-            Some(parent.join(format!("{own}{LOCK_SUFFIX}")))
-        }
-        SlotLookup::NotSlot | SlotLookup::Unknown => None,
+        SlotLookup::Slot(parent) => Ok(data_dir
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .map(|own| parent.join(format!("{own}{LOCK_SUFFIX}")))),
+        SlotLookup::NotSlot => Ok(None),
+        SlotLookup::Unknown => Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "cannot tell whether the data directory is a slot",
+        )),
     }
 }
 

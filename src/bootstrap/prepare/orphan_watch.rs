@@ -89,17 +89,39 @@ pub(crate) fn spawn_watcher(lock: &Path, data_dir: &Path) -> io::Result<Child> {
     watcher_command(lock, data_dir).spawn()
 }
 
+/// Records what became of a watcher request, as one of a small set of outcomes.
+///
+/// No path is logged: the outcome and, for a failure, the error's kind say what
+/// happened without an unbounded field.
+fn log_outcome(outcome: &'static str, error_kind: Option<io::ErrorKind>) {
+    debug!(
+        target: LOG_TARGET,
+        outcome,
+        error_kind = ?error_kind,
+        "orphan watcher"
+    );
+}
+
 /// Starts a watcher for the slot that owns `data_dir`, if it is a slot.
 ///
-/// Best effort: `PG_EMBED_ORPHAN_WATCHER=off` skips it, and a directory that is not a slot, or a
-/// host without `setsid` or `flock`, is skipped with a debug event and the sweep remains the
-/// reclaim.
+/// Best effort: `PG_EMBED_ORPHAN_WATCHER=off` skips it, a directory that is not a slot, or one
+/// whose slot status cannot be read, is skipped, and so is a host without `setsid` or `flock`.
+/// Each case is logged as an outcome, and the sweep remains the reclaim.
 pub(crate) fn watch_slot_owner(data_dir: &Path) -> bool {
     if std::env::var_os(OPT_OUT_VAR).is_some_and(|value| value == "off") {
+        log_outcome("disabled", None);
         return false;
     }
-    let Some(lock) = super::cluster_slot::slot_lock_path(data_dir) else {
-        return false;
+    let lock = match super::cluster_slot::slot_lock_path(data_dir) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            log_outcome("not_a_slot", None);
+            return false;
+        }
+        Err(err) => {
+            log_outcome("slot_unknown", Some(err.kind()));
+            return false;
+        }
     };
     match spawn_watcher(&lock, data_dir) {
         Ok(child) => {
@@ -108,10 +130,11 @@ pub(crate) fn watch_slot_owner(data_dir: &Path) -> bool {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .get_or_insert_with(HashMap::new)
                 .insert(data_dir.to_path_buf(), child);
+            log_outcome("spawned", None);
             true
         }
         Err(err) => {
-            debug!(target: LOG_TARGET, error = %err, "no orphan watcher for this cluster");
+            log_outcome("spawn_failed", Some(err.kind()));
             false
         }
     }
@@ -132,6 +155,7 @@ pub(crate) fn release_watcher(data_dir: &Path) -> bool {
     };
     let _killed = child.kill();
     let _reaped = child.wait();
+    log_outcome("released", None);
     true
 }
 

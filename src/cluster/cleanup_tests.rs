@@ -270,3 +270,33 @@ fn is_dangerous_cleanup_path_flags_root_and_empty() {
         "an ordinary relative path must not be flagged"
     );
 }
+
+/// Cleaning up a cluster ends its orphan watcher, in every mode: the server was
+/// stopped normally, so nothing is left for a watcher to stop, and a long-lived
+/// process must not accumulate one per cluster (#287).
+#[cfg(target_os = "linux")]
+#[rstest]
+#[case::data_only(CleanupMode::DataOnly)]
+#[case::none(CleanupMode::None)]
+fn cleanup_ends_the_clusters_orphan_watcher(#[case] mode: CleanupMode) {
+    let sandbox = tempdir().expect("tempdir");
+    let data_dir = sandbox.path().join("cluster");
+    fs::create_dir_all(&data_dir).expect("create data dir");
+    fs::write(sandbox.path().join("cluster.lock"), b"").expect("the slot's lock file");
+    let settings = Settings {
+        data_dir,
+        installation_dir: sandbox.path().join("install"),
+        ..Settings::default()
+    };
+    assert!(
+        crate::bootstrap::watch_slot_owner(&settings.data_dir),
+        "a slot gets a watcher"
+    );
+
+    cleanup_in_process(mode, &settings, "cleanup-test");
+
+    assert!(
+        !crate::bootstrap::release_watcher(&settings.data_dir),
+        "cleanup must already have ended the watcher"
+    );
+}

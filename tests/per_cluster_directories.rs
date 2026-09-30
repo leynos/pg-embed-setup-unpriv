@@ -9,6 +9,7 @@
 //!   swept and the server it orphaned is stopped;
 //! - the killed child's lock is free while its orphaned server still runs, so the server did not
 //!   inherit it;
+//! - with the watcher enabled, a killed child's server is stopped soon after (Linux);
 //! - an explicit `PG_DATA_DIR` keeps a single directory at that path;
 //! - startups in one install tree wait for its setup lock;
 //! - a run killed mid-test leaves nothing the next run's sweep cannot reclaim.
@@ -159,6 +160,52 @@ fn a_sweep_keeps_the_live_and_clears_the_dead() {
     assert!(!dead_dir.exists(), "a dead cluster must be swept");
     assert!(!alive(orphan), "the orphaned server must be stopped first");
     live.finish();
+}
+
+/// With the watcher enabled, a killed child's server is stopped soon after,
+/// before any later bootstrap could sweep it (#287).
+///
+/// The child bootstraps through the normal startup path, so this covers the
+/// wiring the watcher's own tests cannot: that a start spawns one. Its server
+/// is stopped by the watcher when the kernel releases the child's slot lock,
+/// and the test fails if it is still running after the grace period.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_killed_owner_has_its_server_stopped_by_the_watcher() {
+    if !should_run() || !watcher_tools_present() {
+        return;
+    }
+    let root = fixed_root("watcher").expect("a fixed root");
+    let mut owner = spawn_child(&root, "hold", &[]).expect("owner child");
+    let dir = connected_dir(&owner.report().expect("owner report")).expect("owner connects");
+    let server = postmaster_pid(&dir).expect("the owner's server");
+    let _cleanup = KillOnDrop(Some(server));
+
+    owner.child.kill().expect("kill the owner");
+    owner.child.wait().expect("reap it");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while alive(server) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        !alive(server),
+        "the watcher must stop the server of a killed owner"
+    );
+}
+
+/// Whether `setsid` and `flock` are on `PATH`; without them there is no
+/// watcher and the sweep is the only reclaim.
+#[cfg(target_os = "linux")]
+fn watcher_tools_present() -> bool {
+    let found = ["setsid", "flock"].iter().all(|tool| {
+        std::env::var_os("PATH")
+            .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(tool).is_file()))
+    });
+    if !found {
+        tracing::warn!("SKIP: setsid or flock is not on PATH");
+    }
+    found
 }
 
 /// An explicit `PG_DATA_DIR` keeps a single data directory at that path,

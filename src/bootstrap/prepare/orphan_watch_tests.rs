@@ -69,6 +69,16 @@ impl Drop for Stand {
     }
 }
 
+/// Finds `sleep` on `PATH`, so a host that keeps it elsewhere than `/usr/bin`
+/// (NixOS, Guix, a minimal container) still runs these tests.
+fn sleep_on_path() -> Result<PathBuf> {
+    let paths = std::env::var_os("PATH").ok_or_else(|| eyre!("PATH is not set"))?;
+    std::env::split_paths(&paths)
+        .map(|dir| dir.join("sleep"))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| eyre!("no `sleep` binary on PATH"))
+}
+
 /// Starts `<name>` (a copy of `sleep`) in `cwd`.
 ///
 /// A shell would do, but a non-interactive bash ignores `SIGQUIT`, which is the
@@ -76,7 +86,7 @@ impl Drop for Stand {
 fn stand_in(name: &str, cwd: &Path, holder: &Path) -> Result<Stand> {
     let binary = holder.join(name);
     if !binary.exists() {
-        std::fs::copy("/usr/bin/sleep", &binary)?;
+        std::fs::copy(sleep_on_path()?, &binary)?;
     }
     let child = Command::new(&binary).arg("600").current_dir(cwd).spawn()?;
     let stand = Stand(child);
