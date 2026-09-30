@@ -71,22 +71,35 @@ struct Timings {
     start: u128,
 }
 
+/// Which phase a debug line records, and how long it took.
+fn phase_of(line: &str) -> Option<(&'static str, u128)> {
+    if line.contains("took the install tree's setup lock") {
+        return Some(("lock", field(line, "waited_ms=")?));
+    }
+    if !line.contains("lifecycle step finished") {
+        return None;
+    }
+    let elapsed = field(line, "elapsed_ms=")?;
+    if line.contains("step=\"setup\"") {
+        Some(("setup", elapsed))
+    } else if line.contains("step=\"start\"") {
+        Some(("start", elapsed))
+    } else {
+        None
+    }
+}
+
 /// Reads a child's timings out of its stdout and stderr.
 fn read_timings(stdout: &str, stderr: &str) -> Timings {
     let mut timings = Timings::default();
     for line in stdout.lines().filter(|line| line.contains("RAMP wall_ms=")) {
         timings.wall = field(line, "wall_ms=").unwrap_or_default();
     }
-    for line in stderr.lines() {
-        if line.contains("took the install tree's setup lock") {
-            timings.lock_wait = field(line, "waited_ms=").unwrap_or_default();
-        } else if line.contains("lifecycle step finished") {
-            let elapsed = field(line, "elapsed_ms=").unwrap_or_default();
-            if line.contains("step=\"setup\"") {
-                timings.setup = elapsed;
-            } else if line.contains("step=\"start\"") {
-                timings.start = elapsed;
-            }
+    for (phase, elapsed) in stderr.lines().filter_map(phase_of) {
+        match phase {
+            "lock" => timings.lock_wait = elapsed,
+            "setup" => timings.setup = elapsed,
+            _ => timings.start = elapsed,
         }
     }
     timings
