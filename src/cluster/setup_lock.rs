@@ -1,17 +1,25 @@
-//! Serializes cluster startup within one install tree, across processes.
+//! Serializes populating the install tree, across processes.
 //!
 //! Per-cluster data directories (#261) let processes run clusters side by
 //! side, but they still share the install tree. In a cold root, two
 //! processes would otherwise copy cached binaries into it, or download and
 //! extract an archive into it, at the same time, and the extension hook
-//! writes into it too. The startup lifecycle therefore holds an exclusive
-//! lock on `<install>/.pg-embed-setup.lock` from the cache copy through the
-//! server start. Each process still gets its own server; only their
-//! startups take turns.
+//! writes into it too. A start therefore takes an exclusive lock on
+//! `<install>/.pg-embed-setup.lock` before the cache copy.
 //!
-//! The lock is an `fs4` kernel lock on a file `std` opened with
-//! `O_CLOEXEC`, so the `postgres` children started under it do not inherit
-//! it, and the kernel drops it if the holder dies.
+//! How long it keeps the lock follows from what is left to write (#289):
+//!
+//! - After a binary-cache hit the tree is complete, and `Setup` only runs `initdb` in the cluster's
+//!   own data directory, so the start releases the lock before it and other processes' `initdb` run
+//!   alongside.
+//! - After a miss `Setup` downloads and extracts into the tree, so the start holds the lock through
+//!   `Setup`, the hook and `Start`.
+//! - The extension hook writes into the tree, so after a release it retakes the lock for as long as
+//!   it installs, when extensions are declared.
+//!
+//! Each process still gets its own server. The lock is an `fs4` kernel lock on
+//! a file `std` opened with `O_CLOEXEC`, so the `postgres` children started
+//! under it do not inherit it, and the kernel drops it if the holder dies.
 
 use std::fs::{File, OpenOptions};
 

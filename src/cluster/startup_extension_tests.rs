@@ -79,6 +79,40 @@ fn root_lifecycle_stops_when_the_extension_hook_fails(
     assert_stopped_before_start(&case.hook.operations, &err)
 }
 
+/// After a cache hit with an extension declared, the hook retakes the setup
+/// lock the start released, installs, and lets it go: the extension is in place
+/// before `Start`, the start does not deadlock on its own lock, and the lock is
+/// free once it returns (#289).
+#[rstest]
+#[serial(worker_hook)]
+fn a_cache_hit_with_extensions_retakes_the_setup_lock_for_the_hook(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    let entry = paths.cache_dir.join(TEST_POSTGRES_VERSION);
+    fs::create_dir_all(entry.join("bin").as_std_path())?;
+    fs::write(entry.join(".complete").as_std_path(), b"")?;
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+
+    let outcome = start_postgres(
+        &case.runtime,
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    )?;
+
+    assert_installed_between_setup_and_start(&case.hook.operations, &outcome.bootstrap)?;
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(paths.install_dir.join(".pg-embed-setup.lock").as_std_path())?;
+    ensure!(
+        fs4::FileExt::try_lock(&lock).is_ok(),
+        "the setup lock is free once the start returns"
+    );
+    Ok(())
+}
+
 /// The asynchronous root lifecycle stops on the same failure.
 #[cfg(feature = "async-api")]
 #[rstest]
