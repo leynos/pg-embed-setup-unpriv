@@ -162,6 +162,51 @@ fn copy_from_cache_leaves_an_installed_file_alone() {
     );
 }
 
+/// A second copy into a warm tree succeeds, symbolic links included. The
+/// first attempt at this failed with "File exists" on every link, which sent
+/// every later start down the slow path (#289).
+#[cfg(unix)]
+#[test]
+fn copy_from_cache_into_a_warm_tree_keeps_its_symlinks() {
+    let source_temp = tempdir().expect("source tempdir");
+    let target_temp = tempdir().expect("target tempdir");
+    let source = Utf8Path::from_path(source_temp.path()).expect("utf8 source");
+    let target = Utf8Path::from_path(target_temp.path()).expect("utf8 target");
+    create_mock_binaries(source).expect("create mock binaries");
+    std::os::unix::fs::symlink("postgres", source.join("bin/postgres-link")).expect("link");
+
+    copy_from_cache(source, target).expect("first copy");
+    copy_from_cache(source, target).expect("a copy into a warm tree");
+
+    let link = target.join("bin/postgres-link");
+    assert_eq!(
+        fs::read_link(&link).expect("link kept"),
+        std::path::Path::new("postgres")
+    );
+}
+
+/// A link that points elsewhere is replaced by the cached one.
+#[cfg(unix)]
+#[test]
+fn copy_from_cache_replaces_a_link_that_points_elsewhere() {
+    let source_temp = tempdir().expect("source tempdir");
+    let target_temp = tempdir().expect("target tempdir");
+    let source = Utf8Path::from_path(source_temp.path()).expect("utf8 source");
+    let target = Utf8Path::from_path(target_temp.path()).expect("utf8 target");
+    create_mock_binaries(source).expect("create mock binaries");
+    std::os::unix::fs::symlink("postgres", source.join("bin/postgres-link")).expect("link");
+    fs::create_dir_all(target.join("bin")).expect("target bin");
+    std::os::unix::fs::symlink("stale", target.join("bin/postgres-link")).expect("stale link");
+
+    copy_from_cache(source, target).expect("copy over a stale link");
+
+    let link = target.join("bin/postgres-link");
+    assert_eq!(
+        fs::read_link(&link).expect("link replaced"),
+        std::path::Path::new("postgres")
+    );
+}
+
 #[test]
 fn populate_cache_creates_version_directory() {
     let source_temp = tempdir().expect("source tempdir");
