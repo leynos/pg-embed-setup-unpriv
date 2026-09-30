@@ -888,8 +888,17 @@ ADR 005 records the design; this section covers the code.
   lock. The plan holds the claim guard across the probe and the removal, and
   `claim_slot` takes the same guard, so a claim cannot slip between them.
 - `src/cluster/setup_lock.rs` holds `SetupLock`, taken by `start_postgres`,
-  `start_postgres_async` (on the blocking pool) and the setup-only lifecycle.
-  It spans the cache copy through the start.
+  `start_postgres_async` (on the blocking pool) and the setup-only lifecycle. A
+  start holds it while the tree is populated and releases it after a cache hit,
+  before `Setup`'s `initdb`; `InstallLock` carries that decision to the
+  extension hook, which retakes the lock when it writes into the tree. The lock
+  and each lifecycle step emit debug events (`waited_ms`, `elapsed_ms`) so a
+  slow start can be attributed to a phase. `tests/start_ramp.rs` measures the
+  ramp:
+  `START_RAMP_ROOT=/dev/shm/ramp cargo test --test start_ramp -- --ignored
+  --nocapture`
+  starts N processes at once and prints wall, lock wait and phase medians. Use
+  a RAM-backed root to keep `initdb`'s fsync out of the numbers.
 - Tests: `cluster_slot_tests.rs` and `orphan_tests.rs` hold the unit cases.
   Their `FakePostgres` copies `/bin/sh` as `postgres` and runs `read line`.
   `tests/per_cluster_directories.rs` drives real children through concurrent

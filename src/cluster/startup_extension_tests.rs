@@ -208,6 +208,7 @@ fn populate_cache_on_miss_only_populates_on_cache_miss(
     let hit = PostSetup {
         cache_config: &cache_config,
         cache_hit: true,
+        install_lock: InstallLock::Held,
     };
     populate_cache_on_miss(hit, &bootstrap);
     ensure!(
@@ -218,6 +219,7 @@ fn populate_cache_on_miss_only_populates_on_cache_miss(
     let miss = PostSetup {
         cache_config: &cache_config,
         cache_hit: false,
+        install_lock: InstallLock::Held,
     };
     populate_cache_on_miss(miss, &bootstrap);
     ensure!(

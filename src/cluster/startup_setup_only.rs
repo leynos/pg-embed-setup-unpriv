@@ -7,6 +7,7 @@ use tracing::info;
 
 use super::{
     ClusterWorkerInvoker,
+    InstallLock,
     LifecycleStep,
     PostSetup,
     cache_config_from_bootstrap,
@@ -71,6 +72,7 @@ pub(in crate::cluster) fn setup_lifecycle(
         PostSetup {
             cache_config,
             cache_hit,
+            install_lock: InstallLock::Held,
         },
     )?;
     log_setup_complete(privileges, cache_hit);

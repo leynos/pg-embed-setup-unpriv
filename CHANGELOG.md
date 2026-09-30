@@ -3,6 +3,17 @@
 All notable changes to this crate are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Concurrent starts
+
+- Concurrent cluster starts no longer take turns through `initdb`. A warm root
+  serialized every start behind the install tree's setup lock, so start times
+  under `cargo nextest` climbed linearly with the number of processes (#289).
+  The lock is released after a binary-cache hit, and the cache copy no longer
+  fails on a warm tree's symbolic links, which had made every warm start look
+  like a cache miss.
+
 ## 0.6.2
 
 ### Fixed
