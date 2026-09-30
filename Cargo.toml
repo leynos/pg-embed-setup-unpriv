@@ -32,6 +32,11 @@ path = "tests/support/pg_worker_hang.rs"
 required-features = ["dev-worker"]
 
 [[test]]
+name = "ui"
+path = "tests/ui.rs"
+required-features = ["cluster-unit-tests"]
+
+[[test]]
 name = "test_cluster"
 path = "tests/test_cluster.rs"
 required-features = ["cluster-unit-tests"]
