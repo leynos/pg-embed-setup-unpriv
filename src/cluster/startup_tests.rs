@@ -367,3 +367,6 @@ fn setup_postgres_only_inside_runtime_returns_recoverable_error(
 
 #[path = "startup_extension_tests.rs"]
 mod extension_ordering;
+
+#[path = "startup_lock_tests.rs"]
+mod setup_lock_release;

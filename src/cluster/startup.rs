@@ -7,7 +7,7 @@
 
 use postgresql_embedded::PostgreSQL;
 use tokio::runtime::Runtime;
-use tracing::info;
+use tracing::{debug, info};
 
 #[cfg(feature = "async-api")]
 use super::worker_invoker::AsyncInvoker;
@@ -15,6 +15,7 @@ use super::{
     cache_integration,
     extension_hook::{PostSetup, run_post_setup},
     installation,
+    setup_lock::{InstallLock, SetupLock},
     worker_invoker::WorkerInvoker as ClusterWorkerInvoker,
     worker_operation,
 };
@@ -28,9 +29,14 @@ use crate::{
 
 #[path = "startup_setup_only.rs"]
 mod setup_only;
+#[path = "startup_timing.rs"]
+mod timing;
 pub(crate) use self::setup_only::setup_postgres_only;
 #[cfg(test)]
 pub(super) use self::setup_only::{setup_lifecycle, setup_with_privileges};
+use self::timing::timed_step;
+#[cfg(feature = "async-api")]
+use self::timing::timed_step_async;
 
 #[derive(Clone, Copy)]
 enum LifecycleStep {
@@ -39,6 +45,13 @@ enum LifecycleStep {
 }
 
 impl LifecycleStep {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Setup => "setup",
+            Self::Start => "start",
+        }
+    }
+
     const fn worker_operation(self) -> worker_operation::WorkerOperation {
         match self {
             Self::Setup => worker_operation::WorkerOperation::Setup,
@@ -76,13 +89,16 @@ pub(super) fn start_postgres(
 ) -> BootstrapResult<StartupOutcome> {
     let privileges = bootstrap.privileges;
     log_lifecycle_start(privileges, &bootstrap, false);
-    // Held from the cache copy through the start, so concurrent processes
-    // sharing the install tree take turns setting it up (#261).
-    let _setup = crate::cluster::setup_lock::SetupLock::acquire(&bootstrap)?;
+    // Held while the install tree is populated, so concurrent processes
+    // sharing it take turns (#261). After a cache hit the tree is complete, so
+    // the lock is released before `initdb` and the start (#289).
+    let install_root = SetupLock::install_root(&bootstrap)?;
+    let setup = SetupLock::acquire_at(&install_root)?;
 
     let version_req = bootstrap.settings.version.clone();
     let cache_hit =
         cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
+    let (_setup, install_lock) = InstallLock::after_cache_lookup(setup, cache_hit, &install_root);
 
     let context = LifecycleContext {
         runtime,
@@ -90,6 +106,7 @@ pub(super) fn start_postgres(
         post: PostSetup {
             cache_config,
             cache_hit,
+            install_lock,
         },
     };
     let (is_managed_via_worker, postgres) =
@@ -214,10 +231,14 @@ where
     F: FnMut(&ClusterWorkerInvoker<'_>, LifecycleStep) -> BootstrapResult<()>,
 {
     let setup_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
-    dispatch(&setup_invoker, LifecycleStep::Setup)?;
+    timed_step(LifecycleStep::Setup, || {
+        dispatch(&setup_invoker, LifecycleStep::Setup)
+    })?;
     run_post_setup(bootstrap, context.post)?;
     let start_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
-    dispatch(&start_invoker, LifecycleStep::Start)?;
+    timed_step(LifecycleStep::Start, || {
+        dispatch(&start_invoker, LifecycleStep::Start)
+    })?;
     installation::refresh_worker_port(bootstrap)
 }
 
@@ -253,19 +274,22 @@ pub(super) async fn start_postgres_async(
 ) -> BootstrapResult<StartupOutcome> {
     let privileges = bootstrap.privileges;
     log_lifecycle_start(privileges, &bootstrap, true);
-    // The same install-tree lock as the synchronous start (#261), taken off
-    // the runtime so a second bootstrap in this process waits without
+    // The same install-tree lock as the synchronous start (#261, #289), taken
+    // off the runtime so a second bootstrap in this process waits without
     // blocking the task that holds it.
-    let _setup = crate::cluster::setup_lock::SetupLock::acquire_async(&bootstrap).await?;
+    let install_root = crate::cluster::setup_lock::SetupLock::install_root(&bootstrap)?;
+    let setup = SetupLock::acquire_async_at(install_root.clone()).await?;
 
     // Try to use cached binaries before starting the lifecycle
     let version_req = bootstrap.settings.version.clone();
     let cache_hit =
         cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
 
+    let (_setup, install_lock) = InstallLock::after_cache_lookup(setup, cache_hit, &install_root);
     let post = PostSetup {
         cache_config,
         cache_hit,
+        install_lock,
     };
     let (is_managed_via_worker, postgres) = if privileges == ExecutionPrivileges::Root {
         Box::pin(invoke_lifecycle_root_async(&mut bootstrap, env_vars, post)).await?;
@@ -302,18 +326,24 @@ async fn invoke_lifecycle_async(
     embedded: &mut PostgreSQL,
 ) -> BootstrapResult<()> {
     let invoker = AsyncInvoker::new(bootstrap, env_vars);
-    Box::pin(
-        invoker.invoke(worker_operation::WorkerOperation::Setup, async {
-            embedded.setup().await
-        }),
+    timed_step_async(
+        LifecycleStep::Setup,
+        Box::pin(
+            invoker.invoke(worker_operation::WorkerOperation::Setup, async {
+                embedded.setup().await
+            }),
+        ),
     )
     .await?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
-    Box::pin(
-        start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
-            embedded.start().await
-        }),
+    timed_step_async(
+        LifecycleStep::Start,
+        Box::pin(
+            start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
+                embedded.start().await
+            }),
+        ),
     )
     .await?;
     installation::refresh_worker_port_async(bootstrap).await
@@ -328,19 +358,25 @@ async fn invoke_lifecycle_root_async(
 ) -> BootstrapResult<()> {
     let setup_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual setup; this drives the invocation.
-    Box::pin(
-        setup_invoker.invoke(worker_operation::WorkerOperation::Setup, async {
-            Ok::<(), postgresql_embedded::Error>(())
-        }),
+    timed_step_async(
+        LifecycleStep::Setup,
+        Box::pin(
+            setup_invoker.invoke(worker_operation::WorkerOperation::Setup, async {
+                Ok::<(), postgresql_embedded::Error>(())
+            }),
+        ),
     )
     .await?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual start; this drives the invocation.
-    Box::pin(
-        start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
-            Ok::<(), postgresql_embedded::Error>(())
-        }),
+    timed_step_async(
+        LifecycleStep::Start,
+        Box::pin(
+            start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
+                Ok::<(), postgresql_embedded::Error>(())
+            }),
+        ),
     )
     .await?;
     installation::refresh_worker_port_async(bootstrap).await

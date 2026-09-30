@@ -1022,7 +1022,7 @@ A data directory derived from a root now holds one directory per cluster, so
 concurrent test processes sharing a root no longer collide (#261). Each
 cluster's slot has a liveness lock that its process holds until exit, and a
 bootstrap sweeps slots whose lock it can take, stopping any server a dead owner
-orphaned. Startups in one install tree take turns under a setup lock. An
-explicit `PG_DATA_DIR` keeps the single-directory behaviour.
-[ADR 005](adr-005-per-cluster-data-directories.md) records the decision and the
-alternatives.
+orphaned. Populating an install tree takes turns under a setup lock, which a
+start releases after a cache hit. An explicit `PG_DATA_DIR` keeps the
+single-directory behaviour. [ADR 005](adr-005-per-cluster-data-directories.md)
+records the decision and the alternatives.

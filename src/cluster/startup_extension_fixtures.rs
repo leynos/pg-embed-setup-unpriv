@@ -184,3 +184,76 @@ pub(super) fn failing_request(base: &Utf8Path) -> Result<crate::extensions::Exte
 pub(super) fn failing_bootstrap(paths: &RootSetupPaths) -> Result<TestBootstrapSettings> {
     extension_bootstrap(paths, failing_request)
 }
+
+/// Whether another handle can take the setup lock in `install_root`.
+pub(super) fn lock_is_free(install_root: &Utf8Path) -> bool {
+    use fs4::FileExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(install_root.join(crate::cluster::setup_lock::SETUP_LOCK_FILE))
+        .is_ok_and(|file| FileExt::try_lock(&file).is_ok())
+}
+
+/// Seeds the binary cache with a complete entry, so the lookup is a hit.
+pub(super) fn seed_cache_hit(cache_dir: &Utf8Path) -> Result<()> {
+    let entry = cache_dir.join(TEST_POSTGRES_VERSION);
+    fs::create_dir_all(entry.join("bin").as_std_path())?;
+    fs::write(entry.join(".complete").as_std_path(), b"")?;
+    Ok(())
+}
+
+/// Replaces the bootstrap's manifest file with a FIFO and returns a thread
+/// that reports whether the setup lock was held while the hook read it.
+///
+/// The hook opens the manifest only once it is installing, so a writer that
+/// gets its open through is talking to a hook that is mid-install. The thread
+/// samples the lock at that moment, then supplies the manifest so the install
+/// carries on. The writer polls a non-blocking open, so a hook that never
+/// reads the manifest fails the test rather than hanging it.
+#[cfg(unix)]
+pub(super) fn manifest_observing_the_lock(
+    bootstrap: &TestBootstrapSettings,
+    install_root: &Utf8Path,
+) -> Result<std::thread::JoinHandle<Result<bool>>> {
+    use std::{
+        io::Write,
+        os::unix::fs::OpenOptionsExt,
+        time::{Duration, Instant},
+    };
+
+    let Some(crate::extensions::ExtensionRequest {
+        manifest: crate::extensions::ManifestSource::Path { path: declared, .. },
+        ..
+    }) = bootstrap.extensions.as_ref()
+    else {
+        return Err(eyre!("the bootstrap must declare a path manifest"));
+    };
+    let path = declared.clone();
+    let body = std::fs::read(path.as_std_path())?;
+    std::fs::remove_file(path.as_std_path())?;
+    nix::unistd::mkfifo(
+        path.as_std_path(),
+        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+    )?;
+    let root = install_root.to_path_buf();
+    Ok(std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_mins(1);
+        let mut writer = loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(path.as_std_path())
+            {
+                Ok(file) => break file,
+                Err(_) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(err) => return Err(eyre!("the hook never read the manifest: {err}")),
+            }
+        };
+        let held = !lock_is_free(&root);
+        writer.write_all(&body)?;
+        Ok(held)
+    }))
+}

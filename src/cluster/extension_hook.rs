@@ -8,7 +8,7 @@
 use camino::Utf8PathBuf;
 use color_eyre::eyre::eyre;
 
-use super::{cache_integration, installation};
+use super::{cache_integration, installation, setup_lock::InstallLock};
 #[cfg(feature = "async-api")]
 use crate::extensions::install_extensions_async;
 use crate::{
@@ -25,6 +25,8 @@ pub(super) struct PostSetup<'a> {
     pub(super) cache_config: &'a BinaryCacheConfig,
     /// Whether `Setup` reused cached binaries.
     pub(super) cache_hit: bool,
+    /// Whether the start still holds the install tree's setup lock.
+    pub(super) install_lock: InstallLock<'a>,
 }
 
 /// Runs the post-setup steps: resolve the versioned directory, populate the
@@ -38,6 +40,7 @@ pub(super) fn run_post_setup(
     let Some((request, install_dir)) = extension_target(bootstrap)? else {
         return Ok(());
     };
+    let _hook_lock = post.install_lock.for_hook()?;
     bootstrap.installed_extensions = install_extensions(&request, &install_dir)?;
     Ok(())
 }
@@ -53,6 +56,7 @@ pub(super) async fn run_post_setup_async(
     let Some((request, install_dir)) = extension_target(bootstrap)? else {
         return Ok(());
     };
+    let _hook_lock = post.install_lock.for_hook_async().await?;
     bootstrap.installed_extensions = install_extensions_async(request, install_dir).await?;
     Ok(())
 }

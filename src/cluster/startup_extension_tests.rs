@@ -13,7 +13,16 @@ use crate::cluster::extension_hook::populate_cache_on_miss;
 #[path = "startup_extension_fixtures.rs"]
 mod fixtures;
 
-use fixtures::{PROBE_FILES, failing_bootstrap, lifecycle_case, ordering_bootstrap};
+#[cfg(unix)]
+use fixtures::manifest_observing_the_lock;
+use fixtures::{
+    PROBE_FILES,
+    failing_bootstrap,
+    lifecycle_case,
+    lock_is_free,
+    ordering_bootstrap,
+    seed_cache_hit,
+};
 
 fn assert_installed_between_setup_and_start(
     operations: &Mutex<Vec<String>>,
@@ -77,6 +86,96 @@ fn root_lifecycle_stops_when_the_extension_hook_fails(
     .err()
     .ok_or_else(|| eyre!("a broken manifest must stop the lifecycle"))?;
     assert_stopped_before_start(&case.hook.operations, &err)
+}
+
+/// After a cache hit with an extension declared, the hook retakes the setup
+/// lock the start released, installs, and lets it go: the extension is in place
+/// before `Start`, the start does not deadlock on its own lock, and the lock is
+/// free once it returns (#289).
+#[rstest]
+#[serial(worker_hook)]
+fn a_cache_hit_with_extensions_retakes_the_setup_lock_for_the_hook(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    seed_cache_hit(&paths.cache_dir)?;
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+
+    let outcome = start_postgres(
+        &case.runtime,
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    )?;
+
+    assert_installed_between_setup_and_start(&case.hook.operations, &outcome.bootstrap)?;
+    ensure!(
+        lock_is_free(&paths.install_dir),
+        "the setup lock is free once the start returns"
+    );
+    Ok(())
+}
+
+/// After a cache hit the production hook holds the setup lock while it
+/// installs: the install tree is mutated only under the lock, even though the
+/// start released it before the hit (#289). The manifest is a FIFO, so the
+/// observer samples the lock exactly while the hook is reading it.
+#[cfg(unix)]
+#[rstest]
+#[serial(worker_hook)]
+fn the_hook_holds_the_setup_lock_while_it_installs_after_a_cache_hit(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    seed_cache_hit(&paths.cache_dir)?;
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+    let observer = manifest_observing_the_lock(&case.bootstrap, &paths.install_dir)?;
+
+    start_postgres(
+        &case.runtime,
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    )?;
+
+    let held = observer
+        .join()
+        .map_err(|_| eyre!("the observer thread panicked"))??;
+    ensure!(held, "the hook must hold the setup lock while it installs");
+    ensure!(
+        lock_is_free(&paths.install_dir),
+        "the setup lock is free once the start returns"
+    );
+    Ok(())
+}
+
+/// The asynchronous start holds the lock through the same install.
+#[cfg(all(unix, feature = "async-api"))]
+#[rstest]
+#[serial(worker_hook)]
+fn the_async_hook_holds_the_setup_lock_while_it_installs_after_a_cache_hit(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    seed_cache_hit(&paths.cache_dir)?;
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+    let observer = manifest_observing_the_lock(&case.bootstrap, &paths.install_dir)?;
+
+    case.runtime.block_on(start_postgres_async(
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    ))?;
+
+    let held = observer
+        .join()
+        .map_err(|_| eyre!("the observer thread panicked"))??;
+    ensure!(held, "the hook must hold the setup lock while it installs");
+    ensure!(
+        lock_is_free(&paths.install_dir),
+        "the setup lock is free once the start returns"
+    );
+    Ok(())
 }
 
 /// The asynchronous root lifecycle stops on the same failure.
@@ -208,6 +307,7 @@ fn populate_cache_on_miss_only_populates_on_cache_miss(
     let hit = PostSetup {
         cache_config: &cache_config,
         cache_hit: true,
+        install_lock: InstallLock::Held,
     };
     populate_cache_on_miss(hit, &bootstrap);
     ensure!(
@@ -218,6 +318,7 @@ fn populate_cache_on_miss_only_populates_on_cache_miss(
     let miss = PostSetup {
         cache_config: &cache_config,
         cache_hit: false,
+        install_lock: InstallLock::Held,
     };
     populate_cache_on_miss(miss, &bootstrap);
     ensure!(

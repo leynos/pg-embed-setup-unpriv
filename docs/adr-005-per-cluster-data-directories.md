@@ -113,10 +113,34 @@ that may have changed since the orphan started.
 Processes still share the install tree, so a cold root would otherwise see two
 processes copying cached binaries into it, or extracting an archive into it, at
 once. The startup lifecycle holds an exclusive lock on
-`<install>/.pg-embed-setup.lock` from the binary-cache copy through the server
-start. Each process still gets its own server; only their startups take turns.
-The asynchronous API takes the lock on the blocking pool, so a second bootstrap
-in the same process waits without blocking the runtime.
+`<install>/.pg-embed-setup.lock` while the tree is populated: from the
+binary-cache copy, and through `Setup` on a cache miss, where `Setup` downloads
+and extracts. After a cache hit the tree is complete, and `Setup` only runs
+`initdb` in the cluster's own data directory, so the lock is released before
+it. The extension hook writes into the tree, so it retakes the lock when
+extensions are declared. Each process gets its own server, and on a warm root
+only the brief cache copy is serialized. The asynchronous API takes the lock on
+the blocking pool, so a second bootstrap in the same process waits without
+blocking the runtime.
+
+Holding the lock through `initdb` as well was the first design, and it
+serialized every warm start: sixteen concurrent starts finished at 0.8 s to
+12.9 s instead of together (#289). Measured with `tests/start_ramp.rs` on a
+RAM-backed root, so disk contention does not hide the step:
+
+| Concurrent starts | Lock held through `initdb` (wall, median/max) | Released after the cache hit |
+| ----------------- | --------------------------------------------- | ---------------------------- |
+| 1                 | 0.83 s / 0.83 s                               | 0.66 s / 0.66 s              |
+| 4                 | 3.01 s / 3.74 s                               | 0.82 s / 0.84 s              |
+| 8                 | 3.76 s / 6.81 s                               | 0.79 s / 0.84 s              |
+| 16                | 7.62 s / 12.95 s                              | 1.12 s / 1.19 s              |
+
+_Table: Wall time to start one cluster per process against a warm root._
+
+A second defect hid this: the cache copy failed with "File exists" on every
+symbolic link of a warm tree, so a warm start reported a cache miss and kept
+the lock through `Setup` whatever the design. The copy now leaves a link that
+already points at its target and replaces any other.
 
 The install tree also stays in use after a startup: the first process's server
 runs from it while later processes start. The binary-cache copy therefore
@@ -169,8 +193,9 @@ one such cluster at a time.
 - A slot's lock file and password file outlive a cluster that is dropped
   before its process exits, until that process exits and a later bootstrap
   sweeps them.
-- Startups in one install tree are serialized, so a wide nextest group queues
-  briefly at startup. Servers then run in parallel.
+- Populating an install tree is serialized, so a cold root sets up once. A warm
+  root serializes only the cache copy, and `initdb` and the server start run in
+  parallel.
 - `fs4` is already a dependency (1.1.0, used by the binary cache's lock). The
   only manifest change is the `signal` feature of the existing `nix`
   dependency, used for the liveness probe and the stop.

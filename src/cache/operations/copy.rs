@@ -151,6 +151,15 @@ fn log_permission_copy_failure(src: &Path, dst: &Path, err: &io::Error) {
 #[cfg(unix)]
 fn copy_symlink(src: &Path, dst: &Path) -> io::Result<()> {
     let target = fs::read_link(src)?;
+    // A warm install tree already holds the link. `symlink` refuses an
+    // existing path, which failed the whole copy and sent every start down the
+    // slow path (#289), so a link that already points at the target stays and
+    // any other entry is replaced.
+    match fs::read_link(dst) {
+        Ok(existing) if existing == target => return Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Ok(_) | Err(_) => fs::remove_file(dst)?,
+    }
     std::os::unix::fs::symlink(&target, dst)?;
     Ok(())
 }
