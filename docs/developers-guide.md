@@ -134,6 +134,16 @@ a warm run. A fork's pull request restores a hosted cache that main no longer
 refreshes; fork pull requests are rare here, and a second hosted writer would
 pay double on every main push.
 
+`binstall-packaging` places only its Linux row on Ubicloud. Its `runs-on` reads
+`${{ matrix.runner }}`, and the Linux row's `runner` value is the
+runner-selection expression itself, with the pinned `ubuntu-24.04` as the fork
+arm; the macOS and Windows rows are unchanged, and the required check names
+(which carry the target, not the runner) are too. The job's one ceiling covers
+its slowest row. The contract reads a matrix-placed job through its rows: each
+row that names Ubicloud is judged as a runner-selection expression, the hosted
+rows are left alone, and Ubicloud named under a key the `runs-on` does not read
+is refused.
+
 `scripts/tests/test_runner_placement.py` holds this to the files. It evaluates
 the expression for a push or dispatch, a same-repository pull request and a
 fork, rejects a literal label, inverted arms, another label and another
