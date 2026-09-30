@@ -850,7 +850,8 @@ warning naming it; it can be deleted.
   directory is the cluster's. A stale file naming a recycled process ID is left
   alone. The watcher is skipped where `setsid` or `flock` is missing, as on
   macOS, where the sweep is the only reclaim; a stopped cluster ends its own
-  watcher.
+  watcher. Set `PG_EMBED_ORPHAN_WATCHER=off` in a process to keep it from
+  starting watchers, for example to test the sweep alone.
 - **Setup turns.** Clusters sharing an install tree take turns populating it,
   under a lock on `<root>/install/.pg-embed-setup.lock`, so a cold root is set
   up once rather than raced. Once the tree is populated, clusters initialize

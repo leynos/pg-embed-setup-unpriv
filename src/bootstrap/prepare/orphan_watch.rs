@@ -31,6 +31,12 @@ use tracing::debug;
 
 use crate::observability::LOG_TARGET;
 
+/// Environment variable that, set to `off`, keeps a process from spawning
+/// watchers, so the next bootstrap's sweep is the only reclaim of a killed
+/// owner's server. A test of the sweep needs it: the watcher would stop the
+/// orphan before the sweep has one to find.
+pub(crate) const OPT_OUT_VAR: &str = "PG_EMBED_ORPHAN_WATCHER";
+
 /// The watcher's shell body: `$1` is the data directory.
 ///
 /// It reads the PID on the first line of `postmaster.pid`, requires it to be
@@ -85,9 +91,13 @@ pub(crate) fn spawn_watcher(lock: &Path, data_dir: &Path) -> io::Result<Child> {
 
 /// Starts a watcher for the slot that owns `data_dir`, if it is a slot.
 ///
-/// Best effort: a directory that is not a slot, or a host without `setsid` or
-/// `flock`, is skipped with a debug event and the sweep remains the reclaim.
+/// Best effort: `PG_EMBED_ORPHAN_WATCHER=off` skips it, and a directory that is not a slot, or a
+/// host without `setsid` or `flock`, is skipped with a debug event and the sweep remains the
+/// reclaim.
 pub(crate) fn watch_slot_owner(data_dir: &Path) -> bool {
+    if std::env::var_os(OPT_OUT_VAR).is_some_and(|value| value == "off") {
+        return false;
+    }
     let Some(lock) = super::cluster_slot::slot_lock_path(data_dir) else {
         return false;
     };

@@ -127,7 +127,14 @@ fn a_sweep_keeps_the_live_and_clears_the_dead() {
     let root = fixed_root("sweep").expect("a fixed root");
     let mut live = spawn_child(&root, "hold", &[]).expect("live child");
     let live_dir = connected_dir(&live.report().expect("live report")).expect("live connects");
-    let mut doomed = spawn_child(&root, "hold", &[]).expect("doomed child");
+    // The watcher would stop the orphan before the sweep finds it, and hold the
+    // slot's lock while it did; this test is of the sweep alone.
+    let mut doomed = spawn_child(
+        &root,
+        "hold",
+        &[("PG_EMBED_ORPHAN_WATCHER", std::path::Path::new("off"))],
+    )
+    .expect("doomed child");
     let dead_dir =
         connected_dir(&doomed.report().expect("doomed report")).expect("doomed connects");
     let orphan = postmaster_pid(&dead_dir).expect("the doomed child's server");
@@ -228,7 +235,14 @@ fn a_killed_run_leaves_only_what_the_next_sweep_reclaims() {
         return;
     }
     let root = fixed_root("killed_run").expect("a fixed root");
-    let mut orchestrator = spawn_child(&root, "orchestrate", &[]).expect("orchestrator");
+    // The grandchild inherits the opt-out: this test is of the sweep alone, and
+    // a watcher would stop the server and hold the slot's lock while it did.
+    let mut orchestrator = spawn_child(
+        &root,
+        "orchestrate",
+        &[("PG_EMBED_ORPHAN_WATCHER", std::path::Path::new("off"))],
+    )
+    .expect("orchestrator");
     let leftover = connected_dir(&orchestrator.report().expect("orchestrator report"))
         .expect("the grandchild connects");
     let orphan = postmaster_pid(&leftover).expect("the grandchild's server");
