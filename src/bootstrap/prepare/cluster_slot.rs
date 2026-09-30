@@ -180,6 +180,7 @@ pub(super) fn lock_path(data_dir: &Utf8Path) -> Utf8PathBuf {
 }
 
 /// Returns the lock file of `data_dir` when it is a slot, and None otherwise.
+#[cfg(target_os = "linux")]
 pub(crate) fn slot_lock_path(data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     match slot_lookup(data_dir) {
         SlotLookup::Slot(parent) => {
