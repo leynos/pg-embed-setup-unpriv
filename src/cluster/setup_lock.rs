@@ -72,6 +72,14 @@ impl SetupLock {
     ///
     /// Returns an error when the lock file cannot be created or locked.
     pub(super) fn acquire_at(install_dir: &Utf8Path) -> BootstrapResult<Self> {
+        let (lock, waited) = Self::lock_timed(install_dir)?;
+        log_waited(install_dir, waited);
+        Ok(lock)
+    }
+
+    /// Takes the lock and reports how long the wait for it lasted, leaving the
+    /// logging to the caller so an async start records it on its own thread.
+    fn lock_timed(install_dir: &Utf8Path) -> BootstrapResult<(Self, std::time::Duration)> {
         std::fs::create_dir_all(install_dir).map_err(|err| lock_error(install_dir, err))?;
         let path = install_dir.join(SETUP_LOCK_FILE);
         let file = OpenOptions::new()
@@ -83,15 +91,7 @@ impl SetupLock {
             .map_err(|err| lock_error(&path, err))?;
         let started = std::time::Instant::now();
         FileExt::lock(&file).map_err(|err| lock_error(&path, err))?;
-        // The wait is the cost of sharing an install tree, so a caller can tell
-        // contention from the cost of the start itself (#289).
-        debug!(
-            target: LOG_TARGET,
-            lock = %path,
-            waited_ms = started.elapsed().as_millis(),
-            "took the install tree's setup lock"
-        );
-        Ok(Self { _file: file })
+        Ok((Self { _file: file }, started.elapsed()))
     }
 
     /// Takes the setup lock in `install_dir` on the blocking pool.
@@ -101,11 +101,14 @@ impl SetupLock {
     /// As [`Self::acquire_at`], or when the blocking task cannot be joined.
     #[cfg(feature = "async-api")]
     pub(super) async fn acquire_async_at(install_dir: Utf8PathBuf) -> BootstrapResult<Self> {
-        tokio::task::spawn_blocking(move || Self::acquire_at(&install_dir))
+        let dir = install_dir.clone();
+        let (lock, waited) = tokio::task::spawn_blocking(move || Self::lock_timed(&dir))
             .await
             .map_err(|err| {
                 BootstrapError::from(Report::new(err).wrap_err("setup lock task failed"))
-            })?
+            })??;
+        log_waited(&install_dir, waited);
+        Ok(lock)
     }
 }
 
@@ -177,6 +180,19 @@ impl InstallLock<'_> {
             Self::Held => Ok(None),
         }
     }
+}
+
+/// Records how long a start waited for the lock.
+///
+/// The wait is the cost of sharing an install tree, so a caller can tell
+/// contention from the cost of the start itself (#289).
+fn log_waited(install_dir: &Utf8Path, waited: std::time::Duration) {
+    debug!(
+        target: LOG_TARGET,
+        lock = %install_dir.join(SETUP_LOCK_FILE),
+        waited_ms = waited.as_millis(),
+        "took the install tree's setup lock"
+    );
 }
 
 /// Wraps an I/O failure on the setup lock.

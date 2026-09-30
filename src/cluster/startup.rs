@@ -29,9 +29,14 @@ use crate::{
 
 #[path = "startup_setup_only.rs"]
 mod setup_only;
+#[path = "startup_timing.rs"]
+mod timing;
 pub(crate) use self::setup_only::setup_postgres_only;
 #[cfg(test)]
 pub(super) use self::setup_only::{setup_lifecycle, setup_with_privileges};
+use self::timing::timed_step;
+#[cfg(feature = "async-api")]
+use self::timing::timed_step_async;
 
 #[derive(Clone, Copy)]
 enum LifecycleStep {
@@ -215,25 +220,6 @@ pub(super) fn prepare_postgres_handle(
     }
 }
 
-/// Runs one lifecycle step and records how long it took.
-///
-/// `Setup` covers the installation and `initdb`, and `Start` the server's own
-/// start, so a slow start can be attributed to a phase (#289).
-fn timed_step(
-    step: LifecycleStep,
-    run: impl FnOnce() -> BootstrapResult<()>,
-) -> BootstrapResult<()> {
-    let started = std::time::Instant::now();
-    let outcome = run();
-    debug!(
-        target: LOG_TARGET,
-        step = step.name(),
-        elapsed_ms = started.elapsed().as_millis(),
-        "lifecycle step finished"
-    );
-    outcome
-}
-
 /// Runs `Setup`, the post-setup hook, `Start` and the port refresh, using
 /// `dispatch` to execute each step either via the worker or in-process.
 fn run_lifecycle_steps<F>(
@@ -340,18 +326,24 @@ async fn invoke_lifecycle_async(
     embedded: &mut PostgreSQL,
 ) -> BootstrapResult<()> {
     let invoker = AsyncInvoker::new(bootstrap, env_vars);
-    Box::pin(
-        invoker.invoke(worker_operation::WorkerOperation::Setup, async {
-            embedded.setup().await
-        }),
+    timed_step_async(
+        LifecycleStep::Setup,
+        Box::pin(
+            invoker.invoke(worker_operation::WorkerOperation::Setup, async {
+                embedded.setup().await
+            }),
+        ),
     )
     .await?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
-    Box::pin(
-        start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
-            embedded.start().await
-        }),
+    timed_step_async(
+        LifecycleStep::Start,
+        Box::pin(
+            start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
+                embedded.start().await
+            }),
+        ),
     )
     .await?;
     installation::refresh_worker_port_async(bootstrap).await
@@ -366,19 +358,25 @@ async fn invoke_lifecycle_root_async(
 ) -> BootstrapResult<()> {
     let setup_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual setup; this drives the invocation.
-    Box::pin(
-        setup_invoker.invoke(worker_operation::WorkerOperation::Setup, async {
-            Ok::<(), postgresql_embedded::Error>(())
-        }),
+    timed_step_async(
+        LifecycleStep::Setup,
+        Box::pin(
+            setup_invoker.invoke(worker_operation::WorkerOperation::Setup, async {
+                Ok::<(), postgresql_embedded::Error>(())
+            }),
+        ),
     )
     .await?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual start; this drives the invocation.
-    Box::pin(
-        start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
-            Ok::<(), postgresql_embedded::Error>(())
-        }),
+    timed_step_async(
+        LifecycleStep::Start,
+        Box::pin(
+            start_invoker.invoke(worker_operation::WorkerOperation::Start, async {
+                Ok::<(), postgresql_embedded::Error>(())
+            }),
+        ),
     )
     .await?;
     installation::refresh_worker_port_async(bootstrap).await
