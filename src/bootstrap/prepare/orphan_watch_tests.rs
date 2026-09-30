@@ -139,43 +139,34 @@ fn a_matching_server_is_signalled_only_after_the_owner_dies() -> Result<()> {
     Ok(())
 }
 
-/// A live process the pid file names that is not called `postgres` survives,
-/// however the file got there.
-#[test]
-fn a_live_process_not_named_postgres_survives() -> Result<()> {
+/// A live process the pid file names survives when it is not this slot's
+/// `postgres`: one not called `postgres`, or a `postgres` serving another
+/// directory, as a recycled PID would be.
+#[rstest::rstest]
+#[case::not_named_postgres("bystander", false)]
+#[case::postgres_elsewhere("postgres", true)]
+fn a_live_process_that_is_not_this_slots_postgres_survives(
+    #[case] name: &str,
+    #[case] elsewhere: bool,
+) -> Result<()> {
     let mut slot = Slot::new()?;
     let holder = tempfile::tempdir()?;
-    let mut bystander = stand_in("bystander", &slot.data_dir, holder.path())?;
-    slot.name_pid_file(bystander.0.id())?;
+    let other_dir = tempfile::tempdir()?;
+    let cwd = if elsewhere {
+        other_dir.path()
+    } else {
+        &slot.data_dir
+    };
+    let mut process = stand_in(name, cwd, holder.path())?;
+    slot.name_pid_file(process.0.id())?;
     let mut watcher = spawn_watcher(&slot.lock, &slot.data_dir)?;
 
     slot.owner_dies();
 
     ensure!(wait_exit(&mut watcher, WAIT)?.is_some(), "the watcher ends");
     ensure!(
-        wait_exit(&mut bystander.0, SETTLE)?.is_none(),
-        "a process that is not postgres must not be signalled"
-    );
-    Ok(())
-}
-
-/// A `postgres` running somewhere else, such as another cluster's server that
-/// a recycled PID now names, survives.
-#[test]
-fn a_postgres_in_another_directory_survives() -> Result<()> {
-    let mut slot = Slot::new()?;
-    let holder = tempfile::tempdir()?;
-    let elsewhere = tempfile::tempdir()?;
-    let mut stranger = stand_in("postgres", elsewhere.path(), holder.path())?;
-    slot.name_pid_file(stranger.0.id())?;
-    let mut watcher = spawn_watcher(&slot.lock, &slot.data_dir)?;
-
-    slot.owner_dies();
-
-    ensure!(wait_exit(&mut watcher, WAIT)?.is_some(), "the watcher ends");
-    ensure!(
-        wait_exit(&mut stranger.0, SETTLE)?.is_none(),
-        "a postgres serving another directory must not be signalled"
+        wait_exit(&mut process.0, SETTLE)?.is_none(),
+        "{name} (elsewhere: {elsewhere}) must not be signalled"
     );
     Ok(())
 }
