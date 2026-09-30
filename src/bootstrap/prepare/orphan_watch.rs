@@ -51,7 +51,9 @@ exit 0
 /// Watchers spawned by this process, by data directory.
 ///
 /// A watcher is meant to outlive its owner, so a live process never waits on
-/// one; the exit that releases the slot lock is what wakes it. A cluster that
+/// one; the exit that releases the slot lock is what wakes it. That lock is held
+/// for the life of the process, not of the cluster (`cluster_slot::HELD`), so a
+/// watcher would not end by itself when its cluster is dropped. A cluster that
 /// is stopped normally ends its own watcher through [`release_watcher`], so a
 /// long-lived test process does not accumulate one per cluster it has started.
 static WATCHERS: Mutex<Option<HashMap<PathBuf, Child>>> = Mutex::new(None);

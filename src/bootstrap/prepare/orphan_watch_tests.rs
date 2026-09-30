@@ -4,7 +4,9 @@
 //! The owner is stood in for by a lock this test holds and then drops, which is
 //! what the kernel does when a real owner dies. The "server" is a copy of
 //! `sleep` named `postgres`, run in the data directory, so `/proc/<pid>/comm` and
-//! `/proc/<pid>/cwd` read as a postmaster's do.
+//! `/proc/<pid>/cwd` read as a postmaster's do. It is `sleep` and not a shell
+//! because a non-interactive bash ignores `SIGQUIT`, the signal a postmaster is
+//! stopped with, so a shell stand-in would survive a watcher that worked.
 
 use std::{
     fs::{File, OpenOptions},
