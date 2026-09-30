@@ -844,6 +844,8 @@ warning naming it; it can be deleted.
   under a lock on `<root>/install/.pg-embed-setup.lock`, so a cold root is set
   up once rather than raced. Once the tree is populated, clusters initialize
   and start in parallel; only the brief copy of cached binaries is serialized.
+  Clusters that declare extensions retake the lock while the extensions are
+  installed, so that step is also serialized.
 
 ADR 005 records the design.
 

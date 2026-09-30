@@ -165,6 +165,7 @@ fn copy_from_cache_leaves_an_installed_file_alone() {
 /// Two temporary trees, the source holding a mock install with a symbolic link
 /// `bin/postgres-link` to `postgres`.
 #[cfg(unix)]
+#[fixture]
 fn linked_source_and_target() -> io::Result<(TempDir, TempDir)> {
     let source_temp = tempdir()?;
     let target_temp = tempdir()?;
@@ -185,9 +186,11 @@ fn link_target(target: &Utf8Path) -> io::Result<std::path::PathBuf> {
 /// first attempt at this failed with "File exists" on every link, which sent
 /// every later start down the slow path (#289).
 #[cfg(unix)]
-#[test]
-fn copy_from_cache_into_a_warm_tree_keeps_its_symlinks() {
-    let (source_temp, target_temp) = linked_source_and_target().expect("a linked source");
+#[rstest]
+fn copy_from_cache_into_a_warm_tree_keeps_its_symlinks(
+    linked_source_and_target: io::Result<(TempDir, TempDir)>,
+) {
+    let (source_temp, target_temp) = linked_source_and_target.expect("a linked source");
     let source = Utf8Path::from_path(source_temp.path()).expect("utf8 source");
     let target = Utf8Path::from_path(target_temp.path()).expect("utf8 target");
 
@@ -202,9 +205,11 @@ fn copy_from_cache_into_a_warm_tree_keeps_its_symlinks() {
 
 /// A link that points elsewhere is replaced by the cached one.
 #[cfg(unix)]
-#[test]
-fn copy_from_cache_replaces_a_link_that_points_elsewhere() {
-    let (source_temp, target_temp) = linked_source_and_target().expect("a linked source");
+#[rstest]
+fn copy_from_cache_replaces_a_link_that_points_elsewhere(
+    linked_source_and_target: io::Result<(TempDir, TempDir)>,
+) {
+    let (source_temp, target_temp) = linked_source_and_target.expect("a linked source");
     let source = Utf8Path::from_path(source_temp.path()).expect("utf8 source");
     let target = Utf8Path::from_path(target_temp.path()).expect("utf8 target");
     fs::create_dir_all(target.join("bin")).expect("target bin");

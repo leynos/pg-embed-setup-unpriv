@@ -131,8 +131,16 @@ fn round(root: &Path, count: usize) -> std::io::Result<Vec<Timings>> {
     let mut all = Vec::new();
     for child in children {
         let output = child.wait_with_output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // A child that failed reports zero for every phase, which would read
+        // as a fast start, so a failed round is an error, not a row.
+        if !output.status.success() || !stdout.contains("ok=true") {
+            return Err(std::io::Error::other(
+                "a ramp child failed to boot its cluster",
+            ));
+        }
         all.push(read_timings(
-            &String::from_utf8_lossy(&output.stdout),
+            &stdout,
             &String::from_utf8_lossy(&output.stderr),
         ));
     }
