@@ -139,10 +139,11 @@ pay double on every main push.
 runner-selection expression itself, with the pinned `ubuntu-24.04` as the fork
 arm; the macOS and Windows rows are unchanged, and the required check names
 (which carry the target, not the runner) are too. The job's one ceiling covers
-its slowest row. The contract reads a matrix-placed job through its rows: each
-row that names Ubicloud is judged as a runner-selection expression, the hosted
-rows are left alone, and Ubicloud named under a key the `runs-on` does not read
-is refused.
+its slowest row: 15 minutes, twice the 5.5 the Windows row took (run
+36721523547), rounded up to 5. The contract reads a matrix-placed job through
+its rows: each row that names Ubicloud is judged as a runner-selection
+expression, the hosted rows are left alone, and Ubicloud named under a key the
+`runs-on` does not read is refused.
 
 `scripts/tests/test_runner_placement.py` holds this to the files. It evaluates
 the expression for a push or dispatch, a same-repository pull request and a
