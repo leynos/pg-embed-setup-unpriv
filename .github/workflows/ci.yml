@@ -255,7 +255,8 @@ jobs:
     # taken from the matrix row, which falls back to the hosted pool for a pull
     # request from a fork, as every Ubicloud lane here does. The macOS and
     # Windows rows are unchanged. The ceiling is one for the job, so it covers
-    # the slowest row; provisional until a warm Ubicloud run sizes it.
+    # the slowest row: twice the 5.5 min the Windows row took (run 36721523547),
+    # rounded up to 15. The Linux row on Ubicloud took 3.5 min.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
