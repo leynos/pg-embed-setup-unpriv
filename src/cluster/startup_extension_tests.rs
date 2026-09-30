@@ -13,7 +13,16 @@ use crate::cluster::extension_hook::populate_cache_on_miss;
 #[path = "startup_extension_fixtures.rs"]
 mod fixtures;
 
-use fixtures::{PROBE_FILES, failing_bootstrap, lifecycle_case, ordering_bootstrap};
+#[cfg(unix)]
+use fixtures::manifest_observing_the_lock;
+use fixtures::{
+    PROBE_FILES,
+    failing_bootstrap,
+    lifecycle_case,
+    lock_is_free,
+    ordering_bootstrap,
+    seed_cache_hit,
+};
 
 fn assert_installed_between_setup_and_start(
     operations: &Mutex<Vec<String>>,
@@ -89,9 +98,7 @@ fn a_cache_hit_with_extensions_retakes_the_setup_lock_for_the_hook(
     #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
 ) -> Result<()> {
     let paths = root_setup_paths_res?;
-    let entry = paths.cache_dir.join(TEST_POSTGRES_VERSION);
-    fs::create_dir_all(entry.join("bin").as_std_path())?;
-    fs::write(entry.join(".complete").as_std_path(), b"")?;
+    seed_cache_hit(&paths.cache_dir)?;
     let case = lifecycle_case(&paths, ordering_bootstrap)?;
 
     let outcome = start_postgres(
@@ -102,12 +109,70 @@ fn a_cache_hit_with_extensions_retakes_the_setup_lock_for_the_hook(
     )?;
 
     assert_installed_between_setup_and_start(&case.hook.operations, &outcome.bootstrap)?;
-    let lock = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(paths.install_dir.join(".pg-embed-setup.lock").as_std_path())?;
     ensure!(
-        fs4::FileExt::try_lock(&lock).is_ok(),
+        lock_is_free(&paths.install_dir),
+        "the setup lock is free once the start returns"
+    );
+    Ok(())
+}
+
+/// After a cache hit the production hook holds the setup lock while it
+/// installs: the install tree is mutated only under the lock, even though the
+/// start released it before the hit (#289). The manifest is a FIFO, so the
+/// observer samples the lock exactly while the hook is reading it.
+#[cfg(unix)]
+#[rstest]
+#[serial(worker_hook)]
+fn the_hook_holds_the_setup_lock_while_it_installs_after_a_cache_hit(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    seed_cache_hit(&paths.cache_dir)?;
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+    let observer = manifest_observing_the_lock(&case.bootstrap, &paths.install_dir)?;
+
+    start_postgres(
+        &case.runtime,
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    )?;
+
+    let held = observer
+        .join()
+        .map_err(|_| eyre!("the observer thread panicked"))??;
+    ensure!(held, "the hook must hold the setup lock while it installs");
+    ensure!(
+        lock_is_free(&paths.install_dir),
+        "the setup lock is free once the start returns"
+    );
+    Ok(())
+}
+
+/// The asynchronous start holds the lock through the same install.
+#[cfg(all(unix, feature = "async-api"))]
+#[rstest]
+#[serial(worker_hook)]
+fn the_async_hook_holds_the_setup_lock_while_it_installs_after_a_cache_hit(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    seed_cache_hit(&paths.cache_dir)?;
+    let case = lifecycle_case(&paths, ordering_bootstrap)?;
+    let observer = manifest_observing_the_lock(&case.bootstrap, &paths.install_dir)?;
+
+    case.runtime.block_on(start_postgres_async(
+        case.bootstrap,
+        &case.env_vars,
+        &case.cache_config,
+    ))?;
+
+    let held = observer
+        .join()
+        .map_err(|_| eyre!("the observer thread panicked"))??;
+    ensure!(held, "the hook must hold the setup lock while it installs");
+    ensure!(
+        lock_is_free(&paths.install_dir),
         "the setup lock is free once the start returns"
     );
     Ok(())
