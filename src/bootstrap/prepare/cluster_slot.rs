@@ -179,6 +179,17 @@ pub(super) fn lock_path(data_dir: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{data_dir}{LOCK_SUFFIX}"))
 }
 
+/// Returns the lock file of `data_dir` when it is a slot, and None otherwise.
+pub(crate) fn slot_lock_path(data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    match slot_lookup(data_dir) {
+        SlotLookup::Slot(parent) => {
+            let own = data_dir.file_name()?.to_str()?;
+            Some(parent.join(format!("{own}{LOCK_SUFFIX}")))
+        }
+        SlotLookup::NotSlot | SlotLookup::Unknown => None,
+    }
+}
+
 /// Returns whether another live cluster shares the slot parent of `data_dir`,
 /// and so the install tree beside it.
 ///

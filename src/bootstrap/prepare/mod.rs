@@ -34,6 +34,10 @@ mod layout;
 pub(super) use self::layout::DataLayout;
 use self::layout::claim_derived_slot;
 mod orphan;
+#[cfg(target_os = "linux")]
+mod orphan_watch;
+#[cfg(target_os = "linux")]
+pub(crate) use orphan_watch::watch_slot_owner;
 mod password;
 mod stale_password;
 pub use password::{PasswordReuseOutcome, reuse_existing_password, stored_cluster_password};

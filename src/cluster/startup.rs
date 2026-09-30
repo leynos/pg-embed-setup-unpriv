@@ -113,6 +113,7 @@ pub(super) fn start_postgres(
         handle_privilege_lifecycle(privileges, &context, &mut bootstrap)
             .map_err(|err| cache_integration::note_cached_binaries(cache_hit, &bootstrap, err))?;
 
+    watch_for_owner_death(&bootstrap);
     log_lifecycle_complete(privileges, is_managed_via_worker, cache_hit, false);
 
     Ok(StartupOutcome {
@@ -120,6 +121,16 @@ pub(super) fn start_postgres(
         postgres,
         is_managed_via_worker,
     })
+}
+
+/// Starts the watcher that stops the server if this process is killed (#287).
+///
+/// Linux only; elsewhere the next bootstrap's sweep reclaims the server.
+fn watch_for_owner_death(bootstrap: &TestBootstrapSettings) {
+    #[cfg(target_os = "linux")]
+    let _watching = crate::bootstrap::watch_slot_owner(&bootstrap.settings.data_dir);
+    #[cfg(not(target_os = "linux"))]
+    let _ = bootstrap;
 }
 
 /// Logs the start of the lifecycle.
@@ -309,6 +320,7 @@ pub(super) async fn start_postgres_async(
         )
     };
 
+    watch_for_owner_death(&bootstrap);
     log_lifecycle_complete(privileges, is_managed_via_worker, cache_hit, true);
     Ok(StartupOutcome {
         bootstrap,
