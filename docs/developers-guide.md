@@ -620,9 +620,11 @@ is exercised by this repository's own values:
   reading the first as a substring would take a grace period for a per-test
   budget whenever it were the larger.
 
-`cross-platform-tests` and `binstall-packaging` also declare no ceiling. They
-invoke no coverage step, so they are outside this contract, and bounding them
-is separate work.
+`cross-platform-tests` also declares no ceiling. It invokes no coverage step,
+so it is outside this contract, and bounding it is separate work.
+`binstall-packaging` has a 15-minute job-level ceiling (see "Runner
+placement"), which the placement contract holds; it is outside this contract
+for the same reason.
 
 [shared-actions-coverage]: https://github.com/leynos/shared-actions/blob/main/.github/actions/generate-coverage/README.md
 
