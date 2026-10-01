@@ -15,6 +15,11 @@ const STEP_NAME: &str = "- name: Install Whitaker Dylint suite";
 const INSTALL_WHITAKER_ACTION: &str = "leynos/shared-actions/.github/actions/install-whitaker@";
 const INSTALLER_VERSION_INPUT: &str = "installer-version: ${{ env.WHITAKER_INSTALLER_VERSION }}";
 const SHA_LENGTH: usize = 40;
+/// The oldest installer the shared action accepts; it refuses anything lower.
+const MINIMUM_INSTALLER_VERSION: [u32; 3] = [0, 2, 9];
+/// The shared-actions revision CI must pin: the one concordat's QG-002 rule
+/// lists as carrying the install rules (shared-actions #522).
+const REVIEWED_ACTION_SHA: &str = "6dea5677a84fec60ca51b07202570e3af12ffdb4";
 
 /// Return the number of leading spaces on `line`.
 fn indent_of(line: &str) -> usize { line.len() - line.trim_start().len() }
@@ -115,6 +120,10 @@ fn the_install_step_pins_the_shared_action_to_a_commit_sha() {
         reference.len() == SHA_LENGTH && reference.chars().all(|c| c.is_ascii_hexdigit()),
         "install-whitaker must be pinned to a full commit SHA, found {reference:?}",
     );
+    assert_eq!(
+        reference, REVIEWED_ACTION_SHA,
+        "install-whitaker must pin the revision QG-002 lists as compliant",
+    );
 }
 
 #[test]
@@ -142,6 +151,15 @@ fn the_workflow_defines_a_concrete_installer_version() {
                 .split('.')
                 .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit())),
         "WHITAKER_INSTALLER_VERSION must be a concrete version, found {version:?}",
+    );
+
+    let parts: Vec<u32> = version
+        .split('.')
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    assert!(
+        parts.as_slice() >= MINIMUM_INSTALLER_VERSION.as_slice(),
+        "WHITAKER_INSTALLER_VERSION {version:?} is below the action's 0.2.9 floor",
     );
 }
 
