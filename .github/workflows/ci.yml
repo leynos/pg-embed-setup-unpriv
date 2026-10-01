@@ -241,6 +241,15 @@ jobs:
           fi
 
           "$binary" --version
+      # The test suite above always enables `cluster-unit-tests`, so it cannot
+      # see a test target that only compiles with a feature on. A plain
+      # `cargo check --all-targets` builds what a contributor gets from
+      # `cargo test`: a target that needs a feature must declare it with
+      # `required-features` so it is skipped here rather than failing to
+      # compile (#291).
+      - name: Check test targets with default features
+        shell: bash
+        run: cargo check --all-targets
       - name: Test unprivileged surface
         shell: bash
         run: >-
