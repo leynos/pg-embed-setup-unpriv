@@ -46,6 +46,8 @@ jobs:
           persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
+        with:
+          install-mold: 'true'
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
@@ -131,6 +133,11 @@ jobs:
         run: make test-loom
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ github.event_name == 'pull_request' && matrix.privilege == 'unprivileged' }}
+        env:
+          # One of the two exclusions from the build standard: a coverage build is a
+          # measurement, so it takes neither the parallel frontend nor the mold linker.
+          # Assigning RUSTFLAGS displaces every `rustflags` table in .cargo/config.toml.
+          RUSTFLAGS: -D warnings
         uses: leynos/shared-actions/.github/actions/generate-coverage@d4d248bbbecdcf7b4f5bc79ffd4d6caee370bd79
         with:
           output-path: lcov.info
@@ -190,6 +197,8 @@ jobs:
           persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
+        with:
+          install-mold: 'true'
       - name: Setup uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
         with:
@@ -225,6 +234,8 @@ jobs:
           persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
+        with:
+          install-mold: 'true'
       - name: Restore PostgreSQL binary cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
@@ -301,6 +312,8 @@ jobs:
           persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
+        with:
+          install-mold: 'true'
       - name: Setup uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
         with:

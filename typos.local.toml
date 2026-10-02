@@ -12,6 +12,8 @@ accepted = []
 
 [patterns]
 ignore = [
+  # `mold` is the linker's name, not a misspelling of `mould`.
+  "\\bmold\\b",
   # Cargo and third-party Rust APIs retain their exact upstream spelling.
   '\bCARGO_TERM_COLOR\b',
   '\bcolor_eyre\b',

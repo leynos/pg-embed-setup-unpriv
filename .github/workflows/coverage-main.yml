@@ -51,7 +51,14 @@ jobs:
           persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
+        with:
+          install-mold: 'true'
       - name: Generate coverage
+        env:
+          # One of the two exclusions from the build standard: a coverage build is a
+          # measurement, so it takes neither the parallel frontend nor the mold linker.
+          # Assigning RUSTFLAGS displaces every `rustflags` table in .cargo/config.toml.
+          RUSTFLAGS: -D warnings
         uses: leynos/shared-actions/.github/actions/generate-coverage@d4d248bbbecdcf7b4f5bc79ffd4d6caee370bd79
         with:
           output-path: lcov.info
