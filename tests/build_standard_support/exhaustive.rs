@@ -221,30 +221,53 @@ fn the_configuration_reader_ignores_comments_spacing_and_lookalike_keys() {
     }
 }
 
-/// Checks one generated assignment against what the shell would make of it.
-fn check_assignment(expansion: &str, separator: &str, word: &str, continued: bool) {
-    let command = if continued {
-        " \\\n  cargo test"
-    } else {
-        " cargo test"
-    };
-    let line = format!("RUSTFLAGS=\"{expansion}{separator}{word}\"{command}");
-    let glued = expansion == "${RUSTFLAGS-}" && separator.is_empty() && !word.is_empty();
-    let result = assigned_rustflags(&line.replace("\\\n", " "));
-    if glued {
-        assert!(result.is_err(), "glued form accepted: {line:?}");
-        return;
+/// One generated `RUSTFLAGS` assignment: what it inherits, how that is separated
+/// from the flag word, the word, and whether the command is continued.
+struct AssignmentCase {
+    expansion: &'static str,
+    separator: &'static str,
+    word: &'static str,
+    continued: bool,
+}
+
+impl AssignmentCase {
+    /// Returns the `make -n` line this case stands for.
+    fn line(&self) -> String {
+        let command = if self.continued {
+            " \\\n  cargo test"
+        } else {
+            " cargo test"
+        };
+        format!(
+            "RUSTFLAGS=\"{}{}{}\"{command}",
+            self.expansion, self.separator, self.word
+        )
     }
-    let Ok(Assignment::Flags(flags, inherits)) = result else {
-        panic!("a well-formed assignment was refused: {line:?}");
-    };
-    assert_eq!(inherits, !expansion.is_empty(), "line: {line:?}");
-    assert_eq!(
-        flags.names_threads(),
-        word.contains(THREADS_FLAG),
-        "line: {line:?}"
-    );
-    assert!(!flags.names_linker(), "line: {line:?}");
+
+    /// Returns whether the shell would glue the next flag onto the caller's flags.
+    fn is_glued(&self) -> bool {
+        self.expansion == "${RUSTFLAGS-}" && self.separator.is_empty() && !self.word.is_empty()
+    }
+
+    /// Checks the reader's verdict on this case against what the shell would make of it.
+    fn check(&self) {
+        let line = self.line();
+        let result = assigned_rustflags(&line.replace("\\\n", " "));
+        if self.is_glued() {
+            assert!(result.is_err(), "glued form accepted: {line:?}");
+            return;
+        }
+        let Ok(Assignment::Flags(flags, inherits)) = result else {
+            panic!("a well-formed assignment was refused: {line:?}");
+        };
+        assert_eq!(inherits, !self.expansion.is_empty(), "line: {line:?}");
+        assert_eq!(
+            flags.names_threads(),
+            self.word.contains(THREADS_FLAG),
+            "line: {line:?}"
+        );
+        assert!(!flags.names_linker(), "line: {line:?}");
+    }
 }
 
 /// Scenario: every `RUSTFLAGS` assignment built from an inheritance expansion, an
@@ -259,24 +282,35 @@ fn the_assignment_reader_handles_every_inheritance_form() {
     let expansions = ["", "${RUSTFLAGS:+$RUSTFLAGS }", "${RUSTFLAGS-}"];
     let separators = ["", " "];
     let words = ["", THREADS_FLAG, "-D warnings"];
-    let prefixes: Vec<(&str, &str)> = expansions
+    let prefixes: Vec<(&'static str, &'static str)> = expansions
         .iter()
+        .copied()
         .flat_map(|expansion| {
             separators
                 .iter()
-                .map(move |separator| (*expansion, *separator))
+                .copied()
+                .map(move |separator| (expansion, separator))
         })
         .collect();
-    let cases: Vec<(&str, &str, &str)> = prefixes
+    let spelled: Vec<(&'static str, &'static str, &'static str)> = prefixes
         .iter()
+        .copied()
         .flat_map(|(expansion, separator)| {
             words
                 .iter()
-                .map(move |word| (*expansion, *separator, *word))
+                .copied()
+                .map(move |word| (expansion, separator, word))
         })
         .collect();
-    for (expansion, separator, word) in cases {
-        check_assignment(expansion, separator, word, false);
-        check_assignment(expansion, separator, word, true);
+    for (expansion, separator, word) in spelled {
+        for continued in [false, true] {
+            AssignmentCase {
+                expansion,
+                separator,
+                word,
+                continued,
+            }
+            .check();
+        }
     }
 }
