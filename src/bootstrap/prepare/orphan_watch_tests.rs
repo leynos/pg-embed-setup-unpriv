@@ -234,6 +234,10 @@ fn a_released_watcher_no_longer_acts_on_owner_death() -> Result<()> {
 #[test]
 fn the_watcher_inherits_only_dev_null_and_the_lock_file() -> Result<()> {
     let slot = Slot::new()?;
+    // A pipe without close-on-exec, as a test harness gives its test process:
+    // a plain `pipe(2)` leaves both ends inheritable, so a watcher that did not
+    // close them would hold the pipe open.
+    let (_read_end, _write_end) = nix::unistd::pipe()?;
     let mut watcher = spawn_watcher(&slot.lock, &slot.data_dir)?;
     let pid = watcher.id();
     let deadline = Instant::now() + WAIT;

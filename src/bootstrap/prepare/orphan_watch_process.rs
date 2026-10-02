@@ -2,6 +2,7 @@
 
 use std::{
     io,
+    os::unix::process::CommandExt,
     path::Path,
     process::{Child, Command, Stdio},
 };
@@ -23,6 +24,40 @@ kill -QUIT "$pid" 2>/dev/null
 exit 0
 "#;
 
+/// Marks every descriptor above the standard streams close-on-exec.
+///
+/// The watcher outlives its owner, so a descriptor it inherited, such as a
+/// pipe a test harness gave the owner without `O_CLOEXEC`, would stay open for
+/// as long as the watcher waits and could keep that pipe's reader waiting for
+/// end-of-file. `close_range` with `CLOSE_RANGE_CLOEXEC` marks them all, and
+/// the descriptor `std` keeps to report an `exec` failure is already
+/// close-on-exec, so a missing `setsid` still surfaces as a spawn error.
+/// Where `close_range` is unavailable the descriptors up to a fixed ceiling are
+/// marked one by one.
+///
+/// Runs between `fork` and `exec`, so it only makes system calls.
+fn mark_inherited_descriptors_close_on_exec() {
+    // SAFETY: `close_range` and `fcntl` take plain integers and touch no memory
+    // of this process; both are async-signal-safe.
+    unsafe {
+        if libc::syscall(
+            libc::SYS_close_range,
+            3_u32,
+            u32::MAX,
+            libc::CLOSE_RANGE_CLOEXEC,
+        ) == 0
+        {
+            return;
+        }
+        for descriptor in 3..FALLBACK_DESCRIPTOR_CEILING {
+            libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC);
+        }
+    }
+}
+
+/// The highest descriptor the fallback marks.
+const FALLBACK_DESCRIPTOR_CEILING: i32 = 4096;
+
 /// Builds the watcher command for a slot: blocks on `lock`, then runs the
 /// script against `data_dir`, in a session of its own with no standard streams.
 fn watcher_command(lock: &Path, data_dir: &Path) -> Command {
@@ -36,6 +71,14 @@ fn watcher_command(lock: &Path, data_dir: &Path) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // SAFETY: the closure only makes async-signal-safe system calls and
+    // allocates nothing, as `pre_exec` requires.
+    unsafe {
+        command.pre_exec(|| {
+            mark_inherited_descriptors_close_on_exec();
+            Ok(())
+        });
+    }
     command
 }
 
