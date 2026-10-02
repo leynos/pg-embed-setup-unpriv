@@ -17,9 +17,10 @@ const INSTALLER_VERSION_INPUT: &str = "installer-version: ${{ env.WHITAKER_INSTA
 const SHA_LENGTH: usize = 40;
 /// The oldest installer the shared action accepts; it refuses anything lower.
 const MINIMUM_INSTALLER_VERSION: [u32; 3] = [0, 2, 9];
-/// The shared-actions revision CI must pin: the one concordat's QG-002 rule
-/// lists as carrying the install rules (shared-actions #522).
-const REVIEWED_ACTION_SHA: &str = "6dea5677a84fec60ca51b07202570e3af12ffdb4";
+/// The shared-actions revision CI must pin: shared-actions #546, a descendant
+/// of #522 that leaves `install-whitaker` unchanged (so QG-002 lists it) and
+/// carries the sccache startup fix.
+const REVIEWED_ACTION_SHA: &str = "6cec89bac47a21cf756d68d638a9a510998e57f8";
 
 /// Return the number of leading spaces on `line`.
 fn indent_of(line: &str) -> usize { line.len() - line.trim_start().len() }

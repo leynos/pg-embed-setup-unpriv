@@ -199,9 +199,10 @@ The Whitaker suite itself is installed by the shared `install-whitaker` action,
 pinned to a commit SHA, which resolves a checksum-verified release archive for
 the installer version named by `WHITAKER_INSTALLER_VERSION`, currently `0.2.9`,
 the floor the action accepts (it refuses anything lower). The action is pinned
-to shared-actions `6dea5677a84fec60ca51b07202570e3af12ffdb4` (#522), the
-revision the concordat QG-002 rule lists as carrying the install rules; a later
-shared-actions commit that leaves the action directory unchanged is also
+to shared-actions `6cec89bac47a21cf756d68d638a9a510998e57f8` (#546), which also
+carries the 60 s sccache startup fix. The concordat QG-002 rule accepts it
+because the action directory is content-identical to the reviewed `6dea5677`
+(#522); any later shared-actions commit that leaves it unchanged is also
 accepted. The previous inline step fell back to
 `cargo install --locked whitaker-installer`, building the tool from source in
 CI and verifying nothing. `tests/whitaker_install_pin.rs` keeps that
