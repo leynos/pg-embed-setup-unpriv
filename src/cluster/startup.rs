@@ -31,12 +31,17 @@ use crate::{
 mod setup_only;
 #[path = "startup_timing.rs"]
 mod timing;
+#[path = "startup_watch.rs"]
+mod watch;
 pub(crate) use self::setup_only::setup_postgres_only;
 #[cfg(test)]
 pub(super) use self::setup_only::{setup_lifecycle, setup_with_privileges};
-use self::timing::timed_step;
 #[cfg(feature = "async-api")]
 use self::timing::timed_step_async;
+use self::{
+    timing::timed_step,
+    watch::{release_owner_watcher, watch_for_owner_death},
+};
 
 #[derive(Clone, Copy)]
 enum LifecycleStep {
@@ -109,11 +114,13 @@ pub(super) fn start_postgres(
             install_lock,
         },
     };
+    // Armed before `Start`: a SIGKILL after the server starts but before this
+    // returns would otherwise find no watcher.
+    watch_for_owner_death(&bootstrap);
     let (is_managed_via_worker, postgres) =
         handle_privilege_lifecycle(privileges, &context, &mut bootstrap)
+            .inspect_err(|_| release_owner_watcher(&bootstrap))
             .map_err(|err| cache_integration::note_cached_binaries(cache_hit, &bootstrap, err))?;
-
-    watch_for_owner_death(&bootstrap);
     log_lifecycle_complete(privileges, is_managed_via_worker, cache_hit, false);
 
     Ok(StartupOutcome {
@@ -121,16 +128,6 @@ pub(super) fn start_postgres(
         postgres,
         is_managed_via_worker,
     })
-}
-
-/// Starts the watcher that stops the server if this process is killed (#287).
-///
-/// Linux only; elsewhere the next bootstrap's sweep reclaims the server.
-fn watch_for_owner_death(bootstrap: &TestBootstrapSettings) {
-    #[cfg(target_os = "linux")]
-    let _watching = crate::bootstrap::watch_slot_owner(&bootstrap.settings.data_dir);
-    #[cfg(not(target_os = "linux"))]
-    let _ = bootstrap;
 }
 
 /// Logs the start of the lifecycle.
@@ -302,9 +299,11 @@ pub(super) async fn start_postgres_async(
         cache_hit,
         install_lock,
     };
-    let (is_managed_via_worker, postgres) = if privileges == ExecutionPrivileges::Root {
-        Box::pin(invoke_lifecycle_root_async(&mut bootstrap, env_vars, post)).await?;
-        (true, None)
+    watch_for_owner_death(&bootstrap);
+    let lifecycle = if privileges == ExecutionPrivileges::Root {
+        Box::pin(invoke_lifecycle_root_async(&mut bootstrap, env_vars, post))
+            .await
+            .map(|()| (true, None))
     } else {
         let mut embedded = PostgreSQL::new(bootstrap.settings.clone());
         Box::pin(invoke_lifecycle_async(
@@ -313,14 +312,16 @@ pub(super) async fn start_postgres_async(
             post,
             &mut embedded,
         ))
-        .await?;
-        (
-            false,
-            prepare_postgres_handle(false, &mut bootstrap, embedded),
-        )
+        .await
+        .map(|()| {
+            (
+                false,
+                prepare_postgres_handle(false, &mut bootstrap, embedded),
+            )
+        })
     };
-
-    watch_for_owner_death(&bootstrap);
+    let (is_managed_via_worker, postgres) =
+        lifecycle.inspect_err(|_| release_owner_watcher(&bootstrap))?;
     log_lifecycle_complete(privileges, is_managed_via_worker, cache_hit, true);
     Ok(StartupOutcome {
         bootstrap,

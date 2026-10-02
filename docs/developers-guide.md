@@ -880,10 +880,10 @@ ADR 005 records the design; this section covers the code.
   would otherwise wait until process exit. A missing `setsid` or `flock`, an
   unreadable slot, or `PG_EMBED_ORPHAN_WATCHER=off` skips the watcher, each
   logged as a bounded `outcome`. While a watcher runs it holds the slot lock,
-  so a sweep in that moment skips the slot and the next bootstrap reclaims it.
-  The sweep tests set the opt-out so they exercise the sweep alone. A
-  non-interactive bash ignores `SIGQUIT`, so the tests use a copy of `sleep`
-  named `postgres`.
+  so a sweep skips the slot while the watcher holds the slot lock, and the next
+  bootstrap reclaims it. The sweep tests set the opt-out so they exercise the
+  sweep alone. A non-interactive bash ignores `SIGQUIT`, so the tests use a
+  copy of `sleep` named `postgres`.
 - `DataLayout` (in `src/bootstrap/prepare/layout.rs`) says whether a derived
   data directory becomes a slot: `PerCluster` for test bootstraps, `Persistent`
   for the setup-only `run`. `has_live_peers` and `ClaimGuard` (in

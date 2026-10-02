@@ -300,3 +300,35 @@ fn cleanup_ends_the_clusters_orphan_watcher(#[case] mode: CleanupMode) {
         "cleanup must already have ended the watcher"
     );
 }
+
+/// A worker-managed cluster's cleanup ends its watcher too, before any worker
+/// operation runs: with `CleanupMode::None` there is no operation at all, so the
+/// release is the only thing the call can have done (#287).
+#[cfg(target_os = "linux")]
+#[test]
+fn worker_managed_cleanup_ends_the_clusters_orphan_watcher() {
+    use crate::{
+        ExecutionPrivileges,
+        test_support::{dummy_settings, test_runtime},
+    };
+
+    let sandbox = tempdir().expect("tempdir");
+    let data_dir = sandbox.path().join("cluster");
+    fs::create_dir_all(&data_dir).expect("create data dir");
+    fs::write(sandbox.path().join("cluster.lock"), b"").expect("the slot's lock file");
+    let mut bootstrap = dummy_settings(ExecutionPrivileges::Root);
+    bootstrap.cleanup_mode = CleanupMode::None;
+    bootstrap.settings.data_dir = data_dir;
+    assert!(
+        crate::bootstrap::watch_slot_owner(&bootstrap.settings.data_dir),
+        "a slot gets a watcher"
+    );
+    let runtime = test_runtime().expect("runtime");
+
+    super::cleanup_worker_managed_with_runtime(&runtime, &bootstrap, &[], "cleanup-test");
+
+    assert!(
+        !crate::bootstrap::release_watcher(&bootstrap.settings.data_dir),
+        "worker-managed cleanup must already have ended the watcher"
+    );
+}

@@ -58,6 +58,23 @@ fn bootstrap_and_connect() -> Result<PathBuf, BootstrapError> {
     Ok(handle.settings().data_dir.clone())
 }
 
+/// Starts a cluster through `TestCluster::start_async()` and returns its data
+/// directory, keeping the cluster alive in this process until it exits.
+#[cfg(feature = "async-api")]
+fn async_bootstrap_and_connect() -> Result<PathBuf, BootstrapError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| BootstrapError::from(color_eyre::eyre::eyre!("{err}")))?;
+    let cluster = runtime.block_on(pg_embedded_setup_unpriv::TestCluster::start_async())?;
+    let dir = cluster.settings().data_dir.clone();
+    // The process is killed or its stdin closes next; the cluster must outlive
+    // this function, and its drop would stop the server.
+    std::mem::forget(cluster);
+    std::mem::forget(runtime);
+    Ok(dir)
+}
+
 /// Child: bootstrap, report, and in `hold` mode keep the cluster until
 /// stdin closes. In `orchestrate` mode, first start a `hold` child of its
 /// own and report that child's directory, so a test can kill the
@@ -70,6 +87,17 @@ fn cluster_child() {
     };
     if mode == "orchestrate" {
         orchestrate().expect("the orchestrator runs");
+        return;
+    }
+    #[cfg(feature = "async-api")]
+    if mode == "hold_async" {
+        let line = match async_bootstrap_and_connect() {
+            Ok(dir) => format!("connected {}", dir.display()),
+            Err(err) => format!("failed {}", format!("{err:?}").replace('\n', " | ")),
+        };
+        report(&line).expect("stdout is writable");
+        let mut rest = String::new();
+        let _eof = std::io::stdin().read_line(&mut rest);
         return;
     }
     let line = match bootstrap_and_connect() {
@@ -191,6 +219,34 @@ fn a_killed_owner_has_its_server_stopped_by_the_watcher() {
     assert!(
         !alive(server),
         "the watcher must stop the server of a killed owner"
+    );
+}
+
+/// The asynchronous start arms the watcher too: a child that starts its
+/// cluster with `TestCluster::start_async()` and is killed has its server
+/// stopped, as in the synchronous case (#287).
+#[test]
+#[cfg(all(target_os = "linux", feature = "async-api"))]
+fn a_killed_async_owner_has_its_server_stopped_by_the_watcher() {
+    if !should_run() || !watcher_tools_present() {
+        return;
+    }
+    let root = fixed_root("watcher_async").expect("a fixed root");
+    let mut owner = spawn_child(&root, "hold_async", &[]).expect("owner child");
+    let dir = connected_dir(&owner.report().expect("owner report")).expect("owner connects");
+    let server = postmaster_pid(&dir).expect("the owner's server");
+    let _cleanup = KillOnDrop(Some(server));
+
+    owner.child.kill().expect("kill the owner");
+    owner.child.wait().expect("reap it");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while alive(server) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        !alive(server),
+        "the watcher must stop the server of a killed async owner"
     );
 }
 
