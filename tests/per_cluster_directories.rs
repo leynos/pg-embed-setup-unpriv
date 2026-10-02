@@ -199,27 +199,8 @@ fn a_sweep_keeps_the_live_and_clears_the_dead() {
 /// and the test fails if it is still running after the grace period.
 #[test]
 #[cfg(target_os = "linux")]
-fn a_killed_owner_has_its_server_stopped_by_the_watcher() {
-    if !should_run() || !watcher_tools_present() {
-        return;
-    }
-    let root = fixed_root("watcher").expect("a fixed root");
-    let mut owner = spawn_child(&root, "hold", &[]).expect("owner child");
-    let dir = connected_dir(&owner.report().expect("owner report")).expect("owner connects");
-    let server = postmaster_pid(&dir).expect("the owner's server");
-    let _cleanup = KillOnDrop(Some(server));
-
-    owner.child.kill().expect("kill the owner");
-    owner.child.wait().expect("reap it");
-
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    while alive(server) && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert!(
-        !alive(server),
-        "the watcher must stop the server of a killed owner"
-    );
+fn a_killed_owner_has_its_server_stopped_by_the_watcher() -> Result<(), String> {
+    killed_owner_server_stops("watcher", "hold")
 }
 
 /// The asynchronous start arms the watcher too: a child that starts its
@@ -227,27 +208,38 @@ fn a_killed_owner_has_its_server_stopped_by_the_watcher() {
 /// stopped, as in the synchronous case (#287).
 #[test]
 #[cfg(all(target_os = "linux", feature = "async-api"))]
-fn a_killed_async_owner_has_its_server_stopped_by_the_watcher() {
+fn a_killed_async_owner_has_its_server_stopped_by_the_watcher() -> Result<(), String> {
+    killed_owner_server_stops("watcher_async", "hold_async")
+}
+
+/// Starts a child in `mode` under a fixed root named `case`, kills it, and
+/// requires its server to be gone within 30 s. Skipped where the watcher's
+/// tools are missing or the run is root.
+#[cfg(target_os = "linux")]
+fn killed_owner_server_stops(case: &str, mode: &str) -> Result<(), String> {
     if !should_run() || !watcher_tools_present() {
-        return;
+        return Ok(());
     }
-    let root = fixed_root("watcher_async").expect("a fixed root");
-    let mut owner = spawn_child(&root, "hold_async", &[]).expect("owner child");
-    let dir = connected_dir(&owner.report().expect("owner report")).expect("owner connects");
-    let server = postmaster_pid(&dir).expect("the owner's server");
+    let io = |err: std::io::Error| err.to_string();
+    let root = fixed_root(case).map_err(io)?;
+    let mut owner = spawn_child(&root, mode, &[]).map_err(io)?;
+    let dir = connected_dir(&owner.report().map_err(io)?)?;
+    let server = postmaster_pid(&dir).ok_or("the owner's server has no pid file")?;
     let _cleanup = KillOnDrop(Some(server));
 
-    owner.child.kill().expect("kill the owner");
-    owner.child.wait().expect("reap it");
+    owner.child.kill().map_err(io)?;
+    owner.child.wait().map_err(io)?;
 
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while alive(server) && std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(50));
     }
-    assert!(
-        !alive(server),
-        "the watcher must stop the server of a killed async owner"
-    );
+    if alive(server) {
+        return Err(format!(
+            "the watcher must stop the server of a killed {mode} owner"
+        ));
+    }
+    Ok(())
 }
 
 /// Whether `setsid` and `flock` are on `PATH`; without them there is no
