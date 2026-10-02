@@ -152,6 +152,27 @@ condition, and asserts an exact inventory of the jobs that can land on Ubicloud
 with their ceilings. A change that adds, removes or re-times such a job fails
 it until the inventory is updated in the same commit.
 
+## The sccache wrapper in CI
+
+From the `setup-rust` pin `ff1dd759`, the action starts an sccache server and
+exports `RUSTC_WRAPPER` (and `SCCACHE_CONF`) for the whole job. Two steps of
+`build-test` must not use it, so each sets an empty `RUSTC_WRAPPER`, which
+cargo treats as unset:
+
+- **Root lane** (`Install cargo-nextest and test (root)`): `run_as_root` passes
+  `RUSTC_WRAPPER=` through `sudo -E env`. Root's rustc would otherwise talk to
+  a server owned by the runner user, which cannot write into the target
+  directory root created, so the first crate fails with "Permission denied".
+- **Unprivileged test step** (`Test with all features (unprivileged)`): the `ui`
+  tests build trybuild fixtures in nested cargo invocations that inherit the
+  wrapper, and under it exceeded their 360 s slow-timeout where they took about
+  125 s without. The cause of the slowdown is not traced.
+
+`scripts/tests/test_rustc_wrapper_contract.py` holds both steps to this: each
+way of letting the wrapper back in is driven through the judge in
+`scripts/tests/rustc_wrapper.py` first, and then `ci.yml` is judged. Every
+other step keeps sccache.
+
 ## Lint and formatting toolchain
 
 The repository pins `rust-toolchain.toml` to `nightly-2026-04-25` because the
