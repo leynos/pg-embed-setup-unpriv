@@ -115,7 +115,9 @@ fn the_install_step_pins_the_shared_action_to_a_commit_sha() {
     let Some(rest) = text_after(&step, INSTALL_WHITAKER_ACTION) else {
         panic!("the Whitaker step does not reference the shared action:\n{step}");
     };
-    let reference: String = rest.chars().take(SHA_LENGTH).collect();
+    // The whole ref, up to the end of the token, so a suffix such as a branch
+    // name or a trailing comment marker cannot pass as the reviewed SHA.
+    let reference: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
 
     assert!(
         reference.len() == SHA_LENGTH && reference.chars().all(|c| c.is_ascii_hexdigit()),
@@ -154,10 +156,12 @@ fn the_workflow_defines_a_concrete_installer_version() {
         "WHITAKER_INSTALLER_VERSION must be a concrete version, found {version:?}",
     );
 
-    let parts: Vec<u32> = version
-        .split('.')
-        .filter_map(|part| part.parse().ok())
-        .collect();
+    // Every component must parse; a dropped or overflowing one would otherwise
+    // shift the comparison and let a bad version pass the floor.
+    let parsed: Result<Vec<u32>, _> = version.split('.').map(str::parse::<u32>).collect();
+    let Ok(parts) = parsed else {
+        panic!("WHITAKER_INSTALLER_VERSION has a component that is not a u32: {version:?}");
+    };
     assert!(
         parts.as_slice() >= MINIMUM_INSTALLER_VERSION.as_slice(),
         "WHITAKER_INSTALLER_VERSION {version:?} is below the action's 0.2.9 floor",
