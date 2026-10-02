@@ -41,12 +41,7 @@ impl Pin {
     ///
     /// Returns the reason when the channel is missing, repeated or unsupported.
     pub fn read(toolchain: &str) -> Result<Self, String> {
-        let channels: Vec<&str> = toolchain
-            .lines()
-            .map(str::trim)
-            .filter(|line| line.starts_with("channel"))
-            .filter_map(|line| line.split('"').nth(1))
-            .collect();
+        let channels = toolchain_channels(toolchain);
         match channels.as_slice() {
             [] => Err("rust-toolchain.toml names no channel".to_owned()),
             [channel] => Self::classify(channel),
@@ -76,6 +71,34 @@ impl Pin {
 
     /// Returns whether the pin takes `-Zthreads`, which is a nightly flag.
     pub const fn takes_threads(self) -> bool { matches!(self, Self::Nightly) }
+}
+
+/// Returns the quoted value of a `channel = "..."` line, if the line is one.
+fn channel_value(line: &str) -> Option<&str> {
+    let (key, value) = line.split_once('=')?;
+    if key.trim() != "channel" {
+        return None;
+    }
+    value.trim().strip_prefix('"')?.split('"').next()
+}
+
+/// Returns every `channel` value under `[toolchain]`, skipping comments, so a
+/// lookalike key, a commented line or a key in another table is not counted.
+fn toolchain_channels(toolchain: &str) -> Vec<&str> {
+    let mut table = "";
+    let mut found = Vec::new();
+    for line in toolchain
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+    {
+        if line.starts_with('[') {
+            table = line.trim_matches(|c| c == '[' || c == ']').trim();
+        } else if table == "toolchain" {
+            found.extend(channel_value(line));
+        }
+    }
+    found
 }
 
 /// A list of compiler flags, with `-C value` pairs joined into `-Cvalue` so
@@ -146,6 +169,9 @@ impl Source {
     /// Returns whether the table applies on Linux alone.
     fn is_linux(&self) -> bool { self.table.starts_with("target.") && self.table.contains("linux") }
 
+    /// Returns whether the table selects every Linux target, not one triple.
+    fn is_all_linux(&self) -> bool { self.table == ALL_LINUX_TABLE }
+
     /// Returns what is wrong with the source's flags for a pin: the frontend
     /// flag on a nightly pin only, and mold in a Linux table only.
     fn problem(&self, pin: Pin) -> Option<String> {
@@ -153,6 +179,10 @@ impl Source {
         Some(format!("[{}] {reason}", self.table))
     }
 }
+
+/// The table name for `[target.'cfg(target_os = "linux")']`, which every Linux
+/// target matches; a triple table covers one architecture alone.
+const ALL_LINUX_TABLE: &str = "target.'cfg(target_os = \"linux\")'";
 
 /// One line of a Cargo configuration, as far as the standard reads it.
 enum Line {
@@ -239,6 +269,11 @@ fn shape_problems(found: &[Source], pin: Pin) -> Problems {
         (
             !found.iter().any(Source::is_linux),
             "no Linux target table carries rustflags",
+        ),
+        (
+            found.iter().any(Source::is_linux) && !found.iter().any(Source::is_all_linux),
+            "no `cfg(target_os = \"linux\")` table carries rustflags, so mold reaches one Linux \
+             architecture only",
         ),
         (
             pin.takes_threads() && !found.iter().any(|source| source.table == "build"),

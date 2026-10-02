@@ -13,6 +13,8 @@
 mod ci_steps;
 #[path = "build_standard_support/config.rs"]
 mod config;
+#[path = "build_standard_support/exhaustive.rs"]
+mod exhaustive;
 #[path = "build_standard_support/make.rs"]
 mod make;
 use ci_steps::{Workflow, coverage_problems, linker_install_problems, workflow_problems};
@@ -46,60 +48,67 @@ const STABLE: &str = "[toolchain]\nchannel = \"1.94.0\"\n";
 /// mold in the Linux table alone.
 const NIGHTLY_OK: &str = concat!(
     "[build]\nrustflags = [\"-Zthreads=8\"]\n",
-    "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
     "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
 );
 /// The same, with the linker flag spelled as the `-C` pair Cargo also accepts.
 const NIGHTLY_SPELLED_APART: &str = concat!(
     "[build]\nrustflags = [\"-Zthreads=8\"]\n",
-    "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
     "rustflags = [\"-Zthreads=8\", \"-C\", \"link-arg=-fuse-ld=mold\"]\n"
 );
 /// A compliant stable configuration: mold alone, in the Linux table.
 const STABLE_OK: &str = concat!(
-    "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
     "rustflags = [\"-Clink-arg=-fuse-ld=mold\"]\n"
 );
 /// A nightly configuration whose `[build]` source lost the frontend flag, so it
 /// is missing it and also differs from the Linux source.
 const BUILD_LOSES_THREADS: &str = concat!(
     "[build]\nrustflags = [\"-Dwarnings\"]\n",
-    "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
     "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
 );
 /// A nightly configuration whose Linux table lost mold.
 const LINUX_LOSES_LINKER: &str = concat!(
     "[build]\nrustflags = [\"-Zthreads=8\"]\n",
-    "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
     "rustflags = [\"-Zthreads=8\"]\n"
 );
 /// A nightly configuration that names mold in `[build]`, beyond Linux.
 const LINKER_IN_BUILD: &str = concat!(
     "[build]\nrustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n",
-    "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
     "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
 );
 /// A nightly configuration with no `[build]` source for the other hosts.
 const NO_BUILD_SOURCE: &str = concat!(
-    "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
     "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
 );
 /// A stable configuration that names the nightly-only frontend flag.
 const STABLE_WITH_THREADS: &str = concat!(
-    "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
     "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
 );
 /// A compliant configuration whose table headers and entries carry comments,
 /// with a hash inside a quoted value.
 const COMMENTED_OK: &str = concat!(
     "[build] # every host\nrustflags = [\"-Zthreads=8\"] # the frontend\n",
-    "[target.x86_64-unknown-linux-gnu] # Linux\nlinker = \"clang\"\n",
+    "[target.'cfg(target_os = \"linux\")'] # Linux\n",
     "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n",
     "note = \"a # inside a string\"\n"
 );
 /// A compliant configuration with a sibling key that only starts like `rustflags`.
 const SIBLING_KEY_OK: &str = concat!(
     "[build]\nrustflags = [\"-Zthreads=8\"]\nrustflags-extra = [\"-Dwarnings\"]\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
+    "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
+);
+/// A nightly configuration whose Linux table names one triple, not every Linux
+/// target: mold would reach x86-64 alone.
+const TRIPLE_ONLY: &str = concat!(
+    "[build]\nrustflags = [\"-Zthreads=8\"]\n",
     "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
     "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
 );
@@ -131,6 +140,7 @@ fn draws(config: &str, pin: Pin, expected: usize) -> Result<(), String> {
 #[case::no_build_source(NO_BUILD_SOURCE, Pin::Nightly, 1)]
 #[case::stable_names_the_frontend(STABLE_WITH_THREADS, Pin::Stable, 1)]
 #[case::empty_configuration("", Pin::Nightly, 3)]
+#[case::linux_selector_covers_one_architecture(TRIPLE_ONLY, Pin::Nightly, 1)]
 #[case::comments_after_headers_and_entries(COMMENTED_OK, Pin::Nightly, 0)]
 #[case::a_key_that_only_starts_like_rustflags(SIBLING_KEY_OK, Pin::Nightly, 0)]
 fn the_configuration_reader_reports_each_defect(

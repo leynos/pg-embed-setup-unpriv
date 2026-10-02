@@ -10,7 +10,14 @@ use super::config::{Flags, LINKER_FLAG, Pin, Problems, THREADS_FLAG};
 /// `RUSTFLAGS` with the standard flags or assigns none and so takes the
 /// configuration's. The list is this repository's own, and a target that stops
 /// being defined fails the contract rather than dropping out of it.
-const DEVELOPMENT_TARGETS: &[&str] = &["test", "typecheck", "lint", "build"];
+const DEVELOPMENT_TARGETS: &[&str] = &[
+    "test",
+    "typecheck",
+    "lint",
+    "build",
+    "test-doc",
+    "test-loom",
+];
 /// Makefile targets that measure or ship, so every command assigns `RUSTFLAGS`
 /// and none carries a standard flag.
 const HELD_OUT_TARGETS: &[&str] = &["release"];
