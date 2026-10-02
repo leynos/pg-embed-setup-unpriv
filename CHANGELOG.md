@@ -15,7 +15,9 @@ All notable changes to this crate are recorded here. The format follows
   directory. It needs no helper binary, so a library-only test binary is
   covered. A cluster stopped normally ends its watcher. Where `setsid` or
   `flock` is missing, as on macOS, the next bootstrap's sweep still reclaims
-  the server (#287).
+  the server (#287). Each watcher decision (disabled, not a slot, slot unknown,
+  spawned, spawn failed, released) is also recorded as a
+  `Metric::OrphanWatcher` count through the installed `MetricsRecorder`.
 
 ### Windows test targets
 

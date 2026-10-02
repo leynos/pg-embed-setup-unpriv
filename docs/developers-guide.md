@@ -878,9 +878,11 @@ ADR 005 records the design; this section covers the code.
   other Unix platforms it runs `ps` for the name and `lsof -d cwd` for the
   directory, and a missing or failing tool is unconfirmed. On Windows a live
   PID keeps the directory.
-- `src/bootstrap/prepare/orphan_watch.rs` (Linux only) stops a server the moment
-  its owner dies (#287). `watch_slot_owner`, called after a successful start on
-  the synchronous and asynchronous paths, spawns
+- `src/bootstrap/prepare/orphan_watch.rs` (Linux only; its process and
+  registry halves are `orphan_watch_process.rs` and `orphan_watch_registry.rs`,
+  and the lifecycle hooks are `src/cluster/startup_watch.rs`) stops a server
+  the moment its owner dies (#287). `watch_slot_owner`, called after a
+  successful start on the synchronous and asynchronous paths, spawns
   `setsid flock --exclusive <slot.lock> sh -c WATCHER_SCRIPT`. The flock blocks
   until the kernel releases the owner's slot lock, held for the life of the
   process, and the script then sends `SIGQUIT` only to the PID in
@@ -892,7 +894,8 @@ ADR 005 records the design; this section covers the code.
   `release_watcher`, because the slot lock outlives the cluster and the watcher
   would otherwise wait until process exit. A missing `setsid` or `flock`, an
   unreadable slot, or `PG_EMBED_ORPHAN_WATCHER=off` skips the watcher, each
-  logged as a bounded `outcome`. While a watcher runs it holds the slot lock,
+  recorded as a bounded `outcome`, both as a debug event and as a
+  `Metric::OrphanWatcher` count. While a watcher runs it holds the slot lock,
   so a sweep skips the slot while the watcher holds the slot lock, and the next
   bootstrap reclaims it. The sweep tests set the opt-out so they exercise the
   sweep alone. A non-interactive bash ignores `SIGQUIT`, so the tests use a

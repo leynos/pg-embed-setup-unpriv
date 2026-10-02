@@ -223,3 +223,136 @@ fn a_released_watcher_no_longer_acts_on_owner_death() -> Result<()> {
     );
     Ok(())
 }
+
+/// The watcher inherits nothing from this process but its three standard
+/// streams, which are `/dev/null`, and the slot's lock file it waits on.
+///
+/// A descriptor leaked into a detached process outlives its owner for as long
+/// as the watcher waits, so a pipe or file the owner holds would be kept open
+/// by it. The check reads `/proc/<pid>/fd` of the process once it has become
+/// `flock`, so it sees what `setsid` and the exec left.
+#[test]
+fn the_watcher_inherits_only_dev_null_and_the_lock_file() -> Result<()> {
+    let slot = Slot::new()?;
+    let mut watcher = spawn_watcher(&slot.lock, &slot.data_dir)?;
+    let pid = watcher.id();
+    let deadline = Instant::now() + WAIT;
+    while std::fs::read_to_string(format!("/proc/{pid}/comm"))?.trim() != "flock" {
+        ensure!(Instant::now() < deadline, "the watcher never became flock");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let lock = std::fs::canonicalize(&slot.lock)?;
+    let mut leaked = Vec::new();
+    for entry in std::fs::read_dir(format!("/proc/{pid}/fd"))? {
+        let target = std::fs::read_link(entry?.path())?;
+        if target != Path::new("/dev/null") && target != lock {
+            leaked.push(target);
+        }
+    }
+    watcher.kill()?;
+    watcher.wait()?;
+    ensure!(
+        leaked.is_empty(),
+        "descriptors leaked into the watcher: {leaked:?}"
+    );
+    Ok(())
+}
+
+/// Only `off` turns the watcher off, whatever else the variable holds.
+#[rstest::rstest]
+#[case::off(Some("off"), true)]
+#[case::unset(None, false)]
+#[case::on(Some("on"), false)]
+#[case::empty(Some(""), false)]
+fn only_the_value_off_disables_the_watcher(#[case] value: Option<&str>, #[case] disabled: bool) {
+    let lookup = |key: &str| {
+        (key == super::OPT_OUT_VAR)
+            .then(|| value.map(std::ffi::OsString::from))
+            .flatten()
+    };
+    assert_eq!(super::is_disabled(lookup), disabled);
+}
+
+mod metrics {
+    //! Each watcher decision reaches a consumer's recorder as one bounded
+    //! outcome. The recorder is process-wide, so these carry the same
+    //! `serial` key as the crate's other metric tests, and assert containment
+    //! because the cleanup tests call the watcher without that key.
+
+    use std::sync::{Arc, Mutex, PoisonError};
+
+    use color_eyre::eyre::{Result, ensure};
+    use serial_test::serial;
+
+    use super::{Slot, release_watcher_for_test};
+    use crate::{
+        bootstrap::prepare::orphan_watch::{release_watcher, watch_slot_owner},
+        observability::{
+            Metric,
+            MetricsRecorder,
+            OrphanWatcherOutcomeMetric as Outcome,
+            install_metrics_recorder,
+        },
+    };
+
+    #[derive(Default)]
+    struct Collected(Mutex<Vec<Metric>>);
+
+    impl MetricsRecorder for Collected {
+        fn record(&self, metric: Metric) {
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(metric);
+        }
+    }
+
+    fn collected(body: impl FnOnce()) -> Vec<Metric> {
+        let recorder = Arc::new(Collected::default());
+        let guard = install_metrics_recorder(Arc::clone(&recorder) as Arc<dyn MetricsRecorder>);
+        body();
+        drop(guard);
+        let seen = recorder.0.lock().unwrap_or_else(PoisonError::into_inner);
+        seen.clone()
+    }
+
+    /// A directory that is not a slot is counted as such.
+    #[test]
+    #[serial(metrics_recorder)]
+    fn a_directory_that_is_not_a_slot_is_counted() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let seen = collected(|| {
+            let _watching = watch_slot_owner(dir.path());
+        });
+        ensure!(
+            seen.contains(&Metric::OrphanWatcher(Outcome::NotASlot)),
+            "{seen:?}"
+        );
+        Ok(())
+    }
+
+    /// A slot is counted as spawned, and releasing it as released.
+    #[test]
+    #[serial(metrics_recorder)]
+    fn spawning_and_releasing_a_watcher_are_counted() -> Result<()> {
+        let slot = Slot::new()?;
+        let seen = collected(|| {
+            let _watching = watch_slot_owner(&slot.data_dir);
+            let _released = release_watcher(&slot.data_dir);
+        });
+        release_watcher_for_test(&slot.data_dir);
+        ensure!(
+            seen.contains(&Metric::OrphanWatcher(Outcome::Spawned)),
+            "{seen:?}"
+        );
+        ensure!(
+            seen.contains(&Metric::OrphanWatcher(Outcome::Released)),
+            "{seen:?}"
+        );
+        Ok(())
+    }
+}
+
+/// Ends any watcher left registered for `data_dir`, so a failed assertion does
+/// not leave one waiting for the test process to exit.
+fn release_watcher_for_test(data_dir: &Path) { let _released = super::release_watcher(data_dir); }
