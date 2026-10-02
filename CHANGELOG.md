@@ -17,6 +17,14 @@ All notable changes to this crate are recorded here. The format follows
   `flock` is missing, as on macOS, the next bootstrap's sweep still reclaims
   the server (#287).
 
+### Windows test targets
+
+- `cargo test` with default features no longer fails to compile `tests/ui.rs`
+  on Windows. The target includes fixtures that need the `cluster-unit-tests`
+  surface, so it now declares `required-features` like the other test targets.
+  CI checks every target with default features on Windows and macOS so a
+  feature-dependent target cannot regress unnoticed (#291).
+
 ## 0.6.3
 
 ### Concurrent starts
