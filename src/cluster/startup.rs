@@ -205,9 +205,10 @@ fn invoke_unprivileged_operation(
     step: LifecycleStep,
 ) -> BootstrapResult<()> {
     match step {
-        LifecycleStep::Setup => invoker.invoke(worker_operation::WorkerOperation::Setup, async {
-            embedded.setup().await
-        }),
+        LifecycleStep::Setup => invoker.invoke(
+            worker_operation::WorkerOperation::Setup,
+            crate::durability::setup_disposable(embedded),
+        ),
         LifecycleStep::Start => invoker.invoke(worker_operation::WorkerOperation::Start, async {
             embedded.start().await
         }),
@@ -341,11 +342,10 @@ async fn invoke_lifecycle_async(
     let invoker = AsyncInvoker::new(bootstrap, env_vars);
     timed_step_async(
         LifecycleStep::Setup,
-        Box::pin(
-            invoker.invoke(worker_operation::WorkerOperation::Setup, async {
-                embedded.setup().await
-            }),
-        ),
+        Box::pin(invoker.invoke(
+            worker_operation::WorkerOperation::Setup,
+            crate::durability::setup_disposable(embedded),
+        )),
     )
     .await?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;

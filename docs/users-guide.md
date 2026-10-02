@@ -880,6 +880,34 @@ warning naming it; it can be deleted.
 
 ADR 005 records the design.
 
+## Test clusters are non-durable by default
+
+A cluster started for a test is thrown away, so it does not pay for durability.
+`TestCluster`, `shared_cluster_handle()` and `bootstrap_for_tests()` run
+`initdb --no-sync` and start the server with `fsync`, `synchronous_commit` and
+`full_page_writes` off. The setup-only `run` function and the
+`pg_embedded_setup_unpriv` binary build clusters meant to outlive the process
+and keep PostgreSQL's durable defaults.
+
+- **Why.** `initdb` syncs its whole data directory, and on a loaded or
+  shared-disk host that dominated cluster start times: a single `initdb` took
+  22 to 137 seconds on one shared filesystem, against under a second without
+  the sync (#297). The gain is large on such hosts, including agent hosts and
+  local development, and modest on CI runners.
+- **Opting out.** Set `PG_EMBED_DURABLE=1` in the environment of the process
+  that starts the cluster. That states `fsync = on` explicitly, because the
+  embedded server is otherwise always started with `-F`, and leaves the other
+  two settings at PostgreSQL's defaults. Only the value `1` opts out.
+- **Warning.** A test that depends on durability must opt out. A crash or
+  `SIGKILL` of the server can lose or corrupt a non-durable cluster, so a test
+  that kills the server and expects committed data to survive, or inspects
+  on-disk state after an unclean stop, would pass or fail for the wrong reason.
+- **A cold install tree.** When the PostgreSQL binaries are not yet installed,
+  `PostgreSQL::setup` installs them and runs `initdb` in one step that cannot
+  be split, so the first cluster in a cold root runs the ordinary synced
+  `initdb`. Every later cluster, which finds the binaries in place, runs the
+  unsynced one.
+
 ## Prebuilt extensions
 
 Out-of-tree extensions such as `pgvector` are not part of the Theseus binaries.

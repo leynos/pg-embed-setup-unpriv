@@ -57,6 +57,7 @@ mod extension_hook;
 mod guard;
 mod handle;
 mod installation;
+pub(crate) use self::installation::resolve_installed_dir;
 mod lifecycle;
 mod lifecycle_template;
 pub(crate) mod panic_utils;

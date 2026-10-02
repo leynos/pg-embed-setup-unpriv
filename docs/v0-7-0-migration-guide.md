@@ -24,6 +24,22 @@ instead of leaving it until a later bootstrap's sweep (#287).
   through `setsid flock`, not a helper binary, so nothing has to be installed
   or hooked into `main`.
 
+## Test clusters are non-durable by default
+
+`TestCluster`, `shared_cluster_handle()` and `bootstrap_for_tests()` now run
+`initdb --no-sync` and start the server with `fsync`, `synchronous_commit` and
+`full_page_writes` off (#297). The setup-only `run` function and the binary are
+unchanged and stay durable.
+
+- **Nothing to do** for a suite that treats its cluster as disposable, which is
+  nearly every suite. It starts faster, markedly so on a loaded or shared disk.
+- **A test that depends on durability must opt out.** Set `PG_EMBED_DURABLE=1`
+  for the process that starts the cluster. Examples: a test that kills the
+  server and expects committed rows to survive, or one that reads on-disk state
+  after an unclean stop. The opt-out states `fsync = on` explicitly, because
+  the embedded server is otherwise started with `-F`.
+- **A durability setting you put in the configuration wins** over either mode.
+
 ## A new metric variant
 
 `observability::Metric` gains `OrphanWatcher(OrphanWatcherOutcomeMetric)`. The

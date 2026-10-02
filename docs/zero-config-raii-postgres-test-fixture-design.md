@@ -631,11 +631,10 @@ tests:
 - **Synchronous tests (`cargo test`):** The
   `postgresql_embedded` crate’s `"blocking"` feature must be enabled to use its
   blocking API (see postgresql_embedded README). This allows calling
-  `PostgreSQL::setup()` and `start()` in a normal
-  #[test] function without needing an async runtime. For example,
-  `TestCluster::start()` can internally call the blocking setup/start and
-  return once the DB is running. Developers can then use Diesel or any blocking
-  client directly.
+  `PostgreSQL::setup()` and `start()` in a normal #[test] function without
+  needing an async runtime. For example, `TestCluster::start()` can internally
+  call the blocking setup/start and return once the DB is running. Developers
+  can then use Diesel or any blocking client directly.
 
 - **Asynchronous tests (tokio):** The `async-api` feature (added 2026-01-15)
   provides `TestCluster::start_async()` and `stop_async()` for use in async

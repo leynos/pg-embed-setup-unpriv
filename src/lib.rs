@@ -9,6 +9,7 @@ mod bootstrap;
 pub mod cache;
 mod cleanup_helpers;
 mod cluster;
+mod durability;
 mod env;
 mod error;
 pub mod extensions;
@@ -458,6 +459,10 @@ impl PgEnvCfg {
         self.apply_locale(&mut s);
         if for_tests {
             Self::apply_worker_limits(&mut s);
+            durability::apply_disposable_defaults(
+                &mut s,
+                durability::is_durable_requested(|key| std::env::var_os(key)),
+            );
         }
         self.apply_max_connections(&mut s)?;
 
