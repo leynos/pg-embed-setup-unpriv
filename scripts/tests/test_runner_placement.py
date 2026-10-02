@@ -29,6 +29,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PLACEMENTS = [
     (".github/workflows/ci.yml", "build-test", "ubicloud-standard-4", 66),
     (".github/workflows/ci.yml", "msrv", "ubicloud-standard-4", 30),
+    (".github/workflows/ci.yml", "binstall-packaging", "ubicloud-standard-2", 15),
     (".github/workflows/coverage-main.yml", "coverage-upload", "ubicloud-standard-2", 66),
 ]
 
@@ -134,3 +135,91 @@ def test_a_runner_class_other_than_the_inventoried_one_is_reported() -> None:
     four = ESTATE_EXPRESSION.replace("standard-2", "standard-4")
     assert placement_faults(four, "ubicloud-standard-4") == []
     assert len(placement_faults(four, "ubicloud-standard-2")) == 2
+
+
+def _matrix_job(reference: str, row: str) -> Workflow:
+    """Return a one-job workflow reading a matrix runner, with one row set.
+
+    Parameters
+    ----------
+    reference : str
+        The job's `runs-on`, reading the matrix.
+    row : str
+        The runner value of the Linux row, as YAML text.
+
+    Returns
+    -------
+    Workflow
+        The parsed workflow, with a hosted macOS row beside the Linux one.
+    """
+    text = (
+        f"on: push\njobs:\n  lane:\n    runs-on: {reference}\n"
+        "    strategy:\n      matrix:\n        include:\n"
+        f"          - runner: {row}\n            target: linux\n"
+        "          - runner: macos-latest\n            target: macos\n"
+    )
+    return Workflow.parse("x.yml", text)
+
+
+@pytest.mark.parametrize(
+    ("reference", "row", "expected"),
+    [
+        ("${{ matrix.runner }}", f'"{ESTATE_EXPRESSION}"', 0),
+        ("${{ matrix['runner'] }}", f'"{ESTATE_EXPRESSION}"', 0),
+        ("${{ matrix.runner }}", "ubicloud-standard-2", 3),
+        (
+            "${{ matrix.runner }}",
+            '"${{ github.event.pull_request.head.repo.fork && '
+            "'ubicloud-standard-2' || 'ubuntu-latest' }}\"",
+            3,
+        ),
+        (
+            "${{ matrix.runner }}",
+            '"${{ github.event.pull_request.head.repo.fork && '
+            "'ubuntu-latest' || 'ubicloud-standard-4' }}\"",
+            2,
+        ),
+    ],
+    ids=["dotted", "indexed", "literal-label", "inverted-arms", "another-class"],
+)
+def test_a_matrix_row_is_judged_on_its_own_expression(
+    reference: str, row: str, expected: int
+) -> None:
+    """A placement taken from a matrix row is inventoried and judged on that row.
+
+    The hosted macOS row is left alone, so a job placed through one Linux
+    row yields exactly one entry, and each wrong placement of that row is
+    reported.
+    """
+    placed = placed_jobs([_matrix_job(reference, row)])
+    assert len(placed) == 1, f"expected the one Ubicloud row, read {placed}"
+    assert len(placement_faults(placed[0][2])) == expected, placed
+
+
+def test_a_matrix_of_hosted_rows_is_not_inventoried() -> None:
+    """A matrix that never names Ubicloud needs no ceiling."""
+    flow = _matrix_job("${{ matrix.runner }}", "ubuntu-latest")
+    assert placed_jobs([flow]) == []
+
+
+def test_a_matrix_naming_ubicloud_elsewhere_is_inventoried_and_rejected() -> None:
+    """Refuse Ubicloud named under a key the `runs-on` does not read."""
+    text = (
+        "on: push\njobs:\n  lane:\n    runs-on: ${{ matrix.os }}\n"
+        "    strategy:\n      matrix:\n        include:\n"
+        "          - os: ubuntu-latest\n            runner: ubicloud-standard-2\n"
+    )
+    placed = placed_jobs([Workflow.parse("x.yml", text)])
+    assert len(placed) == 1, f"not inventoried: {placed}"
+    assert placement_faults(placed[0][2]), f"not rejected: {placed}"
+
+
+def test_a_fork_may_fall_back_to_the_pinned_ubuntu_release() -> None:
+    """A lane that pins an Ubuntu release keeps it on the fork arm.
+
+    Both hosted labels are accepted for the fork, and any other is not.
+    """
+    pinned = ESTATE_EXPRESSION.replace("'ubuntu-latest'", "'ubuntu-24.04'")
+    other = ESTATE_EXPRESSION.replace("'ubuntu-latest'", "'ubuntu-22.04'")
+    assert placement_faults(pinned) == []
+    assert len(placement_faults(other)) == 1

@@ -50,7 +50,7 @@ jobs:
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@abf0dcf2686de1eaf79b6dc9a16662b631bed149
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@ff1dd759dfffc0db3459e30e833f52437ee62b57
         with:
           version: "0.6.0"
 
@@ -272,12 +272,19 @@ jobs:
 
   binstall-packaging:
     name: Binstall (${{ matrix.target }})
+    # The Linux row is on Ubicloud, to avoid the hosted queue; its runner is
+    # taken from the matrix row, which falls back to the hosted pool for a pull
+    # request from a fork, as every Ubicloud lane here does. The macOS and
+    # Windows rows are unchanged. The ceiling is one for the job, so it covers
+    # the slowest row: twice the 5.5 min the Windows row took (run 36721523547),
+    # rounded up to 15. The Linux row on Ubicloud took 3.5 min.
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || 'ubicloud-standard-2' }}
             target: x86_64-unknown-linux-gnu
           - runner: macos-latest
             target: aarch64-apple-darwin
