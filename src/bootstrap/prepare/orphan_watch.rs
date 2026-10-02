@@ -31,6 +31,8 @@ mod process;
 mod registry;
 
 pub(crate) use self::process::spawn_watcher;
+#[cfg(test)]
+use self::process::spawn_with;
 
 /// Environment variable that, set to `off`, keeps a process from spawning
 /// watchers, so the next bootstrap's sweep is the only reclaim of a killed

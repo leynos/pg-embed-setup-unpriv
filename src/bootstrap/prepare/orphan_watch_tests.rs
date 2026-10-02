@@ -262,6 +262,24 @@ fn the_watcher_inherits_only_dev_null_and_the_lock_file() -> Result<()> {
     Ok(())
 }
 
+/// A program that cannot be executed is a spawn error, not a watcher that
+/// never ran: marking descriptors close-on-exec must leave the pipe `std` uses
+/// to report an `exec` failure intact, or `spawn` would return a `Child` for a
+/// process that never started.
+#[test]
+fn a_program_that_cannot_exec_is_a_spawn_error() -> Result<()> {
+    let slot = Slot::new()?;
+    let outcome = super::spawn_with("pg-embed-no-such-program", &slot.lock, &slot.data_dir);
+    let Err(err) = outcome else {
+        return Err(eyre!("a missing program must not spawn"));
+    };
+    ensure!(
+        err.kind() == std::io::ErrorKind::NotFound,
+        "expected NotFound, got {err:?}"
+    );
+    Ok(())
+}
+
 /// Only `off` turns the watcher off, whatever else the variable holds.
 #[rstest::rstest]
 #[case::off(Some("off"), true)]

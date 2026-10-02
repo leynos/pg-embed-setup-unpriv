@@ -35,7 +35,12 @@ exit 0
 /// Where `close_range` is unavailable the descriptors up to a fixed ceiling are
 /// marked one by one.
 ///
-/// Runs between `fork` and `exec`, so it only makes system calls.
+/// Runs between `fork` and `exec` in a process that may have been forked from a
+/// multi-threaded parent, so everything it does must be async-signal-safe: raw
+/// system calls on integers only, no allocation, no locks, no logging. Marking
+/// rather than closing is also what keeps `spawn` honest: closing the range
+/// would close the pipe `std` reads to learn that `exec` failed, and `spawn`
+/// would then report success for a process that never ran.
 fn mark_inherited_descriptors_close_on_exec() {
     // SAFETY: `close_range` and `fcntl` take plain integers and touch no memory
     // of this process; both are async-signal-safe.
@@ -60,8 +65,8 @@ const FALLBACK_DESCRIPTOR_CEILING: i32 = 4096;
 
 /// Builds the watcher command for a slot: blocks on `lock`, then runs the
 /// script against `data_dir`, in a session of its own with no standard streams.
-fn watcher_command(lock: &Path, data_dir: &Path) -> Command {
-    let mut command = Command::new("setsid");
+fn watcher_command(program: &str, lock: &Path, data_dir: &Path) -> Command {
+    let mut command = Command::new(program);
     command
         .arg("flock")
         .arg("--exclusive")
@@ -88,5 +93,11 @@ fn watcher_command(lock: &Path, data_dir: &Path) -> Command {
 ///
 /// Returns the spawn error, `NotFound` where `setsid` or `flock` is missing.
 pub(crate) fn spawn_watcher(lock: &Path, data_dir: &Path) -> io::Result<Child> {
-    watcher_command(lock, data_dir).spawn()
+    spawn_with("setsid", lock, data_dir)
+}
+
+/// Spawns the watcher through `program`, which is `setsid` outside a test that
+/// needs the exec to fail.
+pub(super) fn spawn_with(program: &str, lock: &Path, data_dir: &Path) -> io::Result<Child> {
+    watcher_command(program, lock, data_dir).spawn()
 }
