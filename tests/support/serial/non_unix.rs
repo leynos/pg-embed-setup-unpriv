@@ -91,8 +91,20 @@ const fn is_lock_contention(kind: std::io::ErrorKind) -> bool {
     }
 }
 
+/// Makes one attempt to take the lock, returning `None` when it is contended.
+///
+/// The directory creation is a parameter so a test can make it report the
+/// errors a peer's pending delete produces without racing a real peer.
 fn try_acquire_process_lock_once(lock_path: &Path, deadline: Instant) -> Option<ProcessLock> {
-    match std::fs::create_dir(lock_path) {
+    try_acquire_with(lock_path, deadline, |path| std::fs::create_dir(path))
+}
+
+fn try_acquire_with(
+    lock_path: &Path,
+    deadline: Instant,
+    create_dir: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Option<ProcessLock> {
+    match create_dir(lock_path) {
         Ok(()) => write_process_lock_owner(lock_path),
         Err(err) if is_lock_contention(err.kind()) => {
             handle_contended_process_lock(lock_path, deadline, &err);
@@ -107,6 +119,9 @@ fn try_acquire_process_lock_once(lock_path: &Path, deadline: Instant) -> Option<
     }
 }
 
+/// Deals with a contended lock: sweeps it when its owner is gone, fails once
+/// the deadline has passed (naming `cause`), and otherwise waits briefly so the
+/// caller can try again.
 fn handle_contended_process_lock(lock_path: &Path, deadline: Instant, cause: &std::io::Error) {
     match process_lock_state(lock_path) {
         ProcessLockState::Stale(_reason) => {
@@ -257,6 +272,57 @@ mod tests {
         super::{ScenarioSerialGuard, serial_guard},
         *,
     };
+
+    /// What one acquisition attempt does with each way creating the lock
+    /// directory can fail, driven through the real retry path (#279): creation
+    /// that fails with "already exists", or on Windows "access denied", is
+    /// contention and the attempt reports `None` so the caller retries; any
+    /// other failure is a real error and panics at once.
+    #[rstest]
+    #[case::already_exists(std::io::ErrorKind::AlreadyExists, true, false)]
+    #[case::access_denied(std::io::ErrorKind::PermissionDenied, cfg!(windows), !cfg!(windows))]
+    #[case::not_found(std::io::ErrorKind::NotFound, false, true)]
+    fn an_attempt_retries_on_contention_and_panics_on_a_real_failure(
+        #[case] kind: std::io::ErrorKind,
+        #[case] retries: bool,
+        #[case] panics: bool,
+    ) {
+        let missing = std::env::temp_dir().join("pg_scenario_attempt_missing/lockdir");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let outcome = std::panic::catch_unwind(|| {
+            try_acquire_with(&missing, deadline, |_| Err(std::io::Error::from(kind)))
+        });
+        match outcome {
+            Ok(lock) => {
+                assert!(!panics, "{kind:?} must not be retried");
+                assert_eq!(lock.is_none(), retries, "{kind:?} reports contention");
+            }
+            Err(_) => assert!(panics, "{kind:?} must be retried, not panic"),
+        }
+    }
+
+    /// Contention that outlasts the deadline stops retrying and names the last
+    /// error, so a lock path that is really unusable is still reported.
+    #[rstest]
+    fn contention_past_the_deadline_names_the_last_error() {
+        let missing = std::env::temp_dir().join("pg_scenario_deadline_missing/lockdir");
+        let deadline = Instant::now();
+        std::thread::sleep(Duration::from_millis(5));
+        let outcome = std::panic::catch_unwind(|| {
+            try_acquire_with(&missing, deadline, |_| {
+                Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+            })
+        });
+        let payload = outcome.expect_err("an expired deadline must panic");
+        let message = payload
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            message.contains("timed out") && message.contains("last error"),
+            "unexpected panic message: {message}"
+        );
+    }
 
     /// A failed lock-directory creation counts as contention when the path
     /// exists or, on Windows, is delete-pending and reports access denied;
