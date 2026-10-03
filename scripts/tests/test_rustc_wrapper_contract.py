@@ -45,7 +45,8 @@ def parse(text: str) -> Workflow:
 
 def test_the_good_shape_has_no_fault() -> None:
     """Both steps empty the wrapper, so nothing is reported."""
-    assert wrapper_faults(parse(_GOOD)) == []
+    faults = wrapper_faults(parse(_GOOD))
+    assert faults == [], f"the reference workflow must be fault-free, got {faults}"
 
 
 @pytest.mark.parametrize(
@@ -60,13 +61,32 @@ def test_the_good_shape_has_no_fault() -> None:
 )
 def test_restoring_the_wrapper_is_a_fault(old: str, new: str, fragment: str) -> None:
     """Each way of letting the wrapper back into a step names that step."""
-    assert old in _GOOD
+    assert old in _GOOD, f"the mutation target {old!r} must exist in the reference workflow"
     faults = wrapper_faults(parse(_GOOD.replace(old, new)))
-    assert faults, "restoring the wrapper must be reported"
-    assert all(fragment in fault for fault in faults)
+    assert faults, f"replacing {old!r} with {new!r} must be reported"
+    assert all(fragment in fault for fault in faults), f"faults must name {fragment!r}: {faults}"
+
+
+def test_an_assignment_after_the_command_does_not_count() -> None:
+    """An unrelated `RUSTC_WRAPPER=` line after `run_as_root make test` is not the argument.
+
+    `sudo -E env` would still pass sccache to root's build, so a check that
+    searched the whole script would accept this shape and miss the defect.
+    """
+    dropped = _GOOD.replace("              RUSTC_WRAPPER= \\\n", "")
+    assert dropped != _GOOD, "the in-function assignment must exist in the reference workflow"
+    misplaced = dropped.replace(
+        "          run_as_root make test\n",
+        "          run_as_root make test\n          RUSTC_WRAPPER= \\\n",
+    )
+    assert misplaced != dropped, "the trailing assignment must have been added"
+    faults = wrapper_faults(parse(misplaced))
+    assert faults, "an assignment outside the sudo env arguments must be reported"
+    assert all(ROOT_STEP in fault for fault in faults), f"faults must name the root step: {faults}"
 
 
 def test_the_real_ci_workflow_empties_the_wrapper() -> None:
     """The repository's own `ci.yml` keeps both steps on plain rustc."""
     text = (REPOSITORY_ROOT / CI).read_text(encoding="utf-8")
-    assert wrapper_faults(parse(text)) == []
+    faults = wrapper_faults(parse(text))
+    assert faults == [], f"ci.yml must keep both steps on plain rustc, got {faults}"

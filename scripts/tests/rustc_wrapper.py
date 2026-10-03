@@ -16,14 +16,49 @@ from workflow_reader import Workflow
 UNPRIVILEGED_STEP = "Test with all features (unprivileged)"
 ROOT_STEP = "Install cargo-nextest and test (root)"
 
-#: `RUSTC_WRAPPER=` followed by whitespace or a line continuation, so only an
-#: empty assignment inside the `sudo env` argument list counts.
-_EMPTY_ASSIGNMENT = re.compile(r"^\s*RUSTC_WRAPPER=\s*\\?\s*$", re.MULTILINE)
+#: The `run_as_root` shell function: its opening line to the closing brace at
+#: the same indent, so an assignment elsewhere in the step cannot count.
+_ROOT_FUNCTION = re.compile(
+    r"^(?P<indent>[ \t]*)run_as_root\s*\(\s*\)\s*\{(?P<body>.*?)^(?P=indent)\}",
+    re.MULTILINE | re.DOTALL,
+)
+
+#: The `sudo -E env \` line and the continued `NAME=value \` lines after it.
+_SUDO_ENV = re.compile(
+    r"^[ \t]*sudo[ \t]+-E[ \t]+env[ \t]*\\[ \t]*\n"
+    r"(?P<arguments>(?:^[ \t]+[A-Za-z_][A-Za-z0-9_]*=.*\\[ \t]*\n)*)",
+    re.MULTILINE,
+)
+
+#: An empty `RUSTC_WRAPPER=` argument: empty means unset to cargo.
+_EMPTY_ASSIGNMENT = re.compile(r"^[ \t]+RUSTC_WRAPPER=[ \t]*\\[ \t]*$", re.MULTILINE)
+
+
+def _root_command_empties_wrapper(run: str) -> bool:
+    """Return whether `run_as_root` passes an empty `RUSTC_WRAPPER` to `sudo -E env`."""
+    helper = _ROOT_FUNCTION.search(run)
+    if helper is None:
+        return False
+    sudo_env = _SUDO_ENV.search(helper.group("body"))
+    return sudo_env is not None and bool(_EMPTY_ASSIGNMENT.search(sudo_env.group("arguments")))
 
 
 def wrapper_faults(workflow: Workflow) -> list[str]:
     """Return what is wrong with how the two steps handle the wrapper.
 
+    Parameters
+    ----------
+    workflow : Workflow
+        The parsed workflow to judge.
+
+    Returns
+    -------
+    list[str]
+        One message per fault, each naming the step at fault; empty when both
+        steps run plain `rustc`.
+
+    Examples
+    --------
     >>> wrapper_faults(Workflow("x.yml", {}, {}))
     ['no step named Test with all features (unprivileged)', 'no step named Install cargo-nextest and test (root)']
     """
@@ -37,6 +72,6 @@ def wrapper_faults(workflow: Workflow) -> list[str]:
     root = steps.get(ROOT_STEP)
     if root is None:
         faults.append(f"no step named {ROOT_STEP}")
-    elif not _EMPTY_ASSIGNMENT.search(str(root.get("run", ""))):
+    elif not _root_command_empties_wrapper(str(root.get("run", ""))):
         faults.append(f"{ROOT_STEP} does not empty RUSTC_WRAPPER for the root command")
     return faults
