@@ -263,6 +263,20 @@ use crate::error::{ConfigError, ConfigResult};
 /// ```
 pub use crate::fs::ambient_dir_and_path;
 
+/// Whether `err` is `ortho_config` reporting that no source supplied any field.
+///
+/// With no `PG_*` variable and no configuration file, `ortho_config` 0.9 prunes
+/// the all-`None` command-line layer to `null`, and merging that into the struct
+/// fails with "invalid type: null, expected struct `PgEnvCfg`". Nothing was
+/// configured, so the answer is the default configuration (#317). The check is
+/// on the message because the error carries no structured cause; a regression
+/// test clears every `PG_*` variable, so a change in the wording fails loudly
+/// rather than reintroducing the defect.
+fn is_empty_configuration(err: &impl std::fmt::Display) -> bool {
+    err.to_string()
+        .contains("invalid type: null, expected struct PgEnvCfg")
+}
+
 /// Captures `PostgreSQL` settings supplied via environment variables.
 #[derive(Debug, Clone, Serialize, Deserialize, OrthoConfig, Default)]
 #[ortho_config(prefix = "PG")]
@@ -344,7 +358,11 @@ impl PgEnvCfg {
     /// cannot be represented using UTF-8 paths.
     pub fn load() -> ConfigResult<Self> {
         let args = [OsString::from("pg-embedded-setup-unpriv")];
-        Self::load_from_iter(args).map_err(|err| ConfigError::from(eyre!(err)))
+        match Self::load_from_iter(args) {
+            Ok(cfg) => Ok(cfg),
+            Err(err) if is_empty_configuration(&err) => Ok(Self::default()),
+            Err(err) => Err(ConfigError::from(eyre!(err))),
+        }
     }
 
     /// Converts the configuration into a complete `postgresql_embedded::Settings` object.
