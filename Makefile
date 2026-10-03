@@ -82,14 +82,23 @@ INTERROGATE ?= interrogate
 INTERROGATE_EXCLUDES := --exclude .uv-cache --exclude .uv-tools
 PY_DOCSTRING_COVERAGE ?= 100
 
+# The development build standard (concordat rule `rust-build-defaults`):
+# the parallel rustc frontend and, on Linux, the mold linker. An assigned
+# RUSTFLAGS replaces every `rustflags` table in .cargo/config.toml, so each
+# recipe that sets it composes these onto any inherited value (CI's
+# setup-rust exports one), except coverage, which stays on LLVM and the
+# platform linker.
+BUILD_HOST_OS := $(shell uname -s)
+STANDARD_RUSTFLAGS := -Zthreads=8$(if $(filter Linux,$(BUILD_HOST_OS)), -Clink-arg=-fuse-ld=mold)
+
 test-workflow-contracts: ## Check the CV-005 CodeScene workflow contracts
 	$(CV005_CONTRACTS) check --repository .
 
 build: ## Build debug binary
-	$(CARGO) build $(BUILD_JOBS) --bin "$(APP)"
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) build $(BUILD_JOBS) --bin "$(APP)"
 
 release: ## Build release binaries
-	$(CARGO) build $(BUILD_JOBS) --release $(foreach bin,$(RELEASE_BINARIES),--bin $(bin))
+	RUSTFLAGS="$${RUSTFLAGS-}" $(CARGO) build $(BUILD_JOBS) --release $(foreach bin,$(RELEASE_BINARIES),--bin $(bin))
 
 all: check-fmt lint test test-scripts spelling test-workflow-contracts ## Perform all commit gate checks
 
@@ -98,17 +107,17 @@ clean: ## Remove build artefacts
 	rm -rf "$(DIST_DIR)" .uv-cache .uv-tools
 
 test: test-doc ## Run tests with warnings treated as errors
-	RUSTFLAGS="-D warnings" $(CARGO) nextest run --all-targets --all-features $(BUILD_JOBS)
-	RUSTFLAGS="-D warnings" $(CARGO) nextest run --tests --workspace --no-default-features --features dev-worker $(BUILD_JOBS)
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) nextest run --all-targets --all-features $(BUILD_JOBS)
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) nextest run --tests --workspace --no-default-features --features dev-worker $(BUILD_JOBS)
 
 # nextest cannot run documentation examples, so `make test` above never
 # compiled one: every `# Examples` block in this crate was unchecked prose
 # until this target existed.
 test-doc: ## Run the documentation examples
-	RUSTFLAGS="-D warnings" $(CARGO) test --doc --all-features $(BUILD_JOBS)
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) test --doc --all-features $(BUILD_JOBS)
 
 test-loom: ## Run Loom concurrency tests
-	$(CARGO) test --features "loom-tests" --lib -- --ignored
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) test --features "loom-tests" --lib -- --ignored
 
 test-scripts: ## Run the Python release-tooling tests
 	$(SCRIPT_PYTEST) $(SCRIPT_PY_TESTS) -c /dev/null --rootdir=. -p no:cacheprovider
@@ -121,7 +130,7 @@ release-archive: ## Package release binaries for cargo-binstall
 	@test -n "$(TARGET)" || (echo "TARGET is required" >&2; exit 1)
 	@test "$(MANIFEST_VERSION)" = "$(VERSION)" || \
 		(echo "VERSION ($(VERSION)) must match Cargo.toml package version ($(MANIFEST_VERSION))" >&2; exit 1)
-	$(UV) run --script scripts/release_archive.py "$(TARGET)" \
+	RUSTFLAGS="$${RUSTFLAGS-}" $(UV) run --script scripts/release_archive.py "$(TARGET)" \
 		--release-version "$(VERSION)" \
 		--dist-dir "$(DIST_DIR)" \
 		--cargo "$(CARGO)" \
@@ -130,14 +139,14 @@ release-archive: ## Package release binaries for cargo-binstall
 
 lint: ## Run Clippy and the Whitaker Dylint suite with warnings denied
 	$(INTERROGATE) --fail-under $(PY_DOCSTRING_COVERAGE) $(INTERROGATE_EXCLUDES) .
-	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)
-	$(CARGO) clippy $(CLIPPY_FLAGS)
+	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) clippy $(CLIPPY_FLAGS)
 # --ignore-rust-version: the Whitaker Dylint driver toolchain predates the
 # rust-version of some dependencies; the repo toolchain still enforces MSRV.
-	RUSTFLAGS="-D warnings" $(WHITAKER) --all -- --all-targets --all-features --ignore-rust-version
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(WHITAKER) --all -- --all-targets --all-features --ignore-rust-version
 
 typecheck: ## Typecheck the workspace
-	$(CARGO) check --workspace --all-targets --all-features $(BUILD_JOBS)
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) check --workspace --all-targets --all-features $(BUILD_JOBS)
 
 fmt: ## Format Rust and Markdown sources
 	$(CARGO) fmt --all
