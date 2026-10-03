@@ -36,6 +36,8 @@ use self::layout::claim_derived_slot;
 mod orphan;
 #[cfg(target_os = "linux")]
 mod orphan_watch;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use orphan_watch::is_watching;
 #[cfg(target_os = "linux")]
 pub(crate) use orphan_watch::{release_watcher, watch_slot_owner};
 mod password;

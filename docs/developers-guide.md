@@ -881,8 +881,9 @@ ADR 005 records the design; this section covers the code.
 - `src/bootstrap/prepare/orphan_watch.rs` (Linux only; its process and
   registry halves are `orphan_watch_process.rs` and `orphan_watch_registry.rs`,
   and the lifecycle hooks are `src/cluster/startup_watch.rs`) stops a server
-  the moment its owner dies (#287). `watch_slot_owner`, called after a
-  successful start on the synchronous and asynchronous paths, spawns
+  the moment its owner dies (#287). `watch_slot_owner`, called before the
+  lifecycle starts the server on the synchronous and asynchronous paths (and
+  undone by `release_watcher` if the start fails), spawns
   `setsid flock --exclusive <slot.lock> sh -c WATCHER_SCRIPT`. The flock blocks
   until the kernel releases the owner's slot lock, held for the life of the
   process, and the script then sends `SIGQUIT` only to the PID in

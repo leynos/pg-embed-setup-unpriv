@@ -115,6 +115,38 @@ fn wait_exit(child: &mut Child, within: Duration) -> Result<Option<std::process:
 
 const WAIT: Duration = Duration::from_secs(20);
 
+/// Returns whether the kernel lists `pid` as blocked waiting for a file lock.
+///
+/// `/proc/locks` marks a waiter with `->` after the entry's index and names the
+/// waiting process after the lock's mode (`READ` or `WRITE`).
+fn is_blocked_on_a_lock(pid: u32) -> Result<bool> {
+    let locks = std::fs::read_to_string("/proc/locks")?;
+    Ok(locks
+        .lines()
+        .filter(|line| line.contains("->"))
+        .filter_map(|line| {
+            line.split_whitespace()
+                .skip_while(|word| !matches!(*word, "READ" | "WRITE"))
+                .nth(1)
+        })
+        .any(|word| word.parse() == Ok(pid)))
+}
+
+/// Waits until the kernel shows `pid` queued behind the owner's lock, so a test
+/// that the watcher does nothing while the lock is held does not rest on a fixed
+/// sleep.
+fn wait_until_blocked_on_a_lock(pid: u32) -> Result<()> {
+    let deadline = Instant::now() + WAIT;
+    while !is_blocked_on_a_lock(pid)? {
+        ensure!(
+            Instant::now() < deadline,
+            "the watcher never queued on the lock"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Ok(())
+}
+
 /// How long a process that must survive is watched after the watcher has
 /// ended: a signal takes a moment to end its target, so an immediate look
 /// would pass a watcher that had just sent one.
@@ -131,7 +163,7 @@ fn a_matching_server_is_signalled_only_after_the_owner_dies() -> Result<()> {
     slot.name_pid_file(server.0.id())?;
     let mut watcher = spawn_watcher(&slot.lock, &slot.data_dir)?;
 
-    std::thread::sleep(Duration::from_millis(300));
+    wait_until_blocked_on_a_lock(watcher.id())?;
     ensure!(
         server.0.try_wait()?.is_none() && watcher.try_wait()?.is_none(),
         "the watcher must wait for the owner's lock"
@@ -145,7 +177,10 @@ fn a_matching_server_is_signalled_only_after_the_owner_dies() -> Result<()> {
     );
     let status = wait_exit(&mut server.0, WAIT)?
         .ok_or_else(|| eyre!("the matching server was not signalled"))?;
-    ensure!(!status.success(), "the server ends by signal: {status:?}");
+    ensure!(
+        std::os::unix::process::ExitStatusExt::signal(&status) == Some(libc::SIGQUIT),
+        "the server must end by SIGQUIT, as pg_ctl stop -m immediate does: {status:?}"
+    );
     Ok(())
 }
 
@@ -295,85 +330,50 @@ fn only_the_value_off_disables_the_watcher(#[case] value: Option<&str>, #[case] 
     assert_eq!(super::is_disabled(lookup), disabled);
 }
 
-mod metrics {
-    //! Each watcher decision reaches a consumer's recorder as one bounded
-    //! outcome. The recorder is process-wide, so these carry the same
-    //! `serial` key as the crate's other metric tests, and assert containment
-    //! because the cleanup tests call the watcher without that key.
-
-    use std::sync::{Arc, Mutex, PoisonError};
-
-    use color_eyre::eyre::{Result, ensure};
-    use serial_test::serial;
-
-    use super::{Slot, release_watcher_for_test};
-    use crate::{
-        bootstrap::prepare::orphan_watch::{release_watcher, watch_slot_owner},
-        observability::{
-            Metric,
-            MetricsRecorder,
-            OrphanWatcherOutcomeMetric as Outcome,
-            install_metrics_recorder,
-        },
+/// The fallback marks up to the process's soft descriptor limit, not a fixed
+/// number, so a descriptor above 4095 cannot survive into the watcher.
+#[test]
+fn the_fallback_covers_the_soft_descriptor_limit() -> Result<()> {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
     };
-
-    #[derive(Default)]
-    struct Collected(Mutex<Vec<Metric>>);
-
-    impl MetricsRecorder for Collected {
-        fn record(&self, metric: Metric) {
-            self.0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(metric);
-        }
-    }
-
-    fn collected(body: impl FnOnce()) -> Vec<Metric> {
-        let recorder = Arc::new(Collected::default());
-        let guard = install_metrics_recorder(Arc::clone(&recorder) as Arc<dyn MetricsRecorder>);
-        body();
-        drop(guard);
-        let seen = recorder.0.lock().unwrap_or_else(PoisonError::into_inner);
-        seen.clone()
-    }
-
-    /// A directory that is not a slot is counted as such.
-    #[test]
-    #[serial(metrics_recorder)]
-    fn a_directory_that_is_not_a_slot_is_counted() -> Result<()> {
-        let dir = tempfile::tempdir()?;
-        let seen = collected(|| {
-            let _watching = watch_slot_owner(dir.path());
-        });
-        ensure!(
-            seen.contains(&Metric::OrphanWatcher(Outcome::NotASlot)),
-            "{seen:?}"
-        );
-        Ok(())
-    }
-
-    /// A slot is counted as spawned, and releasing it as released.
-    #[test]
-    #[serial(metrics_recorder)]
-    fn spawning_and_releasing_a_watcher_are_counted() -> Result<()> {
-        let slot = Slot::new()?;
-        let seen = collected(|| {
-            let _watching = watch_slot_owner(&slot.data_dir);
-            let _released = release_watcher(&slot.data_dir);
-        });
-        release_watcher_for_test(&slot.data_dir);
-        ensure!(
-            seen.contains(&Metric::OrphanWatcher(Outcome::Spawned)),
-            "{seen:?}"
-        );
-        ensure!(
-            seen.contains(&Metric::OrphanWatcher(Outcome::Released)),
-            "{seen:?}"
-        );
-        Ok(())
-    }
+    // SAFETY: `limit` is a valid, writable `rlimit` for the call.
+    ensure!(
+        unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit) } == 0,
+        "getrlimit failed"
+    );
+    let expected = limit.rlim_cur.min(1 << 20);
+    let ceiling = super::process::fallback_descriptor_ceiling();
+    ensure!(
+        u64::from(u32::try_from(ceiling)?) == expected,
+        "ceiling {ceiling}, expected {expected}"
+    );
+    Ok(())
 }
+
+/// Registering a second watcher for a directory ends the first instead of
+/// dropping its handle, which would leave it waiting for the process to exit.
+#[test]
+fn a_replaced_watcher_is_ended() -> Result<()> {
+    let slot = Slot::new()?;
+    let first = spawn_watcher(&slot.lock, &slot.data_dir)?;
+    let first_pid = first.id();
+    super::registry::register(&slot.data_dir, first);
+    let second = spawn_watcher(&slot.lock, &slot.data_dir)?;
+    super::registry::register(&slot.data_dir, second);
+
+    let gone = !Path::new(&format!("/proc/{first_pid}")).exists();
+    release_watcher_for_test(&slot.data_dir);
+    ensure!(
+        gone,
+        "the replaced watcher (pid {first_pid}) must be killed and reaped"
+    );
+    Ok(())
+}
+
+#[path = "orphan_watch_metrics_tests.rs"]
+mod metrics;
 
 /// Ends any watcher left registered for `data_dir`, so a failed assertion does
 /// not leave one waiting for the test process to exit.

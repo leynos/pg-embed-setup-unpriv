@@ -93,6 +93,10 @@ pub(crate) fn watch_slot_owner(data_dir: &Path) -> bool {
     }
 }
 
+/// Whether a watcher is registered for `data_dir`.
+#[cfg(test)]
+pub(crate) fn is_watching(data_dir: &Path) -> bool { registry::is_registered(data_dir) }
+
 /// Ends the watcher for `data_dir`, after its server was stopped normally.
 ///
 /// Returns whether there was one.

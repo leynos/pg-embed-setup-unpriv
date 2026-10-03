@@ -16,6 +16,8 @@ pub use env::{TestBootstrapEnvironment, find_timezone_dir};
 pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
 pub(crate) use mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
 use postgresql_embedded::Settings;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use prepare::is_watching;
 pub(crate) use prepare::{
     ClaimGuard,
     claim_guard_at,

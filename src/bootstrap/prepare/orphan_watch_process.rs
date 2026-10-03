@@ -54,14 +54,30 @@ fn mark_inherited_descriptors_close_on_exec() {
         {
             return;
         }
-        for descriptor in 3..FALLBACK_DESCRIPTOR_CEILING {
+        for descriptor in 3..fallback_descriptor_ceiling() {
             libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC);
         }
     }
 }
 
-/// The highest descriptor the fallback marks.
-const FALLBACK_DESCRIPTOR_CEILING: i32 = 4096;
+/// One past the highest descriptor this process can have open, for the fallback.
+///
+/// `RLIMIT_NOFILE`'s soft limit bounds every open descriptor, so marking up to it
+/// covers them all. `getrlimit` is async-signal-safe. The result is capped so a
+/// limit set to a billion cannot make the fallback, used only where
+/// `close_range` is missing (Linux before 5.9), spend seconds between fork and
+/// exec; a process holding a descriptor above the cap is not expected.
+pub(super) fn fallback_descriptor_ceiling() -> i32 {
+    const CAP: libc::rlim_t = 1 << 20;
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `limit` is a valid, writable `rlimit` for the call's duration.
+    let ok = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit) } == 0;
+    let ceiling = if ok { limit.rlim_cur.min(CAP) } else { 4096 };
+    i32::try_from(ceiling).unwrap_or(i32::MAX)
+}
 
 /// Builds the watcher command for a slot: blocks on `lock`, then runs the
 /// script against `data_dir`, in a session of its own with no standard streams.

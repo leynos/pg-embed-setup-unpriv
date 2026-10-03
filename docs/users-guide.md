@@ -771,9 +771,13 @@ struct Forwarding;
 
 impl MetricsRecorder for Forwarding {
     fn record(&self, metric: Metric) {
-        let Metric::PasswordReuse(outcome) = metric;
-        // `outcome` is an enum, so it is safe to use as a label directly.
-        println!("password_reuse {outcome:?}");
+        // `Metric` is `#[non_exhaustive]`, so a match needs a wildcard arm.
+        match metric {
+            // `outcome` is an enum, so it is safe to use as a label directly.
+            Metric::PasswordReuse(outcome) => println!("password_reuse {outcome:?}"),
+            Metric::OrphanWatcher(outcome) => println!("orphan_watcher {outcome:?}"),
+            _ => {}
+        }
     }
 }
 
@@ -787,6 +791,19 @@ branches, and `ProbeFailed`, `MissingFile`, `UnreadableFile` and `EmptyFile`
 for the failures. `ProbeFailed` and `UnreadableFile` stay distinct even though
 both return `ClusterPasswordUnreadable`. With no recorder installed, recording
 costs a branch and a return.
+
+### Orphan-watcher counts (Linux)
+
+On Linux a start also records `Metric::OrphanWatcher` with an
+`OrphanWatcherOutcomeMetric` for each decision about the watcher described
+under "Per-cluster data directories": `Disabled`
+(`PG_EMBED_ORPHAN_WATCHER=off`), `NotASlot`, `SlotUnknown`, `Spawned`,
+`SpawnFailed` (no `setsid` or `flock`), and `Released`, recorded when a cluster
+that is stopped normally, or whose start fails, ends its watcher. Only the
+library's side is counted: the watcher is a detached process that outlives the
+owner and reports nothing. The enum is `#[non_exhaustive]`, so existing
+recorders keep compiling; see the
+[v0.7.0 migration guide](v0-7-0-migration-guide.md).
 
 ## Per-cluster data directories
 
@@ -843,7 +860,7 @@ warning naming it; it can be deleted.
 - **A killed owner's server is stopped at once (Linux).** A test process
   killed by `SIGKILL` or the out-of-memory killer runs no destructor, and the
   `postgres` it started would keep running until the next bootstrap's sweep. So
-  after each start the library spawns a detached watcher,
+  before each start the library spawns a detached watcher,
   `setsid flock <slot.lock> sh -c <script>`, that waits for the kernel to
   release the owner's slot lock and then sends `SIGQUIT` to the server, but
   only if the process in `postmaster.pid` is named `postgres` and its working
