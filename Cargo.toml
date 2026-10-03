@@ -127,6 +127,11 @@ path = "tests/test_cluster_async.rs"
 required-features = ["async-api"]
 
 [[test]]
+name = "zero_config_load"
+path = "tests/zero_config_load.rs"
+required-features = ["cluster-unit-tests"]
+
+[[test]]
 name = "settings"
 path = "tests/settings.rs"
 
