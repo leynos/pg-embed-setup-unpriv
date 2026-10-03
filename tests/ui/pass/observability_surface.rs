@@ -17,6 +17,7 @@ use pg_embedded_setup_unpriv::observability::{
     Metric,
     MetricsRecorder,
     MetricsRecorderGuard,
+    OrphanWatcherOutcomeMetric,
     PasswordReuseOutcomeMetric,
     install_metrics_recorder,
 };
@@ -53,11 +54,26 @@ fn describe_outcome(outcome: PasswordReuseOutcomeMetric) -> &'static str {
     }
 }
 
+/// Names every orphan-watcher outcome the way a consumer would, with the
+/// wildcard arm the `#[non_exhaustive]` enum requires.
+fn describe_watcher_outcome(outcome: OrphanWatcherOutcomeMetric) -> &'static str {
+    match outcome {
+        OrphanWatcherOutcomeMetric::Disabled => "disabled",
+        OrphanWatcherOutcomeMetric::NotASlot => "not_a_slot",
+        OrphanWatcherOutcomeMetric::SlotUnknown => "slot_unknown",
+        OrphanWatcherOutcomeMetric::Spawned => "spawned",
+        OrphanWatcherOutcomeMetric::SpawnFailed => "spawn_failed",
+        OrphanWatcherOutcomeMetric::Released => "released",
+        _ => "unknown",
+    }
+}
+
 /// Destructures a `Metric` the way a consumer forwarding to its own backend
 /// would.
 fn describe_metric(metric: Metric) -> &'static str {
     match metric {
         Metric::PasswordReuse(outcome) => describe_outcome(outcome),
+        Metric::OrphanWatcher(outcome) => describe_watcher_outcome(outcome),
         _ => "unknown",
     }
 }
@@ -76,6 +92,10 @@ pub fn verify_surface() {
         describe_outcome(PasswordReuseOutcomeMetric::EmptyFile),
         "empty_file"
     );
+
+    // A consumer can construct and match the orphan-watcher metric too.
+    let watcher = Metric::OrphanWatcher(OrphanWatcherOutcomeMetric::Spawned);
+    assert_eq!(describe_metric(watcher), "spawned");
 
     // The guard is `#[must_use]`, so it has to be named and dropped.
     drop(guard);

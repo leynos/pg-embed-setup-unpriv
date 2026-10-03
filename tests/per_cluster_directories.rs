@@ -9,6 +9,7 @@
 //!   swept and the server it orphaned is stopped;
 //! - the killed child's lock is free while its orphaned server still runs, so the server did not
 //!   inherit it;
+//! - with the watcher enabled, a killed child's server is stopped soon after (Linux);
 //! - an explicit `PG_DATA_DIR` keeps a single directory at that path;
 //! - startups in one install tree wait for its setup lock;
 //! - a run killed mid-test leaves nothing the next run's sweep cannot reclaim.
@@ -57,6 +58,23 @@ fn bootstrap_and_connect() -> Result<PathBuf, BootstrapError> {
     Ok(handle.settings().data_dir.clone())
 }
 
+/// Starts a cluster through `TestCluster::start_async()` and returns its data
+/// directory, keeping the cluster alive in this process until it exits.
+#[cfg(feature = "async-api")]
+fn async_bootstrap_and_connect() -> Result<PathBuf, BootstrapError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| BootstrapError::from(color_eyre::eyre::eyre!("{err}")))?;
+    let cluster = runtime.block_on(pg_embedded_setup_unpriv::TestCluster::start_async())?;
+    let dir = cluster.settings().data_dir.clone();
+    // The process is killed or its stdin closes next; the cluster must outlive
+    // this function, and its drop would stop the server.
+    std::mem::forget(cluster);
+    std::mem::forget(runtime);
+    Ok(dir)
+}
+
 /// Child: bootstrap, report, and in `hold` mode keep the cluster until
 /// stdin closes. In `orchestrate` mode, first start a `hold` child of its
 /// own and report that child's directory, so a test can kill the
@@ -69,6 +87,17 @@ fn cluster_child() {
     };
     if mode == "orchestrate" {
         orchestrate().expect("the orchestrator runs");
+        return;
+    }
+    #[cfg(feature = "async-api")]
+    if mode == "hold_async" {
+        let line = match async_bootstrap_and_connect() {
+            Ok(dir) => format!("connected {}", dir.display()),
+            Err(err) => format!("failed {}", format!("{err:?}").replace('\n', " | ")),
+        };
+        report(&line).expect("stdout is writable");
+        let mut rest = String::new();
+        let _eof = std::io::stdin().read_line(&mut rest);
         return;
     }
     let line = match bootstrap_and_connect() {
@@ -127,7 +156,14 @@ fn a_sweep_keeps_the_live_and_clears_the_dead() {
     let root = fixed_root("sweep").expect("a fixed root");
     let mut live = spawn_child(&root, "hold", &[]).expect("live child");
     let live_dir = connected_dir(&live.report().expect("live report")).expect("live connects");
-    let mut doomed = spawn_child(&root, "hold", &[]).expect("doomed child");
+    // The watcher would stop the orphan before the sweep finds it, and hold the
+    // slot's lock while it did; this test is of the sweep alone.
+    let mut doomed = spawn_child(
+        &root,
+        "hold",
+        &[("PG_EMBED_ORPHAN_WATCHER", std::path::Path::new("off"))],
+    )
+    .expect("doomed child");
     let dead_dir =
         connected_dir(&doomed.report().expect("doomed report")).expect("doomed connects");
     let orphan = postmaster_pid(&dead_dir).expect("the doomed child's server");
@@ -152,6 +188,72 @@ fn a_sweep_keeps_the_live_and_clears_the_dead() {
     assert!(!dead_dir.exists(), "a dead cluster must be swept");
     assert!(!alive(orphan), "the orphaned server must be stopped first");
     live.finish();
+}
+
+/// With the watcher enabled, a killed child's server is stopped soon after,
+/// before any later bootstrap could sweep it (#287).
+///
+/// The child bootstraps through the normal startup path, so this covers the
+/// wiring the watcher's own tests cannot: that a start spawns one. Its server
+/// is stopped by the watcher when the kernel releases the child's slot lock,
+/// and the test fails if it is still running after the grace period.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_killed_owner_has_its_server_stopped_by_the_watcher() -> Result<(), String> {
+    killed_owner_server_stops("watcher", "hold")
+}
+
+/// The asynchronous start arms the watcher too: a child that starts its
+/// cluster with `TestCluster::start_async()` and is killed has its server
+/// stopped, as in the synchronous case (#287).
+#[test]
+#[cfg(all(target_os = "linux", feature = "async-api"))]
+fn a_killed_async_owner_has_its_server_stopped_by_the_watcher() -> Result<(), String> {
+    killed_owner_server_stops("watcher_async", "hold_async")
+}
+
+/// Starts a child in `mode` under a fixed root named `case`, kills it, and
+/// requires its server to be gone within 30 s. Skipped where the watcher's
+/// tools are missing or the run is root.
+#[cfg(target_os = "linux")]
+fn killed_owner_server_stops(case: &str, mode: &str) -> Result<(), String> {
+    if !should_run() || !watcher_tools_present() {
+        return Ok(());
+    }
+    let io = |err: std::io::Error| err.to_string();
+    let root = fixed_root(case).map_err(io)?;
+    let mut owner = spawn_child(&root, mode, &[]).map_err(io)?;
+    let dir = connected_dir(&owner.report().map_err(io)?)?;
+    let server = postmaster_pid(&dir).ok_or("the owner's server has no pid file")?;
+    let _cleanup = KillOnDrop(Some(server));
+
+    owner.child.kill().map_err(io)?;
+    owner.child.wait().map_err(io)?;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while alive(server) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if alive(server) {
+        return Err(format!(
+            "the watcher must stop the server of a killed {mode} owner"
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `setsid` and `flock` are on `PATH`; without them there is no
+/// watcher and the sweep is the only reclaim.
+#[cfg(target_os = "linux")]
+fn watcher_tools_present() -> bool {
+    let found = ["setsid", "flock"].iter().all(|tool| {
+        std::env::var_os("PATH")
+            .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(tool).is_file()))
+    });
+    if !found {
+        tracing::warn!("SKIP: setsid or flock is not on PATH");
+    }
+    found
 }
 
 /// An explicit `PG_DATA_DIR` keeps a single data directory at that path,
@@ -228,7 +330,14 @@ fn a_killed_run_leaves_only_what_the_next_sweep_reclaims() {
         return;
     }
     let root = fixed_root("killed_run").expect("a fixed root");
-    let mut orchestrator = spawn_child(&root, "orchestrate", &[]).expect("orchestrator");
+    // The grandchild inherits the opt-out: this test is of the sweep alone, and
+    // a watcher would stop the server and hold the slot's lock while it did.
+    let mut orchestrator = spawn_child(
+        &root,
+        "orchestrate",
+        &[("PG_EMBED_ORPHAN_WATCHER", std::path::Path::new("off"))],
+    )
+    .expect("orchestrator");
     let leftover = connected_dir(&orchestrator.report().expect("orchestrator report"))
         .expect("the grandchild connects");
     let orphan = postmaster_pid(&leftover).expect("the grandchild's server");

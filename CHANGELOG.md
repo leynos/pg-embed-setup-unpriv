@@ -5,6 +5,21 @@ All notable changes to this crate are recorded here. The format follows
 
 ## Unreleased
 
+### Orphaned servers
+
+- **A killed test process no longer leaves its server running (Linux).** Before
+  a cluster's server starts, the library spawns a small watcher,
+  `setsid flock <slot.lock> sh -c …`, that blocks until the kernel releases the
+  owner's slot lock and then stops the cluster's `postgres` with `SIGQUIT`, but
+  only if `/proc/<pid>/comm` is `postgres` and `/proc/<pid>/cwd` is the data
+  directory. It needs no helper binary, so a library-only test binary is
+  covered. A cluster stopped normally, or one whose start fails, ends its
+  watcher. Where `setsid` or `flock` is missing, as on macOS, the next
+  bootstrap's sweep still reclaims the server (#287). Each watcher decision
+  (disabled, not a slot, slot unknown, spawned, spawn failed, released) is also
+  recorded as a `Metric::OrphanWatcher` count through the installed
+  `MetricsRecorder`.
+
 ### Windows test targets
 
 - `cargo test` with default features no longer fails to compile `tests/ui.rs`
