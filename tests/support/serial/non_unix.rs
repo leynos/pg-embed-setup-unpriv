@@ -33,6 +33,7 @@ enum ProcessLockOwnerIssue {
 }
 
 impl Drop for ProcessLock {
+    /// Releases the lock by removing the owner file and then the directory, best effort.
     fn drop(&mut self) {
         let _unused = std::fs::remove_file(&self.owner_path);
         let _unused = std::fs::remove_dir(&self.path);
@@ -52,6 +53,10 @@ unsafe extern "system" {
     fn CloseHandle(handle: *mut c_void) -> i32;
 }
 
+/// Blocks until the process-wide scenario lock is taken, retrying every 50 ms for up to 120 s.
+///
+/// Contention (an existing lock directory, or on Windows one that is delete-pending) is retried;
+/// any other failure panics at once.
 pub(super) fn acquire_process_lock() -> ProcessLock {
     let lock_path = scenario_lock_path();
     let deadline = Instant::now() + Duration::from_secs(120);
@@ -63,6 +68,7 @@ pub(super) fn acquire_process_lock() -> ProcessLock {
     }
 }
 
+/// The lock directory, `pg-embed-setup-unpriv.serial.lockdir` under `CARGO_TARGET_DIR` or `target`.
 fn scenario_lock_path() -> PathBuf {
     let target_dir =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| PathBuf::from("target"), PathBuf::from);
@@ -75,11 +81,39 @@ fn scenario_lock_path() -> PathBuf {
     target_dir.join("pg-embed-setup-unpriv.serial.lockdir")
 }
 
+/// Whether a failed `create_dir` of the lock directory means another process
+/// holds it, or is still deleting it, rather than that the path is unusable.
+///
+/// Windows reports `ERROR_ACCESS_DENIED`, not `AlreadyExists`, when the
+/// directory is delete-pending: the holder's `remove_dir` has been issued but
+/// an open handle, such as a scanner's or a sweeper's `remove_dir_all`, keeps
+/// the entry alive. That is contention to retry (#279). A lock path that really
+/// cannot be created keeps failing until the deadline, whose message names it.
+const fn is_lock_contention(kind: std::io::ErrorKind) -> bool {
+    match kind {
+        std::io::ErrorKind::AlreadyExists => true,
+        std::io::ErrorKind::PermissionDenied => cfg!(windows),
+        _ => false,
+    }
+}
+
+/// Makes one attempt to take the lock, returning `None` when it is contended.
+///
+/// The directory creation is a parameter so a test can make it report the
+/// errors a peer's pending delete produces without racing a real peer.
 fn try_acquire_process_lock_once(lock_path: &Path, deadline: Instant) -> Option<ProcessLock> {
-    match std::fs::create_dir(lock_path) {
+    try_acquire_with(lock_path, deadline, |path| std::fs::create_dir(path))
+}
+
+fn try_acquire_with(
+    lock_path: &Path,
+    deadline: Instant,
+    create_dir: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Option<ProcessLock> {
+    match create_dir(lock_path) {
         Ok(()) => write_process_lock_owner(lock_path),
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-            handle_contended_process_lock(lock_path, deadline);
+        Err(err) if is_lock_contention(err.kind()) => {
+            handle_contended_process_lock(lock_path, deadline, &err);
             None
         }
         Err(err) => {
@@ -91,7 +125,10 @@ fn try_acquire_process_lock_once(lock_path: &Path, deadline: Instant) -> Option<
     }
 }
 
-fn handle_contended_process_lock(lock_path: &Path, deadline: Instant) {
+/// Deals with a contended lock: sweeps it when its owner is gone, fails once
+/// the deadline has passed (naming `cause`), and otherwise waits briefly so the
+/// caller can try again.
+fn handle_contended_process_lock(lock_path: &Path, deadline: Instant, cause: &std::io::Error) {
     match process_lock_state(lock_path) {
         ProcessLockState::Stale(_reason) => {
             if std::fs::remove_dir_all(lock_path).is_ok() {
@@ -103,12 +140,13 @@ fn handle_contended_process_lock(lock_path: &Path, deadline: Instant) {
 
     assert!(
         Instant::now() < deadline,
-        "timed out waiting to acquire scenario lock at {}",
+        "timed out waiting to acquire scenario lock at {} (last error: {cause})",
         lock_path.display()
     );
     std::thread::sleep(Duration::from_millis(50));
 }
 
+/// Records this process as the lock's owner, undoing the directory if it cannot.
 fn write_process_lock_owner(lock_path: &Path) -> Option<ProcessLock> {
     let owner_path = process_lock_owner_path(lock_path);
     let mut owner_file = match OpenOptions::new()
@@ -142,14 +180,19 @@ fn write_process_lock_owner(lock_path: &Path) -> Option<ProcessLock> {
     })
 }
 
+/// The owner file inside a lock directory.
 fn process_lock_owner_path(lock_path: &Path) -> PathBuf { lock_path.join("owner") }
 
+/// The owner file's contents: this process's id.
 fn process_lock_owner_contents() -> String { format!("pid={}\n", std::process::id()) }
 
+/// The state of a contended lock as of now.
 fn process_lock_state(lock_path: &Path) -> ProcessLockState {
     process_lock_state_at(lock_path, SystemTime::now())
 }
 
+/// The state of a contended lock as of `now`: active while its owner runs, otherwise pending or
+/// stale by the owner grace.
 fn process_lock_state_at(lock_path: &Path, now: SystemTime) -> ProcessLockState {
     let owner_path = process_lock_owner_path(lock_path);
     let owner = match std::fs::read_to_string(&owner_path) {
@@ -175,6 +218,7 @@ fn process_lock_state_at(lock_path: &Path, now: SystemTime) -> ProcessLockState 
     }
 }
 
+/// Pending while the lock is inside the owner grace window, stale once it has passed.
 fn process_lock_pending_or_stale(
     lock_path: &Path,
     now: SystemTime,
@@ -187,6 +231,7 @@ fn process_lock_pending_or_stale(
     }
 }
 
+/// Whether the lock directory is younger than the owner grace.
 fn process_lock_is_within_owner_grace(lock_path: &Path, now: SystemTime) -> bool {
     let Ok(metadata) = std::fs::metadata(lock_path) else {
         return false;
@@ -198,10 +243,12 @@ fn process_lock_is_within_owner_grace(lock_path: &Path, now: SystemTime) -> bool
         .is_ok_and(|age| age <= PROCESS_LOCK_OWNER_GRACE)
 }
 
+/// Reads the process id from an owner file, or `None` when it is malformed.
 fn parse_lock_owner_pid(owner: &str) -> Option<u32> {
     owner.trim().strip_prefix("pid=")?.parse().ok()
 }
 
+/// Whether `pid` is a running process, asked of the operating system.
 #[cfg(windows)]
 fn owner_process_is_running(pid: u32) -> bool {
     if pid == 0 {
@@ -228,6 +275,7 @@ fn owner_process_is_running(pid: u32) -> bool {
     is_running
 }
 
+/// Without a way to ask, an owner is treated as not running.
 #[cfg(not(windows))]
 fn owner_process_is_running(_pid: u32) -> bool { false }
 
@@ -241,6 +289,116 @@ mod tests {
         super::{ScenarioSerialGuard, serial_guard},
         *,
     };
+
+    /// What one acquisition attempt does with each way creating the lock
+    /// directory can fail, driven through the real retry path (#279): creation
+    /// that fails with "already exists", or on Windows "access denied", is
+    /// contention and the attempt reports `None` so the caller retries; any
+    /// other failure is a real error and panics at once.
+    #[rstest]
+    #[case::already_exists(std::io::ErrorKind::AlreadyExists, true, false)]
+    #[case::access_denied(std::io::ErrorKind::PermissionDenied, cfg!(windows), !cfg!(windows))]
+    #[case::not_found(std::io::ErrorKind::NotFound, false, true)]
+    fn an_attempt_retries_on_contention_and_panics_on_a_real_failure(
+        #[case] kind: std::io::ErrorKind,
+        #[case] retries: bool,
+        #[case] panics: bool,
+    ) {
+        let missing = std::env::temp_dir().join("pg_scenario_attempt_missing/lockdir");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let outcome = std::panic::catch_unwind(|| {
+            try_acquire_with(&missing, deadline, |_| Err(std::io::Error::from(kind)))
+        });
+        match outcome {
+            Ok(lock) => {
+                assert!(!panics, "{kind:?} must not be retried");
+                assert_eq!(lock.is_none(), retries, "{kind:?} reports contention");
+            }
+            Err(_) => assert!(panics, "{kind:?} must be retried, not panic"),
+        }
+    }
+
+    /// Contention that outlasts the deadline stops retrying and names the last
+    /// error, so a lock path that is really unusable is still reported.
+    #[rstest]
+    fn contention_past_the_deadline_names_the_last_error() {
+        let missing = std::env::temp_dir().join("pg_scenario_deadline_missing/lockdir");
+        let deadline = Instant::now();
+        std::thread::sleep(Duration::from_millis(5));
+        let outcome = std::panic::catch_unwind(|| {
+            try_acquire_with(&missing, deadline, |_| {
+                Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+            })
+        });
+        let payload = outcome.expect_err("an expired deadline must panic");
+        let message = payload
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            message.contains("timed out") && message.contains("last error"),
+            "unexpected panic message: {message}"
+        );
+    }
+
+    /// A real contender at the acquisition boundary waits while the lock is held and acquires it
+    /// once the holder releases it: the retry loop, the owner-state check and the release through
+    /// `Drop`, with no injected errors (#279).
+    #[rstest]
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort cleanup where errors are intentionally ignored"
+    )]
+    fn a_contender_waits_for_the_holder_and_then_acquires(serial_guard: ScenarioSerialGuard) {
+        use std::{env, ffi::OsString, fs, sync::mpsc, thread};
+
+        use pg_embedded_setup_unpriv::test_support::scoped_env;
+
+        let _guard = serial_guard;
+        let tmp_dir = env::temp_dir().join("pg_scenario_contender_test");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).expect("failed to create the contender test target dir");
+        let _env_guard = scoped_env(vec![(
+            OsString::from("CARGO_TARGET_DIR"),
+            Some(tmp_dir.clone().into_os_string()),
+        )]);
+
+        let holder = acquire_process_lock();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
+        let contender = thread::spawn(move || {
+            let lock = acquire_process_lock();
+            acquired_tx.send(()).expect("the test is listening");
+            drop(lock);
+        });
+
+        assert!(
+            acquired_rx
+                .recv_timeout(Duration::from_millis(500))
+                .is_err(),
+            "the contender must wait while the lock is held"
+        );
+        drop(holder);
+        acquired_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the contender must acquire the lock once it is released");
+        contender.join().expect("the contender thread finished");
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    /// A failed lock-directory creation counts as contention when the path
+    /// exists or, on Windows, is delete-pending and reports access denied;
+    /// anything else is a real failure that must not be retried silently.
+    #[rstest]
+    #[case::exists(std::io::ErrorKind::AlreadyExists, true)]
+    #[case::access_denied(std::io::ErrorKind::PermissionDenied, cfg!(windows))]
+    #[case::not_found(std::io::ErrorKind::NotFound, false)]
+    #[case::other(std::io::ErrorKind::Other, false)]
+    fn lock_contention_is_classified_by_error_kind(
+        #[case] kind: std::io::ErrorKind,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(is_lock_contention(kind), expected);
+    }
 
     #[rstest]
     #[expect(
