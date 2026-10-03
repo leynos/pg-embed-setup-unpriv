@@ -197,19 +197,24 @@ docstring-coverage policy.
 
 The Whitaker suite itself is installed by the shared `install-whitaker` action,
 pinned to a commit SHA, which resolves a checksum-verified release archive for
-the installer version named by `WHITAKER_INSTALLER_VERSION`. The previous
-inline step fell back to `cargo install --locked whitaker-installer`, building
-the tool from source in CI and verifying nothing.
-`tests/whitaker_install_pin.rs` keeps that arrangement in place. Note that the
-installer still resolves the lint suite from the tip of the Whitaker
-repository, so the lints themselves are not yet pinned; a suite change can turn
-this gate red without any commit here. That is what happened between 2026-08-19
-and 2026-09-04, when the same installer version and toolchain built suite commit
-`b4d3101` instead of `2bc0c3f` and the gate failed on every branch. Two issues
-track closing the gap: [whitaker#402][whitaker-suite-pin] asks the installer
-for a ref or suite-version input, and
-[shared-actions#454][shared-actions-suite-pin] asks `install-whitaker` to
-expose and pass it through.
+the installer version named by `WHITAKER_INSTALLER_VERSION`, currently `0.2.9`,
+the floor the action accepts (it refuses anything lower). The action is pinned
+to shared-actions `6cec89bac47a21cf756d68d638a9a510998e57f8` (#546), which also
+carries the 60 s sccache startup fix. The concordat QG-002 rule accepts it
+because the action directory is content-identical to the reviewed `6dea5677`
+(#522); any later shared-actions commit that leaves it unchanged is also
+accepted. The previous inline step fell back to
+`cargo install --locked whitaker-installer`, building the tool from source in
+CI and verifying nothing. `tests/whitaker_install_pin.rs` keeps that
+arrangement in place. Note that the installer still resolves the lint suite
+from the tip of the Whitaker repository, so the lints themselves are not yet
+pinned; a suite change can turn this gate red without any commit here. That is
+what happened between 2026-08-19 and 2026-09-04, when the same installer
+version and toolchain built suite commit `b4d3101` instead of `2bc0c3f` and the
+gate failed on every branch. Two issues track closing the gap:
+[whitaker#402][whitaker-suite-pin] asks the installer for a ref or
+suite-version input, and [shared-actions#454][shared-actions-suite-pin] asks
+`install-whitaker` to expose and pass it through.
 
 [whitaker-suite-pin]: https://github.com/leynos/whitaker/issues/402
 [shared-actions-suite-pin]: https://github.com/leynos/shared-actions/issues/454

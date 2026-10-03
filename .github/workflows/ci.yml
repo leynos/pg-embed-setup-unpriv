@@ -35,7 +35,7 @@ jobs:
       BUILD_PROFILE: debug
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MERMAN_CLI_VERSION: '0.7.0'
-      WHITAKER_INSTALLER_VERSION: '0.2.6'
+      WHITAKER_INSTALLER_VERSION: '0.2.9'
       # Embedded-Postgres tests run slower under cold coverage
       # instrumentation than the default 600s cargo wall-clock cap.
       RUN_RUST_CARGO_WAIT_TIMEOUT: '1800'
@@ -85,7 +85,7 @@ jobs:
       # source in CI and verified nothing.
       - name: Install Whitaker Dylint suite
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/install-whitaker@e041cb75c35c3524201a32d5e57c87408fbd5874
+        uses: leynos/shared-actions/.github/actions/install-whitaker@6cec89bac47a21cf756d68d638a9a510998e57f8
         with:
           installer-version: ${{ env.WHITAKER_INSTALLER_VERSION }}
       - name: Lint
