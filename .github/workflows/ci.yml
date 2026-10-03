@@ -45,7 +45,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
@@ -115,6 +115,13 @@ jobs:
         run: cargo binstall -y cargo-nextest@0.9.122
       - name: Test with all features (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
+        # setup-rust exports the sccache wrapper for the whole job. The `ui`
+        # tests build trybuild fixtures in nested cargo invocations that
+        # inherit it, and under it they exceeded their 360 s slow-timeout where
+        # they took about 125 s without it. Plain rustc here keeps the job's
+        # prior behaviour.
+        env:
+          RUSTC_WRAPPER: ""
         run: >-
           RUSTFLAGS="-D warnings"
           cargo nextest run --all-targets --all-features
@@ -147,6 +154,10 @@ jobs:
           # Worker binary path - staging logic will copy it to /tmp for nobody access
           export PG_EMBEDDED_WORKER="$PWD/target/debug/pg_worker"
 
+          # Root must not use the sccache wrapper setup-rust exports: the
+          # server it talks to belongs to the runner user, so it cannot write
+          # into the target directory root created, and the build fails with
+          # "Permission denied" on its first crate.
           run_as_root() {
             : "${RUSTUP_HOME:=$HOME/.rustup}"
             : "${CARGO_HOME:=$HOME/.cargo}"
@@ -156,6 +167,7 @@ jobs:
               CARGO_HOME="$CARGO_HOME" \
               GITHUB_TOKEN="$GITHUB_TOKEN" \
               PG_EMBEDDED_WORKER="$PG_EMBEDDED_WORKER" \
+              RUSTC_WRAPPER= \
               PATH="$CARGO_HOME/bin:$PATH" \
               "$@"
           }
@@ -177,7 +189,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
       - name: Setup uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
         with:
@@ -212,7 +224,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
       - name: Restore PostgreSQL binary cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
@@ -288,7 +300,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@074f7d8ba75a6e5d18532b72cbe38fccbda4e9c6
+        uses: leynos/shared-actions/.github/actions/setup-rust@ff1dd759dfffc0db3459e30e833f52437ee62b57
       - name: Setup uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
         with:
