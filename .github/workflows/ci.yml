@@ -131,7 +131,7 @@ jobs:
         run: make test-loom
       - name: Test and Measure Coverage (unprivileged)
         if: ${{ github.event_name == 'pull_request' && matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/generate-coverage@d4d248bbbecdcf7b4f5bc79ffd4d6caee370bd79
+        uses: leynos/shared-actions/.github/actions/generate-coverage@ebe2f3105334283441f4c915eb979a0f4b9f2c04
         with:
           output-path: lcov.info
           format: lcov
