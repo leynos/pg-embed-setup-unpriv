@@ -11,7 +11,8 @@ All notable changes to this crate are recorded here. The format follows
   is present. The `ortho_config` 0.9 bump (#302) made an all-empty
   configuration fail with "invalid type: null, expected struct PgEnvCfg", so a
   bootstrap with no configuration at all errored out on `main`; it now yields
-  the default configuration (#317).
+  the default configuration and a debug event records the fallback (#317). A
+  configuration file that cannot be read still fails the load.
 
 ### Windows test targets
 

@@ -189,7 +189,7 @@ pub use error::{
     PrivilegeResult,
     Result,
 };
-use ortho_config::OrthoConfig;
+use ortho_config::{OrthoConfig, declarative::LayerComposition};
 use postgresql_embedded::{Settings, VersionReq};
 #[cfg(feature = "privileged-tests")]
 #[cfg(all(
@@ -263,18 +263,28 @@ use crate::error::{ConfigError, ConfigResult};
 /// ```
 pub use crate::fs::ambient_dir_and_path;
 
-/// Whether `err` is `ortho_config` reporting that no source supplied any field.
+/// Whether `ortho_config` composed no source that supplied any field.
 ///
 /// With no `PG_*` variable and no configuration file, `ortho_config` 0.9 prunes
 /// the all-`None` command-line layer to `null`, and merging that into the struct
-/// fails with "invalid type: null, expected struct `PgEnvCfg`". Nothing was
-/// configured, so the answer is the default configuration (#317). The check is
-/// on the message because the error carries no structured cause; a regression
-/// test clears every `PG_*` variable, so a change in the wording fails loudly
-/// rather than reintroducing the defect.
-fn is_empty_configuration(err: &impl std::fmt::Display) -> bool {
-    err.to_string()
-        .contains("invalid type: null, expected struct PgEnvCfg")
+/// fails with "invalid type: null, expected struct `PgEnvCfg`" (#317). Nothing
+/// was configured, so the answer is the default configuration.
+///
+/// The decision is structural: it holds only when composition reported no
+/// errors and every layer is blank. A file that exists but cannot be read as a
+/// map (an explicit `null`, malformed text) is reported as a composition error,
+/// so it still reaches the merge and fails there rather than being defaulted.
+fn composed_no_source(composition: LayerComposition) -> bool {
+    let (layers, errors) = composition.into_parts();
+    errors.is_empty()
+        && layers
+            .into_iter()
+            .all(|layer| is_blank(&layer.into_value()))
+}
+
+/// Whether a layer value is `null` or an object with no fields.
+fn is_blank(value: &serde_json::Value) -> bool {
+    value.is_null() || value.as_object().is_some_and(serde_json::Map::is_empty)
 }
 
 /// Captures `PostgreSQL` settings supplied via environment variables.
@@ -353,16 +363,24 @@ pub struct PgEnvCfg {
 impl PgEnvCfg {
     /// Loads configuration from environment variables without parsing CLI arguments.
     ///
+    /// When no environment variable and no configuration file supplies any
+    /// field, this returns [`PgEnvCfg::default`] and logs a debug event.
+    ///
     /// # Errors
     /// Returns an error when environment parsing fails or derived configuration
     /// cannot be represented using UTF-8 paths.
     pub fn load() -> ConfigResult<Self> {
         let args = [OsString::from("pg-embedded-setup-unpriv")];
-        match Self::load_from_iter(args) {
-            Ok(cfg) => Ok(cfg),
-            Err(err) if is_empty_configuration(&err) => Ok(Self::default()),
-            Err(err) => Err(ConfigError::from(eyre!(err))),
+        if composed_no_source(Self::compose_layers_from_iter(args.clone())) {
+            tracing::debug!(
+                target: crate::observability::LOG_TARGET,
+                operation = "PgEnvCfg::load",
+                reason = "empty_configuration",
+                "no configuration source supplied a field; using defaults"
+            );
+            return Ok(Self::default());
         }
+        Self::load_from_iter(args).map_err(|err| ConfigError::from(eyre!(err)))
     }
 
     /// Converts the configuration into a complete `postgresql_embedded::Settings` object.
