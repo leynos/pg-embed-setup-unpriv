@@ -10,6 +10,7 @@ use super::{
     make::{
         Host,
         MakeRunner,
+        Target,
         development_problems,
         held_out_problems,
         held_out_problems_for,
@@ -35,7 +36,7 @@ const fn linker_flag(host: Host) -> &'static str {
 }
 
 /// A fake runner: a compliant `make -n` for any target, with no process behind it.
-fn compliant_make(_target: &str, host: Host) -> Result<String, String> {
+fn compliant_make(_target: Target<'_>, host: Host) -> Result<String, String> {
     let linker = linker_flag(host);
     canned(format_args!(
         "RUSTFLAGS=\"${{RUSTFLAGS:+$RUSTFLAGS }}-D warnings {THREADS_FLAG}{linker}\" cargo test\n"
@@ -43,17 +44,17 @@ fn compliant_make(_target: &str, host: Host) -> Result<String, String> {
 }
 
 /// A fake runner whose command loses the caller's `RUSTFLAGS`.
-fn dropping_make(_target: &str, _host: Host) -> Result<String, String> {
+fn dropping_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
     canned(format_args!("RUSTFLAGS=\"-D warnings\" cargo test\n"))
 }
 
 /// A fake runner whose test command assigns nothing, so the warning policy never reaches it.
-fn bare_test_make(_target: &str, _host: Host) -> Result<String, String> {
+fn bare_test_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
     canned(format_args!("cargo test\n"))
 }
 
 /// A fake runner whose lint commands assign nothing beside a command that does.
-fn bare_lint_make(_target: &str, host: Host) -> Result<String, String> {
+fn bare_lint_make(_target: Target<'_>, host: Host) -> Result<String, String> {
     let linker = linker_flag(host);
     canned(format_args!(
         "RUSTFLAGS=\"${{RUSTFLAGS:+$RUSTFLAGS }}-D warnings {THREADS_FLAG}{linker}\" cargo \
@@ -62,7 +63,7 @@ fn bare_lint_make(_target: &str, host: Host) -> Result<String, String> {
 }
 
 /// A fake runner with commands that run no compiled code under test, beside one that assigns.
-fn exempt_commands_make(_target: &str, host: Host) -> Result<String, String> {
+fn exempt_commands_make(_target: Target<'_>, host: Host) -> Result<String, String> {
     let linker = linker_flag(host);
     canned(format_args!(
         "RUSTFLAGS=\"${{RUSTFLAGS:+$RUSTFLAGS }}-D warnings {THREADS_FLAG}{linker}\" cargo \
@@ -72,12 +73,12 @@ fn exempt_commands_make(_target: &str, host: Host) -> Result<String, String> {
 }
 
 /// A fake runner whose command assigns an empty `RUSTFLAGS`, dropping the caller's.
-fn release_clearing_make(_target: &str, _host: Host) -> Result<String, String> {
+fn release_clearing_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
     canned(format_args!("RUSTFLAGS=\"\" cargo build --release\n"))
 }
 
 /// A fake runner whose held-out target runs an inspection command beside an assigning build.
-fn held_out_inspecting_make(_target: &str, _host: Host) -> Result<String, String> {
+fn held_out_inspecting_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
     canned(format_args!(
         "cargo metadata --format-version 1 --locked\nRUSTFLAGS=\"-D warnings\" cargo build \
          --release\n"
@@ -85,7 +86,7 @@ fn held_out_inspecting_make(_target: &str, _host: Host) -> Result<String, String
 }
 
 /// A fake runner whose chained recipe leaves its second command bare beside a probe that assigns.
-fn chained_bare_make(_target: &str, host: Host) -> Result<String, String> {
+fn chained_bare_make(_target: Target<'_>, host: Host) -> Result<String, String> {
     let linker = linker_flag(host);
     canned(format_args!(
         "if RUSTFLAGS=\"${{RUSTFLAGS:+$RUSTFLAGS }}-D warnings {THREADS_FLAG}{linker}\" cargo \
@@ -96,20 +97,23 @@ fn chained_bare_make(_target: &str, host: Host) -> Result<String, String> {
 }
 
 /// A fake runner whose held-out command assigns `RUSTFLAGS` without a standard flag.
-fn held_out_assigning_make(_target: &str, _host: Host) -> Result<String, String> {
+fn held_out_assigning_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
     canned(format_args!(
         "RUSTFLAGS=\"-D warnings\" cargo build --release\n"
     ))
 }
 
 /// A fake runner whose held-out command assigns nothing, so it takes the configuration's flags.
-fn held_out_unassigned_make(_target: &str, _host: Host) -> Result<String, String> {
+fn held_out_unassigned_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
     canned(format_args!("cargo build --release\n"))
 }
 
 /// A fake runner for a target that is not defined.
-fn undefined_make(target: &str, _host: Host) -> Result<String, String> {
-    Err(format!("`make -n {target}` failed, so it is not defined"))
+fn undefined_make(target: Target<'_>, _host: Host) -> Result<String, String> {
+    Err(format!(
+        "`make -n {}` failed, so it is not defined",
+        target.name()
+    ))
 }
 
 /// Turns a failed expectation into the error a test returns.
@@ -187,7 +191,7 @@ fn a_development_command_without_an_assignment_is_refused_and_an_exempt_one_is_n
 /// Defines a fake runner that prints one release command, whatever the target and host.
 macro_rules! release_make {
     ($name:ident, $text:expr) => {
-        fn $name(_target: &str, _host: Host) -> Result<String, String> {
+        fn $name(_target: Target<'_>, _host: Host) -> Result<String, String> {
             canned(format_args!("{}\n", $text))
         }
     };

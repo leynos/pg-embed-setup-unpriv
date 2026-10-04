@@ -131,10 +131,19 @@ pub fn commands_from(stdout: &str) -> Result<Vec<Assignment>, String> {
         .collect()
 }
 
+/// A Makefile target name, typed so a runner takes a target and not just any text.
+#[derive(Clone, Copy, Debug)]
+pub struct Target<'a>(pub &'a str);
+
+impl<'a> Target<'a> {
+    /// Returns the target's name.
+    pub const fn name(self) -> &'a str { self.0 }
+}
+
 /// Runs `make -n` for a target on a host and returns what it printed. The tests
 /// that drive real `make` use [`real_make`]; a test of the parsing path passes a
 /// function that returns canned text instead, so no process runs.
-pub type MakeRunner = fn(&str, Host) -> Result<String, String>;
+pub type MakeRunner = fn(Target<'_>, Host) -> Result<String, String>;
 
 /// The integration adapter: runs the real `make -n` in the crate's directory and
 /// reports a spawn failure or an undefined target as an error.
@@ -142,13 +151,14 @@ pub type MakeRunner = fn(&str, Host) -> Result<String, String>;
 /// # Errors
 ///
 /// Returns the reason when `make` cannot run or the target is not defined.
-pub fn real_make(target: &str, host: Host) -> Result<String, String> {
+pub fn real_make(target: Target<'_>, host: Host) -> Result<String, String> {
+    let name = target.name();
     let output = Command::new("make")
         .args([
             "-n",
             "-B",
             &format!("BUILD_HOST_OS={}", host.make_value()),
-            target,
+            name,
         ])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
@@ -156,7 +166,7 @@ pub fn real_make(target: &str, host: Host) -> Result<String, String> {
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
         return Err(format!(
-            "`make -n {target}` failed, so it is not defined: {stderr}"
+            "`make -n {name}` failed, so it is not defined: {stderr}"
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -164,7 +174,7 @@ pub fn real_make(target: &str, host: Host) -> Result<String, String> {
 
 /// Reads the commands a runner reports for a target on a host.
 fn make_commands(runner: MakeRunner, target: &str, host: Host) -> Result<Vec<Assignment>, String> {
-    commands_from(&runner(target, host)?)
+    commands_from(&runner(Target(target), host)?)
 }
 
 /// Returns the complaint about a development command that assigns no `RUSTFLAGS`.
