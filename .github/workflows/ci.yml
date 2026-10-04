@@ -264,6 +264,13 @@ jobs:
         run: cargo check --all-targets
       - name: Test unprivileged surface
         shell: bash
+        # setup-rust exports the sccache wrapper for the whole job. The `ui`
+        # tests build trybuild fixtures in nested cargo invocations that inherit
+        # it, and under it they took about 300 s on this leg (and timed out at
+        # their budget on a slow runner) where they take about 125 s without it,
+        # as on the Linux unprivileged step above.
+        env:
+          RUSTC_WRAPPER: ""
         run: >-
           cargo nextest run
           --all-targets
