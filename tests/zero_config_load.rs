@@ -6,8 +6,9 @@
 //! other source contributes a field, and deserializing that into the struct
 //! fails, so the case needs its own test. A CI runner that happens to export a
 //! `PG_*` variable, or a checkout that holds a `.pg.toml`, hides the defect, so
-//! every test here clears the `PG_*` variables (which include the configuration
-//! path selector), the XDG and home locations, and runs from an empty directory.
+//! every test here clears the `PG_*` variables (which include the prefixed
+//! configuration path selector), the unprefixed `CONFIG_PATH`, the XDG and
+//! home locations, and runs from an empty directory.
 
 use std::{ffi::OsString, path::PathBuf};
 
@@ -45,6 +46,8 @@ fn isolated_environment(empty: &std::path::Path) -> Vec<(OsString, Option<OsStri
     for name in ["XDG_CONFIG_HOME", "HOME", "APPDATA", "USERPROFILE"] {
         vars.push((name.into(), Some(empty.as_os_str().to_owned())));
     }
+    // `ortho_config` also honours the unprefixed selector.
+    vars.push(("CONFIG_PATH".into(), None));
     vars.push(("XDG_CONFIG_DIRS".into(), None));
     vars
 }
