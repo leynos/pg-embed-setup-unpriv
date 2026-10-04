@@ -433,7 +433,7 @@ they must be ordered lives in the `generate-coverage` README in
 
 | Tier                     | What it bounds                     | Where it is set                               | Current value                                   |
 | ------------------------ | ---------------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 360 s for two overrides |
+| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 450 s for two overrides |
 | nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 600 s (10 m)                                    |
 | Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
 | Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 66 m                                            |

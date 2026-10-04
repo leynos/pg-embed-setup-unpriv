@@ -12,7 +12,7 @@ The outermost tier was the one missing. Neither coverage job declared
 the pull-request lane already ran for twenty-two minutes.
 
 The contract also holds the inner ordering, which this repository does
-satisfy: a 600 s whole-run budget above a 360 s largest per-test
+satisfy: a 600 s whole-run budget above a 450 s largest per-test
 allowance, and a 1,800 s watchdog above that budget once nextest's
 termination procedure and a cold build are counted.
 
@@ -25,6 +25,7 @@ See "Test timeouts: four tiers, outermost last" in
 `leynos/shared-actions`' `generate-coverage` README.
 """
 
+import tomllib
 import typing as typ
 
 import pytest
@@ -332,7 +333,7 @@ def test_the_default_profile_bounds_a_test_no_override_matches(
     ``largest_test_allowance`` reports the largest budget anywhere in
     the file, so deleting ``[profile.default]``'s own ``slow-timeout``
     and leaving the `ui` and `settings` overrides behind still reports
-    360 s while every test those overrides do not match runs with no
+    450 s while every test those overrides do not match runs with no
     bound at all. Nothing else here would notice.
 
     Proved by mutation: commenting out the profile's own
@@ -343,3 +344,49 @@ def test_the_default_profile_bounds_a_test_no_override_matches(
         "an override satisfies the file as a whole while leaving every test it "
         "does not match unbounded"
     )
+
+
+def test_only_the_ui_binary_gets_more_than_the_default_budget(
+    nextest_config: str,
+) -> None:
+    """The long `ui` budget is scoped to the `ui` binary, not given to every test.
+
+    The `ui` tests are trybuild builds that run for about five minutes on a
+    macOS runner, so their budget is the largest in the file. Widening that
+    override's filter (to ``all()``, or by adding a second binary) would
+    quietly give every other test the same allowance, and a real hang in
+    them would then take that long to fail. Nothing else here would notice.
+
+    Proved by mutation: changing the override's filter to ``all()`` fails
+    this test.
+    """
+    config = tomllib.loads(nextest_config)["profile"]["default"]
+    default_budget = _seconds(config["slow-timeout"])
+    longer = [
+        override["filter"]
+        for override in config.get("overrides", [])
+        if "slow-timeout" in override
+        and _seconds(override["slow-timeout"]) > default_budget
+    ]
+    assert longer == ["binary(=ui)"], (
+        f"only `binary(=ui)` may exceed the default {default_budget} s per-test "
+        f"budget, but these filters do: {longer}"
+    )
+
+
+def _seconds(slow_timeout: dict[str, object]) -> int:
+    """Return a ``slow-timeout`` table's budget: its period times terminate-after.
+
+    Parameters
+    ----------
+    slow_timeout : dict[str, object]
+        The inline table, with a period written in whole seconds.
+
+    Returns
+    -------
+    int
+        The per-test budget in seconds.
+    """
+    period = str(slow_timeout["period"])
+    assert period.endswith("s"), f"expected a period in whole seconds, found {period}"
+    return int(period.removesuffix("s")) * int(slow_timeout.get("terminate-after", 1))
