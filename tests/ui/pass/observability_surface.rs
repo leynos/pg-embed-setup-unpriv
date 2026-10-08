@@ -64,6 +64,7 @@ fn describe_watcher_outcome(outcome: OrphanWatcherOutcomeMetric) -> &'static str
         OrphanWatcherOutcomeMetric::Spawned => "spawned",
         OrphanWatcherOutcomeMetric::SpawnFailed => "spawn_failed",
         OrphanWatcherOutcomeMetric::Released => "released",
+        OrphanWatcherOutcomeMetric::ReleaseFailed => "release_failed",
         _ => "unknown",
     }
 }

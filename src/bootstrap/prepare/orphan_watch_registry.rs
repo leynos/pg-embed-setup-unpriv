@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    io,
     path::{Path, PathBuf},
     process::Child,
     sync::Mutex,
@@ -17,21 +18,26 @@ use std::{
 /// long-lived test process does not accumulate one per cluster it has started.
 static WATCHERS: Mutex<Option<HashMap<PathBuf, Child>>> = Mutex::new(None);
 
+/// Kills and reaps `child`, reporting the first process-control error.
+pub(super) fn end(mut child: Child) -> io::Result<()> {
+    let killed = child.kill();
+    let reaped = child.wait();
+    killed.and_then(|()| reaped.map(drop))
+}
+
 /// Keeps `child` as the watcher for `data_dir`.
 ///
 /// A watcher already registered for the directory is ended rather than dropped,
 /// because dropping a `Child` neither kills nor reaps it and the old watcher
-/// would wait for the process to exit.
-pub(super) fn register(data_dir: &Path, child: Child) {
+/// would wait for the process to exit. Returns how ending it went, or `None`
+/// when there was none.
+pub(super) fn register(data_dir: &Path, child: Child) -> Option<io::Result<()>> {
     let replaced = WATCHERS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get_or_insert_with(HashMap::new)
         .insert(data_dir.to_path_buf(), child);
-    if let Some(mut old) = replaced {
-        let _killed = old.kill();
-        let _reaped = old.wait();
-    }
+    replaced.map(end)
 }
 
 /// Whether a watcher is registered for `data_dir`.
@@ -44,18 +50,24 @@ pub(super) fn is_registered(data_dir: &Path) -> bool {
         .is_some_and(|watchers| watchers.contains_key(data_dir))
 }
 
-/// Kills and reaps the watcher registered for `data_dir`, returning whether
-/// there was one, so it neither lingers nor becomes a zombie.
-pub(super) fn remove_and_kill(data_dir: &Path) -> bool {
+/// The process ID of the watcher registered for `data_dir`.
+#[cfg(test)]
+pub(super) fn registered_pid(data_dir: &Path) -> Option<u32> {
+    WATCHERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .and_then(|watchers| watchers.get(data_dir).map(Child::id))
+}
+
+/// Kills and reaps the watcher registered for `data_dir`, so it neither lingers
+/// nor becomes a zombie. Returns `None` when there was none, otherwise how
+/// ending it went.
+pub(super) fn remove_and_kill(data_dir: &Path) -> Option<io::Result<()>> {
     let removed = WATCHERS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .as_mut()
         .and_then(|watchers| watchers.remove(data_dir));
-    let Some(mut child) = removed else {
-        return false;
-    };
-    let _killed = child.kill();
-    let _reaped = child.wait();
-    true
+    removed.map(end)
 }

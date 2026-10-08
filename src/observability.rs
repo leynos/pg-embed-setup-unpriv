@@ -65,8 +65,10 @@ pub enum OrphanWatcherOutcomeMetric {
     Spawned,
     /// The watcher could not be spawned, as where `setsid` is missing.
     SpawnFailed,
-    /// A cluster stopped normally and its watcher was ended.
+    /// A cluster stopped normally and its watcher was killed and reaped.
     Released,
+    /// Ending a watcher failed, so it may still be waiting.
+    ReleaseFailed,
 }
 
 /// A count this crate records.

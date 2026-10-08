@@ -16,9 +16,9 @@ All notable changes to this crate are recorded here. The format follows
   covered. A cluster stopped normally, or one whose start fails, ends its
   watcher. Where `setsid` or `flock` is missing, as on macOS, the next
   bootstrap's sweep still reclaims the server (#287). Each watcher decision
-  (disabled, not a slot, slot unknown, spawned, spawn failed, released) is also
-  recorded as a `Metric::OrphanWatcher` count through the installed
-  `MetricsRecorder`.
+  (disabled, not a slot, slot unknown, spawned, spawn failed, released, release
+  failed) is also recorded as a `Metric::OrphanWatcher` count through the
+  installed `MetricsRecorder`.
 
 ### Zero-configuration load
 

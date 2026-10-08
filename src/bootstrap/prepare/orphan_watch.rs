@@ -82,7 +82,9 @@ pub(crate) fn watch_slot_owner(data_dir: &Path) -> bool {
     };
     match spawn_watcher(&lock, data_dir) {
         Ok(child) => {
-            registry::register(data_dir, child);
+            if let Some(Err(err)) = registry::register(data_dir, child) {
+                record_outcome(Outcome::ReleaseFailed, Some(err.kind()));
+            }
             record_outcome(Outcome::Spawned, None);
             true
         }
@@ -97,15 +99,27 @@ pub(crate) fn watch_slot_owner(data_dir: &Path) -> bool {
 #[cfg(test)]
 pub(crate) fn is_watching(data_dir: &Path) -> bool { registry::is_registered(data_dir) }
 
+/// The process ID of the watcher registered for `data_dir`.
+#[cfg(test)]
+pub(crate) fn watcher_pid(data_dir: &Path) -> Option<u32> { registry::registered_pid(data_dir) }
+
 /// Ends the watcher for `data_dir`, after its server was stopped normally.
 ///
-/// Returns whether there was one.
+/// Returns whether there was one. `Released` is recorded only once the watcher
+/// was killed and reaped; if that failed, `ReleaseFailed` is recorded instead
+/// with the error's kind, because the watcher may still be waiting.
 pub(crate) fn release_watcher(data_dir: &Path) -> bool {
-    let released = registry::remove_and_kill(data_dir);
-    if released {
-        record_outcome(OrphanWatcherOutcomeMetric::Released, None);
+    match registry::remove_and_kill(data_dir) {
+        None => false,
+        Some(Ok(())) => {
+            record_outcome(OrphanWatcherOutcomeMetric::Released, None);
+            true
+        }
+        Some(Err(err)) => {
+            record_outcome(OrphanWatcherOutcomeMetric::ReleaseFailed, Some(err.kind()));
+            true
+        }
     }
-    released
 }
 
 #[cfg(test)]

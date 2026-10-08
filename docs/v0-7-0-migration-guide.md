@@ -30,8 +30,9 @@ instead of leaving it until a later bootstrap's sweep (#287).
 enums are `#[non_exhaustive]`, so a consumer's `match` already needs a wildcard
 arm and keeps compiling. A recorder that forwards every metric needs no change;
 one that maps variants individually can add the new one. The outcomes are
-`Disabled`, `NotASlot`, `SlotUnknown`, `Spawned`, `SpawnFailed` and `Released`;
-only the library's side is counted, because the watcher process reports nothing.
+`Disabled`, `NotASlot`, `SlotUnknown`, `Spawned`, `SpawnFailed`, `Released` and
+`ReleaseFailed`; only the library's side is counted, because the watcher
+process reports nothing.
 
 ## Suites that share a cluster across processes
 
