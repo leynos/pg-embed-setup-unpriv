@@ -330,28 +330,6 @@ fn only_the_value_off_disables_the_watcher(#[case] value: Option<&str>, #[case] 
     assert_eq!(super::is_disabled(lookup), disabled);
 }
 
-/// The fallback marks up to the process's soft descriptor limit, not a fixed
-/// number, so a descriptor above 4095 cannot survive into the watcher.
-#[test]
-fn the_fallback_covers_the_soft_descriptor_limit() -> Result<()> {
-    let mut limit = libc::rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    // SAFETY: `limit` is a valid, writable `rlimit` for the call.
-    ensure!(
-        unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit) } == 0,
-        "getrlimit failed"
-    );
-    let expected = limit.rlim_cur.min(1 << 20);
-    let ceiling = super::process::fallback_descriptor_ceiling();
-    ensure!(
-        u64::from(u32::try_from(ceiling)?) == expected,
-        "ceiling {ceiling}, expected {expected}"
-    );
-    Ok(())
-}
-
 /// Registering a second watcher for a directory ends the first instead of
 /// dropping its handle, which would leave it waiting for the process to exit.
 #[test]

@@ -798,12 +798,12 @@ On Linux a start also records `Metric::OrphanWatcher` with an
 `OrphanWatcherOutcomeMetric` for each decision about the watcher described
 under "Per-cluster data directories": `Disabled`
 (`PG_EMBED_ORPHAN_WATCHER=off`), `NotASlot`, `SlotUnknown`, `Spawned`,
-`SpawnFailed` (no `setsid` or `flock`), and `Released`, recorded when a cluster
-that is stopped normally, or whose start fails, ends its watcher. Only the
-library's side is counted: the watcher is a detached process that outlives the
-owner and reports nothing. The enum is `#[non_exhaustive]`, so existing
-recorders keep compiling; see the
-[v0.7.0 migration guide](v0-7-0-migration-guide.md).
+`SpawnFailed` (launching the watcher through `setsid` failed, for example
+because `setsid` is missing), and `Released`, recorded when a cluster that is
+stopped normally, or whose start fails, ends its watcher. Only the library's
+side is counted: the watcher is a detached process that outlives the owner and
+reports nothing. The enum is `#[non_exhaustive]`, so existing recorders keep
+compiling; see the [v0.7.0 migration guide](v0-7-0-migration-guide.md).
 
 ## Per-cluster data directories
 

@@ -32,8 +32,8 @@ exit 0
 /// end-of-file. `close_range` with `CLOSE_RANGE_CLOEXEC` marks them all, and
 /// the descriptor `std` keeps to report an `exec` failure is already
 /// close-on-exec, so a missing `setsid` still surfaces as a spawn error.
-/// Where `close_range` is unavailable the descriptors up to a fixed ceiling are
-/// marked one by one.
+/// Where `close_range` is unavailable the descriptors up to the process's hard
+/// descriptor limit (capped) are marked one by one.
 ///
 /// Runs between `fork` and `exec` in a process that may have been forked from a
 /// multi-threaded parent, so everything it does must be async-signal-safe: raw
@@ -54,19 +54,28 @@ fn mark_inherited_descriptors_close_on_exec() {
         {
             return;
         }
-        for descriptor in 3..fallback_descriptor_ceiling() {
-            libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC);
-        }
+    }
+    mark_descriptors_one_by_one();
+}
+
+/// The fallback for kernels without `close_range`: marks each descriptor below
+/// [`fallback_descriptor_ceiling`] close-on-exec. Async-signal-safe.
+pub(super) fn mark_descriptors_one_by_one() {
+    for descriptor in 3..fallback_descriptor_ceiling() {
+        // SAFETY: `fcntl` takes plain integers and is async-signal-safe; a
+        // descriptor that is not open just fails.
+        unsafe { libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC) };
     }
 }
 
 /// One past the highest descriptor this process can have open, for the fallback.
 ///
-/// `RLIMIT_NOFILE`'s soft limit bounds every open descriptor, so marking up to it
-/// covers them all. `getrlimit` is async-signal-safe. The result is capped so a
-/// limit set to a billion cannot make the fallback, used only where
-/// `close_range` is missing (Linux before 5.9), spend seconds between fork and
-/// exec; a process holding a descriptor above the cap is not expected.
+/// The hard limit is the bound: lowering the soft limit does not close a
+/// descriptor opened above it, so the soft limit would miss one. `getrlimit` is
+/// async-signal-safe. The result is capped so a limit set to a billion cannot
+/// make the fallback, used only where `close_range` is missing (Linux before
+/// 5.9), spend seconds between fork and exec; a process holding a descriptor
+/// above the cap is not expected.
 pub(super) fn fallback_descriptor_ceiling() -> i32 {
     const CAP: libc::rlim_t = 1 << 20;
     let mut limit = libc::rlimit {
@@ -75,7 +84,7 @@ pub(super) fn fallback_descriptor_ceiling() -> i32 {
     };
     // SAFETY: `limit` is a valid, writable `rlimit` for the call's duration.
     let ok = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit) } == 0;
-    let ceiling = if ok { limit.rlim_cur.min(CAP) } else { 4096 };
+    let ceiling = if ok { limit.rlim_max.min(CAP) } else { 4096 };
     i32::try_from(ceiling).unwrap_or(i32::MAX)
 }
 

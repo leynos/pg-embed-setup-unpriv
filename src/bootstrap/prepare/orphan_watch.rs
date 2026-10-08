@@ -111,3 +111,7 @@ pub(crate) fn release_watcher(data_dir: &Path) -> bool {
 #[cfg(test)]
 #[path = "orphan_watch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "orphan_watch_fd_tests.rs"]
+mod fd_tests;

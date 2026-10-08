@@ -63,7 +63,7 @@ pub enum OrphanWatcherOutcomeMetric {
     SlotUnknown,
     /// A watcher was spawned.
     Spawned,
-    /// The watcher could not be spawned, as where `setsid` or `flock` is missing.
+    /// The watcher could not be spawned, as where `setsid` is missing.
     SpawnFailed,
     /// A cluster stopped normally and its watcher was ended.
     Released,
