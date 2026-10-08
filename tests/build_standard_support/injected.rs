@@ -96,6 +96,11 @@ fn chained_bare_make(_target: Target<'_>, host: Host) -> Result<String, String> 
     ))
 }
 
+/// A fake runner whose held-out target runs only a metadata probe.
+fn held_out_probe_only_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
+    canned(format_args!("cargo metadata --format-version 1 --locked\n"))
+}
+
 /// A fake runner whose held-out command assigns `RUSTFLAGS` without a standard flag.
 fn held_out_assigning_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
     canned(format_args!(
@@ -334,5 +339,27 @@ fn the_held_out_policy_runs_against_an_injected_runner() -> Result<(), String> {
     ensure(
         held_out_target_count() == 0 || held_out_problems(undefined_make).is_err(),
         "the listed held-out targets were not run",
+    )
+}
+
+/// Scenario: a held-out target whose recipe runs a metadata probe and nothing that builds or
+/// tests, and one whose recipe runs a build.
+///
+/// Invariant: each held-out target must run a build or test command of its own, so a probe-only
+/// target is refused instead of hiding behind the commands another target contributes.
+#[test]
+fn a_held_out_target_must_run_a_build_or_test_command_of_its_own() -> Result<(), String> {
+    let (probe_only, read) = held_out_problems_for(held_out_probe_only_make, &["coverage"])?;
+    ensure(read == 1, "the probe was not read")?;
+    ensure(
+        probe_only
+            .iter()
+            .any(|problem| problem.contains("runs no build or test command")),
+        "a target that only probes passed",
+    )?;
+    let (building, _) = held_out_problems_for(held_out_inspecting_make, &["coverage"])?;
+    ensure(
+        building.is_empty(),
+        &format!("a target that builds, beside a probe, raised {building:?}"),
     )
 }
