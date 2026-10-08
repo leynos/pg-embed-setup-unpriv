@@ -85,12 +85,12 @@ directory after the lock is gone. Before removing a dead slot, the sweep reads
 
 - No file, an unreadable file, or a PID that is not running: no server.
 - A live process whose name is not `postgres`: the PID was reused, so there is
-  no server. The name comes from `/proc/<pid>/comm` on Linux and from
+  no server. The name comes from `/proc/$pid/comm` on Linux and from
   `ps -o comm=` on other Unix platforms.
 - A live `postgres` process that is not serving this slot's data directory:
   the PID was reused by an unrelated server, so there is no server here and
   nothing is signalled. On Linux the test is the process's working directory,
-  which a postmaster sets to its data directory and `/proc/<pid>/cwd` reports
+  which a postmaster sets to its data directory and `/proc/$pid/cwd` reports
   whatever the process title says. A working directory that cannot be read, as
   for another user's process, leaves the slot unconfirmed. Elsewhere the name
   comes from `ps` and the working directory from `lsof -d cwd`, which no
@@ -199,3 +199,19 @@ one such cluster at a time.
 - `fs4` is already a dependency (1.1.0, used by the binary cache's lock). The
   only manifest change is the `signal` feature of the existing `nix`
   dependency, used for the liveness probe and the stop.
+
+## Addendum, 2026-10-01: stopping an orphaned server when its owner dies (#287)
+
+The sweep reclaims an orphaned server only when another bootstrap runs. On
+Linux a watcher now does it at once. After the slot is claimed and before the
+server starts, the library spawns a detached `setsid flock` on the slot's lock
+file that runs a watcher script. The kernel releases the owner's slot lock when
+the owner dies, however it dies, and the script then sends `SIGQUIT` to the
+process in `postmaster.pid` only if `/proc/$pid/comm` is `postgres` and
+`/proc/$pid/cwd` is the data directory: the sweep's identity check, in shell,
+so a library-only test binary needs no helper binary. A cluster stopped
+normally, or one whose start fails, ends its watcher, because the slot lock
+outlives the cluster. `PG_EMBED_ORPHAN_WATCHER=off` skips it, as does a host
+without `setsid` or `flock`, where the sweep stays the only reclaim. While a
+watcher holds the slot lock a sweep skips that slot and the next bootstrap
+reclaims it.

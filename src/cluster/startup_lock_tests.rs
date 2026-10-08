@@ -255,3 +255,117 @@ fn the_async_start_logs_the_lock_wait_and_each_step_once(
     outcome?;
     ensure_timing_events(&logs)
 }
+
+/// A hook that fails `Setup`, after noting whether a watcher was registered for
+/// `data_dir` at that moment. Only `Setup` fails, so the failure comes after the
+/// watcher is armed and before `Start`.
+#[cfg(target_os = "linux")]
+fn failing_setup_hook(
+    data_dir: std::path::PathBuf,
+    armed_at_setup: Arc<Mutex<Option<bool>>>,
+) -> Result<crate::test_support::HookGuard> {
+    Ok(install_run_root_operation_hook(move |_, _, operation| {
+        if matches!(operation, crate::cluster::WorkerOperation::Setup) {
+            *armed_at_setup
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(crate::bootstrap::is_watching(&data_dir));
+            return Err(eyre!("setup refused for the test").into());
+        }
+        Ok(())
+    })?)
+}
+
+/// Makes `data_dir` a slot, by creating the lock file beside it that marks one.
+#[cfg(target_os = "linux")]
+fn make_a_slot(data_dir: &Utf8Path) -> Result<()> {
+    std::fs::write(format!("{data_dir}.lock"), b"")?;
+    Ok(())
+}
+
+/// A start that fails after the watcher is armed releases it: the watcher was
+/// registered when `Setup` ran, and is gone once the start has returned its
+/// error, so a cluster that never came up leaves nothing waiting for the
+/// process to exit (#287).
+#[cfg(target_os = "linux")]
+#[rstest]
+#[serial(worker_hook)]
+fn a_failed_sync_start_releases_the_armed_watcher(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    make_a_slot(&paths.data_dir)?;
+    let armed = Arc::new(Mutex::new(None));
+    let _guard = failing_setup_hook(
+        paths.data_dir.as_std_path().to_path_buf(),
+        Arc::clone(&armed),
+    )?;
+    let mut bootstrap = dummy_settings(ExecutionPrivileges::Root);
+    configure_root_bootstrap(
+        &mut bootstrap,
+        &paths.install_dir,
+        &paths.data_dir,
+        &paths.scoped_cache_home,
+    )?;
+    let env_vars = bootstrap.environment.to_env();
+    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
+    let runtime = test_runtime()?;
+
+    let outcome = start_postgres(&runtime, bootstrap, &env_vars, &cache_config);
+
+    ensure!(outcome.is_err(), "a refused Setup fails the start");
+    let seen = *armed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    ensure!(
+        seen == Some(true),
+        "the watcher must be armed before Setup runs"
+    );
+    ensure!(
+        !crate::bootstrap::is_watching(paths.data_dir.as_std_path()),
+        "a failed start must release its watcher"
+    );
+    Ok(())
+}
+
+/// The asynchronous start releases the armed watcher on failure too.
+#[cfg(all(target_os = "linux", feature = "async-api"))]
+#[rstest]
+#[serial(worker_hook)]
+fn a_failed_async_start_releases_the_armed_watcher(
+    #[from(root_setup_paths)] root_setup_paths_res: Result<Arc<RootSetupPaths>>,
+) -> Result<()> {
+    let paths = root_setup_paths_res?;
+    make_a_slot(&paths.data_dir)?;
+    let armed = Arc::new(Mutex::new(None));
+    let _guard = failing_setup_hook(
+        paths.data_dir.as_std_path().to_path_buf(),
+        Arc::clone(&armed),
+    )?;
+    let mut bootstrap = dummy_settings(ExecutionPrivileges::Root);
+    configure_root_bootstrap(
+        &mut bootstrap,
+        &paths.install_dir,
+        &paths.data_dir,
+        &paths.scoped_cache_home,
+    )?;
+    let env_vars = bootstrap.environment.to_env();
+    let cache_config = BinaryCacheConfig::with_dir(paths.cache_dir.clone());
+    let runtime = test_runtime()?;
+
+    let outcome = runtime.block_on(start_postgres_async(bootstrap, &env_vars, &cache_config));
+
+    ensure!(outcome.is_err(), "a refused Setup fails the start");
+    let seen = *armed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    ensure!(
+        seen == Some(true),
+        "the watcher must be armed before Setup runs"
+    );
+    ensure!(
+        !crate::bootstrap::is_watching(paths.data_dir.as_std_path()),
+        "a failed start must release its watcher"
+    );
+    Ok(())
+}
