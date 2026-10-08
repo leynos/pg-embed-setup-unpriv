@@ -44,7 +44,10 @@ fn contention_past_the_deadline_names_the_last_error() {
     std::thread::sleep(Duration::from_millis(5));
     let outcome = std::panic::catch_unwind(|| {
         try_acquire_with(&missing, deadline, |_| {
-            Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "sentinel lock error",
+            ))
         })
     });
     let payload = outcome.expect_err("an expired deadline must panic");
@@ -53,7 +56,7 @@ fn contention_past_the_deadline_names_the_last_error() {
         .cloned()
         .unwrap_or_default();
     assert!(
-        message.contains("timed out") && message.contains("last error"),
+        message.contains("timed out") && message.contains("(last error: sentinel lock error)"),
         "unexpected panic message: {message}"
     );
 }
