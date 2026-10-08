@@ -47,6 +47,30 @@ pub enum PasswordReuseOutcomeMetric {
     EmptyFile,
 }
 
+/// What became of one request for an orphan watcher (#287).
+///
+/// A bounded enum for the same reason as [`PasswordReuseOutcomeMetric`]: no
+/// path or other unbounded value can reach a metric through it. Only the
+/// library's side is counted; the detached watcher process reports nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum OrphanWatcherOutcomeMetric {
+    /// `PG_EMBED_ORPHAN_WATCHER=off` kept the watcher from being spawned.
+    Disabled,
+    /// The data directory is not a slot, so there is no lock to wait on.
+    NotASlot,
+    /// Whether the data directory is a slot could not be read.
+    SlotUnknown,
+    /// A watcher was spawned.
+    Spawned,
+    /// The watcher could not be spawned, as where `setsid` is missing.
+    SpawnFailed,
+    /// A cluster stopped normally and its watcher was killed and reaped.
+    Released,
+    /// Ending a watcher failed, so it may still be waiting.
+    ReleaseFailed,
+}
+
 /// A count this crate records.
 ///
 /// Every variant carries a bounded label set and nothing else. Marked
@@ -58,6 +82,9 @@ pub enum Metric {
     /// One password-reuse decision, recorded once per bootstrap that consults
     /// the stored password.
     PasswordReuse(PasswordReuseOutcomeMetric),
+    /// One request for an orphan watcher on Linux, recorded once per decision
+    /// and once more when a watcher is released.
+    OrphanWatcher(OrphanWatcherOutcomeMetric),
 }
 
 /// Receives each [`Metric`] the crate records.
