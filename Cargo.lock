@@ -2510,7 +2510,7 @@ dependencies = [
  "once_cell",
  "ortho_config",
  "postgres",
- "postgresql_archive",
+ "postgresql_archive 0.21.0",
  "postgresql_embedded",
  "pq-sys",
  "proptest",
@@ -2660,6 +2660,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "postgresql_archive"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "274b4eeb875f1196cc577a69b17c3018a3b189d4017122648b1465066b8b08c1"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "hex",
+ "regex-lite",
+ "reqwest",
+ "reqwest-middleware",
+ "reqwest-retry",
+ "reqwest-tracing",
+ "semver",
+ "serde",
+ "target-triple",
+ "tempfile",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "postgresql_commands"
 version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2677,7 +2699,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ec95242c7e52d7a286f35f10cf143f5fb02255bbdd41b5b2eba05dbbcd79334"
 dependencies = [
  "anyhow",
- "postgresql_archive",
+ "postgresql_archive 0.20.4",
  "postgresql_commands",
  "rand 0.10.2",
  "semver",
