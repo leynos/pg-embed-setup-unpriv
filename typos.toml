@@ -50,6 +50,7 @@ extend-ignore-re = [
     "\\bcolor_eyre\\b",
     "\\bflavor = ",
     "\\binstall_color_eyre\\b",
+    "\\bmold\\b",
     "\\brust-analyzer\\b",
     "\\{COLOR\\}",
     "\\{color\\}",

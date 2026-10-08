@@ -976,13 +976,17 @@ configuration). Cargo has no per-profile `rustflags`, so a direct
 assigned too.
 
 On Linux, install `mold` before building: the configuration names it, so a
-build without it fails at link time. CI installs it through `setup-rust`'s
-`install-mold` input. `tests/build_standard_contract.rs` holds the standard. It
-reads the configuration sources, the commands `make -n` prints for each
-development target on a Linux host and a macOS host (each keeping the caller's
-own `RUSTFLAGS`) and for each coverage and release target on a Linux host, and
-the `setup-rust` steps of the CI workflows (each must pass `install-mold`), so
-a flag lost through a recipe or workflow edit fails there.
+build without it fails at link time. Its flag reaches the linker through the
+default `cc` driver, which must be GCC 12.1 or newer, or clang (older GCC does
+not accept `-fuse-ld=mold`); installing `clang` does not make it the driver, so
+on an older host set `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang`. CI
+installs mold through `setup-rust`'s `install-mold` input.
+`tests/build_standard_contract.rs` holds the standard. It reads the
+configuration sources, the commands `make -n` prints for each development
+target on a Linux host and a macOS host (each keeping the caller's own
+`RUSTFLAGS`) and for each coverage and release target on a Linux host, and the
+`setup-rust` steps of the CI workflows (each must pass `install-mold`), so a
+flag lost through a recipe or workflow edit fails there.
 
 ### Cranelift
 
