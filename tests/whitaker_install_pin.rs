@@ -15,6 +15,12 @@ const STEP_NAME: &str = "- name: Install Whitaker Dylint suite";
 const INSTALL_WHITAKER_ACTION: &str = "leynos/shared-actions/.github/actions/install-whitaker@";
 const INSTALLER_VERSION_INPUT: &str = "installer-version: ${{ env.WHITAKER_INSTALLER_VERSION }}";
 const SHA_LENGTH: usize = 40;
+/// The oldest installer the shared action accepts; it refuses anything lower.
+const MINIMUM_INSTALLER_VERSION: [u32; 3] = [0, 2, 9];
+/// The shared-actions revision CI must pin: shared-actions #546, a descendant
+/// of #522 that leaves `install-whitaker` unchanged (so QG-002 lists it) and
+/// carries the sccache startup fix.
+const REVIEWED_ACTION_SHA: &str = "6cec89bac47a21cf756d68d638a9a510998e57f8";
 
 /// Return the number of leading spaces on `line`.
 fn indent_of(line: &str) -> usize { line.len() - line.trim_start().len() }
@@ -109,11 +115,17 @@ fn the_install_step_pins_the_shared_action_to_a_commit_sha() {
     let Some(rest) = text_after(&step, INSTALL_WHITAKER_ACTION) else {
         panic!("the Whitaker step does not reference the shared action:\n{step}");
     };
-    let reference: String = rest.chars().take(SHA_LENGTH).collect();
+    // The whole ref, up to the end of the token, so a suffix such as a branch
+    // name or a trailing comment marker cannot pass as the reviewed SHA.
+    let reference: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
 
     assert!(
         reference.len() == SHA_LENGTH && reference.chars().all(|c| c.is_ascii_hexdigit()),
         "install-whitaker must be pinned to a full commit SHA, found {reference:?}",
+    );
+    assert_eq!(
+        reference, REVIEWED_ACTION_SHA,
+        "install-whitaker must pin the revision QG-002 lists as compliant",
     );
 }
 
@@ -142,6 +154,17 @@ fn the_workflow_defines_a_concrete_installer_version() {
                 .split('.')
                 .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit())),
         "WHITAKER_INSTALLER_VERSION must be a concrete version, found {version:?}",
+    );
+
+    // Every component must parse; a dropped or overflowing one would otherwise
+    // shift the comparison and let a bad version pass the floor.
+    let parsed: Result<Vec<u32>, _> = version.split('.').map(str::parse::<u32>).collect();
+    let Ok(parts) = parsed else {
+        panic!("WHITAKER_INSTALLER_VERSION has a component that is not a u32: {version:?}");
+    };
+    assert!(
+        parts.as_slice() >= MINIMUM_INSTALLER_VERSION.as_slice(),
+        "WHITAKER_INSTALLER_VERSION {version:?} is below the action's 0.2.9 floor",
     );
 }
 

@@ -34,6 +34,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_msrv_check.py \
 	scripts/tests/test_release_archive_failures.py \
 	scripts/tests/test_release_workflow_contract.py \
 	scripts/tests/test_runner_placement.py \
+	scripts/tests/test_rustc_wrapper_contract.py \
 	scripts/tests/test_workflow_reader.py \
 	scripts/tests/test_timeout_exactness_contract.py \
 	scripts/tests/test_timeout_ordering_contract.py \
@@ -42,6 +43,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_msrv_check.py \
 # Modules whose examples are collected as doctests alongside the suites.
 SCRIPT_PY_DOCTESTS := scripts/msrv_check.py \
 	scripts/tests/runner_placement.py \
+	scripts/tests/rustc_wrapper.py \
 	scripts/tests/workflow_reader.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \
