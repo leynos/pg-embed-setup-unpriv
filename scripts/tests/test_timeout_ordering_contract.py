@@ -27,6 +27,7 @@ See "Test timeouts: four tiers, outermost last" in
 
 import tomllib
 import typing as typ
+from fractions import Fraction
 
 import pytest
 from coverage_lanes import CoverageJob, coverage_jobs_in, load_workflow_documents
@@ -47,8 +48,14 @@ from timeout_budgets import (
     REQUIRED_JOB_CEILING_SECONDS,
     WATCHDOG_VARIABLE,
     required_ceiling,
+    seconds,
 )
 
+
+#: The budget the `binary(=ui)` override gives its tests, written once here
+#: and derived from nothing, so the guide and the configuration stay one
+#: statement. The slowest macOS trybuild tests measured 316 s.
+UI_BUDGET_SECONDS: typ.Final[Fraction] = Fraction(450)
 
 #: The condition each coverage lane legitimately carries, keyed by
 #: workflow and job, as the step's ``if`` and its job's.
@@ -361,12 +368,12 @@ def test_only_the_ui_binary_gets_more_than_the_default_budget(
     this test.
     """
     config = tomllib.loads(nextest_config)["profile"]["default"]
-    default_budget = _seconds(config["slow-timeout"])
+    default_budget = _budget(config["slow-timeout"])
     longer = [
         override["filter"]
         for override in config.get("overrides", [])
         if "slow-timeout" in override
-        and _seconds(override["slow-timeout"]) > default_budget
+        and _budget(override["slow-timeout"]) > default_budget
     ]
     assert longer == ["binary(=ui)"], (
         f"only `binary(=ui)` may exceed the default {default_budget} s per-test "
@@ -374,19 +381,49 @@ def test_only_the_ui_binary_gets_more_than_the_default_budget(
     )
 
 
-def _seconds(slow_timeout: dict[str, object]) -> int:
+def test_the_ui_binary_budget_is_the_one_the_guide_states(
+    nextest_config: str,
+) -> None:
+    """The `ui` override's budget is pinned by value, not only scoped.
+
+    The scope test above passes for any budget above the default, so
+    reverting the override to its old 360 s would leave it green while the
+    macOS runner's slow trybuild tests (measured up to 316 s) timed out
+    again. The ordering checks accept 360 s as well, because they only
+    compare the budget with the whole-run timeout.
+
+    Proved by mutation: setting the override's period back to ``360s`` fails
+    this test and nothing else.
+    """
+    overrides = tomllib.loads(nextest_config)["profile"]["default"]["overrides"]
+    budgets = [
+        _budget(override["slow-timeout"])
+        for override in overrides
+        if override.get("filter") == "binary(=ui)" and "slow-timeout" in override
+    ]
+    assert budgets == [UI_BUDGET_SECONDS], (
+        f"the `binary(=ui)` override must give a budget of "
+        f"{UI_BUDGET_SECONDS:.0f}s (period times terminate-after); found "
+        f"{[f'{budget:.0f}s' for budget in budgets]}"
+    )
+
+
+def _budget(slow_timeout: dict[str, object]) -> Fraction:
     """Return a ``slow-timeout`` table's budget: its period times terminate-after.
+
+    The period goes through the shared duration reader, so any spelling
+    nextest accepts (``"450s"``, ``"7m30s"``, ``"7.5m"``) reads the same.
 
     Parameters
     ----------
     slow_timeout : dict[str, object]
-        The inline table, with a period written in whole seconds.
+        The inline table.
 
     Returns
     -------
-    int
-        The per-test budget in seconds.
+    Fraction
+        The per-test budget in seconds, exactly.
     """
-    period = str(slow_timeout["period"])
-    assert period.endswith("s"), f"expected a period in whole seconds, found {period}"
-    return int(period.removesuffix("s")) * int(slow_timeout.get("terminate-after", 1))
+    return seconds(str(slow_timeout["period"])) * int(
+        typ.cast("int", slow_timeout.get("terminate-after", 1))
+    )
