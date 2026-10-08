@@ -15,9 +15,16 @@ slow-timeout = { period = "30s", terminate-after = 1, grace-period = "5s" }
 # The `ui` binary is a trybuild test: it compiles the whole crate afresh in a
 # scratch directory, which can exceed the default 180s on cold, slow runners
 # (notably macOS). Allow it more headroom while staying under `global-timeout`.
+#
+# Measured on the macOS test leg (it keeps the sccache wrapper, which makes the
+# nested builds slow): the three slow `ui` tests took 299.9, 313.3 and 316.0 s
+# on the pre-adoption run of #314, and 291.7, 293.4 and 298.7 s on job
+# 111315793594, so a 360 s budget left them about 12 to 17 percent of headroom
+# and a slower runner timed them out at 360.0 s. 450 s keeps a real hang failing
+# and, started up to about 90 s into the run, still ends inside `global-timeout`.
 [[profile.default.overrides]]
 filter = "binary(=ui)"
-slow-timeout = { period = "360s", terminate-after = 1, grace-period = "5s" }
+slow-timeout = { period = "450s", terminate-after = 1, grace-period = "5s" }
 
 [test-groups]
 serial = { max-threads = 1 }

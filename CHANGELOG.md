@@ -5,6 +5,15 @@ All notable changes to this crate are recorded here. The format follows
 
 ## Unreleased
 
+### Zero-configuration load
+
+- `PgEnvCfg::load()` no longer fails when no `PG_*` variable and no `.pg.toml`
+  is present. The `ortho_config` 0.9 bump (#302) made an all-empty
+  configuration fail with "invalid type: null, expected struct PgEnvCfg", so a
+  bootstrap with no configuration at all errored out on `main`; it now yields
+  the default configuration and a debug event records the fallback (#317). A
+  configuration file that cannot be read still fails the load.
+
 ### Windows test targets
 
 - `cargo test` with default features no longer fails to compile `tests/ui.rs`

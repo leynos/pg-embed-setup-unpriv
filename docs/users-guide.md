@@ -999,6 +999,11 @@ the warm step.
   `bootstrap_privileges::bootstrap_as_root`) do not trip the underlying Clap
   parser. Provide configuration through environment variables or config files
   when embedding the crate.
+- **No configuration at all**: `PgEnvCfg::load()` returns the default
+  configuration, and logs a debug event on the `pg_embed::observability`
+  target, when no `PG_*` variable and no configuration file supplies any field.
+  A configuration file that exists but cannot be read (malformed text, an
+  explicit `null`) is still an error rather than being treated as absent.
 - **Legacy `with_temp_euid` helper**: The helper now returns an error because
   the library no longer mutates the process UID mid-test. Configure
   `PG_EMBEDDED_WORKER` instead so the subprocess performs the privilege drop.
