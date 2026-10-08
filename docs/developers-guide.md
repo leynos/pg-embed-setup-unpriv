@@ -425,6 +425,28 @@ termination and Job Object assignment decisions against a reused-descendant-PID
 case. The serial lock tests cover missing, partial, malformed, and stale owner
 states around the grace window.
 
+## Windows scenario lock
+
+On targets without `flock`, `tests/support/serial/non_unix.rs` serializes
+behavioural scenarios with a lock directory,
+`<target dir>/pg-embed-setup-unpriv.serial.lockdir`, holding an `owner` file.
+Taking it is a retry loop with a 120-second deadline: `create_dir` succeeding
+means the caller owns the lock, and a failure is classified by
+`is_lock_contention`.
+
+- `AlreadyExists` is contention on every platform: another process holds the
+  lock, or a stale owner is swept after its two-second grace.
+- `PermissionDenied` is contention on Windows only. Windows reports it, instead
+  of `AlreadyExists`, while a peer's removal of the directory is still pending
+  because a handle on it stays open (#279). Elsewhere it is a real failure and
+  panics at once.
+- Any other error panics at once, naming the path.
+
+When the deadline passes the panic names the last error, so a path that really
+cannot be created is reported with its cause. The tests drive
+`try_acquire_with`, which takes the directory creation as a parameter, through
+each error kind without racing a real peer.
+
 ## Test timeouts: four tiers, outermost last
 
 Four independent timers can end a test run, and the canonical statement of how
@@ -433,7 +455,7 @@ they must be ordered lives in the `generate-coverage` README in
 
 | Tier                     | What it bounds                     | Where it is set                               | Current value                                   |
 | ------------------------ | ---------------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 360 s for two overrides |
+| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 450 s for two overrides |
 | nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 600 s (10 m)                                    |
 | Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
 | Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 66 m                                            |

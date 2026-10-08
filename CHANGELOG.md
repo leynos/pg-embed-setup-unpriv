@@ -20,6 +20,14 @@ All notable changes to this crate are recorded here. The format follows
   failed) is also recorded as a `Metric::OrphanWatcher` count through the
   installed `MetricsRecorder`.
 
+### Windows scenario lock
+
+- The Windows scenario-lock test helper retries when creating its lock
+  directory reports access denied, which Windows returns while another
+  process's removal of the directory is still pending, instead of panicking. A
+  path that really cannot be created still fails, at the deadline, with the
+  last error in the message (#279).
+
 ### Zero-configuration load
 
 - `PgEnvCfg::load()` no longer fails when no `PG_*` variable and no `.pg.toml`
