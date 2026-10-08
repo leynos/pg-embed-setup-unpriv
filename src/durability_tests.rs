@@ -1,7 +1,7 @@
 //! The disposable-cluster defaults and the `initdb --no-sync` step.
 
 use color_eyre::eyre::{Result, ensure};
-use postgresql_embedded::Settings;
+use postgresql_embedded::{Settings, VersionReq};
 use rstest::rstest;
 
 use super::{
@@ -154,9 +154,10 @@ fn initdb_runs_with_no_sync_only_for_a_disposable_cluster(
     use color_eyre::eyre::ensure;
     let dir = tempfile::tempdir()?;
     let record = dir.path().join("args");
-    fake_initdb(&dir.path().join("install"), &record)?;
+    fake_initdb(&dir.path().join("install/18.0.0"), &record)?;
     let mut settings = Settings {
         installation_dir: dir.path().join("install"),
+        version: VersionReq::parse("^18")?,
         data_dir: dir.path().join("data"),
         password_file: dir.path().join(".pgpass"),
         ..Settings::default()
@@ -179,6 +180,144 @@ fn initdb_runs_with_no_sync_only_for_a_disposable_cluster(
             !record.exists(),
             "initdb must not run for a durable cluster"
         );
+    }
+    Ok(())
+}
+
+/// An `initdb` is chosen only from installations the requirement matches, as
+/// `PostgreSQL::setup` chooses its own: with 17 and 18 installed and `^17`
+/// asked for, 17 runs; with only 18 installed nothing runs and `setup` is left
+/// to install 17. Initializing with 18 would leave a directory a 17 server
+/// refuses to start.
+#[cfg(unix)]
+#[rstest]
+#[case::the_matching_one_of_two(&["17.0.0", "18.0.0"], Some("17.0.0"))]
+#[case::none_matching(&["18.0.0"], None)]
+fn initdb_comes_from_an_installation_the_requirement_matches(
+    #[case] installed: &[&str],
+    #[case] runs_from: Option<&str>,
+) -> color_eyre::eyre::Result<()> {
+    use color_eyre::eyre::ensure;
+    let dir = tempfile::tempdir()?;
+    for version in installed {
+        fake_initdb(
+            &dir.path().join("install").join(version),
+            &dir.path().join(format!("args-{version}")),
+        )?;
+    }
+    let mut settings = Settings {
+        installation_dir: dir.path().join("install"),
+        data_dir: dir.path().join("data"),
+        password_file: dir.path().join(".pgpass"),
+        version: VersionReq::parse("^17")?,
+        ..Settings::default()
+    };
+    apply_disposable_defaults(&mut settings, false);
+
+    let ran = initialize_without_sync(&settings)?;
+
+    ensure!(ran == runs_from.is_some(), "ran: {ran}");
+    for version in installed {
+        let recorded = dir.path().join(format!("args-{version}")).exists();
+        ensure!(
+            recorded == (runs_from == Some(*version)),
+            "{version}: initdb ran {recorded}"
+        );
+    }
+    Ok(())
+}
+
+/// A stand-in `initdb` that never finishes, to show the step is bounded.
+#[cfg(unix)]
+fn hanging_initdb(install: &std::path::Path, pid_file: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = install.join("bin");
+    std::fs::create_dir_all(&bin)?;
+    let initdb = bin.join("initdb");
+    std::fs::write(
+        &initdb,
+        format!(
+            "#!/bin/sh\necho $$ > {}\nexec sleep 60\n",
+            pid_file.display()
+        ),
+    )?;
+    std::fs::set_permissions(&initdb, std::fs::Permissions::from_mode(0o755))
+}
+
+/// Whether the process in `pid_file` still exists.
+#[cfg(unix)]
+fn process_alive(pid_file: &std::path::Path) -> color_eyre::eyre::Result<bool> {
+    let pid: i32 = std::fs::read_to_string(pid_file)?.trim().parse()?;
+    Ok(std::path::Path::new(&format!("/proc/{pid}")).exists()
+        && std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .is_ok_and(|stat| !stat.contains(") Z")))
+}
+
+/// An `initdb` that outlasts `settings.timeout` is killed and reaped and the
+/// step fails with a timeout, instead of blocking until it ends on its own.
+#[cfg(unix)]
+#[test]
+fn initdb_is_killed_when_it_outlasts_the_setup_timeout() -> color_eyre::eyre::Result<()> {
+    use color_eyre::eyre::ensure;
+    let dir = tempfile::tempdir()?;
+    let pid_file = dir.path().join("pid");
+    hanging_initdb(&dir.path().join("install/18.0.0"), &pid_file)?;
+    let mut settings = Settings {
+        installation_dir: dir.path().join("install"),
+        data_dir: dir.path().join("data"),
+        password_file: dir.path().join(".pgpass"),
+        version: VersionReq::parse("^18")?,
+        timeout: Some(std::time::Duration::from_millis(300)),
+        ..Settings::default()
+    };
+    apply_disposable_defaults(&mut settings, false);
+
+    let started = std::time::Instant::now();
+    let err = initialize_without_sync(&settings).expect_err("a hanging initdb must fail");
+
+    ensure!(err.kind() == std::io::ErrorKind::TimedOut, "{err}");
+    ensure!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "{err}"
+    );
+    ensure!(!process_alive(&pid_file)?, "initdb outlived the timeout");
+    Ok(())
+}
+
+/// Dropping the future that awaits the step, as a setup timeout does, ends the
+/// running `initdb` too: a blocking task cannot be aborted, so it has to stop
+/// itself.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn initdb_is_killed_when_the_awaiting_future_is_dropped() -> color_eyre::eyre::Result<()> {
+    use color_eyre::eyre::ensure;
+    let dir = tempfile::tempdir()?;
+    let pid_file = dir.path().join("pid");
+    hanging_initdb(&dir.path().join("install/18.0.0"), &pid_file)?;
+    let mut settings = Settings {
+        installation_dir: dir.path().join("install"),
+        data_dir: dir.path().join("data"),
+        password_file: dir.path().join(".pgpass"),
+        version: VersionReq::parse("^18")?,
+        timeout: None,
+        ..Settings::default()
+    };
+    apply_disposable_defaults(&mut settings, false);
+    let mut embedded = postgresql_embedded::PostgreSQL::new(settings);
+
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        super::setup_disposable(&mut embedded),
+    )
+    .await;
+    ensure!(outcome.is_err(), "the step must still be running");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while process_alive(&pid_file)? {
+        ensure!(
+            std::time::Instant::now() < deadline,
+            "initdb outlived the drop"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     Ok(())
 }

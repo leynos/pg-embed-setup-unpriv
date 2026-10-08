@@ -104,6 +104,7 @@ pub fn spawn_child(root: &Path, mode: &str, extra: &[(&str, &Path)]) -> std::io:
         .env_remove("PG_PASSWORD")
         .env_remove("PG_TEST_BACKEND")
         .env_remove("PG_EMBEDDED_WORKER")
+        .env_remove("PG_EMBED_DURABLE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
     for (key, value) in extra {
