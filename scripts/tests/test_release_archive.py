@@ -254,6 +254,7 @@ def test_build_release_binaries_assigns_rustflags(
     real_context = cargo_module.ExecutionContext
 
     def recording_context(**kwargs: object) -> object:
+        """Record the keyword arguments of each execution context, then build the real one."""
         contexts.append(kwargs)
         return real_context(**kwargs)
 
