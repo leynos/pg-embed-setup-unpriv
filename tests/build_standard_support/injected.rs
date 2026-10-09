@@ -43,6 +43,11 @@ fn compliant_make(_target: Target<'_>, host: Host) -> Result<String, String> {
     ))
 }
 
+/// A fake runner whose recipes run only a metadata probe, no build, test or lint tool.
+fn probe_only_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
+    canned(format_args!("cargo metadata --format-version 1\n"))
+}
+
 /// A fake runner whose command loses the caller's `RUSTFLAGS`.
 fn dropping_make(_target: Target<'_>, _host: Host) -> Result<String, String> {
     canned(format_args!("RUSTFLAGS=\"-D warnings\" cargo test\n"))
@@ -361,5 +366,21 @@ fn a_held_out_target_must_run_a_build_or_test_command_of_its_own() -> Result<(),
     ensure(
         building.is_empty(),
         &format!("a target that builds, beside a probe, raised {building:?}"),
+    )
+}
+
+/// Scenario: development recipes that run a metadata probe and nothing that builds, tests or lints.
+///
+/// Invariant: each development target must run a tool of its own, so a target that only probes is
+/// refused instead of hiding behind the assignments another target supplies.
+#[test]
+fn a_development_target_that_runs_no_tool_is_refused() -> Result<(), String> {
+    let (problems, read) = development_problems(probe_only_make, Host::Linux, Pin::Nightly)?;
+    ensure(read == 0, "a probe was read as an assignment")?;
+    ensure(
+        problems
+            .iter()
+            .any(|problem| problem.contains("runs no build, test or lint command")),
+        "a target that only probes passed",
     )
 }

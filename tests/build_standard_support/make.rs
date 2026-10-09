@@ -112,6 +112,19 @@ pub fn assigned_rustflags(line: &str) -> Result<Assignment, String> {
 ///
 /// Returns the reason when a command assigns `RUSTFLAGS` in an unreadable form.
 pub fn commands_from(stdout: &str) -> Result<Vec<Assignment>, String> {
+    Ok(commands_with_text(stdout)?
+        .into_iter()
+        .map(|(_, assignment)| assignment)
+        .collect())
+}
+
+/// Reads each cargo or whitaker command `make -n` printed with the command's own text, so a policy
+/// can attach to the command it governs.
+///
+/// # Errors
+///
+/// Returns the reason when a command assigns `RUSTFLAGS` in an unreadable form.
+pub fn commands_with_text(stdout: &str) -> Result<Vec<(String, Assignment)>, String> {
     // A recipe continued with a trailing backslash is one logical line.
     let joined = stdout.replace("\\\n", " ");
     joined
@@ -122,9 +135,12 @@ pub fn commands_from(stdout: &str) -> Result<Vec<Assignment>, String> {
         // A tool-availability probe names Cargo but runs no build.
         .filter(|command| !command.starts_with("command -v"))
         .filter(|command| command.contains("cargo") || command.contains("whitaker"))
-        .map(|command| match assigned_rustflags(&command)? {
-            Assignment::Unassigned if compiles(&command) => Ok(Assignment::Bare(command)),
-            other => Ok(other),
+        .map(|command| {
+            let assignment = match assigned_rustflags(&command)? {
+                Assignment::Unassigned if compiles(&command) => Assignment::Bare(command.clone()),
+                other => other,
+            };
+            Ok((command, assignment))
         })
         .collect()
 }
@@ -151,9 +167,13 @@ impl<'a> Target<'a> {
 /// parsing path passes a function that returns canned text instead, so no process runs.
 pub type MakeRunner = fn(Target<'_>, Host) -> Result<String, String>;
 
-/// Reads the commands a runner reports for a target on a host.
-fn make_commands(runner: MakeRunner, target: &str, host: Host) -> Result<Vec<Assignment>, String> {
-    commands_from(&runner(Target(target), host)?)
+/// Reads the commands a runner reports for a target on a host, with their text.
+fn make_commands(
+    runner: MakeRunner,
+    target: &str,
+    host: Host,
+) -> Result<Vec<(String, Assignment)>, String> {
+    commands_with_text(&runner(Target(target), host)?)
 }
 
 /// Returns the complaint about a development command that assigns no `RUSTFLAGS`.
@@ -188,19 +208,68 @@ pub fn development_problem(
     Some(format!("`make {target}` on {} {reason}", host.make_value()))
 }
 
-/// Returns the complaint when the `test` target assigns `RUSTFLAGS` in no command, or
-/// keeps `-D warnings` in none of its assigned commands: a recipe may run other commands (a version
-/// probe, a prerequisite build) that never carried the policy, but dropping `$(RUST_FLAGS)`
-/// from the command that runs the tests drops it from all of them.
-pub fn test_policy_problem(target: &str, host: Host, commands: &[Assignment]) -> Option<String> {
-    let assigned = commands.iter().filter_map(|command| match command {
-        Assignment::Flags(flags, _) => Some(flags),
-        Assignment::Unassigned | Assignment::Bare(_) => None,
-    });
-    let keeps_the_policy = assigned.clone().any(Flags::denies_warnings);
-    (target == "test" && !keeps_the_policy).then(|| {
+/// Returns whether a command line runs tests: `cargo test` or `cargo nextest run`, past any
+/// `+toolchain` and option words. A version probe (`cargo nextest --version`) and a build run none.
+///
+/// ```text
+/// runs_tests("cargo nextest run --all-targets") == true
+/// runs_tests("cargo +nightly test --doc")       == true
+/// runs_tests("cargo nextest --version")         == false
+/// ```
+pub fn runs_tests(command: &str) -> bool {
+    let mut words = command
+        .split_whitespace()
+        .skip_while(|word| *word != "cargo" && !word.ends_with("/cargo"))
+        .skip(1);
+    let mut subcommand = words.find(|word| !word.starts_with('+') && !word.starts_with('-'));
+    if subcommand == Some("nextest") {
+        subcommand = words.find(|word| !word.starts_with('-'));
+        return subcommand == Some("run");
+    }
+    subcommand == Some("test")
+}
+
+/// Returns the complaints about the `test` target's commands: it must run tests, and every command
+/// that runs tests must keep `-D warnings`. A version probe or a prerequisite build is not held to
+/// it, and the probe keeping the policy cannot stand in for a test command that dropped it.
+pub fn test_policy_problems(
+    target: &str,
+    host: Host,
+    commands: &[(String, Assignment)],
+) -> Problems {
+    if target != "test" {
+        return Vec::new();
+    }
+    let running: Vec<&(String, Assignment)> = commands
+        .iter()
+        .filter(|(text, _)| runs_tests(text))
+        .collect();
+    if running.is_empty() {
+        return vec![format!(
+            "`make {target}` on {} runs no test command",
+            host.make_value()
+        )];
+    }
+    running
+        .into_iter()
+        .filter(|(_, assignment)| !matches!(assignment, Assignment::Flags(flags, _) if flags.denies_warnings()))
+        .map(|(text, _)| format!("`make {target}` on {} runs `{text}` without -D warnings", host.make_value()))
+        .collect()
+}
+
+/// Returns the complaint when a development target runs no build, test or lint command of its own,
+/// so another target's commands cannot stand in for it.
+fn empty_target_problem(
+    target: &str,
+    host: Host,
+    commands: &[(String, Assignment)],
+) -> Option<String> {
+    let runs_a_tool = commands
+        .iter()
+        .any(|(_, assignment)| !matches!(assignment, Assignment::Unassigned));
+    (!runs_a_tool).then(|| {
         format!(
-            "`make {target}` on {} keeps -D warnings in none of its commands",
+            "`make {target}` on {} runs no build, test or lint command",
             host.make_value()
         )
     })
@@ -223,14 +292,15 @@ pub fn development_problems(
         let commands = make_commands(runner, target, host)?;
         read += commands
             .iter()
-            .filter(|command| matches!(command, Assignment::Flags(..)))
+            .filter(|(_, command)| matches!(command, Assignment::Flags(..)))
             .count();
+        problems.extend(empty_target_problem(target, host, &commands));
         problems.extend(
             commands
                 .iter()
-                .filter_map(|command| development_problem(target, host, pin, command)),
+                .filter_map(|(_, command)| development_problem(target, host, pin, command)),
         );
-        problems.extend(test_policy_problem(target, host, &commands));
+        problems.extend(test_policy_problems(target, host, &commands));
     }
     Ok((problems, read))
 }
@@ -288,7 +358,10 @@ pub fn held_out_problems_for(
     let mut problems = Vec::new();
     let mut read = 0;
     for target in targets {
-        let commands = make_commands(runner, target, Host::Linux)?;
+        let commands: Vec<Assignment> = make_commands(runner, target, Host::Linux)?
+            .into_iter()
+            .map(|(_, command)| command)
+            .collect();
         read += commands.len();
         // A command that assigns nothing and runs no build tool (a formatter, a metadata probe) is
         // `Unassigned`; a target made only of those would hide behind the other targets' count.

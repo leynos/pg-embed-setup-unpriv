@@ -62,6 +62,11 @@ impl Action {
 /// other flags (an alternative linker, a different frontend flag) and this is `false`.
 pub const COVERAGE_DENIES_WARNINGS: bool = true;
 
+/// How many coverage steps the listed workflows hold. Pinned both ways, so removing a coverage step
+/// (and with it the assertions about its `RUSTFLAGS`) fails the contract instead of reading as
+/// success, and adding one is a deliberate edit of this number.
+pub const COVERAGE_STEP_COUNT: usize = 2;
+
 /// A step of a workflow file, found by the action it uses.
 struct Step<'a> {
     file: &'a str,
@@ -260,12 +265,30 @@ fn listed_problems(workflow: &Workflow) -> Problems {
 
 /// Returns every complaint about the listed workflows.
 pub fn workflow_problems() -> Problems {
-    let listed = WORKFLOWS
-        .iter()
-        .map(|&(file, text)| Workflow { file, text });
-    listed
+    let listed = || {
+        WORKFLOWS
+            .iter()
+            .map(|&(file, text)| Workflow { file, text })
+    };
+    let found = listed()
+        .map(|workflow| steps_using(&workflow, Action::GenerateCoverage).len())
+        .sum();
+    let mut problems: Problems = listed()
         .flat_map(|workflow| listed_problems(&workflow))
-        .collect()
+        .collect();
+    problems.extend(coverage_presence_problem(found, COVERAGE_STEP_COUNT));
+    problems
+}
+
+/// Returns the complaint when the listed workflows hold a number of coverage steps other than the
+/// one recorded, so a removed step cannot take its own assertions with it.
+pub fn coverage_presence_problem(found: usize, recorded: usize) -> Option<String> {
+    (found != recorded).then(|| {
+        format!(
+            "the listed workflows hold {found} coverage step(s), but the contract records \
+             {recorded}"
+        )
+    })
 }
 
 /// Returns the complaint about each `install-whitaker` step in one workflow that does not pass
