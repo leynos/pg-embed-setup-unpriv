@@ -3,8 +3,10 @@
 //! Linux jobs have the linker the configuration names, and every coverage step
 //! assigns `RUSTFLAGS` itself, without a standard flag.
 //!
-//! The workflows are read as text, one step at a time. Release workflows are not
-//! listed: a release stays on the platform linker and never uses mold.
+//! The workflows are read as text, one step at a time. A release workflow is not
+//! listed: a release stays on the platform linker, and its build steps assign
+//! `RUSTFLAGS`, so mold never reaches a release link. A release build inside a
+//! listed workflow is judged like any other step there.
 
 use super::config::{Flags, Problems, THREADS_FLAG};
 
