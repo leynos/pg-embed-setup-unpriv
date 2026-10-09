@@ -208,6 +208,14 @@ pub fn development_problem(
     Some(format!("`make {target}` on {} {reason}", host.make_value()))
 }
 
+/// Returns whether a word names the Cargo executable: `cargo`, or a path to it on any host, such as
+/// `/usr/bin/cargo` or `C:/Users/x/.cargo/bin/cargo.exe`.
+fn names_cargo(word: &str) -> bool {
+    word.rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|name| name == "cargo" || name == "cargo.exe")
+}
+
 /// Returns whether a command line runs tests: `cargo test` or `cargo nextest run`, past any
 /// `+toolchain` and option words. A version probe (`cargo nextest --version`) and a build run none.
 ///
@@ -219,7 +227,7 @@ pub fn development_problem(
 pub fn runs_tests(command: &str) -> bool {
     let mut words = command
         .split_whitespace()
-        .skip_while(|word| *word != "cargo" && !word.ends_with("/cargo"))
+        .skip_while(|word| !names_cargo(word))
         .skip(1);
     let mut subcommand = words.find(|word| !word.starts_with('+') && !word.starts_with('-'));
     if subcommand == Some("nextest") {

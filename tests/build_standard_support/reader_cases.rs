@@ -56,7 +56,7 @@ use super::{
         UNKNOWN_CHANNEL,
         UNQUOTED_BESIDE_VALID,
     },
-    make::{Assignment, Host, assigned_rustflags, commands_from, test_policy_problems},
+    make::{Assignment, Host, assigned_rustflags, commands_from, runs_tests, test_policy_problems},
 };
 
 /// Text handed to a case, wrapped so that a case reads as data and the test
@@ -369,4 +369,28 @@ fn the_coverage_step_count_is_pinned_both_ways() {
     assert!(coverage_presence_problem(0, 0).is_none());
     assert!(coverage_presence_problem(0, 1).is_some());
     assert!(coverage_presence_problem(2, 1).is_some());
+}
+
+/// Scenario: command lines in each spelling `make -n` prints Cargo in, on each host.
+///
+/// Invariant: a command runs tests when its Cargo, bare or at any path (a `.exe` on Windows), is
+/// followed past any toolchain override and options by `test` or `nextest run`; a probe, a build
+/// and do not. (A line that merely echoes Cargo never reaches the reader: `commands_with_text`
+/// drops it.)
+#[rstest]
+#[case::bare_test(Fixture("cargo test"), true)]
+#[case::nextest_run(Fixture("cargo nextest run --all-targets"), true)]
+#[case::an_absolute_unix_path(Fixture("/usr/bin/cargo test --doc"), true)]
+#[case::a_windows_path(Fixture("C:/Users/x/.cargo/bin/cargo.exe nextest run"), true)]
+#[case::a_windows_path_with_backslashes(Fixture("C:\\tools\\cargo.exe test"), true)]
+#[case::a_toolchain_override(Fixture("cargo +nightly nextest run"), true)]
+#[case::options_before_the_subcommand(Fixture("cargo --locked test"), true)]
+#[case::a_version_probe(Fixture("cargo nextest --version"), false)]
+#[case::a_build(Fixture("cargo build --release"), false)]
+#[case::another_executable(Fixture("notcargo test"), false)]
+fn the_test_reader_recognises_a_test_run_in_each_spelling(
+    #[case] command: Fixture,
+    #[case] expected: bool,
+) {
+    assert_eq!(runs_tests(command.0), expected, "{}", command.0);
 }
