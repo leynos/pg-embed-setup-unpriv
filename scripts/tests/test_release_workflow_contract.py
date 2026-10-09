@@ -305,6 +305,50 @@ def test_sidecars_exist_before_the_upload_step() -> None:
     )
 
 
+# A release build typed out in a workflow step: `cargo ... build ... --release`, or any `cross`
+# build, whatever sits between the words.
+DIRECT_RELEASE_BUILD = re.compile(
+    r"\bcargo\b[^\n]*\bbuild\b[^\n]*--release|\bcargo\b[^\n]*--release[^\n]*\bbuild\b|\bcross\b[^\n]*\bbuild\b"
+)
+
+
+@pytest.mark.parametrize(
+    ("run", "builds_directly"),
+    [
+        pytest.param("cargo build --release --target x", True, id="cargo-build-release"),
+        pytest.param("cargo +nightly build --locked --release", True, id="toolchain-override"),
+        pytest.param("cross build --target x", True, id="cross"),
+        pytest.param("uv run --script scripts/release_archive.py x", False, id="archive-script"),
+        pytest.param("echo release build skipped", False, id="prose"),
+    ],
+)
+def test_the_direct_build_pattern_recognises_a_typed_out_release_build(
+    run: str, builds_directly: bool
+) -> None:
+    """The pattern the next test relies on both fires and stays quiet."""
+    assert bool(DIRECT_RELEASE_BUILD.search(run)) is builds_directly
+
+
+def test_release_binaries_are_built_only_through_the_archive_script() -> None:
+    """Every release build goes through the script that assigns `RUSTFLAGS` itself.
+
+    `release_archive_cargo.release_environment` hands Cargo an assigned `RUSTFLAGS`, which
+    replaces every `rustflags` table in `.cargo/config.toml`, so the build standard's
+    nightly-only frontend flag and the mold linker flag never reach a shipped binary. A
+    workflow step that ran `cargo build --release` itself would bypass that assignment.
+    """
+    typed_out = [
+        f"{job_name}: {step.get('name', '<unnamed>')}"
+        for job_name, job in iter_jobs(RELEASE_WORKFLOW)
+        for step in job.get("steps", ())
+        if DIRECT_RELEASE_BUILD.search(str(step.get("run", "")))
+    ]
+    assert not typed_out, f"these steps build a release without the archive script: {typed_out}"
+    steps = workflow_job(RELEASE_WORKFLOW, "build-assets")["steps"]
+    scripted = [step for step in steps if "release_archive.py" in str(step.get("run", ""))]
+    assert scripted, "no step builds the release through the archive script"
+
+
 def test_default_binaries_match_the_manifest_production_binaries() -> None:
     """The packaged binary set must equal the ungated manifest binaries."""
     assert set(release_archive.DEFAULT_BINARIES) == set(production_binaries()), (

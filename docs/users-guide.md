@@ -1071,3 +1071,28 @@ the warm step.
 
 - `README.md` – overview, configuration reference, and troubleshooting tips.
 - `docs/developers-guide.md` – contributor notes and internal testing context.
+
+## Building from source
+
+The repository's Cargo defaults and the Makefile development targets
+(`make test`, `make lint`, `make typecheck` and the debug build) use the
+parallel `rustc` frontend (`-Zthreads=8`) and, on Linux, the `mold` linker. On
+Linux, install `mold` before building, because the configuration names it and a
+build without it fails at link time. The flag reaches the linker through the
+default `cc` driver, which must be GCC 12.1 or newer, or clang; installing
+`clang` does not make it the driver. On a host whose `cc` is an older GCC,
+point Cargo at clang for the build, for example with
+`CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang`. A release build
+(`make release`) and the coverage build use neither: they assign their own
+`RUSTFLAGS`, which displaces the configuration's flags, so a shipped artefact
+keeps the platform linker. To build with the platform linker directly, assign
+an empty `RUSTFLAGS`:
+
+```bash
+RUSTFLAGS="" cargo build --release
+```
+
+The decision is recorded in [ADR 006](adr-006-rust-build-standard.md). The
+contract tests that guard these defaults run `make -n`, so a direct
+`cargo test` needs GNU make on the `PATH`. The tests fail when `make` is
+missing instead of skipping, so a missing tool cannot read as a pass.

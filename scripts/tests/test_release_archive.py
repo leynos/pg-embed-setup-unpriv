@@ -224,6 +224,66 @@ def test_build_release_binaries_invokes_cargo_with_all_bins(tmp_path: Path) -> N
     )
 
 
+@pytest.mark.parametrize(
+    ("inherited", "expected"),
+    [
+        pytest.param(None, "", id="unset-becomes-empty"),
+        pytest.param("", "", id="empty-stays-empty"),
+        pytest.param("-D warnings", "-D warnings", id="inherited-is-kept"),
+    ],
+)
+def test_build_release_binaries_assigns_rustflags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    inherited: str | None,
+    expected: str,
+) -> None:
+    """The release build assigns `RUSTFLAGS` itself, so the configuration's flags never reach it.
+
+    An unset variable would let `.cargo/config.toml`'s nightly-only frontend flag and its
+    mold linker flag through, whichever caller reached the archive script. The assignment is
+    read from the execution context the build is handed, because a child that merely inherits
+    the caller's environment cannot be told from one that was assigned the same value.
+    """
+    if inherited is None:
+        monkeypatch.delenv("RUSTFLAGS", raising=False)
+    else:
+        monkeypatch.setenv("RUSTFLAGS", inherited)
+    cargo_module = sys.modules["release_archive_cargo"]
+    contexts: list[dict[str, object]] = []
+    real_context = cargo_module.ExecutionContext
+
+    def recording_context(**kwargs: object) -> object:
+        """Record the keyword arguments of each execution context, then build the real one."""
+        contexts.append(kwargs)
+        return real_context(**kwargs)
+
+    monkeypatch.setattr(cargo_module, "ExecutionContext", recording_context)
+    spec = release_archive.ReleaseBuildSpec(
+        repo=tmp_path,
+        target="x86_64-unknown-linux-gnu",
+        binaries=("pg_embedded_setup_unpriv",),
+        cargo="cargo",
+        build_jobs=None,
+    )
+    program, program_args = release_archive._cargo_program_and_args(spec.cargo)
+    with CmdMox() as mox:
+        mox.mock(program).with_args(
+            *program_args,
+            "build",
+            "--release",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+            "--bin",
+            "pg_embedded_setup_unpriv",
+        ).returns()
+        mox.replay()
+
+        release_archive.build_release_binaries(spec)
+
+    assert [context.get("env") for context in contexts] == [{"RUSTFLAGS": expected}]
+
+
 def test_build_release_binaries_preserves_build_jobs_flags(tmp_path: Path) -> None:
     """Release builds preserve explicit Cargo job flags."""
     binaries = ("pg_embedded_setup_unpriv",)

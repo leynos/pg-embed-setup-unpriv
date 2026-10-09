@@ -13,6 +13,7 @@ target and binary names, resolves the Cargo executable, and runs the build in
 
 from __future__ import annotations
 
+import os
 import shlex
 from pathlib import Path
 from typing import Protocol
@@ -86,10 +87,32 @@ def build_release_binaries(spec: ReleaseBuildSpecLike) -> None:
     result = command(*args).run_sync(
         capture=False,
         echo=True,
-        context=ExecutionContext(cwd=spec.repo),
+        context=ExecutionContext(cwd=spec.repo, env=release_environment()),
     )
     if result.exit_code != 0:
         raise SystemExit(result.exit_code)
+
+
+def release_environment() -> dict[str, str]:
+    """Return the environment overlay a release build runs with.
+
+    `RUSTFLAGS` is assigned, with the caller's value or an empty one. An assigned
+    `RUSTFLAGS` replaces every `rustflags` table in `.cargo/config.toml`, so the
+    build standard's nightly-only frontend flag and the mold linker flag never
+    reach a shipped artefact, whichever entry point reached this script.
+
+    Returns
+    -------
+    dict[str, str]
+        The overlay: `RUSTFLAGS` mapped to the inherited value, or to the empty
+        string when none is set.
+
+    Examples
+    --------
+    >>> release_environment()["RUSTFLAGS"] == os.environ.get("RUSTFLAGS", "")
+    True
+    """
+    return {"RUSTFLAGS": os.environ.get("RUSTFLAGS", "")}
 
 
 def _cargo_program_and_args(cargo: str) -> tuple[str, list[str]]:
