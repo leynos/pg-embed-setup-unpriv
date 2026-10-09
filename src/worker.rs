@@ -197,6 +197,10 @@ impl Serialize for PlainSecret {
     }
 }
 
+/// Initializes a disposable cluster with `initdb --no-sync`; used by the worker binary and the
+/// in-process setup before `PostgreSQL::setup` (#297).
+pub use crate::durability::initialize_without_sync;
+
 #[cfg(test)]
 mod tests {
     //! Tests for worker secret handling.

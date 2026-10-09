@@ -102,6 +102,11 @@ path = "tests/test_cluster_behaviour.rs"
 required-features = ["cluster-unit-tests"]
 
 [[test]]
+name = "durability_defaults"
+path = "tests/durability_defaults.rs"
+required-features = ["cluster-unit-tests", "diesel-support"]
+
+[[test]]
 name = "test_cluster_connection"
 path = "tests/test_cluster_connection.rs"
 required-features = ["cluster-unit-tests", "diesel-support"]
