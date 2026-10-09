@@ -1,7 +1,9 @@
 //! The disposable-cluster defaults and the `initdb --no-sync` step.
 
 use color_eyre::eyre::{Result, ensure};
-use postgresql_embedded::{Settings, VersionReq};
+use postgresql_embedded::Settings;
+#[cfg(unix)]
+use postgresql_embedded::VersionReq;
 use rstest::rstest;
 
 use super::{
