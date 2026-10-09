@@ -40,6 +40,7 @@ pub struct Workflow<'a> {
 enum Action {
     SetupRust,
     GenerateCoverage,
+    InstallWhitaker,
 }
 
 impl Action {
@@ -48,6 +49,7 @@ impl Action {
         match self {
             Self::SetupRust => "setup-rust@",
             Self::GenerateCoverage => "generate-coverage@",
+            Self::InstallWhitaker => "install-whitaker@",
         }
     }
 }
@@ -82,6 +84,24 @@ impl Step<'_> {
             .iter()
             .find_map(|line| line.trim().strip_prefix("RUSTFLAGS:"))
             .map(str::trim)
+    }
+
+    /// Returns whether the step passes `cranelift: 'true'` (quoted or bare).
+    fn passes_the_cranelift_input(&self) -> bool {
+        self.lines
+            .iter()
+            .any(|line| squeezed(line) == "cranelift:true")
+    }
+
+    /// Returns the complaint about an `install-whitaker` step that provisions no Cranelift
+    /// component.
+    fn cranelift_problem(&self) -> Option<String> {
+        (!self.passes_the_cranelift_input()).then(|| {
+            format!(
+                "{}: an install-whitaker step does not pass `cranelift: 'true'`",
+                self.location()
+            )
+        })
     }
 
     /// Returns the complaint about a `setup-rust` step that installs no linker.
@@ -243,5 +263,28 @@ pub fn workflow_problems() -> Problems {
         .map(|&(file, text)| Workflow { file, text });
     listed
         .flat_map(|workflow| listed_problems(&workflow))
+        .collect()
+}
+
+/// Returns the complaint about each `install-whitaker` step in one workflow that does not pass
+/// `cranelift: 'true'`, for a repository whose lint suite builds with the Cranelift backend.
+///
+/// ```text
+/// - uses: org/shared-actions/.github/actions/install-whitaker@<sha>
+///   with:
+///     cranelift: 'true'      -> no complaint
+/// ```
+pub fn whitaker_cranelift_problems(workflow: &Workflow) -> Problems {
+    steps_using(workflow, Action::InstallWhitaker)
+        .iter()
+        .filter_map(Step::cranelift_problem)
+        .collect()
+}
+
+/// Returns the complaints about every listed workflow's `install-whitaker` steps.
+pub fn cranelift_workflow_problems() -> Problems {
+    WORKFLOWS
+        .iter()
+        .flat_map(|&(file, text)| whitaker_cranelift_problems(&Workflow { file, text }))
         .collect()
 }

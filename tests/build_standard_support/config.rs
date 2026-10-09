@@ -63,8 +63,7 @@ impl Pin {
 
     /// Classifies one channel name.
     fn classify(channel: &str) -> Result<Self, String> {
-        let is_nightly =
-            channel == "nightly" || channel.strip_prefix("nightly-").is_some_and(is_date);
+        let is_nightly = channel.strip_prefix("nightly-").is_some_and(is_date);
         let is_release = channel.split('.').count() >= 2
             && channel
                 .split('.')
@@ -84,7 +83,8 @@ impl Pin {
     pub const fn takes_threads(self) -> bool { matches!(self, Self::Nightly) }
 }
 
-/// Returns whether text is a `YYYY-MM-DD` date, which is how a dated nightly names itself.
+/// Returns whether text is a `YYYY-MM-DD` date, which is how a dated nightly names itself. A bare
+/// `nightly` floats, so it is no pin and the reader does not know it.
 ///
 /// ```text
 /// is_date("2026-05-28") == true

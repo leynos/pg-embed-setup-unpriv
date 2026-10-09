@@ -67,7 +67,7 @@ fn the_pin_reader_agrees_with_an_independent_count_over_every_small_file() {
         ("channel = \"1.94.0\"", Line::Channel(Some(Pin::Stable))),
         ("channel = \"nightly-preview\"", Line::Channel(None)),
         ("channel = \"nightly-2026-5-28\"", Line::Channel(None)),
-        ("channel = \"nightly\"", Line::Channel(Some(Pin::Nightly))),
+        ("channel = \"nightly\"", Line::Channel(None)),
         (
             "channel = \"stable\" # pinned",
             Line::Channel(Some(Pin::Stable)),
@@ -85,23 +85,52 @@ fn the_pin_reader_agrees_with_an_independent_count_over_every_small_file() {
             .map(|(text, _)| *text)
             .collect::<Vec<_>>()
             .join("\n");
-        let mut table = "";
-        let mut found: Vec<Option<Pin>> = Vec::new();
-        let mut malformed = false;
-        for (_, kind) in &file {
-            match kind {
-                Line::Table(name) => table = name,
-                Line::Channel(class) if table == "toolchain" => found.push(*class),
-                Line::Malformed if table == "toolchain" => malformed = true,
-                _ => {}
-            }
-        }
-        let expected = match found.as_slice() {
-            [class] if !malformed => class.ok_or(()),
-            _ => Err(()),
-        };
-        assert_eq!(Pin::read(&text).map_err(|_| ()), expected, "file: {text:?}");
+        assert_eq!(
+            Pin::read(&text).map_err(|_| ()),
+            expected_read(&file),
+            "file: {text:?}"
+        );
     }
+}
+
+/// What the generated lines of one toolchain file add up to, tracked from the kinds declared
+/// beside each line.
+#[derive(Default)]
+struct Summary {
+    table: &'static str,
+    found: Vec<Option<Pin>>,
+    malformed: bool,
+}
+
+impl Summary {
+    /// Notes one line's declared kind.
+    fn note(&mut self, kind: Line) {
+        let in_toolchain = self.table == "toolchain";
+        match kind {
+            Line::Table(name) => self.table = name,
+            Line::Channel(class) if in_toolchain => self.found.push(class),
+            Line::Malformed if in_toolchain => self.malformed = true,
+            Line::Channel(_) | Line::Malformed | Line::Other => {}
+        }
+    }
+
+    /// Returns what `Pin::read` should answer: the class of the one well-formed declaration, or an
+    /// error for none, a repeated one, an unknown one or a malformed one beside it.
+    fn expected(&self) -> Result<Pin, ()> {
+        match self.found.as_slice() {
+            [class] if !self.malformed => class.ok_or(()),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Returns what `Pin::read` should answer for a generated file.
+fn expected_read(file: &[(&str, Line)]) -> Result<Pin, ()> {
+    let mut summary = Summary::default();
+    for (_, kind) in file {
+        summary.note(*kind);
+    }
+    summary.expected()
 }
 
 /// Returns the flag list with each bare `-C` joined to the word after it.

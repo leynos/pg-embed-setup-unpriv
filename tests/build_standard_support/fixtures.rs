@@ -197,3 +197,5 @@ pub const COMMENT_AFTER_CHANNEL: &str = "[toolchain]\nchannel = \"1.94.0\" # pin
 pub const UNDATED_NIGHTLY: &str = "[toolchain]\nchannel = \"nightly-preview\"\n";
 /// A toolchain file whose nightly date is not zero-padded.
 pub const SHORT_DATED_NIGHTLY: &str = "[toolchain]\nchannel = \"nightly-2026-5-28\"\n";
+/// A toolchain file whose nightly floats instead of naming a date.
+pub const BARE_NIGHTLY: &str = "[toolchain]\nchannel = \"nightly\"\n";

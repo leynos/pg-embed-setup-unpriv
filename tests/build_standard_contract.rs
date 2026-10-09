@@ -17,6 +17,8 @@ mod ci_steps;
 mod command_reader;
 #[path = "build_standard_support/config.rs"]
 mod config;
+#[path = "build_standard_support/cranelift.rs"]
+mod cranelift;
 #[path = "build_standard_support/exhaustive.rs"]
 mod exhaustive;
 #[path = "build_standard_support/fixtures.rs"]
@@ -40,6 +42,7 @@ use ci_steps::{
 };
 use config::{CONFIG, Flags, Pin, Problems, THREADS_FLAG, TOOLCHAIN, config_problems};
 use fixtures::{
+    BARE_NIGHTLY,
     BUILD_LOSES_THREADS,
     COMMENT_AFTER_CHANNEL,
     COMMENT_NAMING_THE_ACTION,
@@ -180,7 +183,7 @@ fn a_rustflags_array_spread_over_lines_is_refused() -> Result<(), String> {
 /// Invariant: only a `nightly` channel reads as nightly, so only it is asked to
 /// carry `-Zthreads`; a missing, repeated, unknown or malformed channel is an
 /// error, not a stable pin by default, and a comment after the quote is fine. A
-/// nightly is `nightly` or `nightly-YYYY-MM-DD`; any other suffix is unknown.
+/// nightly is `nightly-YYYY-MM-DD`; a bare `nightly` floats, and any other suffix is unknown.
 #[rstest]
 #[case::nightly(Fixture(NIGHTLY), Some(Pin::Nightly))]
 #[case::stable(Fixture(STABLE), Some(Pin::Stable))]
@@ -190,6 +193,7 @@ fn a_rustflags_array_spread_over_lines_is_refused() -> Result<(), String> {
 #[case::unquoted_beside_a_valid_one(Fixture(UNQUOTED_BESIDE_VALID), None)]
 #[case::no_closing_quote(Fixture(UNCLOSED_CHANNEL), None)]
 #[case::an_undated_nightly(Fixture(UNDATED_NIGHTLY), None)]
+#[case::a_bare_nightly_floats(Fixture(BARE_NIGHTLY), None)]
 #[case::a_date_that_is_not_padded(Fixture(SHORT_DATED_NIGHTLY), None)]
 #[case::content_after_the_quote(Fixture(TRAILING_CONTENT), None)]
 #[case::comment_after_the_quote(Fixture(COMMENT_AFTER_CHANNEL), Some(Pin::Stable))]
