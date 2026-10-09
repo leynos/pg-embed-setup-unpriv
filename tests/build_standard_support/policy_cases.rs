@@ -69,9 +69,9 @@ fn the_test_target_keeps_the_warning_policy(
 /// Scenario: command lines in each spelling `make -n` prints Cargo in, on each host.
 ///
 /// Invariant: a command runs tests when its Cargo, bare or at any path (a `.exe` on Windows), is
-/// followed past any toolchain override and options by `test` or `nextest run`; a probe, a build
-/// and do not. (A line that merely echoes Cargo never reaches the reader: `commands_with_text`
-/// drops it.)
+/// followed past any toolchain override and options by `test` or `nextest run`; a probe or a build
+/// does not. (A line that merely echoes Cargo never reaches the reader: `commands_with_text` drops
+/// it.)
 #[rstest]
 #[case::bare_test(Fixture("cargo test"), true)]
 #[case::nextest_run(Fixture("cargo nextest run --all-targets"), true)]

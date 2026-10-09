@@ -73,6 +73,15 @@ pub const TRIPLE_ONLY: &str = concat!(
     "[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
     "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
 );
+/// A compliant nightly configuration plus a table that applies to every target but Linux and names
+/// mold.
+pub const NEGATED_LINUX_WITH_MOLD: &str = concat!(
+    "[build]\nrustflags = [\"-Zthreads=8\"]\n",
+    "[target.'cfg(target_os = \"linux\")']\n",
+    "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n",
+    "[target.'cfg(not(target_os = \"linux\"))']\n",
+    "rustflags = [\"-Zthreads=8\", \"-Clink-arg=-fuse-ld=mold\"]\n"
+);
 /// A `rustflags` array spread over several lines, which the reader refuses.
 pub const SPREAD_ARRAY: &str = "[build]\nrustflags = [\n  \"-Zthreads=8\",\n]\n";
 /// A toolchain file that names no channel.

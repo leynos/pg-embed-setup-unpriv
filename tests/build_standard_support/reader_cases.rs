@@ -32,6 +32,7 @@ use super::{
         COVERAGE_WITH_THREADS,
         LINKER_IN_BUILD,
         LINUX_LOSES_LINKER,
+        NEGATED_LINUX_WITH_MOLD,
         NIGHTLY,
         NIGHTLY_OK,
         NIGHTLY_SPELLED_APART,
@@ -105,6 +106,11 @@ fn draws(config: Fixture, pin: Pin, expected: usize) -> Result<(), String> {
 #[case::build_loses_the_frontend(Fixture(BUILD_LOSES_THREADS), Pin::Nightly, 2)]
 #[case::linux_loses_the_linker(Fixture(LINUX_LOSES_LINKER), Pin::Nightly, 1)]
 #[case::linker_named_in_build(Fixture(LINKER_IN_BUILD), Pin::Nightly, 1)]
+#[case::a_negated_linux_selector_is_no_linux_table(
+    Fixture(NEGATED_LINUX_WITH_MOLD),
+    Pin::Nightly,
+    1
+)]
 #[case::no_build_source(Fixture(NO_BUILD_SOURCE), Pin::Nightly, 1)]
 #[case::stable_names_the_frontend(Fixture(STABLE_WITH_THREADS), Pin::Stable, 1)]
 #[case::empty_configuration(Fixture(""), Pin::Nightly, 3)]

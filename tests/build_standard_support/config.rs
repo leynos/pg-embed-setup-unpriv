@@ -223,7 +223,19 @@ struct Source {
 
 impl Source {
     /// Returns whether the table applies on Linux alone.
-    fn is_linux(&self) -> bool { self.table.starts_with("target.") && self.table.contains("linux") }
+    ///
+    /// A Linux triple selects it, and so does a `cfg` that requires the OS; a `cfg` that negates it
+    /// selects every other target, however plainly it names Linux.
+    fn is_linux(&self) -> bool {
+        let Some(target) = self.table.strip_prefix("target.") else {
+            return false;
+        };
+        if target.contains("cfg(") {
+            target.contains("target_os = \"linux\"") && !target.contains("not(")
+        } else {
+            target.contains("linux")
+        }
+    }
 
     /// Returns whether the table selects every Linux target, not one triple.
     fn is_all_linux(&self) -> bool { self.table == ALL_LINUX_TABLE }
