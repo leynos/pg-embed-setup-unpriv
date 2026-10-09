@@ -230,6 +230,13 @@ fn is_setup_complete(pg: &PostgreSQL, data_dir: &Utf8Path) -> bool {
 
 #[cfg(unix)]
 async fn run_setup(pg: &mut PostgreSQL) -> Result<(), WorkerError> {
+    let settings = pg.settings().clone();
+    tokio::task::spawn_blocking(move || {
+        pg_embedded_setup_unpriv::worker::initialize_without_sync(&settings)
+    })
+    .await
+    .map_err(|e| WorkerError::PostgresOperation(format!("initdb task failed: {e}")))?
+    .map_err(|e| WorkerError::PostgresOperation(format!("setup failed: {e}")))?;
     pg.setup()
         .await
         .map_err(|e| WorkerError::PostgresOperation(format!("setup failed: {e}")))

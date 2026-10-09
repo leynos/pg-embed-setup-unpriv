@@ -906,6 +906,45 @@ keeps the `postgres` error as the source and appends that error's own source to
 the message, because `tokio_postgres` displays a server-side failure as
 `db error` alone.
 
+## Disposable test clusters
+
+`src/durability.rs` makes test clusters non-durable (#297).
+`PgEnvCfg::to_settings_with_context(true)`, the path `to_settings_for_tests` and
+`bootstrap_for_tests` take, adds `fsync`, `synchronous_commit` and
+`full_page_writes` set to `off` to `Settings::configuration`, unless
+`PG_EMBED_DURABLE=1`, in which case it states `fsync = on` (upstream starts
+every server with `-F`, so only an explicit `-c fsync=on` after it restores
+durability). The plain `to_settings`, used by `run` and the binary, adds
+nothing.
+
+The `fsync = off` entry is also the marker that a cluster is disposable.
+`initialize_without_sync` (exported from the hidden `worker` module for the
+worker binary) reads it: for a disposable cluster whose binaries are installed
+and whose data directory has no `postgresql.conf`, it runs `initdb --no-sync`
+itself, mirroring upstream's arguments, before `PostgreSQL::setup`, which then
+skips initialization. Both in-process starts call it through
+`durability::setup_disposable`, and `pg_worker`'s setup operation calls it
+directly, so the root path gets it too through the settings snapshot. The
+`initdb` it runs comes from the installation `PostgreSQL::setup` would choose
+(a trusted directory, the directory itself when it is named for a version
+`Settings::version` matches, else the highest matching child), so the two never
+disagree on the major version; `initdb.exe` is looked up on Windows. It is
+bounded by `Settings::timeout`, which the test bootstrap sets to `None` in
+favour of `setup_timeout`, and `setup_disposable` ends it when the future
+awaiting it is dropped, because a blocking task cannot be aborted: the child is
+killed and reaped either way. Like upstream's own `initdb` call it passes
+`--encoding=UTF8` and no locale, so `PG_LOCALE` and `PG_ENCODING` keep reaching
+the server through `Settings::configuration` only, as before. When the binaries
+are not installed yet (a cold install tree), `setup` installs and runs `initdb`
+in one step that cannot be interleaved, so that first cluster keeps the synced
+`initdb`.
+
+Tests: `src/durability_tests.rs` covers the defaults, the opt-out, the entry
+points and `initdb --no-sync` through a stand-in `initdb`, including version
+selection, the timeout and cancellation; `tests/durability_defaults.rs` starts
+real clusters in child processes and reads `current_setting` back for the
+default and the opt-out. Each is mutation-proved.
+
 ## Per-cluster data directories
 
 ADR 005 records the design; this section covers the code.

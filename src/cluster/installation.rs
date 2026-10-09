@@ -175,7 +175,7 @@ fn log_port_parse_failure(pid_path: &Path, err: &std::num::ParseIntError, port_l
 ///
 /// Searches for a directory containing a `bin/` subdirectory within the
 /// installation directory.
-pub(super) fn resolve_installed_dir(settings: &Settings) -> Option<std::path::PathBuf> {
+pub(crate) fn resolve_installed_dir(settings: &Settings) -> Option<std::path::PathBuf> {
     let install_dir = &settings.installation_dir;
 
     if install_dir.join("bin").is_dir() {

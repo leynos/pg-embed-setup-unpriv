@@ -5,6 +5,17 @@ All notable changes to this crate are recorded here. The format follows
 
 ## Unreleased
 
+### Non-durable test clusters
+
+- Test clusters are non-durable by default (#297). `TestCluster`,
+  `shared_cluster_handle()` and `bootstrap_for_tests()` run `initdb --no-sync`
+  and set `fsync`, `synchronous_commit` and `full_page_writes` off, which cuts
+  cluster start times sharply on loaded or shared-disk hosts. The setup-only
+  `run` function and the binary keep PostgreSQL's durable defaults. Set
+  `PG_EMBED_DURABLE=1` to opt out; a test that depends on durability must. The
+  first cluster in a cold install tree still runs the synced `initdb`, because
+  upstream installs and initializes in one step.
+
 ### Orphaned servers
 
 - **A killed test process no longer leaves its server running (Linux).** Before
