@@ -1051,6 +1051,14 @@ the workflow steps) on a Linux host, and the `setup-rust` steps of the CI
 workflows (each must pass `install-mold`), so a flag lost through a recipe or
 workflow edit fails there.
 
+The release recipes assign `RUSTFLAGS` in the Makefile, and the release archive
+script assigns it itself when it runs Cargo (the caller's value, or an empty
+one), so the configuration's flags never reach a shipped binary whichever entry
+point reached it: `make release`, `make release-archive` or the release
+workflow's `Build release archive` step. The script tests read that assignment
+from the execution context, and the release workflow contract requires every
+release build in `release.yml` to go through the script.
+
 ### Cranelift
 
 Exception: Cranelift is not the development-profile backend. The estate adopts
