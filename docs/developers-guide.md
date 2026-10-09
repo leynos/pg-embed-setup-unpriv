@@ -1030,8 +1030,8 @@ source repeats the same flags apart from the linker.
 An assigned `RUSTFLAGS` replaces the configuration's flags, so the Makefile
 recipes that set it compose the standard's flags onto any inherited value (CI's
 `setup-rust` exports one). Two builds are deliberately excluded: coverage
-assigns `RUSTFLAGS` without the fast flags, because a measurement should not
-depend on them, and the release recipe and workflow keep the platform linker,
+assigns `RUSTFLAGS` without the fast flags because a measurement should not
+depend on them, and the release recipe and workflow keep the platform linker
 because they assign `RUSTFLAGS` (even an empty value displaces the
 configuration). Cargo has no per-profile `rustflags`, so a direct
 `cargo build --release` takes the configuration's flags unless `RUSTFLAGS` is
@@ -1063,8 +1063,8 @@ release build in `release.yml` to go through the script.
 
 Exception: Cranelift is not the development-profile backend. The estate adopts
 it only where the full suite passes under it, and that is not shown here on the
-pinned `nightly-2026-04-25` (measured 2026-10-02): 13 tests
-(`steps::scenario_fix...` among them) fail under it while the suite passes
-under LLVM, 799 of 799 in the full run. Revisit on the next toolchain bump:
-measure the whole suite under the backend, with CI's environment, and adopt it
-if every test passes.
+pinned `nightly-2026-04-25` (measured 2026-10-02): 13 tests (the
+`scenario_fixture_*` scenarios in `tests/test_cluster_fixture/steps.rs` among
+them) fail under it while the suite passes under LLVM, 799 of 799 in the full
+run. Revisit on the next toolchain bump: measure the whole suite under the
+backend, with CI's environment, and adopt it if every test passes.
