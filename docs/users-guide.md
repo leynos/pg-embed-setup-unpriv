@@ -1091,3 +1091,8 @@ an empty `RUSTFLAGS`:
 ```bash
 RUSTFLAGS="" cargo build --release
 ```
+
+The decision is recorded in [ADR 006](adr-006-rust-build-standard.md). The
+contract tests that guard these defaults run `make -n`, so a direct
+`cargo test` needs GNU make on the `PATH`. The tests fail when `make` is
+missing instead of skipping, so a missing tool cannot read as a pass.
