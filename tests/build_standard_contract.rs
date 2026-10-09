@@ -17,16 +17,24 @@ mod ci_steps;
 mod command_reader;
 #[path = "build_standard_support/config.rs"]
 mod config;
+#[path = "build_standard_support/coverage_env.rs"]
+mod coverage_env;
 #[path = "build_standard_support/cranelift.rs"]
 mod cranelift;
+#[path = "build_standard_support/development.rs"]
+mod development;
 #[path = "build_standard_support/exhaustive.rs"]
 mod exhaustive;
 #[path = "build_standard_support/fixtures.rs"]
 mod fixtures;
 #[path = "build_standard_support/injected.rs"]
 mod injected;
+#[path = "build_standard_support/injected_held_out.rs"]
+mod injected_held_out;
 #[path = "build_standard_support/make.rs"]
 mod make;
+#[path = "build_standard_support/policy_cases.rs"]
+mod policy_cases;
 #[path = "build_standard_support/process.rs"]
 mod process;
 #[path = "build_standard_support/reader_cases.rs"]
@@ -37,7 +45,9 @@ mod shell;
 mod workflow_exhaustive;
 use ci_steps::workflow_problems;
 use config::{CONFIG, Pin, Problems, TOOLCHAIN, config_problems};
-use make::{Host, development_problems, held_out_problems, held_out_target_count};
+use coverage_env::coverage_recipe_problems;
+use development::development_problems;
+use make::{Host, held_out_problems, held_out_target_count};
 use process::real_make;
 
 /// Turns a list of complaints into a test result.
@@ -90,4 +100,12 @@ fn coverage_and_release_take_neither_flag() -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// The coverage recipe assigns what it recorded besides `RUSTFLAGS`: the LLVM backend, the linker
+/// and the link arguments a measurement needs. A repository with no local coverage recipe records
+/// nothing.
+#[test]
+fn the_coverage_recipe_assigns_its_recorded_environment() -> Result<(), String> {
+    none_of(&coverage_recipe_problems(real_make)?)
 }

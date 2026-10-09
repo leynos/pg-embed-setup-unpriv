@@ -39,5 +39,44 @@ pub fn real_make(target: Target<'_>, host: Host) -> Result<String, String> {
             "`make -n {name}` failed, so it is not defined: {stderr}"
         ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    decode_stdout(output.stdout, target)
+}
+
+/// Decodes what `make -n` printed, refusing bytes that are not UTF-8 instead of replacing them: a
+/// replaced byte could turn a flag the contract looks for into text it reads as something else.
+///
+/// # Errors
+///
+/// Returns the reason when the bytes are not valid UTF-8.
+fn decode_stdout(stdout: Vec<u8>, target: Target<'_>) -> Result<String, String> {
+    String::from_utf8(stdout)
+        .map_err(|error| format!("`make -n {target}` printed bytes that are not UTF-8: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    //! The process boundary refuses bytes that are not UTF-8 and passes text through unchanged.
+
+    use super::{Target, decode_stdout};
+
+    #[test]
+    fn valid_utf8_passes_through_unchanged() {
+        let text = "RUSTFLAGS=\"-D warnings\" cargo test \u{e9}\n";
+        assert_eq!(
+            decode_stdout(text.as_bytes().to_vec(), Target("test")),
+            Ok(text.to_owned())
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_is_refused_not_replaced() {
+        let bytes = b"cargo test \xff\xfe\n".to_vec();
+        let refused = decode_stdout(bytes, Target("test"));
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|reason| reason.contains("not UTF-8")),
+            "{refused:?}"
+        );
+    }
 }

@@ -27,7 +27,7 @@ impl Pin {
     /// Reads the pin from a `rust-toolchain.toml`.
     ///
     /// The channel must be named exactly once and be one the standard knows: a
-    /// `nightly` (dated or not), `stable`, `beta`, or a numbered release.
+    /// dated `nightly-YYYY-MM-DD`, `stable`, `beta`, or a numbered release.
     /// Anything else, and a missing or repeated `channel`, is an error rather
     /// than a guess that lets a malformed file pass as stable.
     ///

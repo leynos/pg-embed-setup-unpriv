@@ -25,17 +25,22 @@ pub fn compiles(command: &str) -> bool {
     }
     let cargo_subcommand = words
         .iter()
-        .position(|word| word.rsplit('/').next() == Some("cargo"))
+        .position(|word| names_program(word, "cargo"))
         .and_then(|at| words.get(at + 1..))
         .and_then(|rest| {
             rest.iter()
                 .find(|word| !word.starts_with('+') && !word.starts_with('-'))
         })
         .is_some_and(|sub| !INSPECTION_SUBCOMMANDS.contains(sub));
-    cargo_subcommand
-        || words
-            .iter()
-            .any(|word| word.rsplit('/').next() == Some("whitaker"))
+    cargo_subcommand || words.iter().any(|word| names_program(word, "whitaker"))
+}
+
+/// Returns whether a word names a program: its final path component, with or without `.exe`,
+/// matches (`cargo`, `/usr/bin/cargo`, `C:\\tools\\cargo.exe`).
+pub fn names_program(word: &str, program: &str) -> bool {
+    word.rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|name| name == program || name.strip_suffix(".exe") == Some(program))
 }
 
 /// Splits one logical line of `make -n` output into the shell commands it runs: at `;`, `&&`,
@@ -92,4 +97,42 @@ pub fn without_leading_keywords(command: &str) -> &str {
         }
     }
     rest
+}
+
+/// Returns the leading `NAME=value` assignments of a command line, where a value is double quoted,
+/// single quoted or a bare word, up to the first word that is not an assignment.
+///
+/// ```text
+/// leading_assignments("A=\"x y\" B=z cargo test") == [("A", "x y"), ("B", "z")]
+/// leading_assignments("cargo test")               == []
+/// ```
+pub fn leading_assignments(command: &str) -> Vec<(String, String)> {
+    let mut rest = command.trim_start();
+    let mut found = Vec::new();
+    while let Some((name, after)) = rest.split_once('=') {
+        let is_name = name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !is_name {
+            break;
+        }
+        let (value, remainder) = split_value(after);
+        found.push((name.to_owned(), value.to_owned()));
+        rest = remainder.trim_start();
+    }
+    found
+}
+
+/// Splits the text after an `=` into a quoted or bare value and the rest.
+fn split_value(after: &str) -> (&str, &str) {
+    let quoted = |quote: char| {
+        after
+            .strip_prefix(quote)
+            .map(|body| body.split_once(quote).unwrap_or((body, "")))
+    };
+    quoted('"')
+        .or_else(|| quoted('\''))
+        .unwrap_or_else(|| after.split_once(char::is_whitespace).unwrap_or((after, "")))
 }
