@@ -2053,11 +2053,10 @@ dependencies = [
 
 [[package]]
 name = "makefile-lossless"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e12c5657c58db35bca5ac2b66121cf469c6734ad0bfa5ce0ea4e71b5f52a65"
+checksum = "b6f0aeb2dabf7be3c88d147e3c13e6c51ec2939f85213490b4831aefbc713fb0"
 dependencies = [
- "log",
  "rowan",
 ]
 
@@ -4479,9 +4478,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "trybuild"
-version = "1.0.121"
+version = "1.0.122"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0cabaa10be1917331a313866bd94526343e03c77bcf69144b62b072ad35d47c"
+checksum = "62db9c92d704393fbf2132041720cc80b689f2d3f28521015c2ac866223c11b8"
 dependencies = [
  "glob",
  "serde",
