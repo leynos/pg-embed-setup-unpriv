@@ -1,9 +1,11 @@
 """The runner-placement judgement: where a lane runs, and for how long.
 
 Ubicloud's cache proxy is scoped by ref, and a pull request from a fork
-cannot obtain an Ubicloud runner at all. A lane that names an Ubicloud
-runner therefore selects it by an expression that falls back to the
-hosted pool for a fork, and states its own ceiling, because an Ubicloud
+cannot obtain an Ubicloud runner at all. A Dependabot pull request is kept
+off Ubicloud too, because hosted minutes cost nothing on a public
+repository. A lane that names an Ubicloud runner therefore selects it by
+an expression that falls back to the hosted pool for a fork or a
+Dependabot pull request, and states its own ceiling, because an Ubicloud
 runner is a self-hosted just-in-time runner that GitHub's six-hour cap
 for hosted jobs does not bound.
 
@@ -14,7 +16,7 @@ Examples
 >>> selected_runner(ESTATE_EXPRESSION, "push")
 'ubicloud-standard-2'
 >>> len(placement_faults("ubuntu-latest"))
-3
+4
 >>> placement_faults(ESTATE_EXPRESSION)
 []
 """
@@ -40,29 +42,41 @@ HOSTED_LABELS: typ.Final = (HOSTED_LABEL, "ubuntu-24.04")
 #: The context value that is true only for a pull request from a fork.
 FORK_CONDITION: typ.Final = "github.event.pull_request.head.repo.fork"
 
+#: The pull request's author, not `github.actor`: the actor is whoever
+#: triggered the run, so a person pushing to a Dependabot branch would flip
+#: the runner.
+DEPENDABOT_CONDITION: typ.Final = (
+    "github.event.pull_request.user.login == 'dependabot[bot]'"
+)
+
+#: The exact condition under which a pull request takes the hosted arm.
+HOSTED_CONDITION: typ.Final = f"({FORK_CONDITION} || {DEPENDABOT_CONDITION})"
+
 #: The estate's runner expression, as a lane writes it.
 ESTATE_EXPRESSION: typ.Final = (
-    "${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' "
-    "|| 'ubicloud-standard-2' }}"
+    "${{ (github.event.pull_request.head.repo.fork "
+    "|| github.event.pull_request.user.login == 'dependabot[bot]') "
+    "&& 'ubuntu-latest' || 'ubicloud-standard-2' }}"
 )
 
 #: The estate shape: a condition, a quoted hosted arm and a quoted other arm.
 _ESTATE_SHAPE: typ.Final = re.compile(
-    r"\$\{\{\s*(?P<condition>[^&|]+?)\s*&&\s*'(?P<hosted>[^']*)'"
+    r"\$\{\{\s*(?P<condition>\(.+?\))\s*&&\s*'(?P<hosted>[^']*)'"
     r"\s*\|\|\s*'(?P<other>[^']*)'\s*\}\}"
 )
 
 #: The kinds of run a runner expression is evaluated for. A push and a
-#: dispatch have no pull request, so the fork value is null and they
-#: behave as a same-repository pull request does.
-ORIGINS: typ.Final = ("push", "same-repository", "fork")
+#: dispatch have no pull request, so both values are empty strings (falsy)
+#: and they behave as a same-repository pull request does.
+ORIGINS: typ.Final = ("push", "same-repository", "fork", "dependabot")
+HOSTED_ORIGINS: typ.Final = frozenset({"fork", "dependabot"})
 
 
 def selected_runner(runs_on: object, origin: str) -> str | None:
     """Return the label a `runs-on` value selects for a run.
 
     Returns None when the value is not the estate's
-    `<fork> && '<hosted>' || '<label>'` shape. A literal label is not the
+    `(<fork> || <dependabot>) && '<hosted>' || '<label>'` shape. A literal label is not the
     shape: a lane that never falls back cannot serve a fork, and a lane
     that never leaves the hosted pool is not placed at all.
 
@@ -72,8 +86,8 @@ def selected_runner(runs_on: object, origin: str) -> str | None:
         The job's `runs-on` value as parsed; anything but a string has no
         selection.
     origin : str
-        The kind of run: `push` (also a dispatch), `same-repository` or
-        `fork`.
+        The kind of run: `push` (also a dispatch), `same-repository`, `fork`
+        or `dependabot`.
 
     Returns
     -------
@@ -81,15 +95,15 @@ def selected_runner(runs_on: object, origin: str) -> str | None:
         The selected label, or None when the value is not the estate shape.
     """
     shape = _ESTATE_SHAPE.fullmatch(runs_on.strip()) if isinstance(runs_on, str) else None
-    if shape is None or shape["condition"] != FORK_CONDITION:
+    if shape is None or shape["condition"] != HOSTED_CONDITION:
         return None
-    return shape["hosted" if origin == "fork" else "other"]
+    return shape["hosted" if origin in HOSTED_ORIGINS else "other"]
 
 
 def placement_faults(runs_on: object, label: str = UBICLOUD_LABEL) -> list[str]:
     """Return one entry per kind of run the expression places wrongly.
 
-    Empty when a fork falls back to hosted and every other run is on
+    Empty when a fork and a Dependabot pull request fall back to hosted and every other run is on
     the Ubicloud runner class `label`.
 
     Parameters
@@ -108,6 +122,7 @@ def placement_faults(runs_on: object, label: str = UBICLOUD_LABEL) -> list[str]:
         "push": (label,),
         "same-repository": (label,),
         "fork": HOSTED_LABELS,
+        "dependabot": HOSTED_LABELS,
     }
     chosen = {origin: selected_runner(runs_on, origin) for origin in ORIGINS}
     return [

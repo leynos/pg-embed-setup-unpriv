@@ -111,14 +111,22 @@ duplicate keys and says nothing.
 `standard-2`:
 
 ```yaml
-runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-2' }}
+runs-on: >-
+  ${{ (github.event.pull_request.head.repo.fork
+  || github.event.pull_request.user.login == 'dependabot[bot]')
+  && 'ubuntu-latest' || 'ubicloud-standard-2' }}
 ```
 
 `build-test` is `standard-4` on a measured shortfall: its unprivileged leg ran
 out of disk on `standard-2` (`No space left on device`, run 36565376334). A
 pull request from a fork cannot obtain an Ubicloud runner, so it falls back to
-`ubuntu-latest`; a push and a dispatch have no pull request, so the fork value
-is null and they select Ubicloud.
+`ubuntu-latest`. So does a pull request Dependabot opened: hosted minutes cost
+nothing on a public repository, and Dependabot opens many pull requests. The
+expression tests the pull request's author, not `github.actor`, because the
+actor is whoever triggered the run, so a person pushing to a Dependabot branch
+would flip the runner. A push and a dispatch have no pull request, so both
+values are empty strings (falsy) and the expression selects Ubicloud; a
+Dependabot pull request therefore builds cold on the hosted pool.
 
 The writer sits on Ubicloud because Ubicloud's cache proxy is scoped by ref. A
 pull request's Ubicloud lane reads a warm main scope only when a main job on
@@ -146,11 +154,12 @@ expression, the hosted rows are left alone, and Ubicloud named under a key the
 `runs-on` does not read is refused.
 
 `scripts/tests/test_runner_placement.py` holds this to the files. It evaluates
-the expression for a push or dispatch, a same-repository pull request and a
-fork, rejects a literal label, inverted arms, another label and another
-condition, and asserts an exact inventory of the jobs that can land on Ubicloud
-with their ceilings. A change that adds, removes or re-times such a job fails
-it until the inventory is updated in the same commit.
+the expression for a push or dispatch, a same-repository pull request, a fork
+and a Dependabot pull request, rejects a literal label, inverted arms, another
+label, another condition, a missing Dependabot arm and an actor test, and
+asserts an exact inventory of the jobs that can land on Ubicloud with their
+ceilings. A change that adds, removes or re-times such a job fails it until the
+inventory is updated in the same commit.
 
 ## The sccache wrapper in CI
 

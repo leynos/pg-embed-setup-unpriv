@@ -40,12 +40,13 @@ PLACEMENTS = [
         ("push", "ubicloud-standard-2"),
         ("same-repository", "ubicloud-standard-2"),
         ("fork", "ubuntu-latest"),
+        ("dependabot", "ubuntu-latest"),
     ],
 )
 def test_the_estate_expression_places_each_run(origin: str, wanted: str) -> None:
     """A push, a dispatch and a same-repository pull request get Ubicloud.
 
-    Only a fork's pull request falls back to the hosted pool.
+    Only a fork's or Dependabot's pull request falls back to the hosted pool.
     """
     assert selected_runner(ESTATE_EXPRESSION, origin) == wanted
 
@@ -54,29 +55,34 @@ def test_the_estate_expression_places_each_run(origin: str, wanted: str) -> None
     ("runs_on", "expected"),
     [
         (ESTATE_EXPRESSION, 0),
-        ("ubuntu-latest", 3),
-        ("ubicloud-standard-2", 3),
+        ("ubuntu-latest", 4),
+        ("ubicloud-standard-2", 4),
         (
-            "${{ github.event.pull_request.head.repo.fork && "
+            "${{ (github.event.pull_request.head.repo.fork "
+            "|| github.event.pull_request.user.login == 'dependabot[bot]') && "
             "'ubicloud-standard-2' || 'ubuntu-latest' }}",
-            3,
+            4,
         ),
         (
-            "${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' "
-            "|| 'ubicloud-standard-4' }}",
+            ESTATE_EXPRESSION.replace("standard-2", "standard-4"),
             2,
         ),
         (
-            "${{ github.event_name == 'pull_request' && 'ubuntu-latest' "
+            "${{ (github.event_name == 'pull_request') && 'ubuntu-latest' "
             "|| 'ubicloud-standard-2' }}",
-            3,
+            4,
         ),
         (
-            "${{ github.event.pull_request.head.repo.fork && "
-            "'ubicloud-standard-2' || 'ubicloud-standard-2' }}",
-            1,
+            ESTATE_EXPRESSION.replace("'ubuntu-latest'", "'ubicloud-standard-2'"),
+            2,
         ),
-        (None, 3),
+        (None, 4),
+        (
+            "${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' "
+            "|| 'ubicloud-standard-2' }}",
+            4,
+        ),
+        (ESTATE_EXPRESSION.replace("pull_request.user.login", "actor"), 4),
     ],
     ids=[
         "estate",
@@ -85,8 +91,10 @@ def test_the_estate_expression_places_each_run(origin: str, wanted: str) -> None
         "inverted-arms",
         "another-label",
         "another-condition",
-        "fork-kept-on-ubicloud",
+        "hosted-origins-kept-on-ubicloud",
         "not-a-string",
+        "dependabot-arm-missing",
+        "actor-instead-of-author",
     ],
 )
 def test_a_misplaced_lane_is_reported(runs_on: object, expected: int) -> None:
@@ -166,16 +174,18 @@ def _matrix_job(reference: str, row: str) -> Workflow:
     [
         ("${{ matrix.runner }}", f'"{ESTATE_EXPRESSION}"', 0),
         ("${{ matrix['runner'] }}", f'"{ESTATE_EXPRESSION}"', 0),
-        ("${{ matrix.runner }}", "ubicloud-standard-2", 3),
+        ("${{ matrix.runner }}", "ubicloud-standard-2", 4),
         (
             "${{ matrix.runner }}",
-            '"${{ github.event.pull_request.head.repo.fork && '
+            '"${{ (github.event.pull_request.head.repo.fork || '
+            "github.event.pull_request.user.login == 'dependabot[bot]') && "
             "'ubicloud-standard-2' || 'ubuntu-latest' }}\"",
-            3,
+            4,
         ),
         (
             "${{ matrix.runner }}",
-            '"${{ github.event.pull_request.head.repo.fork && '
+            '"${{ (github.event.pull_request.head.repo.fork || '
+            "github.event.pull_request.user.login == 'dependabot[bot]') && "
             "'ubuntu-latest' || 'ubicloud-standard-4' }}\"",
             2,
         ),
@@ -217,9 +227,10 @@ def test_a_matrix_naming_ubicloud_elsewhere_is_inventoried_and_rejected() -> Non
 def test_a_fork_may_fall_back_to_the_pinned_ubuntu_release() -> None:
     """A lane that pins an Ubuntu release keeps it on the fork arm.
 
-    Both hosted labels are accepted for the fork, and any other is not.
+    Both hosted labels are accepted for the fork and Dependabot arm, and any other is not
+    (one fault each).
     """
     pinned = ESTATE_EXPRESSION.replace("'ubuntu-latest'", "'ubuntu-24.04'")
     other = ESTATE_EXPRESSION.replace("'ubuntu-latest'", "'ubuntu-22.04'")
     assert placement_faults(pinned) == []
-    assert len(placement_faults(other)) == 1
+    assert len(placement_faults(other)) == 2
