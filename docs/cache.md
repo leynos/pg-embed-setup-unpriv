@@ -215,6 +215,25 @@ sequenceDiagram
     deactivate TestCluster
 ```
 
+## Cache entries and the default version pin
+
+A cached entry is selected by version requirement, so an unpinned bootstrap now
+asks for `=18.6.0` and will not reuse an `18.6.1` entry even when one is
+present. That is deliberate: an `18.6.1` entry on Linux or macOS was extracted
+without the tar hard links that `postgresql_archive` versions before 0.22.0
+drop, so its `share/timezone/UTC` is missing and any session that names a zone
+fails with `invalid value for parameter "TimeZone"`. Delete such an entry
+before expecting a cluster to serve those names:
+
+```bash
+rm -rf ~/.cache/pg-embedded/binaries/18.6.1
+```
+
+The same applies to any other entry whose version is at least `18.6.1` and was
+filled by an unpinned run before the pin existed. Entries are only reused when
+their `.complete` marker and `bin/` directory are present, so a half-populated
+directory is ignored rather than served.
+
 ## Cache maintenance
 
 The cache does not perform automatic cleanup. To clear stale entries:

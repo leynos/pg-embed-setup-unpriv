@@ -22,6 +22,12 @@ slow-timeout = { period = "30s", terminate-after = 1, grace-period = "5s" }
 # 111315793594, so a 360 s budget left them about 12 to 17 percent of headroom
 # and a slower runner timed them out at 360.0 s. 450 s keeps a real hang failing
 # and, started up to about 90 s into the run, still ends inside `global-timeout`.
+#
+# On a machine whose Cargo package cache is busy with unrelated builds, all six
+# cases can hit `Blocking waiting for file lock on package cache` at once and
+# time out at 450 s; the same binary then passes in 163 to 203 s per case once
+# the cache is free. Run `ui` with `RUSTC_WRAPPER=""`, as CI does, so the nested
+# trybuild builds do not also queue for a compile slot.
 [[profile.default.overrides]]
 filter = "binary(=ui)"
 slow-timeout = { period = "450s", terminate-after = 1, grace-period = "5s" }
@@ -39,5 +45,6 @@ filter = """
   | binary(=test_cluster_behaviour)
   | binary(=test_cluster_connection)
   | binary(=test_cluster_drop)
+  | binary(=timezone_regression)
 """
 test-group = "serial"
