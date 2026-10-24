@@ -237,17 +237,28 @@ cfg_privilege_drop! {
 
     #[cfg(any(test, doc, feature = "privileged-tests"))]
     fn decrement_skip_privilege_drop() {
-        let _update_result = SKIP_PRIVILEGE_DROP.fetch_update(
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-            |value| {
-                debug_assert!(
-                    value > 0,
-                    "PrivilegeDropGuard dropped with zero privilege-drop counter"
-                );
-                Some(value.saturating_sub(1))
-            },
-        );
+        // A hand-rolled compare-exchange rather than `fetch_update`: the latter
+        // is deprecated as of nightly-2026-10-23 and its replacement,
+        // `try_update`, is only stable from Rust 1.95, above this crate's
+        // declared MSRV. The loop gives the same guarantee — a decrement that
+        // loses a race retries against the fresh value.
+        let mut current = SKIP_PRIVILEGE_DROP.load(Ordering::SeqCst);
+        loop {
+            debug_assert!(
+                current > 0,
+                "PrivilegeDropGuard dropped with zero privilege-drop counter"
+            );
+            let next = current.saturating_sub(1);
+            match SKIP_PRIVILEGE_DROP.compare_exchange(
+                current,
+                next,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current = observed,
+            }
+        }
     }
 }
 

@@ -2,7 +2,6 @@
 //! `pg-embedded-setup-unpriv` to bootstrap directories as root before
 //! downgrading to the `nobody` user for database operations.
 #![cfg(all(unix, feature = "privileged-tests"))]
-
 use std::{io::Write, time::Duration};
 
 use camino::Utf8PathBuf;

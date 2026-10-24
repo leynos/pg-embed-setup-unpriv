@@ -5,6 +5,36 @@ All notable changes to this crate are recorded here. The format follows
 
 ## Unreleased
 
+### Lint toolchain
+
+- The pinned lint toolchain moves from `nightly-2026-04-25` to
+  `nightly-2026-10-23` (#357), and the new lints are fixed rather than silenced.
+  `AtomicUsize::fetch_update` is deprecated in favour of `try_update`, but
+  `try_update` is only stable from Rust 1.95, above this crate's declared
+  minimum, so the privilege-drop counter decrements through a
+  `compare_exchange` loop that behaves the same on every supported toolchain. A
+  `#[deprecated]` item gains the `since` version the lint now requires, and
+  `ExtensionName` gains the `FromStr` implementation Clippy expects alongside
+  its existing `TryFrom<&str>`.
+
+### Default PostgreSQL version pinned
+
+- Bootstrapping without `PG_VERSION_REQ` now installs `18.6.0` rather than
+  whatever release upstream lists as the newest match. From `18.6.1` onward the
+  Linux and macOS archives pack most of `share/timezone` as tar hard links, and
+  the `postgresql_archive` release this crate builds against extracts regular
+  files, directories and symlinks but silently drops hard links. A cluster from
+  such a tree has no `share/timezone/UTC`, so every session that names a zone
+  failed with `invalid value for parameter "TimeZone": "UTC"` (#351). `18.6.0`
+  predates the change and resolves names from the host zoneinfo database, as
+  before. `PG_VERSION_REQ` still overrides the pin. The underlying extraction
+  gap is fixed in `postgresql_archive` 0.22.0, which needs Rust 1.94 and so
+  arrives with this crate's next minimum-supported-Rust-version release.
+- An installation directory holding several version subdirectories now
+  resolves to one the settings' version requirement accepts, instead of always
+  taking the highest. Without this an exact pin would be undone by a newer
+  directory left behind by an earlier run.
+
 ### Non-durable test clusters
 
 - Test clusters are non-durable by default (#297). `TestCluster`,

@@ -108,8 +108,12 @@ fn max_connections_at_the_public_boundary(
             err.to_string().contains("PG_MAX_CONNECTIONS"),
             "unexpected error: {err}"
         ),
-        (Ok(_), None) => color_eyre::eyre::bail!("PG_MAX_CONNECTIONS={value} must be rejected"),
-        (Err(err), Some(_)) => color_eyre::eyre::bail!("unexpected failure: {err}"),
+        (Ok(_), None) => {
+            color_eyre::eyre::bail!("PG_MAX_CONNECTIONS={value} must be rejected");
+        }
+        (Err(err), Some(_)) => {
+            color_eyre::eyre::bail!("unexpected failure: {err}");
+        }
     }
     Ok(())
 }

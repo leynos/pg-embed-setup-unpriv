@@ -84,8 +84,12 @@ fn bootstrap_for_tests_reuses_the_stored_password(
             );
         }
         (Err(err), Err(kind)) => ensure!(err.kind() == kind, "unexpected kind: {err}"),
-        (Ok(_), Err(kind)) => bail!("expected {kind:?}, but the bootstrap succeeded"),
-        (Err(err), Ok(_)) => bail!("unexpected failure: {err}"),
+        (Ok(_), Err(kind)) => {
+            bail!("expected {kind:?}, but the bootstrap succeeded");
+        }
+        (Err(err), Ok(_)) => {
+            bail!("unexpected failure: {err}");
+        }
     }
     Ok(())
 }

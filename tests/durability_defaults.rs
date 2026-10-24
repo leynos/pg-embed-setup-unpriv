@@ -5,7 +5,6 @@
 //! the shared handle and reports what the running server says about its
 //! durability settings, with the environment set only on that child's `Command`.
 #![cfg(unix)]
-
 use std::path::Path;
 
 use diesel::{RunQueryDsl, sql_types::Text};

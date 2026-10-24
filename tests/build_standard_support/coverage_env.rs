@@ -217,9 +217,9 @@ mod tests {
             coverage_command_problems(&[command(OK), command(OK)], EXPECTED, LINK).len(),
             1
         );
-        assert!(
-            coverage_command_problems(&[command("echo hi"), command(OK)], EXPECTED, LINK)
-                .is_empty()
+        assert_eq!(
+            coverage_command_problems(&[command("echo hi"), command(OK)], EXPECTED, LINK),
+            Vec::<String>::new()
         );
     }
 }

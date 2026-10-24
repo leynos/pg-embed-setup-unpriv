@@ -166,7 +166,12 @@ cargo treats as unset:
 - **Unprivileged test step** (`Test with all features (unprivileged)`): the `ui`
   tests build trybuild fixtures in nested cargo invocations that inherit the
   wrapper, and under it exceeded their 360 s slow-timeout where they took about
-  125 s without. The cause of the slowdown is not traced.
+  125 s without. Those nested builds queue for a compile slot like any other
+  build, so on a host with a shared admission pool each `ui` case waits behind
+  whatever else is compiling. Run `ui` with `RUSTC_WRAPPER=""` locally too: on
+  a loaded host the six cases otherwise hit
+  `Blocking waiting for file lock on package cache` together and time out at
+  450 s, and pass in 163 to 203 s per case once the cache is free.
 
 `scripts/tests/test_rustc_wrapper_contract.py` holds both steps to this: each
 way of letting the wrapper back in is driven through the judge in
@@ -175,7 +180,7 @@ other step keeps sccache.
 
 ## Lint and formatting toolchain
 
-The repository pins `rust-toolchain.toml` to `nightly-2026-04-25` because the
+The repository pins `rust-toolchain.toml` to `nightly-2026-10-23` because the
 imported `rustfmt.toml` template uses unstable rustfmt options. Use the
 Makefile targets rather than invoking Cargo directly so local checks and CI
 exercise the same nightly formatter and Clippy policy:
@@ -220,19 +225,35 @@ The Whitaker suite itself is installed by the shared `install-whitaker` action,
 pinned to a commit SHA, which resolves a checksum-verified release archive for
 the installer version named by `WHITAKER_INSTALLER_VERSION`, currently `0.2.9`,
 the floor the action accepts (it refuses anything lower). The action is pinned
-to shared-actions `6cec89bac47a21cf756d68d638a9a510998e57f8` (#546), which also
-carries the 60 s sccache startup fix. The concordat QG-002 rule accepts it
-because the action directory is content-identical to the reviewed `6dea5677`
-(#522); any later shared-actions commit that leaves it unchanged is also
-accepted. The previous inline step fell back to
+to shared-actions `e693d81d176d2305e2b736a0be0f9038085dec7f`, the revision the
+Dependabot shared-actions group bumps every workflow to.
+
+That revision satisfies the concordat QG-002 rule, and so does every other
+commit that leaves the `install-whitaker` directory's Git tree id equal to the
+reviewed root `6dea5677` (#522). The rule's `compliant_install_whitaker_refs`
+list is derived, not handwritten: it holds the roots plus every later
+first-parent commit that leaves the directory unchanged.
+`tests/whitaker_install_pin.rs` keeps a verbatim copy in
+`APPROVED_ACTION_REVISIONS` and checks the workflow's pin for membership rather
+than equality. That matters because a single hard-coded SHA assertion passes
+for exactly one upstream commit and turns red on the next approved bump, which
+is precisely how this suite failed on the shared-actions update. Three guards
+keep the copy honest: it must hold exactly 77 entries, every entry must be a
+full lowercase SHA, and no entry may repeat. A parameterized negative case
+proves an off-list SHA and a truncated SHA are both refused. Refresh the copy
+from `platform-standards/canon/lint-rules/whitaker-provisioning/rule.yaml` in
+`leynos/concordat` when upstream approves a revision; the current copy matches
+concordat `f46a4848ad5e62cfd170360074cddc3a792f3ea7` (PR #324).
+
+The previous inline step fell back to
 `cargo install --locked whitaker-installer`, building the tool from source in
-CI and verifying nothing. `tests/whitaker_install_pin.rs` keeps that
-arrangement in place. Note that the installer still resolves the lint suite
-from the tip of the Whitaker repository, so the lints themselves are not yet
-pinned; a suite change can turn this gate red without any commit here. That is
-what happened between 2026-08-19 and 2026-09-04, when the same installer
-version and toolchain built suite commit `b4d3101` instead of `2bc0c3f` and the
-gate failed on every branch. Two issues track closing the gap:
+CI and verifying nothing; the suite still refuses every Cargo route to the
+installer. Note that the installer still resolves the lint suite from the tip
+of the Whitaker repository, so the lints themselves are not yet pinned; a suite
+change can turn this gate red without any commit here. That is what happened
+between 2026-08-19 and 2026-09-04, when the same installer version and
+toolchain built suite commit `b4d3101` instead of `2bc0c3f` and the gate failed
+on every branch. Two issues track closing the gap:
 [whitaker#402][whitaker-suite-pin] asks the installer for a ref or
 suite-version input, and [shared-actions#454][shared-actions-suite-pin] asks
 `install-whitaker` to expose and pass it through.
@@ -338,6 +359,45 @@ fails that job. Fix it by relaxing the requirement to the lowest release that
 does what is needed, or raise `rust-version` deliberately and say so in the
 change log. `scripts/tests/test_msrv_check.py` holds the script's steps and the
 contract that CI runs `make msrv`.
+
+## The default PostgreSQL version
+
+`PgEnvCfg::apply_version` in `src/lib.rs` sets `Settings::version` from
+`PG_VERSION_REQ` when that variable names a requirement, and otherwise from the
+`DEFAULT_VERSION_REQ` constant, currently `=18.6.0`. An unset requirement used
+to mean `VersionReq::STAR`, which let upstream's newest listed release win
+without any change in this repository's own files. That is how the `TimeZone`
+failure reached downstream projects: the release that started shipping a bundled
+`share/timezone` tree also started packing most of it as tar hard links, and
+`postgresql_archive` before 0.22.0 drops hard links while extracting. The
+resulting tree has no `share/timezone/UTC`, so `SET TimeZone = 'UTC'` fails with
+`invalid value for parameter "TimeZone": "UTC"`.
+
+The pin is a hold, not the fix. `postgresql_archive` 0.22.0 extracts hard links
+and removes the need for it, but that release needs Rust 1.94, which arrives
+with this crate's next MSRV bump. Until then the constant keeps an unpinned
+bootstrap on a release whose archives predate the switch and resolve zone names
+from the host zoneinfo database, as before. Delete the constant when the
+dependency moves.
+
+`resolve_installed_dir` in `src/cluster/installation.rs` also filters the
+version-named subdirectories of an installation directory by the settings'
+requirement. Without that filter an exact pin could still be undone by a newer
+directory left in the same tree by an earlier run. Names that do not parse as
+semver are kept and compared lexically, so a hand-made directory still resolves;
+`tests/settings.rs` covers the default and the override, and a unit test in
+`installation.rs` pins the exact-requirement selection.
+
+`tests/timezone_regression.rs` proves the behaviour end to end. It starts one
+real cluster and asks the server for `UTC`, `Etc/UTC` and `Europe/London`,
+`SET TimeZone` then `SHOW TimeZone` for each. On failure it attaches a bounded
+list of facts gathered before the cluster stops: the server version, the
+installation directory, the type of `share/timezone`, `share/timezone/UCT` and
+`share/timezone/UTC`, and the tail of `start.log`. Settings, passwords,
+connection URLs and command debug logs are deliberately excluded, because the
+text lands in test output. The suite shares the `serial` group and is in the
+`no_std_fs_operations` exclusion list for the same reasons the other
+integration-test crates are: it uses the ambient `tests/support` modules.
 
 ## Path resolution
 
@@ -1073,5 +1133,7 @@ it only where the full suite passes under it, and that is not shown here on the
 pinned `nightly-2026-04-25` (measured 2026-10-02): 13 tests (the
 `scenario_fixture_*` scenarios in `tests/test_cluster_fixture/steps.rs` among
 them) fail under it while the suite passes under LLVM, 799 of 799 in the full
-run. Revisit on the next toolchain bump: measure the whole suite under the
-backend, with CI's environment, and adopt it if every test passes.
+run. That measurement predates the bump to `nightly-2026-10-23` and has not
+been repeated on it, so it is evidence of a past result, not of current
+behaviour. Re-measure the whole suite under the backend, with CI's environment,
+on the next attempt to adopt it, and adopt it only if every test passes.

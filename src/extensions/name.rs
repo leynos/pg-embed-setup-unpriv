@@ -59,6 +59,14 @@ impl AsRef<str> for ExtensionName {
     fn as_ref(&self) -> &str { &self.0 }
 }
 
+/// The idiomatic spelling of the same conversion as [`TryFrom<&str>`], which
+/// generic `str::parse` callers expect.
+impl std::str::FromStr for ExtensionName {
+    type Err = crate::error::BootstrapError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> { Self::new(value) }
+}
+
 impl TryFrom<&str> for ExtensionName {
     type Error = crate::error::BootstrapError;
 
