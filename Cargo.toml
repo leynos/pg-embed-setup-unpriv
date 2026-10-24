@@ -165,7 +165,7 @@ figment-json5 = "0.1.1"
 cap-std = "4.0.2"
 camino = { version = "1.2", features = ["serde1"] }
 thiserror = "2"
-serde_json = "1"
+serde_json = "1.0.154"
 secrecy = { version = "0.10", features = ["serde"] }
 tempfile = "3"
 filetime = "0.2.27"
@@ -178,7 +178,7 @@ pq-sys = { version = "0.7.5", optional = true, features = ["bundled"] }
 rstest = "0.27"
 dashmap = "6.1.0"
 dirs = "7.0"
-sha2 = "0.11"
+sha2 = "0.11.1"
 # HTTP for the extension hook; the TLS backend matches postgresql_embedded's
 # default so the two share one stack.
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "native-tls"] }
@@ -280,11 +280,11 @@ error_impl_error = "deny"
 result_large_err = "deny"
 
 [dev-dependencies]
-makefile-lossless = "0.4.1"
+makefile-lossless = "0.4.8"
 temp-env = "0.3"
 color-eyre = "0.6"
 diesel = { version = "2", default-features = false, features = ["postgres"] }
-proptest = "1"
+proptest = "1.12.0"
 rstest-bdd = "0.6.0"
 rstest-bdd-macros = "0.6.0"
 once_cell = "1"
@@ -292,5 +292,5 @@ unic-langid = "0.9"
 serial_test = { version = "3.4.0", features = ["file_locks"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 mockall = "0.15"
-trybuild = "1"
+trybuild = "1.0.122"
 insta = "1"
