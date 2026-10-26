@@ -104,6 +104,18 @@ cargo binstall pg-embed-setup-unpriv
    per-user default tree: without `PG_EMBED_ROOT` the `postgresql_embedded`
    defaults apply, and with it the same two leaves are derived.
 
+   If `PG_VERSION_REQ` is unset, the helper selects PostgreSQL `=18.6.0`. Set
+   it to a semver requirement to choose a different release. When an
+   installation directory contains version-named subdirectories, the highest
+   version matching that requirement is selected; non-matching versioned
+   directories are ignored. A direct installation containing `bin/` is reused.
+
+   The default avoids newer archives whose hard-linked time-zone files are not
+   extracted by the current archive dependency. An explicit override can still
+   select an affected release. If named zones fail, check the selected version
+   and remove an incomplete cache entry before retrying; see
+   [binary cache troubleshooting](cache.md#cache-entries-and-the-default-version-pin).
+
    Test clusters cap `max_connections` at 20 (a `postgres` container defaults
    to 100); set `PG_MAX_CONNECTIONS` when parallel test runners need more. The
    override applies to plain `bootstrap()` runs as well as test bootstraps, and
@@ -919,6 +931,17 @@ export PG_VERSION_REQ="=17.11.0"
 export PG_EXTENSIONS="vector"
 export PG_EXTENSIONS_MANIFEST="https://github.com/leynos/df12-pg-extensions/releases/download/v1.0.0/manifest.json"
 export PG_EXTENSIONS_MANIFEST_SHA256="<digest from manifest.json.sha256>"
+```
+
+Extension names can also be parsed through the standard Rust parsing API:
+
+```rust
+use pg_embedded_setup_unpriv::extensions::ExtensionName;
+
+let name: ExtensionName = "vector".parse()?;
+assert_eq!(name.as_str(), "vector");
+assert!("Vector".parse::<ExtensionName>().is_err());
+# Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
 ```
 
 `CREATE EXTENSION vector` then works in any database of the cluster, and

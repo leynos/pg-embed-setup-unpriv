@@ -99,6 +99,7 @@ def test_root_step_stages_worker_for_privilege_drop(
     """The actual root step supplies an accessible worker and cleans it up."""
     import os
     import subprocess
+    import sys
 
     workflow = parse((REPOSITORY_ROOT / CI).read_text(encoding="utf-8"))
     step = next(step for _, step in workflow.steps() if step.get("name") == ROOT_STEP)
@@ -118,7 +119,9 @@ def test_root_step_stages_worker_for_privilege_drop(
         "make": (
             '#!/bin/sh\n'
             'test -x "$PG_EMBEDDED_WORKER" || exit 1\n'
-            'test "$(stat -c %a "$(dirname "$PG_EMBEDDED_WORKER")")" = 755 || exit 2\n'
+            '"$PYTHON_EXECUTABLE" -c \'import os, sys; '
+            'mode = os.stat(os.path.dirname(os.environ["PG_EMBEDDED_WORKER"])).st_mode; '
+            'sys.exit((mode & 0o777) != 0o755)\' || exit 2\n'
             'printf "%s" "$PG_EMBEDDED_WORKER" > "$WORKER_RECORD"\n'
         ),
     }
@@ -134,6 +137,7 @@ def test_root_step_stages_worker_for_privilege_drop(
         CARGO_HOME=str(tmp_path),
         RUSTUP_HOME=str(tmp_path),
         GITHUB_TOKEN="test-token",
+        PYTHON_EXECUTABLE=sys.executable,
         PATH=f"{bin_dir}:/usr/bin:/bin",
         WORKER_RECORD=str(record),
     )

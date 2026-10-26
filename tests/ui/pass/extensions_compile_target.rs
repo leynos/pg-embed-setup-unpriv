@@ -24,7 +24,12 @@ pub fn verify_surface() -> Result<(), String> {
     if ALLOWED_PREFIXES != ["lib/", "share/extension/"] {
         return Err("allowed prefixes changed".to_owned());
     }
-    let name = ExtensionName::new("vector").map_err(|err| err.to_string())?;
+    let name = "vector"
+        .parse::<ExtensionName>()
+        .map_err(|err| err.to_string())?;
+    if name.as_str() != "vector" || "Vector".parse::<ExtensionName>().is_ok() {
+        return Err("extension name parsing changed".to_owned());
+    }
     let request = ExtensionRequest {
         names: vec![name.clone()],
         manifest: ManifestSource::Path {

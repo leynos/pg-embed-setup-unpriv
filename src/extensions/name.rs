@@ -76,3 +76,30 @@ impl TryFrom<&str> for ExtensionName {
 impl fmt::Display for ExtensionName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.0) }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Tests for parsing extension names through the standard trait.
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case::simple("vector")]
+    #[case::digits_and_underscore("pg_trgm2")]
+    fn parse_accepts_valid_names(#[case] name: &str) {
+        let parsed = name.parse::<ExtensionName>().expect("valid extension name");
+        assert_eq!(parsed.as_str(), name);
+    }
+
+    #[rstest]
+    #[case::empty("")]
+    #[case::uppercase("Vector")]
+    #[case::whitespace("vec tor")]
+    fn parse_rejects_invalid_names(#[case] name: &str) {
+        let error = name
+            .parse::<ExtensionName>()
+            .expect_err("invalid extension name");
+        assert_eq!(error.kind(), BootstrapErrorKind::ExtensionConfigInvalid);
+    }
+}

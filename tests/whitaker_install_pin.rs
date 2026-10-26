@@ -43,85 +43,7 @@ const APPROVED_REVISION_COUNT: usize = 77;
 /// reviewed, and includes every later commit that leaves the directory's Git
 /// tree id unchanged. Copy it verbatim, in the same order, when it is
 /// refreshed, so a diff against upstream stays readable.
-const APPROVED_ACTION_REVISIONS: [&str; APPROVED_REVISION_COUNT] = [
-    "6dea5677a84fec60ca51b07202570e3af12ffdb4",
-    "8a83824b29dfe8f861714b544dc85fb925ed010c",
-    "14c325b60788814cd50298eb8060228daee3b842",
-    "d4d248bbbecdcf7b4f5bc79ffd4d6caee370bd79",
-    "9a27950942334d69ff79005b3a8db23bf151f43f",
-    "a904888c815dc5919a3b24d41a9bb4d566459a93",
-    "fc73b3fe2da2be3e641b4809268b6e350dfd0d28",
-    "a38feb9be25755c30eca5bda96bd3786a5b89c6b",
-    "d65313b25cc6db5a23518fe409280b167a3305e1",
-    "b23b7b8d2b9438f8f697d2b7976463020bb0d1ea",
-    "a8ca3302e60c6852561c19b75fa39020f86cb207",
-    "6346e6a781b9c7db16ea2647b41076e6bf170b91",
-    "03d0ed80b88628cca2b6f96bf32e4220b0121926",
-    "6738afdb486258ed4f1dd5f526a58309be30396e",
-    "584a0793a634e119673fd1e71f88f78970611f25",
-    "63f7dbac64f6fc6217b859d71fff46f85df97e9e",
-    "1cb2cfb9faf06424690cdf7753045745982de128",
-    "2802a8448ceabe34995b091da62ef60e5276a7c7",
-    "2573e4ccc4dadb9d30b18e408d393890989c1b9a",
-    "ce8d747242ab3c9d58674d5838cf04c801eeb2f9",
-    "32741eab2df11defd36eb06eaf2ac047ac8729ba",
-    "2f58fab140cc8dfe69756aaa6a3bbb987c426023",
-    "c856f4c570e8d83d64318ee2768a4906d0d807f6",
-    "8901b50fda116a1a33304809b8767809dc17c203",
-    "b7d70b5d3ff0ac0199416b9678ea7af25bb3254e",
-    "8250c914bd32aeacfdf8d9e87b804ec0024ee83e",
-    "d57cb19b82281236088108f2ffb7e13bc00fc2f8",
-    "5e218e3c055da635947aa823e98387aa2ace0306",
-    "6cec89bac47a21cf756d68d638a9a510998e57f8",
-    "abf0dcf2686de1eaf79b6dc9a16662b631bed149",
-    "e6d7c2f25cec0576b599de9acdb3bf29c3ca6655",
-    "e734ba497fa85a1577dba6b66715b2d41587419f",
-    "c4ed5ffaf0640b1907d5359a87fd1677034eec27",
-    "013346ccfd37bd1e02eb430525233f1a4cd942b8",
-    "ff1dd759dfffc0db3459e30e833f52437ee62b57",
-    "88977798a5c3bae1549afb99642529488c665276",
-    "ebe2f3105334283441f4c915eb979a0f4b9f2c04",
-    "d9de10c64b2b84f42209c7a0d1d83aa3a3ffa0ea",
-    "b6eb26ff70e41779a80fb7f4f073011d847ab5fc",
-    "14eb66098248084fe8072da519dda6fec2745df2",
-    "7d751eded578e48dacf43ab173d5820e6437c474",
-    "b9a3bff63b1e19b3a48d433668184e24e1abd3ba",
-    "6ecf4a7691031f92c3e75e176705cf541ad5283d",
-    "f3b62790a564a18b0ef11e1dda32e7fa6113e4e5",
-    "0606ca899ce2995a0c4bc78e660e80832e6e8855",
-    "122fc392099957575259c97f0599bc3f0f095882",
-    "d99a5e2aeba9c2164a70549f00540d0bd12a573b",
-    "2f47859bcf82ae8b5bc10b457683fbd589ca2e41",
-    "03ef8cdcea566bd1d34fac511f27928cf763c7d5",
-    "f03cb6565da66299c43148ed46b2409866ac25d5",
-    "c17d433f99daa94e53ca5eb566088518a312cb71",
-    "5bc2b2611f5921ef2c56e4ee3fde2b879a319361",
-    "d0c2585d9e144775e4ec9fe26e7eeb03c14844dd",
-    "b59d7d13d29636cc9f0c33a81ba17a9a2bde9bb8",
-    "b804b69fa7f978cf9091b9d9bd5481d8ce58c2ea",
-    "3c0fa8e72567f5fb58f9b4f281fbc902e4ec48c5",
-    "ec1432aa6fa5379b2dd8f4b3402fd5b250a597bd",
-    "cfcc379e29be516160f499864ae82720842359af",
-    "65e76d487b4ed17d0f4003a17eaccdc8859a7d0e",
-    "d93ba23803a96cf76e233ae1331e24548d0157a5",
-    "3754876bc4e94dc65c83af3def37828934f8f65e",
-    "cabf105ae230e3759cf77b1c2d1d73ea0b67e9a9",
-    "0b6bec31b2d7a1bb19bff3c4d9d76d54c6607bac",
-    "c85021def0e09a26f6f2ef2d701c0d3dc04d4e3d",
-    "26c918632c5413039a84358fafe012a4399a9ec7",
-    "2ddf19b3fd52c0f1089db0d57b015f859b80ab67",
-    "aea9c14c24b73042e99f0be8245a4f171b67c31a",
-    "e693d81d176d2305e2b736a0be0f9038085dec7f",
-    "aaf2bbccebae2fe4e8eaf7dab949de60f4d30071",
-    "a563db345cb3bd1f88548fc0f3403583fc45bb67",
-    "81374b6f183e59f0570ad36217ded90d3240fda6",
-    "3e4cba9ff5898f40723b95e09b8d5bae26c1b1f6",
-    "5ac271baf94615e9a876ce1b77a4b266dd81f201",
-    "126d02e32a07c2b049e8b68fff09298526e5971a",
-    "d26e53630893c942af44eb3db7efd4fcbe0c8093",
-    "2aed718022775671809f8c85a2c10547dfb1ae13",
-    "d5fded1107ee6822fdbf9539d81ff18ce6ce073a",
-];
+const APPROVED_ACTION_REVISIONS: &str = include_str!("fixtures/approved_whitaker_revisions.txt");
 
 /// Return the number of leading spaces on `line`.
 fn indent_of(line: &str) -> usize { line.len() - line.trim_start().len() }
@@ -225,7 +147,11 @@ fn is_full_lowercase_sha(revision: &str) -> bool {
 }
 
 /// Report whether the copied list holds `revision`.
-fn is_approved_revision(revision: &str) -> bool { APPROVED_ACTION_REVISIONS.contains(&revision) }
+fn is_approved_revision(revision: &str) -> bool {
+    APPROVED_ACTION_REVISIONS
+        .lines()
+        .any(|approved| approved == revision)
+}
 
 #[test]
 fn the_install_step_uses_the_shared_action() {
@@ -258,7 +184,7 @@ fn the_install_step_pins_the_shared_action_to_an_approved_commit_sha() {
 #[test]
 fn the_approved_list_holds_the_expected_number_of_revisions() {
     assert_eq!(
-        APPROVED_ACTION_REVISIONS.len(),
+        APPROVED_ACTION_REVISIONS.lines().count(),
         APPROVED_REVISION_COUNT,
         "the copied list must hold exactly {APPROVED_REVISION_COUNT} revisions",
     );
@@ -273,7 +199,7 @@ fn the_approved_list_holds_the_expected_number_of_revisions() {
 /// per-case assertion.
 #[test]
 fn the_approved_list_holds_only_full_lowercase_shas() {
-    for (index, revision) in APPROVED_ACTION_REVISIONS.iter().enumerate() {
+    for (index, revision) in APPROVED_ACTION_REVISIONS.lines().enumerate() {
         assert!(
             is_full_lowercase_sha(revision),
             "entry {index} of the approved list is not a full lowercase SHA: {revision:?}",
@@ -285,8 +211,7 @@ fn the_approved_list_holds_only_full_lowercase_shas() {
 fn the_approved_list_holds_no_duplicates() {
     let mut seen = std::collections::BTreeSet::new();
     let duplicates: Vec<&str> = APPROVED_ACTION_REVISIONS
-        .iter()
-        .copied()
+        .lines()
         .filter(|revision| !seen.insert(*revision))
         .collect();
 

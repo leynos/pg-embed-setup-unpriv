@@ -154,9 +154,9 @@ it until the inventory is updated in the same commit.
 
 ## The sccache wrapper in CI
 
-From the `setup-rust` pin `ff1dd759`, the action starts an sccache server and
-exports `RUSTC_WRAPPER` (and `SCCACHE_CONF`) for the whole job. The following
-CI steps use an empty `RUSTC_WRAPPER`, which Cargo treats as unset:
+The pinned `setup-rust` action (`e693d81d`) starts an sccache server and exports
+`RUSTC_WRAPPER` (and `SCCACHE_CONF`) for the whole job. The following CI steps
+use an empty `RUSTC_WRAPPER`, which Cargo treats as unset:
 
 - **Root lane** (`Install cargo-nextest and test (root)`): `run_as_root` passes
   `RUSTC_WRAPPER=` through `sudo -E env`. Root's rustc would otherwise talk to
@@ -692,8 +692,8 @@ matrix that also runs as root, and only that leg measures coverage.
 losing or changing a condition has to change this section with it, and a lane
 appearing without an entry fails the contract too.
 
-It pins two values as well as ordering them: the 10 m `global-timeout` and the
-66 m job ceiling. Two numbers are involved and they are worth keeping apart.
+It pins two values as well as ordering them: the 1,100 s `global-timeout` and
+the 66 m job ceiling. Two numbers are involved and they are worth keeping apart.
 
 The **base requirement is 50 minutes**: the 1,800 s watchdog plus the 1,200 s
 of measured work outside its window. That is what the job has to be allowed to

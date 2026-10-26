@@ -92,7 +92,9 @@ fn a_started_cluster_resolves_nameable_time_zones(serial_guard: ScenarioSerialGu
     sandbox.reset()?;
     // Clearing TZ and TZDIR keeps the host's zone configuration out of the
     // answer: the server must resolve the names from its own data.
-    let vars = sandbox.env_without_timezone();
+    let mut vars = sandbox.env_without_timezone();
+    // The regression must exercise the default even when a caller has an override.
+    vars.push(("PG_VERSION_REQ".into(), None));
     let outcome = sandbox.with_env(vars, verify_zones_against_live_cluster);
     drop(serial_guard);
     match outcome {

@@ -357,3 +357,7 @@ mod tests {
         assert_eq!(resolve_installed_dir(&settings), None);
     }
 }
+
+#[cfg(test)]
+#[path = "installation_property_tests.rs"]
+mod installation_property_tests;

@@ -296,13 +296,31 @@ fn find_staging_directory_handles_custom_profile_under_deps() {
     );
 }
 
-#[test]
-fn explicitly_configured_worker_takes_precedence_over_discovery() {
-    let configured = OsString::from("configured-worker");
+#[rstest]
+#[case::configured_wins(
+    Some("configured-worker"),
+    Some("cargo-worker"),
+    Some("discovered-worker"),
+    Some("configured-worker")
+)]
+#[case::cargo_wins(
+    None,
+    Some("cargo-worker"),
+    Some("discovered-worker"),
+    Some("cargo-worker")
+)]
+#[case::discovery_fallback(None, None, Some("discovered-worker"), Some("discovered-worker"))]
+#[case::nothing_found(None, None, None, None)]
+fn worker_source_respects_precedence(
+    #[case] configured: Option<&str>,
+    #[case] cargo_binary: Option<&str>,
+    #[case] discovered: Option<&str>,
+    #[case] expected: Option<&str>,
+) {
     let selected = select_worker_source(
-        Some(configured.clone()),
-        Some(OsString::from("cargo-worker")),
-        || Some(OsString::from("discovered-worker")),
+        configured.map(OsString::from),
+        cargo_binary.map(OsString::from),
+        || discovered.map(OsString::from),
     );
-    assert_eq!(selected, Some(configured));
+    assert_eq!(selected, expected.map(OsString::from));
 }
