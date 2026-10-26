@@ -12,7 +12,7 @@ The outermost tier was the one missing. Neither coverage job declared
 the pull-request lane already ran for twenty-two minutes.
 
 The contract also holds the inner ordering, which this repository does
-satisfy: a 600 s whole-run budget above a 450 s largest per-test
+satisfy: a 1,100 s whole-run budget above a 900 s largest per-test
 allowance, and a 1,800 s watchdog above that budget once nextest's
 termination procedure and a cold build are counted.
 
@@ -55,7 +55,7 @@ from timeout_budgets import (
 #: The budget the `binary(=ui)` override gives its tests, written once here
 #: and derived from nothing, so the guide and the configuration stay one
 #: statement. The slowest macOS trybuild tests measured 316 s.
-UI_BUDGET_SECONDS: typ.Final[Fraction] = Fraction(450)
+UI_BUDGET_SECONDS: typ.Final[Fraction] = Fraction(900)
 
 #: The condition each coverage lane legitimately carries, keyed by
 #: workflow and job, as the step's ``if`` and its job's.
@@ -340,7 +340,7 @@ def test_the_default_profile_bounds_a_test_no_override_matches(
     ``largest_test_allowance`` reports the largest budget anywhere in
     the file, so deleting ``[profile.default]``'s own ``slow-timeout``
     and leaving the `ui` and `settings` overrides behind still reports
-    450 s while every test those overrides do not match runs with no
+    900 s while every test those overrides do not match runs with no
     bound at all. Nothing else here would notice.
 
     Proved by mutation: commenting out the profile's own

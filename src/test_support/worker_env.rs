@@ -33,11 +33,22 @@ pub(super) fn worker_binary() -> Option<OsString> {
     static WORKER_PATH: OnceLock<Option<OsString>> = OnceLock::new();
     WORKER_PATH
         .get_or_init(|| {
-            let original =
-                std::env::var_os("CARGO_BIN_EXE_pg_worker").or_else(locate_worker_binary)?;
+            let original = select_worker_source(
+                std::env::var_os("PG_EMBEDDED_WORKER"),
+                std::env::var_os("CARGO_BIN_EXE_pg_worker"),
+                locate_worker_binary,
+            )?;
             Some(stage_worker_binary(original))
         })
         .clone()
+}
+
+fn select_worker_source(
+    configured: Option<OsString>,
+    cargo_binary: Option<OsString>,
+    locate: impl FnOnce() -> Option<OsString>,
+) -> Option<OsString> {
+    configured.or(cargo_binary).or_else(locate)
 }
 
 fn stage_worker_binary(original: OsString) -> OsString {

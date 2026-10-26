@@ -28,6 +28,12 @@ updates:
   # Enable version updates for Cargo
   - package-ecosystem: "cargo"
     directory: "/"
+    # Releases from 0.20.3 require Rust 1.94; retain the 1.92 MSRV.
+    ignore:
+      - dependency-name: "postgresql_embedded"
+        versions: [">= 0.20.3"]
+      - dependency-name: "postgresql_archive"
+        versions: [">= 0.20.3"]
     groups:
       # The rstest-bdd crates release in lockstep and one bumped alone does not
       # build. Cargo counts a 0.x minor as a major, which the catch-all leaves

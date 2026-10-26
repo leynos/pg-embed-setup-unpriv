@@ -295,3 +295,14 @@ fn find_staging_directory_handles_custom_profile_under_deps() {
         "the deps parent should be treated as the profile directory"
     );
 }
+
+#[test]
+fn explicitly_configured_worker_takes_precedence_over_discovery() {
+    let configured = OsString::from("configured-worker");
+    let selected = select_worker_source(
+        Some(configured.clone()),
+        Some(OsString::from("cargo-worker")),
+        || Some(OsString::from("discovered-worker")),
+    );
+    assert_eq!(selected, Some(configured));
+}

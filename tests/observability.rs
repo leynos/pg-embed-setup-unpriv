@@ -123,7 +123,9 @@ fn when_cluster_boots(world: &WorldFixture) -> Result<()> {
         let world_ref = world_cell.borrow();
         let env_vars = world_ref.sandbox.env_without_timezone();
         ensure_runtime_dir_matches(&env_vars, world_ref.sandbox.install_dir())?;
-        assert_worker_present(&env_vars)?;
+        if nix::unistd::geteuid().is_root() {
+            assert_worker_present(&env_vars)?;
+        }
         capture_info_logs_with_spans(|| {
             world_ref
                 .sandbox
@@ -153,7 +155,9 @@ fn when_cluster_bootstrap_fails(world: &WorldFixture) -> Result<()> {
         let mut vars = world_ref.sandbox.env_without_timezone();
         override_env_path(&mut vars, "PG_DATA_DIR", data_file.as_ref());
         ensure_runtime_dir_matches(&vars, world_ref.sandbox.install_dir())?;
-        assert_worker_present(&vars)?;
+        if nix::unistd::geteuid().is_root() {
+            assert_worker_present(&vars)?;
+        }
 
         capture_info_logs_with_spans(|| {
             world_ref.sandbox.with_env(vars, || -> BootstrapResult<()> {

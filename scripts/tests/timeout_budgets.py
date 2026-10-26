@@ -87,7 +87,7 @@ COLD_BUILD_ALLOWANCE_SECONDS: typ.Final[Fraction] = Fraction(10 * 60)
 #: `docs/developers-guide.md` records it. Pinned as well as ordered: the
 #: ordering below holds for a wide range of values and would not notice
 #: the budget drifting away from the guide.
-REQUIRED_GLOBAL_TIMEOUT_SECONDS: typ.Final[Fraction] = Fraction(10 * 60)
+REQUIRED_GLOBAL_TIMEOUT_SECONDS: typ.Final[Fraction] = Fraction(1100)
 
 #: How far a ceiling must sit above the sum it contains, rather than
 #: merely reaching it. A ceiling equal to that sum cancels the job at

@@ -238,6 +238,8 @@ mod tests {
     //! Tests for cluster installation handling.
     use std::fs;
 
+    use rstest::rstest;
+
     use super::*;
     use crate::test_support::dummy_settings;
 
@@ -319,38 +321,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolve_installed_dir_picks_highest_versioned_subdir() {
+    #[rstest]
+    #[case::highest_matching_version(["16.0.0", "17.0.0"], None, "17.0.0")]
+    #[case::exact_requirement(["18.6.0", "18.6.1"], Some("=18.6.0"), "18.6.0")]
+    fn resolve_installed_dir_selects_an_eligible_version(
+        #[case] versions: [&str; 2],
+        #[case] requirement: Option<&str>,
+        #[case] expected: &str,
+    ) {
         let temp = tempfile::tempdir().expect("tempdir");
-        fs::create_dir_all(temp.path().join("16.0.0/bin")).expect("create 16 bin");
-        fs::create_dir_all(temp.path().join("17.0.0/bin")).expect("create 17 bin");
-        let settings = Settings {
+        for version in versions {
+            fs::create_dir_all(temp.path().join(version).join("bin")).expect("create version bin");
+        }
+        let mut settings = Settings {
             installation_dir: temp.path().to_path_buf(),
             ..Settings::default()
         };
-        let resolved = resolve_installed_dir(&settings).expect("a versioned dir is resolved");
+        if let Some(version_requirement) = requirement {
+            settings.version = VersionReq::parse(version_requirement).expect("valid requirement");
+        }
+        let resolved = resolve_installed_dir(&settings).expect("an eligible dir is resolved");
         assert_eq!(
             resolved.file_name().and_then(|n| n.to_str()),
-            Some("17.0.0"),
-            "the highest version should win",
-        );
-    }
-
-    #[test]
-    fn resolve_installed_dir_honours_an_exact_version_requirement() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        fs::create_dir_all(temp.path().join("18.6.0/bin")).expect("create 18.6.0 bin");
-        fs::create_dir_all(temp.path().join("18.6.1/bin")).expect("create 18.6.1 bin");
-        let settings = Settings {
-            installation_dir: temp.path().to_path_buf(),
-            version: VersionReq::parse("=18.6.0").expect("exact requirement"),
-            ..Settings::default()
-        };
-        let resolved = resolve_installed_dir(&settings).expect("the pinned dir is resolved");
-        assert_eq!(
-            resolved.file_name().and_then(|n| n.to_str()),
-            Some("18.6.0"),
-            "an exact requirement must not resolve to a newer sibling",
+            Some(expected)
         );
     }
 

@@ -155,28 +155,23 @@ it until the inventory is updated in the same commit.
 ## The sccache wrapper in CI
 
 From the `setup-rust` pin `ff1dd759`, the action starts an sccache server and
-exports `RUSTC_WRAPPER` (and `SCCACHE_CONF`) for the whole job. Two steps of
-`build-test` must not use it, so each sets an empty `RUSTC_WRAPPER`, which
-cargo treats as unset:
+exports `RUSTC_WRAPPER` (and `SCCACHE_CONF`) for the whole job. The following
+CI steps use an empty `RUSTC_WRAPPER`, which Cargo treats as unset:
 
 - **Root lane** (`Install cargo-nextest and test (root)`): `run_as_root` passes
   `RUSTC_WRAPPER=` through `sudo -E env`. Root's rustc would otherwise talk to
   a server owned by the runner user, which cannot write into the target
   directory root created, so the first crate fails with "Permission denied".
-- **Unprivileged test step** (`Test with all features (unprivileged)`): the `ui`
-  tests build trybuild fixtures in nested cargo invocations that inherit the
-  wrapper, and under it exceeded their 360 s slow-timeout where they took about
-  125 s without. Those nested builds queue for a compile slot like any other
-  build, so on a host with a shared admission pool each `ui` case waits behind
-  whatever else is compiling. Run `ui` with `RUSTC_WRAPPER=""` locally too: on
-  a loaded host the six cases otherwise hit
-  `Blocking waiting for file lock on package cache` together and time out at
-  450 s, and pass in 163 to 203 s per case once the cache is free.
+- **Unprivileged test step** (`Test with all features (unprivileged)`): nested
+  trybuild compilations have exceeded the slow timeout when using sccache on
+  hosted runners. The non-Windows UI cases now share one trybuild invocation,
+  avoiding competing Cargo processes for the same generated build directory.
+- **Windows test and packaging jobs** use plain rustc because sccache's expanded
+  command exceeds the Windows process command-line limit.
 
-`scripts/tests/test_rustc_wrapper_contract.py` holds both steps to this: each
-way of letting the wrapper back in is driven through the judge in
-`scripts/tests/rustc_wrapper.py` first, and then `ci.yml` is judged. Every
-other step keeps sccache.
+`scripts/tests/test_rustc_wrapper_contract.py` checks the root and unprivileged
+steps. Local builds retain the configured compiler admission wrapper, including
+nested trybuild compilations.
 
 ## Lint and formatting toolchain
 
@@ -354,6 +349,10 @@ with `cargo +<version> check --locked --all-targets --all-features`. It clears
 `RUSTFLAGS`, because the repository's Cargo configuration sets nightly-only
 flags. The committed `Cargo.lock` is restored afterwards.
 
+Dependabot ignores `postgresql_embedded` and `postgresql_archive` versions
+`>= 0.20.3`, because those releases require Rust 1.94. Keep the exclusions and
+the PostgreSQL version pin until the project deliberately raises its MSRV.
+
 Raising a dependency requirement past what the declared version can build now
 fails that job. Fix it by relaxing the requirement to the lowest release that
 does what is needed, or raise `rust-version` deliberately and say so in the
@@ -519,8 +518,8 @@ they must be ordered lives in the `generate-coverage` README in
 
 | Tier                     | What it bounds                     | Where it is set                               | Current value                                   |
 | ------------------------ | ---------------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 450 s for two overrides |
-| nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 600 s (10 m)                                    |
+| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 900 s for two overrides |
+| nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 1,100 s                                         |
 | Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
 | Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 66 m                                            |
 
@@ -542,8 +541,9 @@ different moments and cover different work.
 The watchdog starts when `cargo` starts, so it covers the build as well as the
 test run, while nextest's global timeout starts only once tests begin. A
 watchdog merely larger than the global timeout still pre-empts it whenever the
-build takes longer than the difference. Here the difference is 1,200 s, which
-is ample for this crate's build.
+build takes longer than the difference. Here the difference is 700 s, which
+covers the 600 s cold-build allowance and 65 s termination allowance enforced
+by the contract.
 
 Hitting the global timeout does not stop the run instantly either. nextest
 signals the process group and waits `slow-timeout.grace-period`, five seconds
