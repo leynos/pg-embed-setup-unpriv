@@ -502,6 +502,12 @@ impl PgEnvCfg {
         Ok(s)
     }
 
+    /// Replaces the settings' version requirement with the configured one, or
+    /// the default pin when no explicit requirement was supplied.
+    ///
+    /// For example, `=17.4.0` takes precedence over the default `=18.6.0`.
+    /// An invalid explicit requirement, or an invalid default, returns a
+    /// configuration error without changing the settings.
     fn apply_version(&self, settings: &mut Settings) -> ConfigResult<()> {
         settings.version = match self.version_req.as_deref() {
             Some(spec) => VersionReq::parse(spec).context("PG_VERSION_REQ invalid semver spec")?,

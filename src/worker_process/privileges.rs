@@ -235,6 +235,11 @@ cfg_privilege_drop! {
         SKIP_PRIVILEGE_DROP.load(Ordering::SeqCst) > 0
     }
 
+    /// Releases one guard's privilege-drop exemption from the shared counter.
+    ///
+    /// Concurrent updates retry against the latest observed value, so dropping
+    /// one of two active guards leaves the other exemption in force. A guard
+    /// must only be dropped when the counter is positive.
     #[cfg(any(test, doc, feature = "privileged-tests"))]
     fn decrement_skip_privilege_drop() {
         // A hand-rolled compare-exchange rather than `fetch_update`: the latter

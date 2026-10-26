@@ -29,6 +29,13 @@ use sha2::{Digest, Sha256};
 #[must_use]
 pub fn worker_binary_for_tests() -> Option<OsString> { worker_binary() }
 
+/// Resolves and caches the worker path once per process, including absence.
+///
+/// The configured worker takes precedence over Cargo's binary path and local
+/// discovery. On Unix, the selected binary is staged for privilege-dropped
+/// execution when possible; if staging fails, its original path is retained.
+/// For example, with no configured, Cargo, or discovered worker, this returns
+/// `None` for subsequent calls as well.
 pub(super) fn worker_binary() -> Option<OsString> {
     static WORKER_PATH: OnceLock<Option<OsString>> = OnceLock::new();
     WORKER_PATH
@@ -43,6 +50,10 @@ pub(super) fn worker_binary() -> Option<OsString> {
         .clone()
 }
 
+/// Selects the configured path, then Cargo's path, then a discovered path.
+///
+/// Discovery is lazy: for example, supplying a configured path returns it
+/// without calling `locate`. Returns `None` when no source supplies a path.
 fn select_worker_source(
     configured: Option<OsString>,
     cargo_binary: Option<OsString>,
