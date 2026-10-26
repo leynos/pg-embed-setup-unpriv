@@ -296,31 +296,36 @@ fn find_staging_directory_handles_custom_profile_under_deps() {
     );
 }
 
+/// The available sources and expected winner for one precedence scenario.
+#[derive(Clone, Copy)]
+enum WorkerSourceCase {
+    Configured,
+    Cargo,
+    Discovered,
+    Missing,
+}
+
 #[rstest]
-#[case::configured_wins(
-    Some("configured-worker"),
-    Some("cargo-worker"),
-    Some("discovered-worker"),
-    Some("configured-worker")
-)]
-#[case::cargo_wins(
-    None,
-    Some("cargo-worker"),
-    Some("discovered-worker"),
-    Some("cargo-worker")
-)]
-#[case::discovery_fallback(None, None, Some("discovered-worker"), Some("discovered-worker"))]
-#[case::nothing_found(None, None, None, None)]
-fn worker_source_respects_precedence(
-    #[case] configured: Option<&str>,
-    #[case] cargo_binary: Option<&str>,
-    #[case] discovered: Option<&str>,
-    #[case] expected: Option<&str>,
-) {
-    let selected = select_worker_source(
-        configured.map(OsString::from),
-        cargo_binary.map(OsString::from),
-        || discovered.map(OsString::from),
-    );
-    assert_eq!(selected, expected.map(OsString::from));
+#[case::configured_wins(WorkerSourceCase::Configured)]
+#[case::cargo_wins(WorkerSourceCase::Cargo)]
+#[case::discovery_fallback(WorkerSourceCase::Discovered)]
+#[case::nothing_found(WorkerSourceCase::Missing)]
+fn worker_source_respects_precedence(#[case] scenario: WorkerSourceCase) {
+    let configured = matches!(scenario, WorkerSourceCase::Configured)
+        .then(|| OsString::from("configured-worker"));
+    let cargo_binary = matches!(
+        scenario,
+        WorkerSourceCase::Configured | WorkerSourceCase::Cargo
+    )
+    .then(|| OsString::from("cargo-worker"));
+    let discovered = (!matches!(scenario, WorkerSourceCase::Missing))
+        .then(|| OsString::from("discovered-worker"));
+    let expected = match scenario {
+        WorkerSourceCase::Configured => Some(OsString::from("configured-worker")),
+        WorkerSourceCase::Cargo => Some(OsString::from("cargo-worker")),
+        WorkerSourceCase::Discovered => Some(OsString::from("discovered-worker")),
+        WorkerSourceCase::Missing => None,
+    };
+    let selected = select_worker_source(configured, cargo_binary, || discovered);
+    assert_eq!(selected, expected);
 }
