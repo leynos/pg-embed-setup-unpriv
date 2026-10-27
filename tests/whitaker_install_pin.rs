@@ -70,12 +70,15 @@ impl Workflow<'_> {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        WhitakerStep(text)
+        WhitakerStep {
+            text,
+            field_indent: step_indent + 2,
+        }
     }
 
     /// Validate the extracted action pin against the QG-002 list.
     fn validate_pin(&self) -> Result<(), String> {
-        let revision = self.whitaker_step().revision();
+        let revision = self.whitaker_step().revision()?;
         if !Revision(&revision).is_full_lowercase_sha() {
             return Err(format!(
                 "install-whitaker must use a full lowercase SHA: {revision:?}"
@@ -91,22 +94,33 @@ impl Workflow<'_> {
 }
 
 /// The extracted install step, kept separate from unrelated workflow text.
-struct WhitakerStep(String);
+struct WhitakerStep {
+    text: String,
+    field_indent: usize,
+}
 
 impl WhitakerStep {
-    /// Return the complete revision token used by the install action.
-    fn revision(&self) -> String {
-        let Some(rest) = self
-            .0
-            .split_once(INSTALL_WHITAKER_ACTION)
-            .map(|(_, rest)| rest)
-        else {
-            panic!(
-                "the Whitaker step does not reference the shared action:\n{}",
-                self.0
-            );
-        };
-        rest.chars().take_while(|c| !c.is_whitespace()).collect()
+    /// Read the sole direct `uses` entry, excluding comments and nested fields.
+    fn revision(&self) -> Result<String, String> {
+        let mut entries = self.text.lines().filter_map(|line| {
+            (indent_of(line) == self.field_indent)
+                .then_some(line.trim().strip_prefix("uses:"))
+                .flatten()
+        });
+        let entry = entries
+            .next()
+            .ok_or_else(|| "missing uses entry".to_owned())?;
+        if entries.next().is_some() {
+            return Err("duplicate uses entries".to_owned());
+        }
+        let value = entry
+            .split_whitespace()
+            .next()
+            .ok_or_else(|| "empty uses entry".to_owned())?;
+        let revision = value
+            .strip_prefix(INSTALL_WHITAKER_ACTION)
+            .ok_or_else(|| format!("unexpected uses value: {value:?}"))?;
+        Ok(revision.to_owned())
     }
 }
 
@@ -172,9 +186,9 @@ fn the_install_step_uses_the_shared_action() {
     let step = Workflow { text: CI_WORKFLOW }.whitaker_step();
 
     assert!(
-        step.0.contains(INSTALL_WHITAKER_ACTION),
+        step.revision().is_ok(),
         "the Whitaker step must use the shared install-whitaker action:\n{}",
-        step.0,
+        step.text,
     );
 }
 
@@ -187,12 +201,15 @@ fn the_install_step_pins_the_shared_action_to_an_approved_commit_sha() {
 
 #[test]
 fn an_unapproved_workflow_pin_fails_validation() {
-    let approved = Workflow { text: CI_WORKFLOW }.whitaker_step().revision();
+    let approved = Workflow { text: CI_WORKFLOW }
+        .whitaker_step()
+        .revision()
+        .expect("valid uses entry");
     let unapproved = "0".repeat(SHA_LENGTH);
     assert!(Revision(&unapproved).is_full_lowercase_sha());
     assert!(!Revision(&unapproved).is_approved());
-    let old_pin = format!("{INSTALL_WHITAKER_ACTION}{approved}");
-    let new_pin = format!("{INSTALL_WHITAKER_ACTION}{unapproved}");
+    let old_pin = format!("uses: {INSTALL_WHITAKER_ACTION}{approved}");
+    let new_pin = format!("uses: {INSTALL_WHITAKER_ACTION}{unapproved}");
     assert_eq!(
         CI_WORKFLOW.matches(&old_pin).count(),
         1,
@@ -294,9 +311,9 @@ fn the_install_step_requests_an_explicit_installer_version() {
     let step = Workflow { text: CI_WORKFLOW }.whitaker_step();
 
     assert!(
-        step.0.contains(INSTALLER_VERSION_INPUT),
+        step.text.contains(INSTALLER_VERSION_INPUT),
         "the Whitaker step must pass {INSTALLER_VERSION_INPUT:?}:\n{}",
-        step.0,
+        step.text,
     );
 }
 
@@ -366,3 +383,6 @@ fn ci_never_obtains_the_whitaker_installer_through_cargo() {
         "CI must not build or fetch whitaker-installer through Cargo: {offending:?}",
     );
 }
+
+#[path = "whitaker_install_pin/uses_tests.rs"]
+mod uses_tests;

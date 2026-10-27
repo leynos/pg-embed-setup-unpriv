@@ -247,14 +247,24 @@ cfg_privilege_drop! {
         // `try_update`, is only stable from Rust 1.95, above this crate's
         // declared MSRV. The loop gives the same guarantee — a decrement that
         // loses a race retries against the fresh value.
-        let mut current = SKIP_PRIVILEGE_DROP.load(Ordering::SeqCst);
+        decrement_counter(&SKIP_PRIVILEGE_DROP, || {});
+    }
+
+    /// Decrements a counter, running `after_load` once before the first exchange.
+    ///
+    /// For example, a counter at two becomes one after a successful call.
+    /// The hook lets tests force competing calls to read the same initial value.
+    #[cfg(any(test, doc, feature = "privileged-tests"))]
+    fn decrement_counter(counter: &AtomicUsize, after_load: impl FnOnce()) {
+        let mut current = counter.load(Ordering::SeqCst);
+        after_load();
         loop {
             debug_assert!(
                 current > 0,
                 "PrivilegeDropGuard dropped with zero privilege-drop counter"
             );
             let next = current.saturating_sub(1);
-            match SKIP_PRIVILEGE_DROP.compare_exchange(
+            match counter.compare_exchange(
                 current,
                 next,
                 Ordering::SeqCst,
@@ -363,3 +373,17 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(
+    test,
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
+#[path = "privileges_counter_tests.rs"]
+mod counter_tests;

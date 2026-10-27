@@ -23,8 +23,9 @@
 //! [`PgEnvCfg`]: pg_embedded_setup_unpriv::PgEnvCfg
 #![cfg(all(unix, feature = "diesel-support"))]
 use std::{
+    fmt::Display,
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom},
     path::Path,
 };
 
@@ -158,76 +159,77 @@ fn collect_diagnostics(handle: &ClusterHandle) -> String {
     let install_dir = &handle.settings().installation_dir;
     let data_dir = &handle.settings().data_dir;
     let mut lines = vec![
-        format!("server version: {}", server_version(handle)),
+        format!(
+            "server version: {}",
+            render_diagnostic(server_version(handle))
+        ),
         format!("installation dir: {}", install_dir.display()),
     ];
     for entry in ["share/timezone", "share/timezone/UCT", "share/timezone/UTC"] {
         lines.push(format!(
             "{entry}: {}",
-            describe(install_dir.join(entry).as_path())
+            render_diagnostic(describe(install_dir.join(entry).as_path()))
         ));
     }
     lines.push(format!(
         "start.log tail ({}):\n{}",
         data_dir.join("start.log").display(),
-        tail_of(&data_dir.join("start.log"))
+        render_diagnostic(tail_of(&data_dir.join("start.log")))
     ));
     lines.join("\n")
 }
 
-/// Reports what `SELECT version()` returns, or why it could not be read.
-fn server_version(handle: &ClusterHandle) -> String {
-    let query = || -> Result<String> {
-        let mut connection = handle
-            .connection()
-            .diesel_connection("postgres")
-            .map_err(|err| eyre!(err))?;
-        let rows: Vec<VersionRow> = sql_query("SELECT version()")
-            .load(&mut connection)
-            .map_err(|err| eyre!(err))?;
-        rows.into_iter()
-            .next()
-            .map(|row| row.version)
-            .ok_or_else(|| eyre!("SELECT version() returned no rows"))
-    };
-    query().unwrap_or_else(|err| format!("<unavailable: {err}>"))
+/// Renders an unavailable diagnostic without replacing the primary failure.
+fn render_diagnostic<E: Display>(result: std::result::Result<String, E>) -> String {
+    result.unwrap_or_else(|err| format!("<unavailable: {err}>"))
+}
+
+/// Returns the server version reported by `SELECT version()`.
+fn server_version(handle: &ClusterHandle) -> Result<String> {
+    let mut connection = handle
+        .connection()
+        .diesel_connection("postgres")
+        .map_err(|err| eyre!(err))?;
+    let rows: Vec<VersionRow> = sql_query("SELECT version()")
+        .load(&mut connection)
+        .map_err(|err| eyre!(err))?;
+    rows.into_iter()
+        .next()
+        .map(|row| row.version)
+        .ok_or_else(|| eyre!("SELECT version() returned no rows"))
 }
 
 /// Describes a path's type without following a final symlink.
-fn describe(path: &Path) -> String {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            let target = std::fs::read_link(path).map_or_else(
-                |err| format!("<unreadable: {err}>"),
-                |target| target.display().to_string(),
-            );
-            format!("symlink -> {target}")
-        }
-        Ok(metadata) if metadata.is_dir() => "directory".to_owned(),
-        Ok(metadata) if metadata.is_file() => {
-            format!("regular file ({} bytes)", metadata.len())
-        }
-        Ok(_) => "other file type".to_owned(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => "absent".to_owned(),
-        Err(err) => format!("<stat failed: {err}>"),
+fn describe(path: &Path) -> io::Result<String> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok("absent".to_owned()),
+        Err(err) => return Err(err),
+    };
+    if metadata.file_type().is_symlink() {
+        let target = std::fs::read_link(path)?;
+        Ok(format!("symlink -> {}", target.display()))
+    } else if metadata.is_dir() {
+        Ok("directory".to_owned())
+    } else if metadata.is_file() {
+        Ok(format!("regular file ({} bytes)", metadata.len()))
+    } else {
+        Ok("other file type".to_owned())
     }
 }
 
-/// Returns at most [`LOG_TAIL_BYTES`] from the end of `path`.
+/// Reads at most [`LOG_TAIL_BYTES`] from the end of `path`.
 ///
-/// The log is read as lossy UTF-8 so a partial multi-byte character at the
-/// boundary cannot fail the diagnostic path itself.
-fn tail_of(path: &Path) -> String {
-    let read_tail = || -> std::io::Result<String> {
-        let mut file = File::open(path)?;
-        let length = file.metadata()?.len();
-        let start = length.saturating_sub(LOG_TAIL_BYTES);
-        file.seek(SeekFrom::Start(start))?;
-        let mut bytes = Vec::new();
-        file.take(LOG_TAIL_BYTES).read_to_end(&mut bytes)?;
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
-    };
-    read_tail().unwrap_or_else(|err| format!("<unavailable: {err}>"))
+/// The log is decoded as lossy UTF-8 so a partial multi-byte character at the
+/// boundary does not prevent a useful diagnostic.
+fn tail_of(path: &Path) -> io::Result<String> {
+    let mut file = File::open(path)?;
+    let length = file.metadata()?.len();
+    let start = length.saturating_sub(LOG_TAIL_BYTES);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(LOG_TAIL_BYTES).read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Classifies a bootstrap error as an environment skip or a real failure.
@@ -235,4 +237,34 @@ fn skip_or_fail(err: &BootstrapError) -> Failure {
     let debug = format!("{err:?}");
     cluster_skip_message(&err.to_string(), Some(&debug))
         .map_or_else(|| Failure::Failed(eyre!("{err}")), Failure::Skipped)
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    //! Tests for diagnostic failures and filesystem observations.
+    use super::*;
+
+    #[test]
+    fn missing_log_remains_an_error_until_rendered() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let result = tail_of(&temp.path().join("missing.log"));
+        assert_eq!(
+            result.as_ref().expect_err("missing log").kind(),
+            io::ErrorKind::NotFound
+        );
+        assert!(render_diagnostic(result).starts_with("<unavailable:"));
+    }
+
+    #[test]
+    fn absent_path_is_a_distinct_observation() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        assert_eq!(
+            describe(&temp.path().join("missing")).expect("describe missing path"),
+            "absent"
+        );
+        assert_eq!(
+            describe(temp.path()).expect("describe directory"),
+            "directory"
+        );
+    }
 }

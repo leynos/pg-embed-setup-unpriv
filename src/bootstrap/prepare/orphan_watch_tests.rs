@@ -264,8 +264,9 @@ fn a_released_watcher_no_longer_acts_on_owner_death() -> Result<()> {
 ///
 /// A descriptor leaked into a detached process outlives its owner for as long
 /// as the watcher waits, so a pipe or file the owner holds would be kept open
-/// by it. The check reads `/proc/<pid>/fd` of the process once it has become
-/// `flock`, so it sees what `setsid` and the exec left.
+/// by it. The check waits until `flock` opens the held slot lock, then reads
+/// `/proc/<pid>/fd`. Waiting for the lock rather than the process name ensures
+/// that the dynamic loader has finished opening its temporary descriptors.
 #[test]
 fn the_watcher_inherits_only_dev_null_and_the_lock_file() -> Result<()> {
     let slot = Slot::new()?;
@@ -273,14 +274,10 @@ fn the_watcher_inherits_only_dev_null_and_the_lock_file() -> Result<()> {
     // a plain `pipe(2)` leaves both ends inheritable, so a watcher that did not
     // close them would hold the pipe open.
     let (_read_end, _write_end) = nix::unistd::pipe()?;
-    let mut watcher = spawn_watcher(&slot.lock, &slot.data_dir)?;
-    let pid = watcher.id();
-    let deadline = Instant::now() + WAIT;
-    while std::fs::read_to_string(format!("/proc/{pid}/comm"))?.trim() != "flock" {
-        ensure!(Instant::now() < deadline, "the watcher never became flock");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    let mut watcher = Stand(spawn_watcher(&slot.lock, &slot.data_dir)?);
+    let pid = watcher.0.id();
     let lock = std::fs::canonicalize(&slot.lock)?;
+    wait_for_watcher_lock(pid, &lock)?;
     let mut leaked = Vec::new();
     for entry in std::fs::read_dir(format!("/proc/{pid}/fd"))? {
         let target = std::fs::read_link(entry?.path())?;
@@ -288,13 +285,32 @@ fn the_watcher_inherits_only_dev_null_and_the_lock_file() -> Result<()> {
             leaked.push(target);
         }
     }
-    watcher.kill()?;
-    watcher.wait()?;
+    watcher.0.kill()?;
+    watcher.0.wait()?;
     ensure!(
         leaked.is_empty(),
         "descriptors leaked into the watcher: {leaked:?}"
     );
     Ok(())
+}
+
+/// Waits until the watcher has opened the held lock after its dynamic loader.
+fn wait_for_watcher_lock(pid: u32, lock: &Path) -> Result<()> {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let descriptors = std::fs::read_dir(format!("/proc/{pid}/fd"))?;
+        for entry_result in descriptors {
+            let entry = entry_result?;
+            if std::fs::read_link(entry.path()).is_ok_and(|target| target == lock) {
+                return Ok(());
+            }
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "the watcher never opened the lock"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// A program that cannot be executed is a spawn error, not a watcher that

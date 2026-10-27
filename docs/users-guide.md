@@ -112,6 +112,30 @@ cargo binstall pg-embed-setup-unpriv
    versioned directories are ignored. A direct installation containing `bin/`
    is reused.
 
+   The diagram shows how subdirectories are filtered and ordered: directories
+   without `bin/` are ignored, non-semver names remain as lexical fallbacks,
+   and versioned directories must satisfy the requirement before the highest
+   eligible candidate is selected.
+
+   ```mermaid
+   flowchart TD
+       accTitle: PostgreSQL installation directory selection
+       accDescr: Filter by bin/ and VersionReq; keep lexical fallbacks, then sort and select the highest candidate.
+       A[Scan installation subdirectories] --> B{Directory has bin/}
+       B -- No --> X[Ignore directory]
+       B -- Yes --> C{Semver name?}
+       C -- No --> D[Keep as lexical fallback]
+       C -- Yes --> E{VersionReq accepts version?}
+       E -- No --> X
+       E -- Yes --> F[Keep eligible version]
+       D --> G[Sort candidates]
+       F --> G
+       G --> H[Select highest eligible candidate]
+   ```
+
+   _Figure: Installation subdirectories are filtered by `bin/` and the version
+   requirement, then sorted to select the highest eligible candidate._
+
    The default avoids newer archives whose hard-linked time-zone files are not
    extracted by the current archive dependency. An explicit override can still
    select an affected release. If named zones fail, check the selected version

@@ -1025,3 +1025,22 @@ orphaned. Populating an install tree takes turns under a setup lock, which a
 start releases after a cache hit. An explicit `PG_DATA_DIR` keeps the
 single-directory behaviour. [ADR 005](adr-005-per-cluster-data-directories.md)
 records the decision and the alternatives.
+
+### Implementation update (2026-10-27): PostgreSQL archive compatibility
+
+- **Default version.** Bootstrap uses PostgreSQL `=18.6.0` when no
+  configuration source supplies `version_req`. `PG_VERSION_REQ` and the
+  configuration file's `version_req` remain explicit overrides.
+- **Installed versions.** When the installation root contains versioned
+  subdirectories, bootstrap selects the highest installed version accepted by
+  the effective requirement. A candidate must contain `bin/`; semver names
+  rejected by the requirement are ignored. Names that do not parse as semver
+  remain lexical fallbacks when no eligible versioned candidate exists.
+- **Archive limitation.** PostgreSQL archives from 18.6.1 onward store many
+  `share/timezone` files as tar hard links. The current `postgresql_archive`
+  extractor drops hard links, leaving named time-zone resolution incomplete.
+  Version 18.6.0 predates this archive change.
+- **MSRV decision.** The project remains at Rust 1.92. Upstream
+  `postgresql_embedded` 0.22.0 and its `postgresql_archive` 0.22.0 dependency
+  require Rust 1.94, so that upgrade is deferred. The version pin and
+  regression coverage remain until the MSRV decision changes.
