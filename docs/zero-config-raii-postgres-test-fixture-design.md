@@ -143,10 +143,12 @@ all setup/teardown details:
   `PgEnvCfg::load()` (from the existing OrthoConfig integration) to gather any
   env/file configs, but if none are provided, use
   `postgresql_embedded::Settings::default()` with smart tweaks (see
-  docs/next-steps.md). This means using the latest PostgreSQL version by
-  default, a random free port, and temporary directories for data. All of this
-  happens behind the scenes, so in most cases **test code simply creates a
-  `TestCluster` with no arguments**.
+  docs/next-steps.md). The PostgreSQL version requirement defaults to `=18.6.0`;
+  `PG_VERSION_REQ` or `version_req` in a configuration file can override it.
+  Other defaults include a random free port and temporary data directories. All
+  of this happens behind the scenes, so in most cases **test code simply
+  creates a `TestCluster` with no arguments**. The dated implementation update
+  below records why the version default is pinned.
 
 ## Bootstrapping and configuration handling
 

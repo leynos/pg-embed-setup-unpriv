@@ -308,13 +308,10 @@ fn an_uppercase_sha_is_rejected() {
 
 #[test]
 fn the_install_step_requests_an_explicit_installer_version() {
-    let step = Workflow { text: CI_WORKFLOW }.whitaker_step();
-
-    assert!(
-        step.text.contains(INSTALLER_VERSION_INPUT),
-        "the Whitaker step must pass {INSTALLER_VERSION_INPUT:?}:\n{}",
-        step.text,
-    );
+    Workflow { text: CI_WORKFLOW }
+        .whitaker_step()
+        .validate_installer_input()
+        .expect("the installer version must use the configured value");
 }
 
 #[test]
@@ -386,3 +383,6 @@ fn ci_never_obtains_the_whitaker_installer_through_cargo() {
 
 #[path = "whitaker_install_pin/uses_tests.rs"]
 mod uses_tests;
+
+#[path = "whitaker_install_pin/installer_input.rs"]
+mod installer_input;
