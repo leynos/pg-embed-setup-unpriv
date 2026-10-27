@@ -173,6 +173,33 @@ use an empty `RUSTC_WRAPPER`, which Cargo treats as unset:
 steps. Local builds retain the configured compiler admission wrapper, including
 nested trybuild compilations.
 
+## Test worker staging
+
+The `test_support::worker_binary_for_tests` helper resolves the worker once per
+process, preferring `PG_EMBEDDED_WORKER`, then Cargo's
+`CARGO_BIN_EXE_pg_worker`, then local discovery. The result, including no
+worker found, is cached for that process. On Unix, the selected executable is
+copied into a profile- and source-path-specific directory under the system
+temporary directory so privilege-dropped test processes can run it. If staging
+fails, the helper retains the original path; it does not report the staging
+error. Publishing the optional `target/{profile}/pg_worker_staged.path` cleanup
+pointer is best-effort, and pointer-write errors are ignored.
+
+The staged executable is replaced by copying to a temporary sibling, setting
+mode `0o755`, then atomically renaming it into place. This lets another test
+process continue using the previous inode during replacement. Restaging uses a
+metadata heuristic: it occurs when the source modification time is newer, the
+file sizes differ, or the staged mode is not `0o755`. It does not compare file
+contents, so same-size changes with an unchanged or older source timestamp may
+not be detected. The pointer file is also written to a temporary sibling and
+renamed into place. This staging and discovery contract belongs to test
+support; it does not describe production worker installation or updates.
+
+The source precedence, per-process cache, fallback, metadata checks, and atomic
+executable and pointer publication are covered by
+`src/test_support/worker_env_tests.rs` and
+`src/test_support/worker_env_additional_tests.rs`.
+
 ## Lint and formatting toolchain
 
 The repository pins `rust-toolchain.toml` to `nightly-2026-10-23` because the

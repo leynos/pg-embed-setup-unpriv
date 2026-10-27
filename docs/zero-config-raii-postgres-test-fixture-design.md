@@ -811,11 +811,11 @@ extremely easy and consistent:
   parameter (see docs/next-steps.md) and immediately proceed to execute queries
   against the database, relying on RAII for cleanup.
 
-- **Defaults with escape hatches:** By default, everything is auto-chosen
-  (ports, temp dirs, latest PG version). If needed, developers can still
-  override via env vars or config files (`pg.toml`, etc.) using the OrthoConfig
-  system (see README.md), but this is purely optional. In most cases “it just
-  works” with zero config.
+- **Defaults with escape hatches:** By default, ports and temporary directories
+  are chosen automatically, and PostgreSQL is pinned to `=18.6.0`. Developers
+  can override the version via `PG_VERSION_REQ` or `version_req` in a
+  configuration file, using the OrthoConfig system (see README.md). In most
+  cases “it just works” with zero config.
 
 In conclusion, **pg-embedded-setup-unpriv** will evolve from a low-level
 bootstrap tool into a robust test fixture foundation. By combining automatic
@@ -1042,7 +1042,7 @@ records the decision and the alternatives.
   `share/timezone` files as tar hard links. The current `postgresql_archive`
   extractor drops hard links, leaving named time-zone resolution incomplete.
   Version 18.6.0 predates this archive change.
-- **MSRV decision.** The project remains at Rust 1.92. Upstream
-  `postgresql_embedded` 0.22.0 and its `postgresql_archive` 0.22.0 dependency
-  require Rust 1.94, so that upgrade is deferred. The version pin and
-  regression coverage remain until the MSRV decision changes.
+- **MSRV decision.** The project remains at Rust 1.92 and currently uses
+  `postgresql_embedded` and `postgresql_archive` 0.20.2. Upgrades to 0.20.3 or
+  later require Rust 1.94, so they are deferred. The version pin and regression
+  coverage remain until the MSRV decision changes.
