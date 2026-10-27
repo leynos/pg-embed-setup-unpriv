@@ -361,15 +361,16 @@ contract that CI runs `make msrv`.
 
 ## The default PostgreSQL version
 
-`PgEnvCfg::apply_version` in `src/lib.rs` sets `Settings::version` from
-`PG_VERSION_REQ` when that variable names a requirement, and otherwise from the
-`DEFAULT_VERSION_REQ` constant, currently `=18.6.0`. An unset requirement used
-to mean `VersionReq::STAR`, which let upstream's newest listed release win
-without any change in this repository's own files. That is how the `TimeZone`
-failure reached downstream projects: the release that started shipping a bundled
-`share/timezone` tree also started packing most of it as tar hard links, and
-`postgresql_archive` before 0.22.0 drops hard links while extracting. The
-resulting tree has no `share/timezone/UTC`, so `SET TimeZone = 'UTC'` fails with
+`PgEnvCfg::apply_version` in `src/lib.rs` sets `Settings::version` from the
+configured `version_req`, supplied by `PG_VERSION_REQ` or another configuration
+source. If none supplies a requirement, it uses `DEFAULT_VERSION_REQ`, currently
+`=18.6.0`. An unset requirement used to mean `VersionReq::STAR`, which let
+upstream's newest listed release win without any change in this repository's
+own files. That is how the `TimeZone` failure reached downstream projects: the
+release that started shipping a bundled `share/timezone` tree also started
+packing most of it as tar hard links, and `postgresql_archive` before 0.22.0
+drops hard links while extracting. The resulting tree has no
+`share/timezone/UTC`, so `SET TimeZone = 'UTC'` fails with
 `invalid value for parameter "TimeZone": "UTC"`.
 
 The pin is a hold, not the fix. `postgresql_archive` 0.22.0 extracts hard links
@@ -384,8 +385,8 @@ version-named subdirectories of an installation directory by the settings'
 requirement. Without that filter an exact pin could still be undone by a newer
 directory left in the same tree by an earlier run. Names that do not parse as
 semver are kept and compared lexically, so a hand-made directory still resolves;
-`tests/settings.rs` covers the default and the override, and a unit test in
-`installation.rs` pins the exact-requirement selection.
+`tests/settings/version.rs` covers the default and the override, and a unit
+test in `installation.rs` pins the exact-requirement selection.
 
 `tests/timezone_regression.rs` proves the behaviour end to end. It starts one
 real cluster and asks the server for `UTC`, `Etc/UTC` and `Europe/London`,

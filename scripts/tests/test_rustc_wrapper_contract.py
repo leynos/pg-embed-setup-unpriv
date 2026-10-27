@@ -119,8 +119,8 @@ def test_root_step_stages_worker_for_privilege_drop(
         "make": (
             '#!/bin/sh\n'
             'test -x "$PG_EMBEDDED_WORKER" || exit 1\n'
-            '"$PYTHON_EXECUTABLE" -c \'import os, sys; '
-            'mode = os.stat(os.path.dirname(os.environ["PG_EMBEDDED_WORKER"])).st_mode; '
+            '"$PYTHON_EXECUTABLE" -c \'import os, sys; from pathlib import Path; '
+            'mode = Path(os.environ["PG_EMBEDDED_WORKER"]).parent.stat().st_mode; '
             'sys.exit((mode & 0o777) != 0o755)\' || exit 2\n'
             'printf "%s" "$PG_EMBEDDED_WORKER" > "$WORKER_RECORD"\n'
         ),

@@ -180,19 +180,41 @@ fn log_port_parse_failure(pid_path: &Path, err: &std::num::ParseIntError, port_l
 pub(crate) fn resolve_installed_dir(settings: &Settings) -> Option<std::path::PathBuf> {
     let install_dir = &settings.installation_dir;
 
-    if install_dir.join("bin").is_dir() {
-        return Some(install_dir.clone());
-    }
+    let (selected, outcome) = if install_dir.join("bin").is_dir() {
+        (Some(install_dir.clone()), "direct")
+    } else if settings.trust_installation_dir {
+        (Some(install_dir.clone()), "trusted")
+    } else {
+        select_versioned_installation(install_dir, &settings.version)
+    };
+    log_installation_outcome(outcome);
+    selected
+}
 
-    if settings.trust_installation_dir {
-        return Some(install_dir.clone());
-    }
+/// Records the selection outcome without exposing installation paths.
+fn log_installation_outcome(outcome: &str) {
+    tracing::debug!(
+        target: LOG_TARGET,
+        operation = "resolve_installed_dir",
+        outcome,
+        "resolved PostgreSQL installation directory"
+    );
+}
 
-    let mut candidates = eligible_candidates(install_dir, &settings.version);
-    // `Option<Version>` orders `None` before `Some`, so the lexically greatest
-    // name wins only when no semver name matches the requirement.
+/// Selects the highest eligible version or lexical fallback within a tree.
+fn select_versioned_installation(
+    install_dir: &Path,
+    requirement: &VersionReq,
+) -> (Option<std::path::PathBuf>, &'static str) {
+    let mut candidates = eligible_candidates(install_dir, requirement);
+    // `Option<Version>` orders `None` before `Some`, so the lexically
+    // greatest name wins only when no semver name matches the requirement.
     candidates.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-    candidates.pop().map(|(_, path)| path)
+    match candidates.pop() {
+        Some((Some(_), path)) => (Some(path), "versioned"),
+        Some((None, path)) => (Some(path), "unversioned"),
+        None => (None, "not_found"),
+    }
 }
 
 /// Collects the installation subdirectories the requirement accepts.
@@ -361,3 +383,7 @@ mod tests {
 #[cfg(test)]
 #[path = "installation_property_tests.rs"]
 mod installation_property_tests;
+
+#[cfg(test)]
+#[path = "installation_observability_tests.rs"]
+mod installation_observability_tests;

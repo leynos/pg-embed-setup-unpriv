@@ -509,11 +509,40 @@ impl PgEnvCfg {
     /// An invalid explicit requirement, or an invalid default, returns a
     /// configuration error without changing the settings.
     fn apply_version(&self, settings: &mut Settings) -> ConfigResult<()> {
-        settings.version = match self.version_req.as_deref() {
-            Some(spec) => VersionReq::parse(spec).context("PG_VERSION_REQ invalid semver spec")?,
-            None => default_version_requirement()?,
+        let (version, source) = match self.version_req.as_deref() {
+            Some(spec) => (
+                VersionReq::parse(spec).context("PG_VERSION_REQ invalid semver spec")?,
+                "configured",
+            ),
+            None => (default_version_requirement()?, "default"),
         };
+        Self::log_version_requirement(&version, source);
+        settings.version = version;
         Ok(())
+    }
+
+    /// Logs a capped requirement only when debug diagnostics are enabled.
+    fn log_version_requirement(version: &VersionReq, source: &str) {
+        // Prerelease identifiers may be arbitrarily long, so the emitted
+        // requirement is capped and the event records whether it was cut off.
+        if tracing::enabled!(target: crate::observability::LOG_TARGET, tracing::Level::DEBUG) {
+            let full_requirement = version.to_string();
+            let mut characters = full_requirement.chars();
+            let requirement: String = characters.by_ref().take(128).collect();
+            Self::emit_version_requirement(source, &requirement, characters.next().is_some());
+        }
+    }
+
+    /// Emits the resolved requirement and its configuration source.
+    fn emit_version_requirement(source: &str, requirement: &str, requirement_truncated: bool) {
+        tracing::debug!(
+            target: crate::observability::LOG_TARGET,
+            operation = "PgEnvCfg::apply_version",
+            source,
+            requirement = %requirement,
+            requirement_truncated,
+            "resolved PostgreSQL version requirement"
+        );
     }
 
     fn apply_connection(&self, settings: &mut Settings) {

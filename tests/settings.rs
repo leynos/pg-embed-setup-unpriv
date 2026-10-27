@@ -105,6 +105,10 @@ fn to_settings_default_config() -> color_eyre::Result<()> {
 #[path = "settings/version.rs"]
 mod version;
 
+#[cfg(any(feature = "cluster-unit-tests", feature = "dev-worker"))]
+#[path = "settings/version_observability.rs"]
+mod version_observability;
+
 #[fixture]
 fn default_pg_env() -> PgEnvCfg {
     // Keep this as a fixture factory so rstest can inject the default settings.

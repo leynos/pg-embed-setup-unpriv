@@ -48,54 +48,66 @@ const APPROVED_ACTION_REVISIONS: &str = include_str!("fixtures/approved_whitaker
 /// Return the number of leading spaces on `line`.
 fn indent_of(line: &str) -> usize { line.len() - line.trim_start().len() }
 
-/// Return the lines of the Whitaker install step, excluding its `- name:` line.
-///
-/// The step ends at the next sibling step, identified by a list entry at the
-/// same indentation.
-fn whitaker_step_lines() -> Option<Vec<&'static str>> {
-    let mut lines = CI_WORKFLOW.lines();
-    let header = lines.by_ref().find(|line| line.trim() == STEP_NAME)?;
-    let step_indent = indent_of(header);
-    Some(
-        lines
+/// A workflow document whose Whitaker step and pin can be checked together.
+struct Workflow<'a> {
+    text: &'a str,
+}
+
+impl Workflow<'_> {
+    /// Extract the install step, stopping at the next sibling or outdent.
+    fn whitaker_step(&self) -> WhitakerStep {
+        let mut lines = self.text.lines();
+        let Some(header) = lines.by_ref().find(|line| line.trim() == STEP_NAME) else {
+            panic!("ci.yml has no step named {STEP_NAME:?}");
+        };
+        let step_indent = indent_of(header);
+        let text = lines
             .take_while(|line| {
                 let is_sibling_step =
                     indent_of(line) == step_indent && line.trim_start().starts_with("- ");
                 let is_outdented = !line.trim().is_empty() && indent_of(line) < step_indent;
                 !is_sibling_step && !is_outdented
             })
-            .collect(),
-    )
+            .collect::<Vec<_>>()
+            .join("\n");
+        WhitakerStep(text)
+    }
+
+    /// Validate the extracted action pin against the QG-002 list.
+    fn validate_pin(&self) -> Result<(), String> {
+        let revision = self.whitaker_step().revision();
+        if !Revision(&revision).is_full_lowercase_sha() {
+            return Err(format!(
+                "install-whitaker must use a full lowercase SHA: {revision:?}"
+            ));
+        }
+        if !Revision(&revision).is_approved() {
+            return Err(format!(
+                "install-whitaker revision {revision:?} is not approved by QG-002"
+            ));
+        }
+        Ok(())
+    }
 }
 
-/// Return the whole Whitaker install step as a single string.
-fn whitaker_step() -> String {
-    let Some(lines) = whitaker_step_lines() else {
-        panic!("ci.yml has no step named {STEP_NAME:?}");
-    };
-    lines.join("\n")
-}
+/// The extracted install step, kept separate from unrelated workflow text.
+struct WhitakerStep(String);
 
-/// Return the text following `needle`, or `None` when it is absent.
-///
-/// `str::get` is used rather than an index range because the lint gate denies
-/// `clippy::string_slice`.
-fn text_after<'a>(haystack: &'a str, needle: &str) -> Option<&'a str> {
-    haystack
-        .find(needle)
-        .and_then(|index| haystack.get(index + needle.len()..))
-}
-
-/// Return the revision `install-whitaker` is pinned to, up to the end of the
-/// token.
-///
-/// Taking the whole token matters: a branch name or a trailing comment marker
-/// must not be able to pass as the reviewed SHA.
-fn pinned_action_revision(step: &str) -> String {
-    let Some(rest) = text_after(step, INSTALL_WHITAKER_ACTION) else {
-        panic!("the Whitaker step does not reference the shared action:\n{step}");
-    };
-    rest.chars().take_while(|c| !c.is_whitespace()).collect()
+impl WhitakerStep {
+    /// Return the complete revision token used by the install action.
+    fn revision(&self) -> String {
+        let Some(rest) = self
+            .0
+            .split_once(INSTALL_WHITAKER_ACTION)
+            .map(|(_, rest)| rest)
+        else {
+            panic!(
+                "the Whitaker step does not reference the shared action:\n{}",
+                self.0
+            );
+        };
+        rest.chars().take_while(|c| !c.is_whitespace()).collect()
+    }
 }
 
 /// Collapse shell line continuations and drop comment lines.
@@ -134,50 +146,65 @@ fn installs_whitaker_through_cargo(command: &str) -> bool {
         && command.contains("whitaker-installer")
 }
 
-/// Report whether `revision` is written as a full, lowercase commit SHA.
-///
-/// Uppercase is rejected even though Git accepts it: the copied list and the
-/// upstream rule are both lowercase, so a case-insensitive match would let a
-/// hand-edited entry agree with a list it does not actually equal.
-fn is_full_lowercase_sha(revision: &str) -> bool {
-    revision.len() == SHA_LENGTH
-        && revision
-            .chars()
-            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-}
+/// A candidate action revision, checked for both syntax and approval.
+struct Revision<'a>(&'a str);
 
-/// Report whether the copied list holds `revision`.
-fn is_approved_revision(revision: &str) -> bool {
-    APPROVED_ACTION_REVISIONS
-        .lines()
-        .any(|approved| approved == revision)
+impl Revision<'_> {
+    /// Require the lowercase SHA form used by the upstream approved list.
+    fn is_full_lowercase_sha(&self) -> bool {
+        self.0.len() == SHA_LENGTH
+            && self
+                .0
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    }
+
+    /// Check exact membership in the copied QG-002 list.
+    fn is_approved(&self) -> bool {
+        APPROVED_ACTION_REVISIONS
+            .lines()
+            .any(|approved| approved == self.0)
+    }
 }
 
 #[test]
 fn the_install_step_uses_the_shared_action() {
-    let step = whitaker_step();
+    let step = Workflow { text: CI_WORKFLOW }.whitaker_step();
 
     assert!(
-        step.contains(INSTALL_WHITAKER_ACTION),
-        "the Whitaker step must use the shared install-whitaker action:\n{step}",
+        step.0.contains(INSTALL_WHITAKER_ACTION),
+        "the Whitaker step must use the shared install-whitaker action:\n{}",
+        step.0,
     );
 }
 
 #[test]
 fn the_install_step_pins_the_shared_action_to_an_approved_commit_sha() {
-    let revision = pinned_action_revision(&whitaker_step());
+    Workflow { text: CI_WORKFLOW }
+        .validate_pin()
+        .expect("the workflow pin must be approved");
+}
 
-    assert!(
-        is_full_lowercase_sha(&revision),
-        "install-whitaker must be pinned to a full lowercase commit SHA, found {revision:?}",
+#[test]
+fn an_unapproved_workflow_pin_fails_validation() {
+    let approved = Workflow { text: CI_WORKFLOW }.whitaker_step().revision();
+    let unapproved = "0".repeat(SHA_LENGTH);
+    assert!(Revision(&unapproved).is_full_lowercase_sha());
+    assert!(!Revision(&unapproved).is_approved());
+    let old_pin = format!("{INSTALL_WHITAKER_ACTION}{approved}");
+    let new_pin = format!("{INSTALL_WHITAKER_ACTION}{unapproved}");
+    assert_eq!(
+        CI_WORKFLOW.matches(&old_pin).count(),
+        1,
+        "mutation must target the install step"
     );
+    let mutated = CI_WORKFLOW.replacen(&old_pin, &new_pin, 1);
+    let error = Workflow { text: &mutated }
+        .validate_pin()
+        .expect_err("an unapproved pin must fail");
     assert!(
-        is_approved_revision(&revision),
-        concat!(
-            "install-whitaker is pinned to {:?}, which QG-002 does not list. ",
-            "Refresh APPROVED_ACTION_REVISIONS from concordat when a bump is approved.",
-        ),
-        revision,
+        error.contains("not approved by QG-002"),
+        "unexpected error: {error}"
     );
 }
 
@@ -201,7 +228,7 @@ fn the_approved_list_holds_the_expected_number_of_revisions() {
 fn the_approved_list_holds_only_full_lowercase_shas() {
     for (index, revision) in APPROVED_ACTION_REVISIONS.lines().enumerate() {
         assert!(
-            is_full_lowercase_sha(revision),
+            Revision(revision).is_full_lowercase_sha(),
             "entry {index} of the approved list is not a full lowercase SHA: {revision:?}",
         );
     }
@@ -231,8 +258,8 @@ fn the_approved_list_holds_no_duplicates() {
 #[case::well_formed_but_unlisted("0".repeat(SHA_LENGTH), "an off-list SHA")]
 #[case::truncated_sha("6dea567", "a truncated SHA whose prefix is listed")]
 fn an_unapproved_revision_is_rejected(#[case] candidate: String, #[case] what: &str) {
-    let is_well_formed = is_full_lowercase_sha(&candidate);
-    let is_approved = is_approved_revision(&candidate);
+    let is_well_formed = Revision(&candidate).is_full_lowercase_sha();
+    let is_approved = Revision(&candidate).is_approved();
 
     assert!(
         !is_approved,
@@ -257,24 +284,28 @@ fn an_uppercase_sha_is_rejected() {
     let uppercase = "6DEA5677A84FEC60CA51B07202570E3AF12FFDB4";
 
     assert!(
-        !is_full_lowercase_sha(uppercase),
+        !Revision(uppercase).is_full_lowercase_sha(),
         "an uppercase SHA must fail the format check: {uppercase:?}",
     );
 }
 
 #[test]
 fn the_install_step_requests_an_explicit_installer_version() {
-    let step = whitaker_step();
+    let step = Workflow { text: CI_WORKFLOW }.whitaker_step();
 
     assert!(
-        step.contains(INSTALLER_VERSION_INPUT),
-        "the Whitaker step must pass {INSTALLER_VERSION_INPUT:?}:\n{step}",
+        step.0.contains(INSTALLER_VERSION_INPUT),
+        "the Whitaker step must pass {INSTALLER_VERSION_INPUT:?}:\n{}",
+        step.0,
     );
 }
 
 #[test]
 fn the_workflow_defines_a_concrete_installer_version() {
-    let Some(rest) = text_after(CI_WORKFLOW, "WHITAKER_INSTALLER_VERSION: '") else {
+    let Some(rest) = CI_WORKFLOW
+        .split_once("WHITAKER_INSTALLER_VERSION: '")
+        .map(|(_, rest)| rest)
+    else {
         panic!("ci.yml does not define WHITAKER_INSTALLER_VERSION");
     };
     let Some(version) = rest.split('\'').next() else {

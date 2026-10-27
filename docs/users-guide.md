@@ -104,11 +104,13 @@ cargo binstall pg-embed-setup-unpriv
    per-user default tree: without `PG_EMBED_ROOT` the `postgresql_embedded`
    defaults apply, and with it the same two leaves are derived.
 
-   If `PG_VERSION_REQ` is unset, the helper selects PostgreSQL `=18.6.0`. Set
-   it to a semver requirement to choose a different release. When an
-   installation directory contains version-named subdirectories, the highest
-   version matching that requirement is selected; non-matching versioned
-   directories are ignored. A direct installation containing `bin/` is reused.
+   If no configuration source supplies a version requirement, the helper
+   selects PostgreSQL `=18.6.0`. Set `PG_VERSION_REQ` or `version_req` in a
+   configuration file to a semver requirement to choose a different release.
+   When an installation directory contains version-named subdirectories, the
+   highest version matching that requirement is selected; non-matching
+   versioned directories are ignored. A direct installation containing `bin/`
+   is reused.
 
    The default avoids newer archives whose hard-linked time-zone files are not
    extracted by the current archive dependency. An explicit override can still
@@ -1065,9 +1067,12 @@ the warm step.
 
 ## Known issues and mitigations
 
-- **TimeZone errors**: The embedded cluster loads timezone data from the host
-  `tzdata` package. Install it inside the execution environment if you see
-  `invalid value for parameter "TimeZone": "UTC"`.
+- **TimeZone errors**: If the selected PostgreSQL release uses host timezone
+  data, install the host `tzdata` package when it is missing. For an affected
+  archive whose extracted `share/timezone` is incomplete, host `tzdata` cannot
+  restore the missing files. Check the selected version and remove the
+  incomplete cache entry before retrying; see
+  [binary cache troubleshooting](cache.md#cache-entries-and-the-default-version-pin).
 - **Download rate limits**: `postgresql_embedded` fetches binaries from the
   Theseus GitHub releases. Supply a `GITHUB_TOKEN` environment variable if you
   hit rate limits in CI.
