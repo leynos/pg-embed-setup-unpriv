@@ -208,7 +208,7 @@ impl BootstrapSandbox {
                 skip_message("SKIP-BOOTSTRAP", &message, Some(&debug)).map_or_else(
                     || {
                         tracing::warn!("SKIP-BOOTSTRAP-FAILURE: {message}");
-                        Err(err.into())
+                        Err(eyre!("{debug}"))
                     },
                     |reason| {
                         self.mark_skipped(reason);

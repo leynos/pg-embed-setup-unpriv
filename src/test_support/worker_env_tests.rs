@@ -192,6 +192,7 @@ fn should_restage_returns_false_when_staged_is_newer() {
 
     fs::write(&source, b"content").expect("write source");
     fs::write(&staged, b"content").expect("write staged");
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).expect("set staged mode");
 
     // Set source mtime to 1 hour ago to ensure staged is newer.
     // This avoids flaky tests due to filesystem mtime resolution.
@@ -329,3 +330,37 @@ fn worker_source_respects_precedence(#[case] scenario: WorkerSourceCase) {
     let selected = select_worker_source(configured, cargo_binary, || discovered);
     assert_eq!(selected, expected);
 }
+
+/// A running executable remains usable while a newer copy is staged.
+#[cfg(target_os = "linux")]
+#[test]
+fn restaging_does_not_overwrite_an_executable_in_use() -> color_eyre::Result<()> {
+    use std::{os::unix::fs::MetadataExt, process::Command, time::Duration};
+
+    let source_dir = debug_target_dir()?;
+    let source = source_dir.path().join("target/debug/pg_worker");
+    fs::copy("/bin/sleep", &source)?;
+    let staged = PathBuf::from(try_stage_worker_binary(&source.clone().into_os_string())?);
+    let _cleanup = StagedDirCleanup::new(&staged);
+    let mut running = Command::new(&staged).arg("1").spawn()?;
+    let original_metadata = fs::metadata(&staged)?;
+    let staged_time = original_metadata.modified()?;
+    let future = staged_time + Duration::from_secs(1);
+    filetime::set_file_mtime(&source, filetime::FileTime::from_system_time(future))?;
+
+    let result = try_stage_worker_binary(&source.into_os_string());
+    let status = running.wait()?;
+    ensure!(status.success(), "the original worker should complete");
+    ensure!(
+        result.is_ok(),
+        "restaging a running worker failed: {result:?}"
+    );
+    ensure!(
+        fs::metadata(&staged)?.ino() != original_metadata.ino(),
+        "restaging must publish a new inode rather than overwrite a running worker"
+    );
+    Ok(())
+}
+
+#[path = "worker_env_additional_tests.rs"]
+mod additional_tests;
