@@ -235,19 +235,45 @@ cfg_privilege_drop! {
         SKIP_PRIVILEGE_DROP.load(Ordering::SeqCst) > 0
     }
 
+    /// Releases one guard's privilege-drop exemption from the shared counter.
+    ///
+    /// Concurrent updates retry against the latest observed value, so dropping
+    /// one of two active guards leaves the other exemption in force. A guard
+    /// must only be dropped when the counter is positive.
     #[cfg(any(test, doc, feature = "privileged-tests"))]
     fn decrement_skip_privilege_drop() {
-        let _update_result = SKIP_PRIVILEGE_DROP.fetch_update(
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-            |value| {
-                debug_assert!(
-                    value > 0,
-                    "PrivilegeDropGuard dropped with zero privilege-drop counter"
-                );
-                Some(value.saturating_sub(1))
-            },
-        );
+        // A hand-rolled compare-exchange rather than `fetch_update`: the latter
+        // is deprecated as of nightly-2026-10-23 and its replacement,
+        // `try_update`, is only stable from Rust 1.95, above this crate's
+        // declared MSRV. The loop gives the same guarantee — a decrement that
+        // loses a race retries against the fresh value.
+        decrement_counter(&SKIP_PRIVILEGE_DROP, || {});
+    }
+
+    /// Decrements a counter, running `after_load` once before the first exchange.
+    ///
+    /// For example, a counter at two becomes one after a successful call.
+    /// The hook lets tests force competing calls to read the same initial value.
+    #[cfg(any(test, doc, feature = "privileged-tests"))]
+    fn decrement_counter(counter: &AtomicUsize, after_load: impl FnOnce()) {
+        let mut current = counter.load(Ordering::SeqCst);
+        after_load();
+        loop {
+            debug_assert!(
+                current > 0,
+                "PrivilegeDropGuard dropped with zero privilege-drop counter"
+            );
+            let next = current.saturating_sub(1);
+            match counter.compare_exchange(
+                current,
+                next,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current = observed,
+            }
+        }
     }
 }
 
@@ -347,3 +373,17 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(
+    test,
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+))]
+#[path = "privileges_counter_tests.rs"]
+mod counter_tests;

@@ -104,6 +104,44 @@ cargo binstall pg-embed-setup-unpriv
    per-user default tree: without `PG_EMBED_ROOT` the `postgresql_embedded`
    defaults apply, and with it the same two leaves are derived.
 
+   If no configuration source supplies a version requirement, the helper
+   selects PostgreSQL `=18.6.0`. Set `PG_VERSION_REQ` or `version_req` in a
+   configuration file to a semver requirement to choose a different release.
+   When an installation directory contains version-named subdirectories, the
+   highest version matching that requirement is selected; non-matching
+   versioned directories are ignored. A direct installation containing `bin/`
+   is reused.
+
+   The diagram shows how subdirectories are filtered and ordered: directories
+   without `bin/` are ignored, non-semver names remain as lexical fallbacks,
+   and versioned directories must satisfy the requirement before the highest
+   eligible candidate is selected.
+
+   ```mermaid
+   flowchart TD
+       accTitle: PostgreSQL installation directory selection
+       accDescr: Filter by bin/ and VersionReq; keep lexical fallbacks, then sort and select the highest candidate.
+       A[Scan installation subdirectories] --> B{Directory has bin/}
+       B -- No --> X[Ignore directory]
+       B -- Yes --> C{Semver name?}
+       C -- No --> D[Keep as lexical fallback]
+       C -- Yes --> E{VersionReq accepts version?}
+       E -- No --> X
+       E -- Yes --> F[Keep eligible version]
+       D --> G[Sort candidates]
+       F --> G
+       G --> H[Select highest eligible candidate]
+   ```
+
+   _Figure: Installation subdirectories are filtered by `bin/` and the version
+   requirement, then sorted to select the highest eligible candidate._
+
+   The default avoids newer archives whose hard-linked time-zone files are not
+   extracted by the current archive dependency. An explicit override can still
+   select an affected release. If named zones fail, check the selected version
+   and remove an incomplete cache entry before retrying; see
+   [binary cache troubleshooting](cache.md#cache-entries-and-the-default-version-pin).
+
    Test clusters cap `max_connections` at 20 (a `postgres` container defaults
    to 100); set `PG_MAX_CONNECTIONS` when parallel test runners need more. The
    override applies to plain `bootstrap()` runs as well as test bootstraps, and
@@ -921,6 +959,17 @@ export PG_EXTENSIONS_MANIFEST="https://github.com/leynos/df12-pg-extensions/rele
 export PG_EXTENSIONS_MANIFEST_SHA256="<digest from manifest.json.sha256>"
 ```
 
+Extension names can also be parsed through the standard Rust parsing API:
+
+```rust
+use pg_embedded_setup_unpriv::extensions::ExtensionName;
+
+let name: ExtensionName = "vector".parse()?;
+assert_eq!(name.as_str(), "vector");
+assert!("Vector".parse::<ExtensionName>().is_err());
+# Ok::<(), pg_embedded_setup_unpriv::BootstrapError>(())
+```
+
 `CREATE EXTENSION vector` then works in any database of the cluster, and
 `ClusterHandle::installed_extensions()` reports what was installed. The hook
 matches the running PostgreSQL major and the compile target and fails closed
@@ -1042,9 +1091,12 @@ the warm step.
 
 ## Known issues and mitigations
 
-- **TimeZone errors**: The embedded cluster loads timezone data from the host
-  `tzdata` package. Install it inside the execution environment if you see
-  `invalid value for parameter "TimeZone": "UTC"`.
+- **TimeZone errors**: If the selected PostgreSQL release uses host timezone
+  data, install the host `tzdata` package when it is missing. For an affected
+  archive whose extracted `share/timezone` is incomplete, host `tzdata` cannot
+  restore the missing files. Check the selected version and remove the
+  incomplete cache entry before retrying; see
+  [binary cache troubleshooting](cache.md#cache-entries-and-the-default-version-pin).
 - **Download rate limits**: `postgresql_embedded` fetches binaries from the
   Theseus GitHub releases. Supply a `GITHUB_TOKEN` environment variable if you
   hit rate limits in CI.

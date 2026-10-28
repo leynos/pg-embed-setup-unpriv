@@ -1,5 +1,4 @@
 //! Helpers for the Diesel-based `PostgreSQL` embedded e2e test.
-
 use std::{path::PathBuf, time::Duration};
 
 use camino::Utf8PathBuf;

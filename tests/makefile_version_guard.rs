@@ -14,8 +14,10 @@ fn repository_root() -> &'static Path { Path::new(env!("CARGO_MANIFEST_DIR")) }
 fn makefile_parses_without_recovery() {
     let parse = Makefile::parse(MAKEFILE);
 
+    // `is_ok` rather than the deprecated `ok`, so the check keeps reading as a
+    // question about the parse and not about a value it would hand back.
     assert!(
-        parse.ok(),
+        parse.is_ok(),
         "Makefile required parser recovery: {:?}",
         parse.positioned_errors(),
     );

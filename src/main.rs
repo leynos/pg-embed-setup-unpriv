@@ -13,7 +13,7 @@ const CLI_ABOUT: &str = "Initializes postgresql_embedded clusters with platform-
 
 const CONFIGURATION_HELP: &str = concat!(
     "Configuration is read from environment variables:\n",
-    "  PG_VERSION_REQ          PostgreSQL semver requirement.\n",
+    "  PG_VERSION_REQ          PostgreSQL semver requirement (default =18.6.0).\n",
     "  PG_PORT                 PostgreSQL port.\n",
     "  PG_SUPERUSER            Administrative PostgreSQL user.\n",
     "  PG_PASSWORD             Administrative PostgreSQL password.\n",

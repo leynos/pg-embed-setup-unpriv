@@ -154,28 +154,55 @@ it until the inventory is updated in the same commit.
 
 ## The sccache wrapper in CI
 
-From the `setup-rust` pin `ff1dd759`, the action starts an sccache server and
-exports `RUSTC_WRAPPER` (and `SCCACHE_CONF`) for the whole job. Two steps of
-`build-test` must not use it, so each sets an empty `RUSTC_WRAPPER`, which
-cargo treats as unset:
+The pinned `setup-rust` action (`e693d81d`) starts an sccache server and exports
+`RUSTC_WRAPPER` (and `SCCACHE_CONF`) for the whole job. The following CI steps
+use an empty `RUSTC_WRAPPER`, which Cargo treats as unset:
 
 - **Root lane** (`Install cargo-nextest and test (root)`): `run_as_root` passes
   `RUSTC_WRAPPER=` through `sudo -E env`. Root's rustc would otherwise talk to
   a server owned by the runner user, which cannot write into the target
   directory root created, so the first crate fails with "Permission denied".
-- **Unprivileged test step** (`Test with all features (unprivileged)`): the `ui`
-  tests build trybuild fixtures in nested cargo invocations that inherit the
-  wrapper, and under it exceeded their 360 s slow-timeout where they took about
-  125 s without. The cause of the slowdown is not traced.
+- **Unprivileged test step** (`Test with all features (unprivileged)`): nested
+  trybuild compilations have exceeded the slow timeout when using sccache on
+  hosted runners. The non-Windows UI cases now share one trybuild invocation,
+  avoiding competing Cargo processes for the same generated build directory.
+- **Windows test and packaging jobs** use plain rustc because sccache's expanded
+  command exceeds the Windows process command-line limit.
 
-`scripts/tests/test_rustc_wrapper_contract.py` holds both steps to this: each
-way of letting the wrapper back in is driven through the judge in
-`scripts/tests/rustc_wrapper.py` first, and then `ci.yml` is judged. Every
-other step keeps sccache.
+`scripts/tests/test_rustc_wrapper_contract.py` checks the root and unprivileged
+steps. Local builds retain the configured compiler admission wrapper, including
+nested trybuild compilations.
+
+## Test worker staging
+
+The `test_support::worker_binary_for_tests` helper resolves the worker once per
+process, preferring `PG_EMBEDDED_WORKER`, then Cargo's
+`CARGO_BIN_EXE_pg_worker`, then local discovery. The result, including no
+worker found, is cached for that process. On Unix, the selected executable is
+copied into a profile- and source-path-specific directory under the system
+temporary directory so privilege-dropped test processes can run it. If staging
+fails, the helper retains the original path; it does not report the staging
+error. Publishing the optional `target/{profile}/pg_worker_staged.path` cleanup
+pointer is best-effort, and pointer-write errors are ignored.
+
+The staged executable is replaced by copying to a temporary sibling, setting
+mode `0o755`, then atomically renaming it into place. This lets another test
+process continue using the previous inode during replacement. Restaging uses a
+metadata heuristic: it occurs when the source modification time is newer, the
+file sizes differ, or the staged mode is not `0o755`. It does not compare file
+contents, so same-size changes with an unchanged or older source timestamp may
+not be detected. The pointer file is also written to a temporary sibling and
+renamed into place. This staging and discovery contract belongs to test
+support; it does not describe production worker installation or updates.
+
+The source precedence, per-process cache, fallback, metadata checks, and atomic
+executable and pointer publication are covered by
+`src/test_support/worker_env_tests.rs` and
+`src/test_support/worker_env_additional_tests.rs`.
 
 ## Lint and formatting toolchain
 
-The repository pins `rust-toolchain.toml` to `nightly-2026-04-25` because the
+The repository pins `rust-toolchain.toml` to `nightly-2026-10-23` because the
 imported `rustfmt.toml` template uses unstable rustfmt options. Use the
 Makefile targets rather than invoking Cargo directly so local checks and CI
 exercise the same nightly formatter and Clippy policy:
@@ -220,19 +247,35 @@ The Whitaker suite itself is installed by the shared `install-whitaker` action,
 pinned to a commit SHA, which resolves a checksum-verified release archive for
 the installer version named by `WHITAKER_INSTALLER_VERSION`, currently `0.2.9`,
 the floor the action accepts (it refuses anything lower). The action is pinned
-to shared-actions `6cec89bac47a21cf756d68d638a9a510998e57f8` (#546), which also
-carries the 60 s sccache startup fix. The concordat QG-002 rule accepts it
-because the action directory is content-identical to the reviewed `6dea5677`
-(#522); any later shared-actions commit that leaves it unchanged is also
-accepted. The previous inline step fell back to
+to shared-actions `e693d81d176d2305e2b736a0be0f9038085dec7f`, the revision the
+Dependabot shared-actions group bumps every workflow to.
+
+That revision satisfies the concordat QG-002 rule, and so does every other
+commit that leaves the `install-whitaker` directory's Git tree id equal to the
+reviewed root `6dea5677` (#522). The rule's `compliant_install_whitaker_refs`
+list is derived, not handwritten: it holds the roots plus every later
+first-parent commit that leaves the directory unchanged.
+`tests/whitaker_install_pin.rs` keeps a verbatim copy in
+`APPROVED_ACTION_REVISIONS` and checks the workflow's pin for membership rather
+than equality. That matters because a single hard-coded SHA assertion passes
+for exactly one upstream commit and turns red on the next approved bump, which
+is precisely how this suite failed on the shared-actions update. Three guards
+keep the copy honest: it must hold exactly 77 entries, every entry must be a
+full lowercase SHA, and no entry may repeat. A parameterized negative case
+proves an off-list SHA and a truncated SHA are both refused. Refresh the copy
+from `platform-standards/canon/lint-rules/whitaker-provisioning/rule.yaml` in
+`leynos/concordat` when upstream approves a revision; the current copy matches
+concordat `f46a4848ad5e62cfd170360074cddc3a792f3ea7` (PR #324).
+
+The previous inline step fell back to
 `cargo install --locked whitaker-installer`, building the tool from source in
-CI and verifying nothing. `tests/whitaker_install_pin.rs` keeps that
-arrangement in place. Note that the installer still resolves the lint suite
-from the tip of the Whitaker repository, so the lints themselves are not yet
-pinned; a suite change can turn this gate red without any commit here. That is
-what happened between 2026-08-19 and 2026-09-04, when the same installer
-version and toolchain built suite commit `b4d3101` instead of `2bc0c3f` and the
-gate failed on every branch. Two issues track closing the gap:
+CI and verifying nothing; the suite still refuses every Cargo route to the
+installer. Note that the installer still resolves the lint suite from the tip
+of the Whitaker repository, so the lints themselves are not yet pinned; a suite
+change can turn this gate red without any commit here. That is what happened
+between 2026-08-19 and 2026-09-04, when the same installer version and
+toolchain built suite commit `b4d3101` instead of `2bc0c3f` and the gate failed
+on every branch. Two issues track closing the gap:
 [whitaker#402][whitaker-suite-pin] asks the installer for a ref or
 suite-version input, and [shared-actions#454][shared-actions-suite-pin] asks
 `install-whitaker` to expose and pass it through.
@@ -333,11 +376,55 @@ with `cargo +<version> check --locked --all-targets --all-features`. It clears
 `RUSTFLAGS`, because the repository's Cargo configuration sets nightly-only
 flags. The committed `Cargo.lock` is restored afterwards.
 
+Dependabot ignores `postgresql_embedded` and `postgresql_archive` versions
+`>= 0.20.3`, because those releases require Rust 1.94. Keep the exclusions and
+the PostgreSQL version pin until the project deliberately raises its MSRV.
+
 Raising a dependency requirement past what the declared version can build now
 fails that job. Fix it by relaxing the requirement to the lowest release that
 does what is needed, or raise `rust-version` deliberately and say so in the
 change log. `scripts/tests/test_msrv_check.py` holds the script's steps and the
 contract that CI runs `make msrv`.
+
+## The default PostgreSQL version
+
+`PgEnvCfg::apply_version` in `src/lib.rs` sets `Settings::version` from the
+configured `version_req`, supplied by `PG_VERSION_REQ` or another configuration
+source. If none supplies a requirement, it uses `DEFAULT_VERSION_REQ`, currently
+`=18.6.0`. An unset requirement used to mean `VersionReq::STAR`, which let
+upstream's newest listed release win without any change in this repository's
+own files. That is how the `TimeZone` failure reached downstream projects: the
+release that started shipping a bundled `share/timezone` tree also started
+packing most of it as tar hard links, and `postgresql_archive` before 0.22.0
+drops hard links while extracting. The resulting tree has no
+`share/timezone/UTC`, so `SET TimeZone = 'UTC'` fails with
+`invalid value for parameter "TimeZone": "UTC"`.
+
+The pin is a hold, not the fix. `postgresql_archive` 0.22.0 extracts hard links
+and removes the need for it, but that release needs Rust 1.94, which arrives
+with this crate's next MSRV bump. Until then the constant keeps an unpinned
+bootstrap on a release whose archives predate the switch and resolve zone names
+from the host zoneinfo database, as before. Delete the constant when the
+dependency moves.
+
+`resolve_installed_dir` in `src/cluster/installation.rs` also filters the
+version-named subdirectories of an installation directory by the settings'
+requirement. Without that filter an exact pin could still be undone by a newer
+directory left in the same tree by an earlier run. Names that do not parse as
+semver are kept and compared lexically, so a hand-made directory still resolves;
+`tests/settings/version.rs` covers the default and the override, and a unit
+test in `installation.rs` pins the exact-requirement selection.
+
+`tests/timezone_regression.rs` proves the behaviour end to end. It starts one
+real cluster and asks the server for `UTC`, `Etc/UTC` and `Europe/London`,
+`SET TimeZone` then `SHOW TimeZone` for each. On failure it attaches a bounded
+list of facts gathered before the cluster stops: the server version, the
+installation directory, the type of `share/timezone`, `share/timezone/UCT` and
+`share/timezone/UTC`, and the tail of `start.log`. Settings, passwords,
+connection URLs and command debug logs are deliberately excluded, because the
+text lands in test output. The suite shares the `serial` group and is in the
+`no_std_fs_operations` exclusion list for the same reasons the other
+integration-test crates are: it uses the ambient `tests/support` modules.
 
 ## Path resolution
 
@@ -459,8 +546,8 @@ they must be ordered lives in the `generate-coverage` README in
 
 | Tier                     | What it bounds                     | Where it is set                               | Current value                                   |
 | ------------------------ | ---------------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 450 s for two overrides |
-| nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 600 s (10 m)                                    |
+| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 900 s for two overrides |
+| nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 1,100 s                                         |
 | Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
 | Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 66 m                                            |
 
@@ -482,8 +569,9 @@ different moments and cover different work.
 The watchdog starts when `cargo` starts, so it covers the build as well as the
 test run, while nextest's global timeout starts only once tests begin. A
 watchdog merely larger than the global timeout still pre-empts it whenever the
-build takes longer than the difference. Here the difference is 1,200 s, which
-is ample for this crate's build.
+build takes longer than the difference. Here the difference is 700 s, which
+covers the 600 s cold-build allowance and 65 s termination allowance enforced
+by the contract.
 
 Hitting the global timeout does not stop the run instantly either. nextest
 signals the process group and waits `slow-timeout.grace-period`, five seconds
@@ -632,8 +720,8 @@ matrix that also runs as root, and only that leg measures coverage.
 losing or changing a condition has to change this section with it, and a lane
 appearing without an entry fails the contract too.
 
-It pins two values as well as ordering them: the 10 m `global-timeout` and the
-66 m job ceiling. Two numbers are involved and they are worth keeping apart.
+It pins two values as well as ordering them: the 1,100 s `global-timeout` and
+the 66 m job ceiling. Two numbers are involved and they are worth keeping apart.
 
 The **base requirement is 50 minutes**: the 1,800 s watchdog plus the 1,200 s
 of measured work outside its window. That is what the job has to be allowed to
@@ -1073,5 +1161,7 @@ it only where the full suite passes under it, and that is not shown here on the
 pinned `nightly-2026-04-25` (measured 2026-10-02): 13 tests (the
 `scenario_fixture_*` scenarios in `tests/test_cluster_fixture/steps.rs` among
 them) fail under it while the suite passes under LLVM, 799 of 799 in the full
-run. Revisit on the next toolchain bump: measure the whole suite under the
-backend, with CI's environment, and adopt it if every test passes.
+run. That measurement predates the bump to `nightly-2026-10-23` and has not
+been repeated on it, so it is evidence of a past result, not of current
+behaviour. Re-measure the whole suite under the backend, with CI's environment,
+on the next attempt to adopt it, and adopt it only if every test passes.

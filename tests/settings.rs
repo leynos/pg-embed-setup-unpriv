@@ -102,6 +102,13 @@ fn to_settings_default_config() -> color_eyre::Result<()> {
     Ok(())
 }
 
+#[path = "settings/version.rs"]
+mod version;
+
+#[cfg(any(feature = "cluster-unit-tests", feature = "dev-worker"))]
+#[path = "settings/version_observability.rs"]
+mod version_observability;
+
 #[fixture]
 fn default_pg_env() -> PgEnvCfg {
     // Keep this as a fixture factory so rstest can inject the default settings.
@@ -162,7 +169,9 @@ fn max_connections_below_floor_is_rejected(#[case] limit: u32) -> color_eyre::Re
         ..PgEnvCfg::default()
     };
     let Err(err) = cfg.to_settings() else {
-        color_eyre::eyre::bail!("max_connections={limit} must be rejected");
+        return Err(color_eyre::eyre::eyre!(
+            "max_connections={limit} must be rejected"
+        ));
     };
     let message = err.to_string();
     ensure!(

@@ -5,6 +5,30 @@ organized by the change a consumer has to make. No change in it is breaking: a
 consumer that does nothing keeps compiling and behaves as before, except where
 noted below.
 
+## The default PostgreSQL version is pinned
+
+When no configuration source supplies a version requirement, bootstrap now
+selects PostgreSQL `=18.6.0` instead of the newest matching upstream release.
+Set `PG_VERSION_REQ` or the configuration file's `version_req` to retain an
+explicit version choice. The pin avoids archives whose hard-linked time-zone
+files the current extractor omits; explicit overrides can still select those
+archives. See the [user guide](users-guide.md) and
+[cache troubleshooting](cache.md#cache-entries-and-the-default-version-pin) for
+selection and recovery details.
+
+When reusing an installation root with version-named subdirectories, bootstrap
+selects the highest installed version accepted by the effective requirement.
+Candidates need a `bin/` directory; semver-named versions rejected by the
+requirement are ignored. Names that are not semver remain lexical fallbacks
+when no eligible semver candidate exists. A root that itself contains `bin/`
+continues to be used directly.
+
+`ExtensionName` now implements `FromStr`, so callers can use
+`"vector".parse::<ExtensionName>()`. Names must be non-empty and contain only
+lower-case ASCII letters, digits or underscores. Invalid input, including
+uppercase letters and whitespace, returns
+`BootstrapErrorKind::ExtensionConfigInvalid`.
+
 ## A killed test process now stops its server (Linux)
 
 From this release, a cluster started on Linux through the library gets a

@@ -6,25 +6,19 @@
 slow-timeout = { period = "180s", terminate-after = 1, grace-period = "5s" }
 
 # Put a hard ceiling on the whole run.
-global-timeout = "10m"
+global-timeout = "1100s"
 
 [[profile.default.overrides]]
 filter = "binary(=settings)"
 slow-timeout = { period = "30s", terminate-after = 1, grace-period = "5s" }
 
-# The `ui` binary is a trybuild test: it compiles the whole crate afresh in a
-# scratch directory, which can exceed the default 180s on cold, slow runners
-# (notably macOS). Allow it more headroom while staying under `global-timeout`.
-#
-# Measured on the macOS test leg (it keeps the sccache wrapper, which makes the
-# nested builds slow): the three slow `ui` tests took 299.9, 313.3 and 316.0 s
-# on the pre-adoption run of #314, and 291.7, 293.4 and 298.7 s on job
-# 111315793594, so a 360 s budget left them about 12 to 17 percent of headroom
-# and a slower runner timed them out at 360.0 s. 450 s keeps a real hang failing
-# and, started up to about 90 s into the run, still ends inside `global-timeout`.
+# The UI test compiles six trybuild fixtures in a shared generated project.
+# Nested builds queue behind other users of the shared Cargo cache and compiler
+# pool; allow 15 minutes while retaining a finite timeout for a stalled test.
+# The 1,100-second global timeout leaves time for the other tests to start.
 [[profile.default.overrides]]
 filter = "binary(=ui)"
-slow-timeout = { period = "450s", terminate-after = 1, grace-period = "5s" }
+slow-timeout = { period = "900s", terminate-after = 1, grace-period = "5s" }
 
 [test-groups]
 serial = { max-threads = 1 }
@@ -39,5 +33,6 @@ filter = """
   | binary(=test_cluster_behaviour)
   | binary(=test_cluster_connection)
   | binary(=test_cluster_drop)
+  | binary(=timezone_regression)
 """
 test-group = "serial"

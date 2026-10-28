@@ -206,7 +206,7 @@ fn a_cranelift_repository_declares_everything_the_backend_needs() -> Result<(), 
 /// Invariant: both declarations are needed, in their own tables, and a comment declares nothing.
 #[test]
 fn the_configuration_reader_wants_the_feature_and_the_selection() {
-    assert!(config_problems(CONFIG_OK).is_empty());
+    assert_eq!(config_problems(CONFIG_OK), Vec::<String>::new());
     assert_eq!(config_problems(CONFIG_NO_FEATURE).len(), 1);
     assert_eq!(config_problems(CONFIG_FEATURE_OFF).len(), 1);
     assert_eq!(config_problems(CONFIG_OTHER_BACKEND).len(), 1);
@@ -220,7 +220,7 @@ fn the_configuration_reader_wants_the_feature_and_the_selection() {
 /// Invariant: only a listed `rustc-codegen-cranelift-preview` counts.
 #[test]
 fn the_toolchain_reader_wants_the_component() {
-    assert!(toolchain_problems(TOOLCHAIN_OK).is_empty());
+    assert_eq!(toolchain_problems(TOOLCHAIN_OK), Vec::<String>::new());
     for lacking in [TOOLCHAIN_LACKING, TOOLCHAIN_COMMENTED, TOOLCHAIN_LOOKALIKE] {
         assert_eq!(toolchain_problems(lacking).len(), 1, "{lacking}");
     }

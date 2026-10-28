@@ -135,7 +135,10 @@ pub fn commands_with_text(stdout: &str) -> Result<Vec<Command>, String> {
                 Assignment::Unassigned if compiles(&command) => Assignment::Bare(command.clone()),
                 other => other,
             };
-            Ok(Command { text: command, assignment })
+            Ok(Command {
+                text: command,
+                assignment,
+            })
         })
         .collect()
 }

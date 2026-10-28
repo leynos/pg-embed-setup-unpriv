@@ -50,6 +50,7 @@ excluded_crates = [
     "test_cluster_connection",
     "test_cluster_drop",
     "test_cluster_extensions",
+    "timezone_regression",
     "ui",
     "worker_process",
 ]

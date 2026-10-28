@@ -143,10 +143,12 @@ all setup/teardown details:
   `PgEnvCfg::load()` (from the existing OrthoConfig integration) to gather any
   env/file configs, but if none are provided, use
   `postgresql_embedded::Settings::default()` with smart tweaks (see
-  docs/next-steps.md). This means using the latest PostgreSQL version by
-  default, a random free port, and temporary directories for data. All of this
-  happens behind the scenes, so in most cases **test code simply creates a
-  `TestCluster` with no arguments**.
+  docs/next-steps.md). The PostgreSQL version requirement defaults to `=18.6.0`;
+  `PG_VERSION_REQ` or `version_req` in a configuration file can override it.
+  Other defaults include a random free port and temporary data directories. All
+  of this happens behind the scenes, so in most cases **test code simply
+  creates a `TestCluster` with no arguments**. The dated implementation update
+  below records why the version default is pinned.
 
 ## Bootstrapping and configuration handling
 
@@ -809,11 +811,11 @@ extremely easy and consistent:
   parameter (see docs/next-steps.md) and immediately proceed to execute queries
   against the database, relying on RAII for cleanup.
 
-- **Defaults with escape hatches:** By default, everything is auto-chosen
-  (ports, temp dirs, latest PG version). If needed, developers can still
-  override via env vars or config files (`pg.toml`, etc.) using the OrthoConfig
-  system (see README.md), but this is purely optional. In most cases “it just
-  works” with zero config.
+- **Defaults with escape hatches:** By default, ports and temporary directories
+  are chosen automatically, and PostgreSQL is pinned to `=18.6.0`. Developers
+  can override the version via `PG_VERSION_REQ` or `version_req` in a
+  configuration file, using the OrthoConfig system (see README.md). In most
+  cases “it just works” with zero config.
 
 In conclusion, **pg-embedded-setup-unpriv** will evolve from a low-level
 bootstrap tool into a robust test fixture foundation. By combining automatic
@@ -1025,3 +1027,22 @@ orphaned. Populating an install tree takes turns under a setup lock, which a
 start releases after a cache hit. An explicit `PG_DATA_DIR` keeps the
 single-directory behaviour. [ADR 005](adr-005-per-cluster-data-directories.md)
 records the decision and the alternatives.
+
+### Implementation update (2026-10-27): PostgreSQL archive compatibility
+
+- **Default version.** Bootstrap uses PostgreSQL `=18.6.0` when no
+  configuration source supplies `version_req`. `PG_VERSION_REQ` and the
+  configuration file's `version_req` remain explicit overrides.
+- **Installed versions.** When the installation root contains versioned
+  subdirectories, bootstrap selects the highest installed version accepted by
+  the effective requirement. A candidate must contain `bin/`; semver names
+  rejected by the requirement are ignored. Names that do not parse as semver
+  remain lexical fallbacks when no eligible versioned candidate exists.
+- **Archive limitation.** PostgreSQL archives from 18.6.1 onward store many
+  `share/timezone` files as tar hard links. The current `postgresql_archive`
+  extractor drops hard links, leaving named time-zone resolution incomplete.
+  Version 18.6.0 predates this archive change.
+- **MSRV decision.** The project remains at Rust 1.92 and currently uses
+  `postgresql_embedded` and `postgresql_archive` 0.20.2. Upgrades to 0.20.3 or
+  later require Rust 1.94, so they are deferred. The version pin and regression
+  coverage remain until the MSRV decision changes.

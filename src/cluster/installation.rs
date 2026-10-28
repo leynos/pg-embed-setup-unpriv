@@ -6,7 +6,7 @@
 use std::{path::Path, time::Duration};
 
 use color_eyre::eyre::eyre;
-use postgresql_embedded::{Settings, Version};
+use postgresql_embedded::{Settings, Version, VersionReq};
 
 use crate::{
     ExecutionPrivileges,
@@ -174,53 +174,93 @@ fn log_port_parse_failure(pid_path: &Path, err: &std::num::ParseIntError, port_l
 /// Resolves the installed directory from settings.
 ///
 /// Searches for a directory containing a `bin/` subdirectory within the
-/// installation directory.
+/// installation directory. A version-named child is only eligible when the
+/// settings' version requirement accepts it, so an exact pin such as `=18.6.0`
+/// cannot silently resolve to a newer release left in the same tree.
 pub(crate) fn resolve_installed_dir(settings: &Settings) -> Option<std::path::PathBuf> {
     let install_dir = &settings.installation_dir;
 
-    if install_dir.join("bin").is_dir() {
-        return Some(install_dir.clone());
-    }
+    let (selected, outcome) = if install_dir.join("bin").is_dir() {
+        (Some(install_dir.clone()), "direct")
+    } else if settings.trust_installation_dir {
+        (Some(install_dir.clone()), "trusted")
+    } else {
+        select_versioned_installation(install_dir, &settings.version)
+    };
+    log_installation_outcome(outcome);
+    selected
+}
 
-    if settings.trust_installation_dir {
-        return Some(install_dir.clone());
-    }
+/// Records the selection outcome without exposing installation paths.
+fn log_installation_outcome(outcome: &str) {
+    tracing::debug!(
+        target: LOG_TARGET,
+        operation = "resolve_installed_dir",
+        outcome,
+        "resolved PostgreSQL installation directory"
+    );
+}
 
-    let mut candidates = std::fs::read_dir(install_dir)
-        .ok()?
+/// Selects the highest eligible version or lexical fallback within a tree.
+fn select_versioned_installation(
+    install_dir: &Path,
+    requirement: &VersionReq,
+) -> (Option<std::path::PathBuf>, &'static str) {
+    let mut candidates = eligible_candidates(install_dir, requirement);
+    // `Option<Version>` orders `None` before `Some`, so the lexically
+    // greatest name wins only when no semver name matches the requirement.
+    candidates.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    match candidates.pop() {
+        Some((Some(_), path)) => (Some(path), "versioned"),
+        Some((None, path)) => (Some(path), "unversioned"),
+        None => (None, "not_found"),
+    }
+}
+
+/// Collects the installation subdirectories the requirement accepts.
+///
+/// Each entry pairs the parsed version with the path, or `None` when the
+/// directory name is not semver at all. Those two cases are kept apart on
+/// purpose: a semver name the requirement rejects is dropped, because falling
+/// back to it lexically would undo the pin, while a name that never parses is
+/// kept so a hand-made directory still resolves rather than being ignored.
+fn eligible_candidates(
+    install_dir: &Path,
+    requirement: &VersionReq,
+) -> Vec<(Option<Version>, std::path::PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(install_dir) else {
+        return Vec::new();
+    };
+    entries
         .filter_map(|dir_entry| {
             let entry = dir_entry.ok()?;
             if !entry.file_type().ok()?.is_dir() {
                 return None;
             }
             let path = entry.path();
-            path.join("bin").is_dir().then_some(path)
+            if !path.join("bin").is_dir() {
+                return None;
+            }
+            let file_name = entry.file_name();
+            let Some(directory_name) = file_name.to_str() else {
+                // A non-UTF-8 name cannot be semver; treat it lexically.
+                return Some((None, path));
+            };
+            match Version::parse(directory_name) {
+                Ok(version) if requirement.matches(&version) => Some((Some(version), path)),
+                Ok(_) => None,
+                Err(_) => Some((None, path)),
+            }
         })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|a, b| {
-        let version_a = a
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|s| Version::parse(s).ok());
-        let version_b = b
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|s| Version::parse(s).ok());
-
-        match (version_a, version_b) {
-            (Some(va), Some(vb)) => va.cmp(&vb),
-            (Some(_), None) => std::cmp::Ordering::Greater,
-            (None, Some(_)) => std::cmp::Ordering::Less,
-            (None, None) => a.cmp(b),
-        }
-    });
-    candidates.pop()
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     //! Tests for cluster installation handling.
     use std::fs;
+
+    use rstest::rstest;
 
     use super::*;
     use crate::test_support::dummy_settings;
@@ -303,20 +343,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolve_installed_dir_picks_highest_versioned_subdir() {
+    #[rstest]
+    #[case::highest_matching_version(["16.0.0", "17.0.0"], None, "17.0.0")]
+    #[case::exact_requirement(["18.6.0", "18.6.1"], Some("=18.6.0"), "18.6.0")]
+    fn resolve_installed_dir_selects_an_eligible_version(
+        #[case] versions: [&str; 2],
+        #[case] requirement: Option<&str>,
+        #[case] expected: &str,
+    ) {
         let temp = tempfile::tempdir().expect("tempdir");
-        fs::create_dir_all(temp.path().join("16.0.0/bin")).expect("create 16 bin");
-        fs::create_dir_all(temp.path().join("17.0.0/bin")).expect("create 17 bin");
-        let settings = Settings {
+        for version in versions {
+            fs::create_dir_all(temp.path().join(version).join("bin")).expect("create version bin");
+        }
+        let mut settings = Settings {
             installation_dir: temp.path().to_path_buf(),
             ..Settings::default()
         };
-        let resolved = resolve_installed_dir(&settings).expect("a versioned dir is resolved");
+        if let Some(version_requirement) = requirement {
+            settings.version = VersionReq::parse(version_requirement).expect("valid requirement");
+        }
+        let resolved = resolve_installed_dir(&settings).expect("an eligible dir is resolved");
         assert_eq!(
             resolved.file_name().and_then(|n| n.to_str()),
-            Some("17.0.0"),
-            "the highest version should win",
+            Some(expected)
         );
     }
 
@@ -330,3 +379,11 @@ mod tests {
         assert_eq!(resolve_installed_dir(&settings), None);
     }
 }
+
+#[cfg(test)]
+#[path = "installation_property_tests.rs"]
+mod installation_property_tests;
+
+#[cfg(test)]
+#[path = "installation_observability_tests.rs"]
+mod installation_observability_tests;

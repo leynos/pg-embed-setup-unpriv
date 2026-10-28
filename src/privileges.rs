@@ -266,7 +266,10 @@ pub fn default_root_for(uid: Uid) -> Utf8PathBuf {
 /// # Errors
 /// Always returns an error instructing callers to use the worker-based privileged path.
 #[cfg(feature = "privileged-tests")]
-#[deprecated(note = "with_temp_euid() is unsupported; use the worker-based privileged path")]
+#[deprecated(
+    since = "0.0.0",
+    note = "with_temp_euid() is unsupported; use the worker-based privileged path"
+)]
 pub fn with_temp_euid<F, R>(target: Uid, _body: F) -> crate::Result<R>
 where
     F: FnOnce() -> crate::Result<R>,

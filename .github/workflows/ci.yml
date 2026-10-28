@@ -45,14 +45,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@b9a3bff63b1e19b3a48d433668184e24e1abd3ba
+        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
         with:
           install-mold: 'true'
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@0606ca899ce2995a0c4bc78e660e80832e6e8855
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@e693d81d176d2305e2b736a0be0f9038085dec7f
         with:
           version: "0.6.1"
 
@@ -87,7 +87,7 @@ jobs:
       # source in CI and verified nothing.
       - name: Install Whitaker Dylint suite
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/install-whitaker@6cec89bac47a21cf756d68d638a9a510998e57f8
+        uses: leynos/shared-actions/.github/actions/install-whitaker@e693d81d176d2305e2b736a0be0f9038085dec7f
         with:
           installer-version: ${{ env.WHITAKER_INSTALLER_VERSION }}
       - name: Lint
@@ -138,7 +138,7 @@ jobs:
           # measurement, so it takes neither the parallel frontend nor the mold linker.
           # Assigning RUSTFLAGS displaces every `rustflags` table in .cargo/config.toml.
           RUSTFLAGS: -D warnings
-        uses: leynos/shared-actions/.github/actions/generate-coverage@d4d248bbbecdcf7b4f5bc79ffd4d6caee370bd79
+        uses: leynos/shared-actions/.github/actions/generate-coverage@e693d81d176d2305e2b736a0be0f9038085dec7f
         with:
           output-path: lcov.info
           format: lcov
@@ -158,8 +158,13 @@ jobs:
       - name: Install cargo-nextest and test (root)
         if: ${{ matrix.privilege == 'root' }}
         run: |
-          # Worker binary path - staging logic will copy it to /tmp for nobody access
-          export PG_EMBEDDED_WORKER="$PWD/target/debug/pg_worker"
+          # A privilege-dropped worker cannot traverse every runner workspace.
+          # Give every test, including those reading the variable directly, an
+          # accessible executable rather than relying on fixture-specific staging.
+          worker_dir="$(mktemp -d /tmp/pg-worker-ci.XXXXXX)"
+          chmod 755 "$worker_dir"
+          trap 'rm -rf "$worker_dir"' EXIT
+          export PG_EMBEDDED_WORKER="$worker_dir/pg_worker"
 
           # Root must not use the sccache wrapper setup-rust exports: the
           # server it talks to belongs to the runner user, so it cannot write
@@ -178,6 +183,8 @@ jobs:
               PATH="$CARGO_HOME/bin:$PATH" \
               "$@"
           }
+          run_as_root cargo build --bin pg_worker
+          install -m 755 "$PWD/target/debug/pg_worker" "$PG_EMBEDDED_WORKER"
           run_as_root make test
   msrv:
     name: Build at the declared rust-version
@@ -196,7 +203,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@b9a3bff63b1e19b3a48d433668184e24e1abd3ba
+        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
         with:
           install-mold: 'true'
       - name: Setup uv
@@ -236,9 +243,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@b9a3bff63b1e19b3a48d433668184e24e1abd3ba
+        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
         with:
           install-mold: 'true'
+      # sccache expands every dependency search path into its rustc command.
+      # With the new Cargo build layout this exceeds Windows' command limit.
+      - name: Use rustc directly on Windows
+        if: ${{ runner.os == 'Windows' }}
+        shell: bash
+        run: echo 'RUSTC_WRAPPER=' >> "$GITHUB_ENV"
       - name: Restore PostgreSQL binary cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
@@ -314,9 +327,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@b9a3bff63b1e19b3a48d433668184e24e1abd3ba
+        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
         with:
           install-mold: 'true'
+      # See the Windows test job: sccache exceeds the command limit with the
+      # current Cargo build layout.
+      - name: Use rustc directly on Windows
+        if: ${{ runner.os == 'Windows' }}
+        shell: bash
+        run: echo 'RUSTC_WRAPPER=' >> "$GITHUB_ENV"
       - name: Setup uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
         with:

@@ -18,13 +18,8 @@ const TARGET: &str = compile_target();
 /// Exercises the public extension surface; returns a message on the first
 /// expectation that fails so the Windows smoke path can report it.
 pub fn verify_surface() -> Result<(), String> {
-    if TARGET.is_empty() || !TARGET.contains('-') {
-        return Err(format!("compile target {TARGET:?} is not a triple"));
-    }
-    if ALLOWED_PREFIXES != ["lib/", "share/extension/"] {
-        return Err("allowed prefixes changed".to_owned());
-    }
-    let name = ExtensionName::new("vector").map_err(|err| err.to_string())?;
+    verify_target_and_prefixes()?;
+    let name = parse_extension_name()?;
     let request = ExtensionRequest {
         names: vec![name.clone()],
         manifest: ManifestSource::Path {
@@ -49,6 +44,28 @@ pub fn verify_surface() -> Result<(), String> {
         return Err("https must be permitted".to_owned());
     }
     Ok(())
+}
+
+/// Checks the compile target and permitted installation prefixes.
+fn verify_target_and_prefixes() -> Result<(), String> {
+    if TARGET.is_empty() || !TARGET.contains('-') {
+        return Err(format!("compile target {TARGET:?} is not a triple"));
+    }
+    if ALLOWED_PREFIXES != ["lib/", "share/extension/"] {
+        return Err("allowed prefixes changed".to_owned());
+    }
+    Ok(())
+}
+
+/// Exercises the public parser on valid and invalid names.
+fn parse_extension_name() -> Result<ExtensionName, String> {
+    let name = "vector"
+        .parse::<ExtensionName>()
+        .map_err(|err| err.to_string())?;
+    if name.as_str() != "vector" || "Vector".parse::<ExtensionName>().is_ok() {
+        return Err("extension name parsing changed".to_owned());
+    }
+    Ok(name)
 }
 
 #[cfg(not(windows))]

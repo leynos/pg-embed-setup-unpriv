@@ -29,15 +29,37 @@ use sha2::{Digest, Sha256};
 #[must_use]
 pub fn worker_binary_for_tests() -> Option<OsString> { worker_binary() }
 
+/// Resolves and caches the worker path once per process, including absence.
+///
+/// The configured worker takes precedence over Cargo's binary path and local
+/// discovery. On Unix, the selected binary is staged for privilege-dropped
+/// execution when possible; if staging fails, its original path is retained.
+/// For example, with no configured, Cargo, or discovered worker, this returns
+/// `None` for subsequent calls as well.
 pub(super) fn worker_binary() -> Option<OsString> {
     static WORKER_PATH: OnceLock<Option<OsString>> = OnceLock::new();
     WORKER_PATH
         .get_or_init(|| {
-            let original =
-                std::env::var_os("CARGO_BIN_EXE_pg_worker").or_else(locate_worker_binary)?;
+            let original = select_worker_source(
+                std::env::var_os("PG_EMBEDDED_WORKER"),
+                std::env::var_os("CARGO_BIN_EXE_pg_worker"),
+                locate_worker_binary,
+            )?;
             Some(stage_worker_binary(original))
         })
         .clone()
+}
+
+/// Selects the configured path, then Cargo's path, then a discovered path.
+///
+/// Discovery is lazy: for example, supplying a configured path returns it
+/// without calling `locate`. Returns `None` when no source supplies a path.
+fn select_worker_source(
+    configured: Option<OsString>,
+    cargo_binary: Option<OsString>,
+    locate: impl FnOnce() -> Option<OsString>,
+) -> Option<OsString> {
+    configured.or(cargo_binary).or_else(locate)
 }
 
 fn stage_worker_binary(original: OsString) -> OsString {
@@ -71,12 +93,9 @@ fn try_stage_worker_binary(original: &OsString) -> io::Result<OsString> {
 
     let staged = staged_dir.join(filename);
 
-    // Only copy if source is newer than staged (or staged doesn't exist).
+    // Replace stale, incomplete, or incorrectly permissioned copies.
     if should_restage(&source, &staged)? {
-        fs::copy(&source, &staged)?;
-        let mut perms = fs::metadata(&staged)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&staged, perms)?;
+        replace_staged_worker(&source, &staged_dir, &staged)?;
     }
 
     // Write pointer file to target directory for discoverability and cleanup.
@@ -86,6 +105,22 @@ fn try_stage_worker_binary(original: &OsString) -> io::Result<OsString> {
     }
 
     Ok(staged.into_os_string())
+}
+
+/// Replaces a staged worker without writing to an executable in use.
+///
+/// A unique temporary file is fully copied and closed before it is renamed
+/// over the destination. Concurrent test processes can continue executing the
+/// old inode while another process publishes its replacement.
+#[cfg(unix)]
+fn replace_staged_worker(source: &Path, staged_dir: &Path, staged: &Path) -> io::Result<()> {
+    let temporary = tempfile::NamedTempFile::new_in(staged_dir)?.into_temp_path();
+    fs::copy(source, &temporary)?;
+    let mut perms = fs::metadata(&temporary)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&temporary, perms)?;
+    temporary.persist(staged).map_err(|err| err.error)?;
+    Ok(())
 }
 
 /// Creates the staging directory securely, protecting against symlink attacks.
@@ -255,12 +290,15 @@ fn write_pointer_file(
     target_dir: &std::path::Path,
     staged_path: &std::path::Path,
 ) -> io::Result<()> {
-    let pointer_path = target_dir.join("pg_worker_staged.path");
-    let temp_path = target_dir.join("pg_worker_staged.path.tmp");
+    use std::io::Write;
 
-    // Write atomically: write to temp file, then rename
-    fs::write(&temp_path, staged_path.as_os_str().as_encoded_bytes())?;
-    fs::rename(&temp_path, &pointer_path)?;
+    let pointer_path = target_dir.join("pg_worker_staged.path");
+    let mut temporary = tempfile::NamedTempFile::new_in(target_dir)?;
+    temporary.write_all(staged_path.as_os_str().as_encoded_bytes())?;
+    temporary
+        .into_temp_path()
+        .persist(pointer_path)
+        .map_err(|err| err.error)?;
     Ok(())
 }
 
@@ -277,7 +315,11 @@ fn should_restage(source: &std::path::Path, staged: &std::path::Path) -> io::Res
     let source_mtime = source_meta.modified()?;
     let staged_mtime = staged_meta.modified()?;
 
-    Ok(source_mtime > staged_mtime)
+    // A previous process may have stopped during the old in-place copy, or
+    // before setting permissions. Its newer mtime does not make it usable.
+    Ok(source_mtime > staged_mtime
+        || source_meta.len() != staged_meta.len()
+        || staged_meta.permissions().mode() & 0o777 != 0o755)
 }
 
 fn locate_worker_binary() -> Option<OsString> {

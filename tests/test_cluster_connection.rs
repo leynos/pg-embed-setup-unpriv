@@ -1,6 +1,5 @@
 //! Behavioural coverage for the connection helpers exposed by `TestCluster`.
 #![cfg(unix)]
-
 use std::{
     cell::RefCell,
     ffi::{OsStr, OsString},
