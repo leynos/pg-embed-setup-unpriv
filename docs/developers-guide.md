@@ -262,7 +262,7 @@ first-parent commit that leaves the directory unchanged.
 than equality. That matters because a single hard-coded SHA assertion passes
 for exactly one upstream commit and turns red on the next approved bump, which
 is precisely how this suite failed on the shared-actions update. Three guards
-keep the copy honest: it must hold exactly 77 entries, every entry must be a
+keep the copy honest: it must hold exactly 83 entries, every entry must be a
 full lowercase SHA, and no entry may repeat. A parameterized negative case
 proves an off-list SHA and a truncated SHA are both refused. Refresh the copy
 from `platform-standards/canon/lint-rules/whitaker-provisioning/rule.yaml` in
