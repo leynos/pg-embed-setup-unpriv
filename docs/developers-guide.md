@@ -246,10 +246,11 @@ docstring-coverage policy.
 The Whitaker suite itself is installed by the shared `install-whitaker` action,
 pinned to a commit SHA, which resolves a checksum-verified release archive for
 the installer version named by `WHITAKER_INSTALLER_VERSION`, currently
-`0.2.11`, which builds the Dylint driver from a verified Clippy snapshot (earlier
-versions clone Clippy's deleted `master` branch and fail on a cold build). The
-action is pinned to shared-actions `5a99aed78ce68dcebd3052b75c31e6f173162b1e`,
-the revision the Dependabot shared-actions group bumps every workflow to.
+`0.2.11`, which builds the Dylint driver from a verified Clippy snapshot
+(earlier versions clone Clippy's deleted `master` branch and fail on a cold
+build). The action is pinned to shared-actions
+`5a99aed78ce68dcebd3052b75c31e6f173162b1e`, the revision the Dependabot
+shared-actions group bumps every workflow to.
 
 That revision satisfies the concordat QG-002 rule, and so does every other
 commit that leaves the `install-whitaker` directory's Git tree id equal to the
