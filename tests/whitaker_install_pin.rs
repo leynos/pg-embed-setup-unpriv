@@ -30,7 +30,7 @@ const MINIMUM_INSTALLER_VERSION: [u32; 3] = [0, 2, 9];
 /// An exact count is the guard against a truncated or partly applied list: the
 /// membership check below would otherwise pass while silently refusing every
 /// legitimate bump, or accept one the upstream rule does not.
-const APPROVED_REVISION_COUNT: usize = 77;
+const APPROVED_REVISION_COUNT: usize = 83;
 
 /// The shared-actions revisions the concordat QG-002 rule accepts.
 ///

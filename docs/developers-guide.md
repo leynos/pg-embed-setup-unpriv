@@ -245,10 +245,12 @@ docstring-coverage policy.
 
 The Whitaker suite itself is installed by the shared `install-whitaker` action,
 pinned to a commit SHA, which resolves a checksum-verified release archive for
-the installer version named by `WHITAKER_INSTALLER_VERSION`, currently `0.2.9`,
-the floor the action accepts (it refuses anything lower). The action is pinned
-to shared-actions `e693d81d176d2305e2b736a0be0f9038085dec7f`, the revision the
-Dependabot shared-actions group bumps every workflow to.
+the installer version named by `WHITAKER_INSTALLER_VERSION`, currently
+`0.2.11`, which builds the Dylint driver from a verified Clippy snapshot
+(earlier versions clone Clippy's deleted `master` branch and fail on a cold
+build). The action is pinned to shared-actions
+`5a99aed78ce68dcebd3052b75c31e6f173162b1e`, the revision the Dependabot
+shared-actions group bumps every workflow to.
 
 That revision satisfies the concordat QG-002 rule, and so does every other
 commit that leaves the `install-whitaker` directory's Git tree id equal to the
@@ -260,7 +262,7 @@ first-parent commit that leaves the directory unchanged.
 than equality. That matters because a single hard-coded SHA assertion passes
 for exactly one upstream commit and turns red on the next approved bump, which
 is precisely how this suite failed on the shared-actions update. Three guards
-keep the copy honest: it must hold exactly 77 entries, every entry must be a
+keep the copy honest: it must hold exactly 83 entries, every entry must be a
 full lowercase SHA, and no entry may repeat. A parameterized negative case
 proves an off-list SHA and a truncated SHA are both refused. Refresh the copy
 from `platform-standards/canon/lint-rules/whitaker-provisioning/rule.yaml` in
