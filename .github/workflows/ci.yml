@@ -16,7 +16,13 @@ jobs:
     # Ubicloud coverage-upload writes the cache scope this reads. standard-4,
     # not standard-2: the unprivileged leg ran out of disk on standard-2
     # (`No space left on device`, run 36565376334).
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-4' }}
+    # Dependabot pull requests run on the hosted pool too (free on a public
+    # repository). The author is tested, not the actor, which changes when
+    # someone else pushes to the branch.
+    runs-on: >-
+      ${{ (github.event.pull_request.head.repo.fork
+      || github.event.pull_request.user.login == 'dependabot[bot]')
+      && 'ubuntu-latest' || 'ubicloud-standard-4' }}
     # Above the 1,800 s cargo watchdog on the coverage step plus the work
     # either side of it, which reached 830 s on run 33982759833. The job
     # had no ceiling before this and so inherited GitHub's six-hour
@@ -190,7 +196,10 @@ jobs:
     name: Build at the declared rust-version
     # The same placement as `build-test`: a fork cannot obtain an Ubicloud
     # runner and falls back to the hosted pool.
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-4' }}
+    runs-on: >-
+      ${{ (github.event.pull_request.head.repo.fork
+      || github.event.pull_request.user.login == 'dependabot[bot]')
+      && 'ubuntu-latest' || 'ubicloud-standard-4' }}
     # A cold build of every target on a stable toolchain, with no coverage
     # instrumentation, takes about five minutes.
     timeout-minutes: 30
@@ -311,7 +320,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || 'ubicloud-standard-2' }}
+          - runner: >-
+              ${{ (github.event.pull_request.head.repo.fork
+              || github.event.pull_request.user.login == 'dependabot[bot]')
+              && 'ubuntu-24.04' || 'ubicloud-standard-2' }}
             target: x86_64-unknown-linux-gnu
           - runner: macos-latest
             target: aarch64-apple-darwin
