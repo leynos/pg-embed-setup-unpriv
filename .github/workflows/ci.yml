@@ -66,7 +66,7 @@ jobs:
           globs: '**/*.md'
       - name: Setup uv
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
         with:
           enable-cache: false
       - name: Enforce en-GB-oxendict spelling
@@ -207,7 +207,7 @@ jobs:
         with:
           install-mold: 'true'
       - name: Setup uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
         with:
           enable-cache: false
       # `scripts/msrv_check.py` reads `rust-version` from Cargo.toml,
@@ -337,7 +337,7 @@ jobs:
         shell: bash
         run: echo 'RUSTC_WRAPPER=' >> "$GITHUB_ENV"
       - name: Setup uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
         with:
           enable-cache: false
       - name: Build cargo-binstall archive

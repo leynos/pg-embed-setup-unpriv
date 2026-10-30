@@ -107,7 +107,7 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
       - name: Setup uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
         with:
           enable-cache: false
       - name: Build release archive
