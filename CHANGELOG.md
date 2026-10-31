@@ -5,6 +5,17 @@ All notable changes to this crate are recorded here. The format follows
 
 ## Unreleased
 
+### Test timing
+
+- Cluster tests get a 300 s per-test allowance, and every test that takes the
+  cross-process scenario lock joins the one-slot `serial` group, so nextest
+  queues it before the `slow-timeout` clock starts (#247). The tier is 2.25
+  times the 132.893 s measured for `test_cluster_fixture`'s
+  `fixture_exposes_connection_metadata` run alone; before it, one full
+  `make test` timed out sixty cluster tests at 180.00 s. A residual `flock`
+  wait of one second or more is now reported on stderr, so a timeout separates
+  lock queueing from cluster work.
+
 ### Lint toolchain
 
 - The pinned lint toolchain moves from `nightly-2026-04-25` to

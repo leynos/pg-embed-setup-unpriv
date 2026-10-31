@@ -14,7 +14,9 @@ the pull-request lane already ran for twenty-two minutes.
 The contract also holds the inner ordering, which this repository does
 satisfy: a 1,100 s whole-run budget above a 900 s largest per-test
 allowance, and a 1,800 s watchdog above that budget once nextest's
-termination procedure and a cold build are counted.
+termination procedure and a cold build are counted. The tiers
+themselves, and the binaries each names, are pinned in
+``test_nextest_tier_contract.py``.
 
 The readings these assertions rest on live in ``timeout_budgets.py`` and
 ``coverage_lanes.py``, and are exercised in
@@ -25,14 +27,11 @@ See "Test timeouts: four tiers, outermost last" in
 `leynos/shared-actions`' `generate-coverage` README.
 """
 
-import tomllib
 import typing as typ
-from fractions import Fraction
 
 import pytest
 from coverage_lanes import CoverageJob, coverage_jobs_in, load_workflow_documents
 from nextest_budgets import (
-    bounds_a_single_test,
     global_timeout,
     largest_test_allowance,
     termination_allowance,
@@ -42,20 +41,12 @@ from timeout_budgets import (
     COLD_BUILD_ALLOWANCE_SECONDS,
     COVERAGE_ACTION,
     DECLARED_WATCHDOG_SECONDS,
-    NEXTEST_CONFIG,
     OUTSIDE_WATCHDOG_ALLOWANCE_SECONDS,
-    REQUIRED_GLOBAL_TIMEOUT_SECONDS,
     REQUIRED_JOB_CEILING_SECONDS,
     WATCHDOG_VARIABLE,
     required_ceiling,
-    seconds,
 )
 
-
-#: The budget the `binary(=ui)` override gives its tests, written once here
-#: and derived from nothing, so the guide and the configuration stay one
-#: statement. The slowest macOS trybuild tests measured 316 s.
-UI_BUDGET_SECONDS: typ.Final[Fraction] = Fraction(900)
 
 #: The condition each coverage lane legitimately carries, keyed by
 #: workflow and job, as the step's ``if`` and its job's.
@@ -77,18 +68,6 @@ REQUIRED_CONDITIONS: typ.Final[dict[tuple[str, str], tuple[object, object]]] = {
     ),
     ("coverage-main.yml", "coverage-upload"): (None, None),
 }
-
-
-@pytest.fixture(scope="module")
-def nextest_config() -> str:
-    """Return the nextest configuration file's text.
-
-    Returns
-    -------
-    str
-        The file's contents.
-    """
-    return NEXTEST_CONFIG.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -235,30 +214,6 @@ def test_the_job_ceiling_contains_every_watchdog_and_the_work_around_them(
         )
 
 
-def test_the_whole_run_budget_is_the_one_the_guide_states(
-    nextest_config: str,
-) -> None:
-    """Tier two is present here, and is required to stay present.
-
-    Skipping when no ``global-timeout`` is found would let this tier be
-    deleted and leave the four-tier contract passing with three, which
-    is the state the branch exists to correct. The value is pinned as
-    well, because the ordering below holds for a wide range of budgets
-    and would not notice this one drifting away from the guide.
-    """
-    whole_run = global_timeout(nextest_config)
-    assert whole_run is not None, (
-        "`.config/nextest.toml` must set a global-timeout; without it "
-        "nothing bounds the whole run and the watchdog reports the cargo "
-        "invocation rather than the suite"
-    )
-    assert whole_run == REQUIRED_GLOBAL_TIMEOUT_SECONDS, (
-        f"the global-timeout is {whole_run:.0f}s, not the "
-        f"{REQUIRED_GLOBAL_TIMEOUT_SECONDS:.0f}s the developers' guide "
-        f"states; change the guide with it or change it back"
-    )
-
-
 def test_the_whole_run_budget_sits_inside_each_watchdog(
     coverage_jobs: tuple[CoverageJob, ...], nextest_config: str
 ) -> None:
@@ -332,98 +287,3 @@ def test_each_coverage_lane_carries_the_condition_it_is_meant_to(
     )
 
 
-def test_the_default_profile_bounds_a_test_no_override_matches(
-    nextest_config: str,
-) -> None:
-    """An override bounds its filter's tests; the profile bounds the rest.
-
-    ``largest_test_allowance`` reports the largest budget anywhere in
-    the file, so deleting ``[profile.default]``'s own ``slow-timeout``
-    and leaving the `ui` and `settings` overrides behind still reports
-    900 s while every test those overrides do not match runs with no
-    bound at all. Nothing else here would notice.
-
-    Proved by mutation: commenting out the profile's own
-    ``slow-timeout`` fails this test and nothing else.
-    """
-    assert bounds_a_single_test(nextest_config), (
-        "[profile.default] itself must set slow-timeout with terminate-after; "
-        "an override satisfies the file as a whole while leaving every test it "
-        "does not match unbounded"
-    )
-
-
-def test_only_the_ui_binary_gets_more_than_the_default_budget(
-    nextest_config: str,
-) -> None:
-    """The long `ui` budget is scoped to the `ui` binary, not given to every test.
-
-    The `ui` tests are trybuild builds that run for about five minutes on a
-    macOS runner, so their budget is the largest in the file. Widening that
-    override's filter (to ``all()``, or by adding a second binary) would
-    quietly give every other test the same allowance, and a real hang in
-    them would then take that long to fail. Nothing else here would notice.
-
-    Proved by mutation: changing the override's filter to ``all()`` fails
-    this test.
-    """
-    config = tomllib.loads(nextest_config)["profile"]["default"]
-    default_budget = _budget(config["slow-timeout"])
-    longer = [
-        override["filter"]
-        for override in config.get("overrides", [])
-        if "slow-timeout" in override
-        and _budget(override["slow-timeout"]) > default_budget
-    ]
-    assert longer == ["binary(=ui)"], (
-        f"only `binary(=ui)` may exceed the default {default_budget} s per-test "
-        f"budget, but these filters do: {longer}"
-    )
-
-
-def test_the_ui_binary_budget_is_the_one_the_guide_states(
-    nextest_config: str,
-) -> None:
-    """The `ui` override's budget is pinned by value, not only scoped.
-
-    The scope test above passes for any budget above the default, so
-    reverting the override to its old 360 s would leave it green while the
-    macOS runner's slow trybuild tests (measured up to 316 s) timed out
-    again. The ordering checks accept 360 s as well, because they only
-    compare the budget with the whole-run timeout.
-
-    Proved by mutation: setting the override's period back to ``360s`` fails
-    this test and nothing else.
-    """
-    overrides = tomllib.loads(nextest_config)["profile"]["default"]["overrides"]
-    budgets = [
-        _budget(override["slow-timeout"])
-        for override in overrides
-        if override.get("filter") == "binary(=ui)" and "slow-timeout" in override
-    ]
-    assert budgets == [UI_BUDGET_SECONDS], (
-        f"the `binary(=ui)` override must give a budget of "
-        f"{UI_BUDGET_SECONDS:.0f}s (period times terminate-after); found "
-        f"{[f'{budget:.0f}s' for budget in budgets]}"
-    )
-
-
-def _budget(slow_timeout: dict[str, object]) -> Fraction:
-    """Return a ``slow-timeout`` table's budget: its period times terminate-after.
-
-    The period goes through the shared duration reader, so any spelling
-    nextest accepts (``"450s"``, ``"7m30s"``, ``"7.5m"``) reads the same.
-
-    Parameters
-    ----------
-    slow_timeout : dict[str, object]
-        The inline table.
-
-    Returns
-    -------
-    Fraction
-        The per-test budget in seconds, exactly.
-    """
-    return seconds(str(slow_timeout["period"])) * int(
-        typ.cast("int", slow_timeout.get("terminate-after", 1))
-    )

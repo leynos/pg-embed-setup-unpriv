@@ -11,8 +11,10 @@ use std::fs::OpenOptions;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 #[cfg(unix)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 use rstest::fixture;
 
@@ -115,6 +117,44 @@ fn acquire_scenario_guard() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// A scenario-lock wait shorter than this is scheduler jitter rather than
+/// queueing, and reporting it would bury the waits that matter.
+#[cfg(unix)]
+const SLOW_LOCK_WAIT_THRESHOLD: Duration = Duration::from_secs(1);
+
+/// Return the diagnostic for a scenario-lock wait worth reporting.
+///
+/// nextest stops the `slow-timeout` clock while a test waits for a slot in the
+/// `serial` test group, but it keeps counting while the test blocks in
+/// `flock`. Reporting a residual wait separately is what lets a timeout show
+/// lock queueing rather than only cluster work.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(slow_lock_wait_message(Path::new("scenario.lock"), Duration::from_millis(20)).is_none());
+/// assert!(slow_lock_wait_message(Path::new("scenario.lock"), Duration::from_secs(2)).is_some());
+/// ```
+#[cfg(unix)]
+fn slow_lock_wait_message(lock_path: &Path, waited: Duration) -> Option<String> {
+    (waited >= SLOW_LOCK_WAIT_THRESHOLD).then(|| {
+        format!(
+            "scenario lock wait at {} lasted {waited:?}; runtime lock waiting counts against \
+             nextest slow-timeout, unlike waiting for the serial test-group slot",
+            lock_path.display()
+        )
+    })
+}
+
+/// Write a residual-wait diagnostic to nextest's captured standard error.
+#[cfg(unix)]
+#[expect(
+    clippy::print_stderr,
+    reason = "the residual wait must reach nextest's captured test output; these binaries install \
+              no tracing subscriber, so an event would lose the diagnostic"
+)]
+fn report_slow_lock_wait(message: &str) { eprintln!("{message}") }
+
 #[cfg(unix)]
 fn acquire_process_lock() -> ProcessLock {
     let target_dir =
@@ -139,6 +179,7 @@ fn acquire_process_lock() -> ProcessLock {
             lock_path.display()
         ),
     };
+    let started = Instant::now();
     // SAFETY: The file descriptor obtained from `lock_file.as_raw_fd()` is valid
     // because `lock_file` was opened via `OpenOptions::open` and remains owned by
     // this scope until after the `flock` call completes. No other code moves or
@@ -146,12 +187,16 @@ fn acquire_process_lock() -> ProcessLock {
     // operates on the OS-level file descriptor and does not access Rust memory,
     // so there are no data-race concerns from Rust's perspective.
     let result = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+    let waited = started.elapsed();
     assert!(
         result == 0,
         "failed to acquire scenario lock at {}: {}",
         lock_path.display(),
         std::io::Error::last_os_error()
     );
+    if let Some(message) = slow_lock_wait_message(&lock_path, waited) {
+        report_slow_lock_wait(&message);
+    }
     lock_file
 }
 
@@ -176,6 +221,46 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         drop(reacquired);
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    #[case::just_below(
+        SLOW_LOCK_WAIT_THRESHOLD
+            .checked_sub(Duration::from_millis(1))
+            .expect("a one-second threshold is larger than one millisecond"),
+        false
+    )]
+    #[case::at_the_threshold(SLOW_LOCK_WAIT_THRESHOLD, true)]
+    #[case::well_above(Duration::from_secs(42), true)]
+    fn a_lock_wait_is_reported_from_the_threshold(
+        #[case] waited: Duration,
+        #[case] is_reported: bool,
+    ) {
+        let message = slow_lock_wait_message(Path::new("scenario.lock"), waited);
+        assert_eq!(
+            message.is_some(),
+            is_reported,
+            "unexpected report decision for {waited:?}: {message:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_long_lock_wait_names_the_path_and_duration() {
+        let lock_path = Path::new("target/pg-embed-setup-unpriv.serial.lock");
+        let waited = Duration::from_secs(42) + Duration::from_millis(250);
+        let message =
+            slow_lock_wait_message(lock_path, waited).expect("a 42 s wait must be reported");
+
+        assert!(
+            message.contains(&lock_path.display().to_string()),
+            "the message must name the lock file: {message}"
+        );
+        assert!(
+            message.contains(&format!("{waited:?}")),
+            "the message must state the duration: {message}"
+        );
     }
 
     #[cfg(unix)]

@@ -20,19 +20,70 @@ slow-timeout = { period = "30s", terminate-after = 1, grace-period = "5s" }
 filter = "binary(=ui)"
 slow-timeout = { period = "900s", terminate-after = 1, grace-period = "5s" }
 
-[test-groups]
-serial = { max-threads = 1 }
-
+# These binaries start or share a real PostgreSQL cluster. A single
+# `test_cluster_fixture unit_tests::fixture_exposes_connection_metadata` run,
+# with nothing else in the same nextest run, took 132.893 s on a 6-core Rocky 10
+# host. One full `make test` on that host timed out sixty cluster tests at
+# exactly 180.00 s, every one of them in a binary listed here. 300 s is
+# 2.25 times the measured run, leaving 167 s of headroom for a loaded developer
+# host or a cold CI runner. A warm repeat on the same host class ran the test
+# in 1.479 s, so the tier is for the cold case rather than the steady state.
+#
+# The grace period is explicit: omitting it selects nextest's own 10 s default
+# and raises the watchdog floor this contract derives from 1,765 s to 1,770 s.
 [[profile.default.overrides]]
 filter = """
   binary(=bootstrap_privileges)
+  | binary(=cluster_split_constructors)
+  | binary(=data_dir_recovery)
   | binary(=database_lifecycle)
   | binary(=observability)
   | binary(=password_reuse_e2e)
   | binary(=settings_logging)
+  | binary(=shared_cluster_handle_success)
+  | binary(=shutdown_hook)
+  | binary(=shutdown_hook_lifecycle)
+  | binary(=test_cluster_async)
   | binary(=test_cluster_behaviour)
   | binary(=test_cluster_connection)
   | binary(=test_cluster_drop)
+  | binary(=test_cluster_extensions)
+  | binary(=test_cluster_fixture)
   | binary(=timezone_regression)
+"""
+slow-timeout = { period = "300s", terminate-after = 1, grace-period = "5s" }
+
+[test-groups]
+serial = { max-threads = 1 }
+
+# Everything that takes the cross-process scenario lock joins this group, so
+# nextest queues it before the test starts. Group queue time is not counted by
+# `slow-timeout`; time blocked in `flock` after the test has started is, and
+# `tests/support/serial.rs` reports a residual wait worth noticing on stderr.
+# Grouping adds no serial wall time, because `flock` already serialized these
+# tests against one another; it only stops the wait counting against a test's
+# own allowance.
+#
+# The embedded `serial::tests::*` cases take the same lock in every integration
+# binary, so they join by test name as well as whole binaries. The ignored
+# `shutdown_hook_lifecycle` child runs under its parent's guard and is not made
+# to take the lock.
+[[profile.default.overrides]]
+filter = """
+  binary(=bootstrap_privileges)
+  | binary(=cluster_split_constructors)
+  | binary(=database_lifecycle)
+  | binary(=observability)
+  | binary(=password_reuse_e2e)
+  | binary(=settings_logging)
+  | binary(=shutdown_hook)
+  | binary(=shutdown_hook_lifecycle)
+  | binary(=test_cluster_behaviour)
+  | binary(=test_cluster_connection)
+  | binary(=test_cluster_drop)
+  | binary(=test_cluster_extensions)
+  | binary(=test_cluster_fixture)
+  | binary(=timezone_regression)
+  | kind(test) & test(/^serial::/)
 """
 test-group = "serial"
