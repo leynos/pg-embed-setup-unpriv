@@ -82,7 +82,7 @@ Options:
   -V, --version  Print version
 
 Configuration is read from environment variables:
-  PG_VERSION_REQ          PostgreSQL semver requirement (default =18.6.0).
+  PG_VERSION_REQ          PostgreSQL semver requirement (default: any release).
   PG_PORT                 PostgreSQL port.
   PG_SUPERUSER            Administrative PostgreSQL user.
   PG_PASSWORD             Administrative PostgreSQL password.

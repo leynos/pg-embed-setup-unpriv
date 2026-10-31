@@ -3,7 +3,17 @@
 All notable changes to this crate are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.7.0
+
+This release raises the minimum supported Rust version to 1.94.
+
+### Rust 1.94 minimum
+
+- `rust-version` is now 1.94 (it was 1.92), and the crate requires
+  `postgresql_embedded` and `postgresql_archive` 0.22.0, which declare 1.94. A
+  project on an older toolchain must upgrade before adopting 0.7.0. The
+  Dependabot ignore entries for `postgresql_embedded` and `postgresql_archive`
+  versions `>= 0.20.3` are removed.
 
 ### Slot claim and build script
 
@@ -34,19 +44,18 @@ All notable changes to this crate are recorded here. The format follows
   `ExtensionName` gains the `FromStr` implementation Clippy expects alongside
   its existing `TryFrom<&str>`.
 
-### Default PostgreSQL version pinned
+### Named time zones on every PostgreSQL release
 
-- Bootstrapping without `PG_VERSION_REQ` now installs `18.6.0` rather than
-  whatever release upstream lists as the newest match. From `18.6.1` onward the
-  Linux and macOS archives pack most of `share/timezone` as tar hard links, and
-  the `postgresql_archive` release this crate builds against extracts regular
-  files, directories and symlinks but silently drops hard links. A cluster from
-  such a tree has no `share/timezone/UTC`, so every session that names a zone
-  failed with `invalid value for parameter "TimeZone": "UTC"` (#351). `18.6.0`
-  predates the change and resolves names from the host zoneinfo database, as
-  before. `PG_VERSION_REQ` still overrides the pin. The underlying extraction
-  gap is fixed in `postgresql_archive` 0.22.0, which needs Rust 1.94 and so
-  arrives with this crate's next minimum-supported-Rust-version release.
+- The default PostgreSQL version pin to `18.6.0` is dropped. From `18.6.1`
+  onward the Linux and macOS archives pack most of `share/timezone` as tar hard
+  links, which `postgresql_archive` before 0.22.0 silently dropped, so every
+  session that named a zone failed with
+  `invalid value for parameter "TimeZone": "UTC"` (#351, leynos/mxd#665).
+  `postgresql_archive` 0.22.0 extracts hard links, so an unset `PG_VERSION_REQ`
+  accepts any release again. `PG_VERSION_REQ` still selects a version. A cache
+  entry that an older release extracted still lacks `share/timezone/UTC`;
+  delete it once (see `docs/cache.md`). The named-time-zone regression test now
+  runs against an unpinned cluster.
 - An installation directory holding several version subdirectories now
   resolves to one the settings' version requirement accepts, instead of always
   taking the highest. Without this an exact pin would be undone by a newer

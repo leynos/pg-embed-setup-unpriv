@@ -139,13 +139,13 @@ fn a_claim_holds_the_guard_until_its_slot_is_locked(
     let first_parent = dir.dir.clone();
     let (paused_tx, paused_rx) = std::sync::mpsc::channel();
     let (resume_tx, resume_rx) = std::sync::mpsc::channel();
-    let resume_rx = std::sync::Arc::new(std::sync::Mutex::new(resume_rx));
+    let shared_resume = std::sync::Arc::new(std::sync::Mutex::new(resume_rx));
     let pause_at = move |at: PausePoint| {
-        let (paused_tx, resume_rx) = (paused_tx.clone(), std::sync::Arc::clone(&resume_rx));
+        let (report, resume) = (paused_tx.clone(), std::sync::Arc::clone(&shared_resume));
         move || {
             if std::mem::discriminant(&at) == std::mem::discriminant(&pause) {
-                paused_tx.send(()).expect("report the pause");
-                resume_rx
+                report.send(()).expect("report the pause");
+                resume
                     .lock()
                     .expect("resume receiver")
                     .recv()

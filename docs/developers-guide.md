@@ -372,12 +372,12 @@ archive packager and the workflow contract tests in
 
 ## Minimum supported Rust version
 
-`rust-version` in `Cargo.toml` is a promise to downstream projects. It is 1.92
-because `postgresql_embedded` 0.20.2, the floor this crate requires, needs
-1.92. The committed `Cargo.lock` resolves to the newest releases, so building
-from it proves nothing about that promise: 0.6.1 declared 1.85 while a direct
-`postgresql_archive` requirement resolved to a release that needs 1.94, and a
-project on 1.93 could not build it.
+`rust-version` in `Cargo.toml` is a promise to downstream projects. It is 1.94
+because `postgresql_embedded` 0.22.0 and `postgresql_archive` 0.22.0, the floor
+this crate requires, need 1.94. The committed `Cargo.lock` resolves to the
+newest releases, so building from it proves nothing about that promise: 0.6.1
+declared 1.85 while a direct `postgresql_archive` requirement resolved to a
+release that needs 1.94, and a project on 1.93 could not build it.
 
 `make msrv` closes that gap, and CI runs it as the `msrv` job. It runs
 `scripts/msrv_check.py`, which installs the declared toolchain, resolves a
@@ -386,10 +386,6 @@ lockfile with Cargo's rust-version-aware resolver
 with `cargo +<version> check --locked --all-targets --all-features`. It clears
 `RUSTFLAGS`, because the repository's Cargo configuration sets nightly-only
 flags. The committed `Cargo.lock` is restored afterwards.
-
-Dependabot ignores `postgresql_embedded` and `postgresql_archive` versions
-`>= 0.20.3`, because those releases require Rust 1.94. Keep the exclusions and
-the PostgreSQL version pin until the project deliberately raises its MSRV.
 
 Raising a dependency requirement past what the declared version can build now
 fails that job. Fix it by relaxing the requirement to the lowest release that
@@ -401,41 +397,20 @@ contract that CI runs `make msrv`.
 
 `PgEnvCfg::apply_version` in `src/lib.rs` sets `Settings::version` from the
 configured `version_req`, supplied by `PG_VERSION_REQ` or another configuration
-source. If none supplies a requirement, it uses `DEFAULT_VERSION_REQ`, currently
-`=18.6.0`. An unset requirement used to mean `VersionReq::STAR`, which let
-upstream's newest listed release win without any change in this repository's
-own files. That is how the `TimeZone` failure reached downstream projects: the
-release that started shipping a bundled `share/timezone` tree also started
-packing most of it as tar hard links, and `postgresql_archive` before 0.22.0
-drops hard links while extracting. The resulting tree has no
-`share/timezone/UTC`, so `SET TimeZone = 'UTC'` fails with
-`invalid value for parameter "TimeZone": "UTC"`.
+source. If none supplies a requirement, the settings keep their default,
+`VersionReq::STAR`, so upstream's newest listed release wins.
 
-The pin is a hold, not the fix. `postgresql_archive` 0.22.0 extracts hard links
-and removes the need for it, but that release needs Rust 1.94, which arrives
-with this crate's next MSRV bump. Until then the constant keeps an unpinned
-bootstrap on a release whose archives predate the switch and resolve zone names
-from the host zoneinfo database, as before. Delete the constant when the
-dependency moves.
-
-`resolve_installed_dir` in `src/cluster/installation.rs` also filters the
-version-named subdirectories of an installation directory by the settings'
-requirement. Without that filter an exact pin could still be undone by a newer
-directory left in the same tree by an earlier run. Names that do not parse as
-semver are kept and compared lexically, so a hand-made directory still resolves;
-`tests/settings/version.rs` covers the default and the override, and a unit
-test in `installation.rs` pins the exact-requirement selection.
-
-`tests/timezone_regression.rs` proves the behaviour end to end. It starts one
-real cluster and asks the server for `UTC`, `Etc/UTC` and `Europe/London`,
-`SET TimeZone` then `SHOW TimeZone` for each. On failure it attaches a bounded
-list of facts gathered before the cluster stops: the server version, the
-installation directory, the type of `share/timezone`, `share/timezone/UCT` and
-`share/timezone/UTC`, and the tail of `start.log`. Settings, passwords,
-connection URLs and command debug logs are deliberately excluded, because the
-text lands in test output. The suite shares the `serial` group and is in the
-`no_std_fs_operations` exclusion list for the same reasons the other
-integration-test crates are: it uses the ambient `tests/support` modules.
+Development builds between 0.6.3 and 0.7.0 held that back with a default of
+`=18.6.0`, which never shipped in a release. The `TimeZone` failure reached
+downstream projects because the release that started shipping a bundled
+`share/timezone` tree (18.6.1) also packed most of it as tar hard links, and
+`postgresql_archive` before 0.22.0 dropped hard links while extracting, so
+`share/timezone/UTC` was missing and `SET TimeZone = 'UTC'` failed with
+`invalid value for parameter "TimeZone": "UTC"`. `postgresql_archive` 0.22.0
+extracts hard links, which is why the MSRV is 1.94 and the pin is gone.
+`tests/timezone_regression.rs` starts an unpinned cluster and asks the server
+for named zones, so a regression in extraction fails there and not in a
+downstream project.
 
 ## Path resolution
 
