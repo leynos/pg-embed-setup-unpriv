@@ -160,9 +160,13 @@ fn clearing_problems(whitaker: &str, host: &str) -> Problems {
 /// Returns whether a word assigns a flag, encoded-flag or backend variable in any spelling (empty,
 /// bare, single or double quoted), each of which replaces Cargo's repository defaults.
 fn assigns_build_variable(word: &str) -> bool {
-    ["RUSTFLAGS=", "CARGO_ENCODED_RUSTFLAGS=", "CARGO_BUILD_RUSTFLAGS="]
-        .iter()
-        .any(|prefix| word.starts_with(prefix))
+    [
+        "RUSTFLAGS=",
+        "CARGO_ENCODED_RUSTFLAGS=",
+        "CARGO_BUILD_RUSTFLAGS=",
+    ]
+    .iter()
+    .any(|prefix| word.starts_with(prefix))
         || (word.starts_with("CARGO_PROFILE_") && word.contains("_CODEGEN_BACKEND="))
 }
 
@@ -245,8 +249,8 @@ fn lint_runs_clippy_and_whitaker() -> Result<(), String> {
 /// A compliant `lint-whitaker` line, as `make -n` prints it.
 const WHITAKER_OK: &str =
     "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u \
-     CARGO_PROFILE_DEV_CODEGEN_BACKEND -u \
-     CARGO_BUILD_TARGET -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER -u \
+     CARGO_PROFILE_DEV_CODEGEN_BACKEND -u CARGO_BUILD_TARGET -u \
+     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER -u \
      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -u CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER \
      -u CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS -u CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER -u \
      CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS -u CFLAGS -u LDFLAGS DYLINT_RUSTFLAGS=\"-D \
