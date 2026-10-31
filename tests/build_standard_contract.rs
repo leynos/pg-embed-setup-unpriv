@@ -142,6 +142,7 @@ fn whitaker_route_problems(recipe: &str, host: &str) -> Problems {
             "`make lint-whitaker` on {host} must execute the Whitaker program: {recipe}"
         )];
     };
+    let whitaker = shell::without_comment(whitaker);
     let mut problems = clearing_problems(whitaker, host);
     problems.extend(assignment_problems(whitaker));
     problems.extend(selection_problems(whitaker));
@@ -266,7 +267,11 @@ fn the_whitaker_and_lint_readers_refuse_each_broken_recipe() -> Result<(), Strin
         &format!("{WHITAKER_OK} --locked"),
         "Linux",
     ))?;
-    let broken: [(&str, String); 8] = [
+    none_of(&whitaker_route_problems(
+        &format!("{WHITAKER_OK} --note \"a #b\""),
+        "Linux",
+    ))?;
+    let broken: [(&str, String); 10] = [
         (
             "echoed",
             WHITAKER_OK.replace("whitaker --all", "echo whitaker --all"),
@@ -288,6 +293,14 @@ fn the_whitaker_and_lint_readers_refuse_each_broken_recipe() -> Result<(), Strin
             WHITAKER_OK.replace("DYLINT", "CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm DYLINT"),
         ),
         ("kept flags", WHITAKER_OK.replace("-u RUSTFLAGS ", "")),
+        (
+            "options hidden by a comment",
+            WHITAKER_OK.replace(" --all-targets --all-features", " # --all-targets --all-features"),
+        ),
+        (
+            "options hidden by a tab-led comment",
+            WHITAKER_OK.replace(" --all-targets --all-features", "\t# --all-targets --all-features"),
+        ),
         (
             "kept build flags",
             WHITAKER_OK.replace("-u CARGO_BUILD_RUSTFLAGS ", ""),
