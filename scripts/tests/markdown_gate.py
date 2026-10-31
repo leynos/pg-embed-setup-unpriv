@@ -47,6 +47,38 @@ _WHOLE_SELECTION_EXCLUSIONS: typ.Final[frozenset[str]] = frozenset(
 )
 
 
+def _skip_string(text: str, index: int) -> int:
+    """Return the index just past the string literal starting at ``index``."""
+    index += 1
+    while index < len(text):
+        character = text[index]
+        if character == "\\":
+            index += 2
+        elif character == '"':
+            return index + 1
+        else:
+            index += 1
+    return index
+
+
+def _skip_comment(text: str, index: int) -> int | None:
+    """Return the index past a comment at ``index``, or ``None`` if none starts."""
+    if text.startswith("//", index):
+        newline = text.find("\n", index)
+        return len(text) if newline == -1 else newline
+    if text.startswith("/*", index):
+        end = text.find("*/", index + 2)
+        return len(text) if end == -1 else end + 2
+    return None
+
+
+def _next_significant(text: str, index: int) -> str:
+    """Return the first non-whitespace character at or after ``index``."""
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return text[index] if index < len(text) else ""
+
+
 def _strip_jsonc_comments(text: str) -> str:
     """Return JSONC text with comments removed and strings left intact.
 
@@ -62,29 +94,17 @@ def _strip_jsonc_comments(text: str) -> str:
     """
     stripped: list[str] = []
     index = 0
-    in_string = False
     while index < len(text):
-        character = text[index]
-        if in_string:
-            stripped.append(character)
-            if character == "\\" and index + 1 < len(text):
-                index += 1
-                stripped.append(text[index])
-            elif character == '"':
-                in_string = False
-        elif character == '"':
-            in_string = True
-            stripped.append(character)
-        elif text.startswith("//", index):
-            newline = text.find("\n", index)
-            index = len(text) if newline == -1 else newline
+        if text[index] == '"':
+            end = _skip_string(text, index)
+            stripped.append(text[index:end])
+            index = end
             continue
-        elif text.startswith("/*", index):
-            end = text.find("*/", index + 2)
-            index = len(text) if end == -1 else end + 2
+        comment_end = _skip_comment(text, index)
+        if comment_end is not None:
+            index = comment_end
             continue
-        else:
-            stripped.append(character)
+        stripped.append(text[index])
         index += 1
     return "".join(stripped)
 
@@ -97,27 +117,16 @@ def _strip_trailing_commas(text: str) -> str:
     """
     stripped: list[str] = []
     index = 0
-    in_string = False
     while index < len(text):
-        character = text[index]
-        if in_string:
-            stripped.append(character)
-            if character == "\\" and index + 1 < len(text):
-                index += 1
-                stripped.append(text[index])
-            elif character == '"':
-                in_string = False
-        elif character == '"':
-            in_string = True
-            stripped.append(character)
-        elif character == ",":
-            following = index + 1
-            while following < len(text) and text[following].isspace():
-                following += 1
-            if following == len(text) or text[following] not in "]}":
-                stripped.append(character)
-        else:
-            stripped.append(character)
+        if text[index] == '"':
+            end = _skip_string(text, index)
+            stripped.append(text[index:end])
+            index = end
+            continue
+        if text[index] == "," and _next_significant(text, index + 1) in ("]", "}"):
+            index += 1
+            continue
+        stripped.append(text[index])
         index += 1
     return "".join(stripped)
 
