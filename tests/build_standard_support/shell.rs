@@ -198,3 +198,28 @@ fn skip_env_arguments(mut rest: &str) -> &str {
         }
     }
 }
+
+/// Returns the command without a trailing shell comment: from the first unquoted `#` that starts a word
+/// (after whitespace, tab included) to the end of the line. A `#` inside quotes, or inside a word such
+/// as `a#b`, is not a comment.
+///
+/// ```text
+/// without_comment("whitaker --all # --all-targets")  == "whitaker --all "
+/// without_comment("whitaker --all\t# --all-targets") == "whitaker --all\t"
+/// without_comment("whitaker --note \"a #b\" --all")  == "whitaker --note \"a #b\" --all"
+/// ```
+pub fn without_comment(command: &str) -> &str {
+    let mut quote: Option<char> = None;
+    let mut after_space = true;
+    for (index, c) in command.char_indices() {
+        match quote {
+            Some(open) if c == open => quote = None,
+            Some(_) => {}
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c == '#' && after_space => return &command[..index],
+            None => {}
+        }
+        after_space = c.is_whitespace();
+    }
+    command
+}
