@@ -124,10 +124,17 @@ def test_a_missing_all_prerequisite_is_reported() -> None:
     [
         ("markdownlint", "$(MDLINT)\n", '$(MDLINT) "**/*.md"\n'),
         ("markdownlint", "$(MDLINT)\n", '$(MDLINT) "#.uv-cache"\n'),
+        ("markdownlint", "$(MDLINT)\n", "@echo $(MDLINT)\n"),
         ("fmt", "$(MDLINT) --fix\n", '$(MDLINT) --fix "**/*.md"\n'),
         ("fmt", "$(MDLINT) --fix\n", "$(MDLINT) --fix #.uv-cache\n"),
     ],
-    ids=["lint-glob", "lint-exclusion", "fmt-glob", "fmt-exclusion"],
+    ids=[
+        "lint-glob",
+        "lint-exclusion",
+        "lint-echo-only",
+        "fmt-glob",
+        "fmt-exclusion",
+    ],
 )
 def test_caller_globs_in_a_recipe_are_reported(
     target: str, old: str, new: str
@@ -144,8 +151,18 @@ def test_caller_globs_in_a_recipe_are_reported(
         ('"globs": ["**/*.md"],', '"globs": null,'),
         ('"globs": ["**/*.md"],', ""),
         ('"globs": ["**/*.md"],', '"globs": ["docs/**/*.md"],'),
+        (
+            '"globs": ["**/*.md"],',
+            '"globs": ["**/*.md", "!**/*.md"],',
+        ),
     ],
-    ids=["empty", "not-an-array", "missing-key", "partial-selection"],
+    ids=[
+        "empty",
+        "not-an-array",
+        "missing-key",
+        "partial-selection",
+        "cancelling-negation",
+    ],
 )
 def test_empty_or_missing_configuration_globs_are_reported(
     old: str, new: str
@@ -153,6 +170,15 @@ def test_empty_or_missing_configuration_globs_are_reported(
     """Selection must be a non-empty array covering every Markdown file."""
     assert old in _GOOD_CONFIG, f"the mutation target {old!r} must exist"
     assert config_faults(_GOOD_CONFIG.replace(old, new))
+
+
+def test_a_negation_of_a_non_markdown_pattern_is_allowed() -> None:
+    """Negating a pattern that cannot remove Markdown keeps the selection whole."""
+    config = _GOOD_CONFIG.replace(
+        '"globs": ["**/*.md"],', '"globs": ["**/*.md", "!**/*.json"],'
+    )
+    assert config != _GOOD_CONFIG, "the reference globs line must exist"
+    assert config_faults(config) == []
 
 
 def test_the_repository_holds_the_contract() -> None:

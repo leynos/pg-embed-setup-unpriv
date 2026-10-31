@@ -28,6 +28,13 @@ APPROVED_PAIRINGS: typ.Final[dict[str, str]] = {
     "21c1be1b93ad9ed58fa840aacc3f279cde2a72ff": "0.23.2",
 }
 
+#: Negations that cancel the whole Markdown selection. Narrower negations
+#: that name a Markdown file or a directory tree are caught by suffix; a
+#: negation of a non-Markdown pattern is harmless and stays allowed.
+_CANCELLING_NEGATIONS: typ.Final[frozenset[str]] = frozenset(
+    {"*", "**", "**/*", "**/*.md"}
+)
+
 
 def _strip_jsonc_comments(text: str) -> str:
     """Return JSONC text with comments removed and strings left intact.
@@ -71,6 +78,14 @@ def _strip_jsonc_comments(text: str) -> str:
     return "".join(stripped)
 
 
+def _cancels_markdown_selection(pattern: str) -> bool:
+    """Return whether a negated glob can remove Markdown from the selection."""
+    if pattern in _CANCELLING_NEGATIONS:
+        return True
+    lowered = pattern.lower()
+    return lowered.endswith(".md") or pattern.endswith("/**")
+
+
 def config_faults(text: str) -> list[str]:
     """Return what is wrong with a configuration's file selection.
 
@@ -83,13 +98,23 @@ def config_faults(text: str) -> list[str]:
     -------
     list[str]
         One message per fault; empty when the top-level ``globs`` array is
-        non-empty and selects every Markdown file.
+        non-empty, selects every Markdown file and carries no negation that
+        cancels that selection.
     """
     globs = json.loads(_strip_jsonc_comments(text)).get("globs")
     if not isinstance(globs, list) or not globs:
         return [f"globs must be a non-empty array, got {globs!r}"]
     if "**/*.md" not in globs:
         return [f"globs must include **/*.md, got {globs!r}"]
+    cancelling = [
+        glob
+        for glob in globs
+        if isinstance(glob, str)
+        and glob.startswith("!")
+        and _cancels_markdown_selection(glob[1:])
+    ]
+    if cancelling:
+        return [f"globs negate the Markdown selection with {cancelling!r}"]
     return []
 
 
@@ -161,7 +186,19 @@ def pairing_faults(revision: str, version: str) -> list[str]:
 
 
 def makefile_version(makefile: str) -> str:
-    """Return the Makefile's pinned Markdown lint CLI version."""
+    """Return the Makefile's pinned Markdown lint CLI version.
+
+    Parameters
+    ----------
+    makefile : str
+        The Makefile text.
+
+    Returns
+    -------
+    str
+        The value assigned to ``MARKDOWNLINT_CLI2_VERSION``, or an empty
+        string when the assignment is absent.
+    """
     match = re.search(
         r"^MARKDOWNLINT_CLI2_VERSION\s*\?=\s*([^\s#]+)", makefile, re.MULTILINE
     )
@@ -169,7 +206,21 @@ def makefile_version(makefile: str) -> str:
 
 
 def pairing_faults_for(workflow: Workflow, makefile: str) -> list[str]:
-    """Return the pairing faults across a workflow and the Makefile."""
+    """Return the pairing faults across a workflow and the Makefile.
+
+    Parameters
+    ----------
+    workflow : Workflow
+        The parsed workflow holding the action step.
+    makefile : str
+        The Makefile text holding the CLI version.
+
+    Returns
+    -------
+    list[str]
+        One message per fault; empty when every action revision pairs with
+        the Makefile's version through an approved entry.
+    """
     steps = _markdownlint_steps(workflow)
     if not steps:
         return [f"no {ACTION} step"]
@@ -192,7 +243,21 @@ def _target_declaration(makefile: str, target: str) -> str | None:
 
 
 def prerequisites(makefile: str, target: str) -> list[str]:
-    """Return the prerequisites named on a target's declaration line."""
+    """Return the prerequisites named on a target's declaration line.
+
+    Parameters
+    ----------
+    makefile : str
+        The Makefile text.
+    target : str
+        The target whose declaration to read.
+
+    Returns
+    -------
+    list[str]
+        The whitespace-separated prerequisite names, or an empty list when
+        the target is absent.
+    """
     line = _target_declaration(makefile, target)
     if line is None:
         return []
@@ -202,7 +267,23 @@ def prerequisites(makefile: str, target: str) -> list[str]:
 def prerequisite_faults(
     makefile: str, target: str, wanted: typ.Iterable[str]
 ) -> list[str]:
-    """Return each wanted prerequisite that a target does not name."""
+    """Return each wanted prerequisite that a target does not name.
+
+    Parameters
+    ----------
+    makefile : str
+        The Makefile text.
+    target : str
+        The target whose prerequisites are required.
+    wanted : typing.Iterable[str]
+        The prerequisite names that must be present.
+
+    Returns
+    -------
+    list[str]
+        One message per missing prerequisite; empty when every name is
+        present.
+    """
     declared = prerequisites(makefile, target)
     return [
         f"{target} is missing prerequisite {name}"
@@ -212,7 +293,21 @@ def prerequisite_faults(
 
 
 def recipe_lines(makefile: str, target: str) -> list[str]:
-    """Return a target's recipe lines, with their leading tabs removed."""
+    """Return a target's recipe lines, with their leading tabs removed.
+
+    Parameters
+    ----------
+    makefile : str
+        The Makefile text.
+    target : str
+        The target whose recipe to read.
+
+    Returns
+    -------
+    list[str]
+        The recipe lines in order, or an empty list when the target is
+        absent.
+    """
     lines = makefile.splitlines()
     start = next(
         (
@@ -261,7 +356,12 @@ def mdlint_faults(makefile: str, target: str) -> list[str]:
     allowed = ["--fix"] if target == "fmt" else []
     faults: list[str] = []
     for line in invocations:
-        _head, _separator, tail = line.partition("$(MDLINT)")
+        head, _separator, tail = line.partition("$(MDLINT)")
+        if head.lstrip("@-+ \t"):
+            faults.append(
+                f"{target} mentions $(MDLINT) without running it: {line!r}"
+            )
+            continue
         extra = [argument for argument in tail.split() if argument not in allowed]
         if extra:
             faults.append(
