@@ -77,7 +77,8 @@ matches `17.4.0`.
 
 ## Cross-process coordination
 
-The cache uses file-based advisory locking (`flock(2)` on Unix) to coordinate
+The cache uses file-based advisory locking with `fs4` on every platform:
+`flock(2)` on Unix and whole-file `LockFileEx` on Windows[^1]. It coordinates
 concurrent access:
 
 - **Shared locks**: Acquired when reading from the cache. Multiple readers can
@@ -88,7 +89,15 @@ concurrent access:
 Locks are per-version, allowing different versions to be downloaded in parallel
 without contention.
 
-On non-Unix platforms, locking is not supported; concurrent tests may race.
+The locks are advisory: every process that uses `CacheLock` honours them, but a
+process that ignores them can still touch the cache. Acquisition blocks until
+the lock is available, with no timeout, so a caller must never hold a
+conflicting guard for the same key on one thread. Upgrading a shared guard to
+exclusive is unsupported; drop the shared guard first.
+
+Extension installation runs after the archive lock is released, and
+`install_archive` re-verifies the archive digest at that point, so the bytes it
+writes are the bytes the manifest recorded.
 
 ## Integration with TestCluster
 
@@ -248,5 +257,12 @@ Or remove specific versions:
 rm -rf ~/.cache/pg-embedded/binaries/16.3.0
 ```
 
-Lock files in `.locks/` may be safely deleted when no processes are actively
-using the cache.
+Delete lock files in `.locks/` only when no process holds them. On Windows,
+removing a lock file that another process still has open leaves the name
+unusable until that handle closes, and the next caller fails to open it with
+`ERROR_ACCESS_DENIED` (os error 5). That is how the early non-Unix
+implementation failed: it removed its temporary lock file while still holding
+the handle. On Unix the name is simply detached, so the same mistake fails
+silently instead.
+
+[^1]: `fs4` 1.1.0: <https://crates.io/crates/fs4>.
