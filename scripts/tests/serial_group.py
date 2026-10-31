@@ -16,6 +16,13 @@ that compile the module and discovers new ones, so an omission fails
 The filter grammar is deliberately narrow: exact ``binary(=name)`` terms
 joined by ``|``. A broader filter, a negation or a conjunction would make
 the group mean something this contract cannot compare with the inventory.
+
+Discovery is narrow in the same way: a binary is lock-taking when its
+declared root file names the module directly, as every current root does.
+A support module that compiled the module on a root's behalf would hide the
+dependency, so the contract reports such a file instead of guessing which
+binary reaches it; move the attribute into the root to make the binary
+discoverable.
 """
 
 from __future__ import annotations
@@ -88,7 +95,11 @@ def _mapping(value: object) -> dict[str, object]:
     dict of str to object
         The table, or an empty mapping when the value is not one.
     """
-    return value if isinstance(value, dict) else {}
+    match value:
+        case dict():
+            return value
+        case _:
+            return {}
 
 
 def _sequence(value: object) -> list[object]:
@@ -104,7 +115,11 @@ def _sequence(value: object) -> list[object]:
     list of object
         The array, or an empty list when the value is not one.
     """
-    return value if isinstance(value, list) else []
+    match value:
+        case list():
+            return value
+        case _:
+            return []
 
 
 def _serial_limit_faults(config: dict[str, object]) -> list[str]:
@@ -191,11 +206,14 @@ def _filter_names(
         The binary names named by the filter, and the grammar faults.
     """
     raw = override.get("filter")
-    if not isinstance(raw, str):
-        return frozenset(), ["the serial override names no filter"]
+    match raw:
+        case str():
+            terms = raw.split("|")
+        case _:
+            return frozenset(), ["the serial override names no filter"]
     names: set[str] = set()
     faults: list[str] = []
-    for part in raw.split("|"):
+    for part in terms:
         term = part.strip()
         match = _BINARY_TERM.fullmatch(term)
         if match is None:
@@ -226,14 +244,42 @@ def _declared_targets(manifest: dict[str, object], root: Path) -> dict[str, Path
     targets: dict[str, Path] = {}
     for entry in _sequence(manifest.get("test")):
         table = _mapping(entry)
-        path = table.get("path")
-        name = table.get("name")
-        if isinstance(path, str):
-            target_name = name if isinstance(name, str) else Path(path).stem
-            targets[target_name] = root / path
-        elif isinstance(name, str):
-            targets[name] = root / "tests" / f"{name}.rs"
+        match table.get("path"), table.get("name"):
+            case (str() as path, str() as name):
+                targets[name] = root / path
+            case (str() as path, _):
+                targets[Path(path).stem] = root / path
+            case (_, str() as name):
+                targets[name] = root / "tests" / f"{name}.rs"
     return targets
+
+
+def _serial_includers(
+    tests_directory: Path,
+) -> tuple[frozenset[Path], list[str]]:
+    """Return every file under ``tests`` that compiles the serial module.
+
+    Parameters
+    ----------
+    tests_directory : Path
+        The ``tests`` directory to scan.
+
+    Returns
+    -------
+    tuple
+        The resolved paths that name the module, and any read faults.
+    """
+    includers: set[Path] = set()
+    faults: list[str] = []
+    for path in sorted(tests_directory.rglob("*.rs")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as error:
+            faults.append(f"cannot read {path}: {error}")
+            continue
+        if _SERIAL_MODULE_PATTERN.search(text):
+            includers.add(path.resolve())
+    return frozenset(includers), faults
 
 
 def _lock_taking_binaries(
@@ -243,7 +289,9 @@ def _lock_taking_binaries(
 
     Declared ``[[test]]`` targets and undeclared top-level ``tests/*.rs``
     files are both considered, so a new binary that includes the module is
-    found even before its manifest entry or filter term is added.
+    found even before its manifest entry or filter term is added. Only a
+    root file counts, so any other file that compiles the module is reported
+    rather than silently left unattributable.
 
     Parameters
     ----------
@@ -277,6 +325,15 @@ def _lock_taking_binaries(
             continue
         if _SERIAL_MODULE_PATTERN.search(text):
             lock_taking.add(name)
+    includers, read_faults = _serial_includers(tests_directory)
+    faults.extend(read_faults)
+    hidden = sorted(includers - {target.resolve() for target in targets.values()})
+    if hidden:
+        faults.append(
+            "the serial module is compiled outside a declared test root, so "
+            "no binary can be attributed: "
+            + ", ".join(str(path) for path in hidden)
+        )
     return frozenset(lock_taking), faults
 
 

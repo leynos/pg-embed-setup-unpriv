@@ -205,6 +205,23 @@ def test_an_undeclared_lock_taking_binary_is_named(tmp_path: Path) -> None:
     )
 
 
+def test_a_support_module_compiling_the_serial_module_is_named(
+    tmp_path: Path,
+) -> None:
+    """A root that hides the module behind a support module cannot pass."""
+    tests_directory, manifest = _write_repository(tmp_path)
+    support = tests_directory / "support"
+    support.mkdir(exist_ok=True)
+    hidden = support / "shared.rs"
+    hidden.write_text(
+        f'{_serial_attribute("tests/support/shared.rs")}\n', encoding="utf-8"
+    )
+    faults = serial_group_faults(_GOOD_CONFIG, manifest, tests_directory)
+    assert any("shared.rs" in fault for fault in faults), (
+        f"an indirect serial inclusion must be reported: {faults}"
+    )
+
+
 def test_the_real_repository_serial_group_holds_every_lock_taking_binary() -> None:
     """The repository's own configuration and tests tree agree with the pin."""
     faults = serial_group_faults(
