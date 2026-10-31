@@ -1088,15 +1088,15 @@ ADR 005 records the design; this section covers the code.
   --nocapture`
   starts N processes at once and prints wall, lock wait and phase medians. Use
   a RAM-backed root to keep `initdb`'s fsync out of the numbers.
-- Tests: `cluster_slot/tests.rs` and `orphan_tests.rs` hold the unit cases.
-  Their `FakePostgres` copies `/bin/sh` as `postgres` and runs `read line`.
-  `tests/per_cluster_directories.rs` drives real children through concurrent
-  bootstraps, a live-kept and dead-swept sweep with an orphaned server, the
-  explicit `PG_DATA_DIR` case, the setup-lock wait (Linux only: it reads the
-  blocked waiter from `/proc/locks`), and a run killed mid-test. Each case uses
-  a fixed root under `CARGO_TARGET_TMPDIR`, so the next run's sweep reclaims
-  whatever a killed run left. A `Running` guard closes each child's stdin,
-  waits, then kills it.
+- Tests: `cluster_slot/tests.rs`, `cluster_slot/claim_guard_tests.rs` and
+  `orphan_tests.rs` hold the unit cases. Their `FakePostgres` copies `/bin/sh`
+  as `postgres` and runs `read line`. `tests/per_cluster_directories.rs` drives
+  real children through concurrent bootstraps, a live-kept and dead-swept sweep
+  with an orphaned server, the explicit `PG_DATA_DIR` case, the setup-lock wait
+  (Linux only: it reads the blocked waiter from `/proc/locks`), and a run
+  killed mid-test. Each case uses a fixed root under `CARGO_TARGET_TMPDIR`, so
+  the next run's sweep reclaims whatever a killed run left. A `Running` guard
+  closes each child's stdin, waits, then kills it.
 
 ## The build standard
 

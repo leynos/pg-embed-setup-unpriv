@@ -381,4 +381,6 @@ fn slot_error(path: &Utf8Path, action: &str, err: io::Error) -> BootstrapError {
 mod removal;
 
 #[cfg(test)]
+mod claim_guard_tests;
+#[cfg(test)]
 mod tests;

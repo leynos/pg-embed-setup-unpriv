@@ -7,18 +7,18 @@ use color_eyre::eyre::{Result, eyre};
 use fs4::FileExt;
 use rstest::{fixture, rstest};
 
-use super::{claim_guard_for, claim_slot, claim_slot_with_hooks, has_live_peers, sweep_dead_slots};
+use super::{claim_guard_for, claim_slot, has_live_peers, sweep_dead_slots};
 use crate::bootstrap::prepare::orphan::{OrphanStop, ProcessId};
 
 /// A data parent directory under a temporary root.
-struct Parent {
+pub(super) struct Parent {
     _temp: tempfile::TempDir,
-    dir: Utf8PathBuf,
+    pub(super) dir: Utf8PathBuf,
 }
 
 /// An empty data parent.
 #[fixture]
-fn parent() -> Result<Parent> {
+pub(super) fn parent() -> Result<Parent> {
     let temp = tempfile::tempdir()?;
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf())
         .map_err(|path| eyre!("non-UTF-8 tempdir {}", path.display()))?;
@@ -115,93 +115,6 @@ fn a_claim_waits_for_the_claim_guard(parent: Result<Parent>) {
         .join()
         .expect("join the claimer")
         .expect("the claim succeeds");
-}
-
-/// The point at which a test pauses the first claim.
-#[derive(Clone, Copy, Debug)]
-enum PausePoint {
-    /// Inside the dead-slot sweep.
-    Sweep,
-    /// After the new slot's lock file is created and locked.
-    SlotCreation,
-}
-
-/// Another bootstrap cannot claim while the first claim holds the guard, from
-/// the sweep through the creation and locking of its slot.
-#[rstest]
-#[case::sweep(PausePoint::Sweep)]
-#[case::slot_creation(PausePoint::SlotCreation)]
-fn a_claim_holds_the_guard_until_its_slot_is_locked(
-    parent: Result<Parent>,
-    #[case] pause: PausePoint,
-) {
-    let dir = parent.expect("data parent");
-    let first_parent = dir.dir.clone();
-    let (paused_tx, paused_rx) = std::sync::mpsc::channel();
-    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
-    let shared_resume = std::sync::Arc::new(std::sync::Mutex::new(resume_rx));
-    let pause_at = move |at: PausePoint| {
-        let (report, resume) = (paused_tx.clone(), std::sync::Arc::clone(&shared_resume));
-        move || {
-            if std::mem::discriminant(&at) == std::mem::discriminant(&pause) {
-                report.send(()).expect("report the pause");
-                resume
-                    .lock()
-                    .expect("resume receiver")
-                    .recv()
-                    .expect("wait for the test to resume");
-            }
-        }
-    };
-    let (on_sweep, on_created) = (
-        pause_at(PausePoint::Sweep),
-        pause_at(PausePoint::SlotCreation),
-    );
-    let first = std::thread::spawn(move || {
-        claim_slot_with_hooks(
-            &first_parent,
-            move |_| {
-                on_sweep();
-                Ok(0)
-            },
-            on_created,
-        )
-    });
-    paused_rx
-        .recv_timeout(std::time::Duration::from_secs(30))
-        .expect("the first claim reaches the pause point");
-
-    let second_parent = dir.dir.clone();
-    let (claim_started_tx, claim_started_rx) = std::sync::mpsc::channel();
-    let (claim_finished_tx, claim_finished_rx) = std::sync::mpsc::channel();
-    let second = std::thread::spawn(move || {
-        claim_started_tx.send(()).expect("report claim start");
-        let claimed = claim_slot(&second_parent);
-        claim_finished_tx
-            .send(claimed.is_ok())
-            .expect("report claim result");
-    });
-    claim_started_rx
-        .recv_timeout(std::time::Duration::from_secs(30))
-        .expect("the second claim starts");
-    assert!(
-        claim_finished_rx
-            .recv_timeout(std::time::Duration::from_millis(500))
-            .is_err(),
-        "a second claim must wait until sweeping and slot creation finish ({pause:?})"
-    );
-
-    resume_tx.send(()).expect("resume the first claim");
-    first
-        .join()
-        .expect("join the first claim")
-        .expect("the first claim succeeds");
-    assert!(
-        claim_finished_rx
-            .recv_timeout(std::time::Duration::from_secs(30))
-            .expect("the second claim proceeds")
-    );
-    second.join().expect("join the second claim");
 }
 
 /// The claim guard sits among the slots but is not one: a sweep leaves it, and
