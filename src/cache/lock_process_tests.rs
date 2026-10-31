@@ -15,6 +15,9 @@ use std::{
 
 use camino::Utf8Path;
 
+/// Environment variable marking a child launched by the parent harness.
+pub(super) const CHILD_MARKER: &str = "PG_EMBED_CACHE_LOCK_CHILD";
+
 /// Environment variable naming the cache directory in the child.
 pub(super) const CHILD_CACHE_DIR: &str = "PG_EMBED_CACHE_LOCK_DIR";
 
@@ -62,6 +65,7 @@ impl ChildLock {
                 "--nocapture",
                 "--test-threads=1",
             ])
+            .env(CHILD_MARKER, "1")
             .env(CHILD_CACHE_DIR, cache_dir.as_str())
             .env(CHILD_VERSION, version)
             .env(CHILD_MODE, mode)

@@ -226,10 +226,19 @@ fn acquire_rejects_invalid_version_strings(
 /// reports that fact, then holds the guard until stdin reaches EOF. The
 /// parent harness starts it with `--ignored`, so a normal run never executes
 /// it as a standalone case.
+///
+/// `#[ignore]` hides the case from a normal run but not from an explicit
+/// `--ignored` run, which has none of the parent's coordinates. Returning
+/// early in that case keeps the selection from reporting a spurious failure;
+/// once the parent has announced itself, every coordinate stays required.
 #[test]
 #[ignore = "spawned by the cross-process cache lock tests"]
 fn cache_lock_child() {
     use std::io::Read;
+
+    if std::env::var_os(process::CHILD_MARKER).is_none() {
+        return;
+    }
 
     let cache_dir =
         Utf8PathBuf::from(std::env::var(process::CHILD_CACHE_DIR).expect("child cache directory"));
