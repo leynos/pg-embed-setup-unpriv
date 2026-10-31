@@ -1009,7 +1009,7 @@ reads it (#259). The design document records the reasoning.
   Each case creates its own temporary root, so the cases share no state and
   stay out of the nextest `serial` group. That exemption is specific to this
   binary because it does not compile `tests/support/serial.rs`; a binary that
-  does joins the group even when its cases use isolated roots.
+  does so joins the group even when its cases use isolated roots.
 
 `cluster::connection::admin_connect_error` wraps a failed admin connection. It
 keeps the `postgres` error as the source and appends that error's own source to
