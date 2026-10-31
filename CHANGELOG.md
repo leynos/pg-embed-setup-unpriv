@@ -8,7 +8,9 @@ All notable changes to this crate are recorded here. The format follows
 ### Lint toolchain
 
 - The pinned lint toolchain moves from `nightly-2026-04-25` to
-  `nightly-2026-10-23` (#357), and the new lints are fixed rather than silenced.
+  `nightly-2026-10-30` (#357, #371), and the new lints are fixed rather than
+  silenced. The 10-30 nightly no longer raises `clippy::cognitive_complexity` on
+  `caches_successful_initialization`, so its unfulfilled `#[expect]` is gone.
   `AtomicUsize::fetch_update` is deprecated in favour of `try_update`, but
   `try_update` is only stable from Rust 1.95, above this crate's declared
   minimum, so the privilege-drop counter decrements through a
