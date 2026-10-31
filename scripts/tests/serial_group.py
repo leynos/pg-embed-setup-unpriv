@@ -16,6 +16,8 @@ that compile the module and discovers new ones, so an omission fails
 The filter grammar is deliberately narrow: exact ``binary(=name)`` terms
 joined by ``|``. A broader filter, a negation or a conjunction would make
 the group mean something this contract cannot compare with the inventory.
+The override must also apply on every platform: a ``platform`` restriction
+would leave the binaries out of the group everywhere else.
 
 The inventory itself comes from :mod:`serial_inventory`, which discovers
 the binaries and reports a serial-module inclusion that cannot be
@@ -139,6 +141,32 @@ def _one_serial_override(
     ]
 
 
+def _platform_faults(override: dict[str, object]) -> list[str]:
+    """Report a serial override nextest applies on one platform only.
+
+    A platform-restricted override would leave the lock-taking binaries out
+    of the serial group everywhere else, which is the omission this contract
+    exists to catch, so the override must apply on every platform.
+
+    Parameters
+    ----------
+    override : dict of str to object
+        The override assigning the serial group.
+
+    Returns
+    -------
+    list of str
+        One fault when the override names a platform, else empty.
+    """
+    platform = override.get("platform")
+    if platform is None:
+        return []
+    return [
+        "the serial override must not restrict itself to a platform, "
+        f"found platform = {platform!r}"
+    ]
+
+
 def _filter_names(
     override: dict[str, object],
 ) -> tuple[frozenset[str], list[str]]:
@@ -230,6 +258,7 @@ def serial_group_faults(
     faults.extend(override_faults)
     filter_names: frozenset[str] = frozenset()
     if override is not None:
+        faults.extend(_platform_faults(override))
         filter_names, grammar_faults = _filter_names(override)
         faults.extend(grammar_faults)
     discovered, discovery_faults = lock_taking_binaries(

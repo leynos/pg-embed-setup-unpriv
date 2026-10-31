@@ -152,6 +152,11 @@ def test_the_reference_shape_has_no_fault(
         ),
         ('test-group = "serial"', 'test-group = "other"', "exactly one"),
         ("\ntest-group = \"serial\"\n", "\n", "exactly one"),
+        (
+            'test-group = "serial"',
+            'platform = "x86_64-unknown-linux-gnu"\ntest-group = "serial"',
+            "platform",
+        ),
         ("binary(=bootstrap_privileges)", "all()", "binary(=name)"),
         (
             "binary(=test_cluster_fixture)",
@@ -172,6 +177,7 @@ def test_the_reference_shape_has_no_fault(
         "max-threads-above-one",
         "renamed-group",
         "removed-group",
+        "platform-restricted",
         "all-operator",
         "negation",
         "conjunction",
