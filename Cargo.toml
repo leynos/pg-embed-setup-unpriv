@@ -1,8 +1,8 @@
 [package]
 name = "pg-embed-setup-unpriv"
-version = "0.6.3"
+version = "0.7.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.94"
 description = "Initializes postgresql_embedded clusters with platform-appropriate setup"
 license = "ISC"
 documentation = "https://docs.rs/pg-embed-setup-unpriv/latest/pg_embedded_setup_unpriv"
@@ -141,16 +141,16 @@ name = "settings"
 path = "tests/settings.rs"
 
 [dependencies]
-postgresql_embedded = { version = "0.20.2", features = ["tokio"] }
+postgresql_embedded = { version = "0.22.0", features = ["tokio"] }
 # Named directly only to classify `postgresql_embedded::Error::ArchiveError`
 # causes when deciding whether a bootstrap failure is transient. It must stay
 # the version `postgresql_embedded` uses: a test builds that error from this
 # crate's type, so a mismatch fails to compile rather than silently turning
 # the retry off. The requirement is the floor `postgresql_embedded` names
-# (0.20.2, which needs Rust 1.92), so a lockfile resolved for the declared
-# `rust-version` can pick it; 0.20.3 and later need 1.94 and would raise the
-# minimum supported Rust version if required here.
-postgresql_archive = { version = "0.20.2", default-features = false }
+# (0.22.0, which needs Rust 1.94, the declared `rust-version`). 0.22.0 is also
+# the first release that extracts the tar hard links in the 18.6.1 and later
+# PostgreSQL archives, which `share/timezone/UTC` depends on.
+postgresql_archive = { version = "0.22.0", default-features = false }
 color-eyre = "0.6"
 tokio = { version = "1", features = ["rt", "macros", "time", "fs"] }
 serde = { version = "1", features = ["derive"] }
@@ -188,9 +188,6 @@ fs4 = { version = "1.1.0", default-features = false, features = ["sync"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.3", default-features = false, features = ["user", "fs", "signal"] }
-
-[build-dependencies]
-cfg_aliases = "0.2.1"
 
 [features]
 toml = []

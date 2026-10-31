@@ -31,6 +31,7 @@ use color_eyre::eyre::{Report, eyre};
 use fs4::{FileExt, TryLockError};
 use tracing::{info, warn};
 
+use self::removal::remove_slot;
 use super::orphan::{self, OrphanStop};
 use crate::{
     error::{BootstrapError, BootstrapResult},
@@ -133,19 +134,39 @@ fn slot_lookup(data_dir: &std::path::Path) -> SlotLookup<'_> {
     }
 }
 
-/// Sweeps dead slots under `parent`, then claims a new one for this cluster.
+/// Sweeps dead slots under `parent`, then claims a new one for this cluster,
+/// holding the claim guard across both operations.
 ///
 /// # Errors
 ///
-/// Returns an error when `parent` cannot be created or listed, or when the
-/// new slot's lock file cannot be created and locked.
+/// Returns an error when the guard cannot be locked, `parent` cannot be
+/// created or listed, or the new slot's lock file cannot be created and locked.
 pub(super) fn claim_slot(parent: &Utf8Path) -> BootstrapResult<ClusterSlot> {
+    claim_slot_with_hooks(
+        parent,
+        |slots| sweep_dead_slots(slots, &orphan::SignalStop),
+        || {},
+    )
+}
+
+/// Sweeps and claims while holding the guard, so another bootstrap cannot
+/// mistake a newly created but not-yet-locked file for a dead slot.
+///
+/// `sweep` runs once the guard is held. `created` runs after the new slot's
+/// lock file is created and locked, still under the guard; production passes
+/// a no-op, and tests pause there to prove the guard covers slot creation.
+fn claim_slot_with_hooks(
+    parent: &Utf8Path,
+    sweep: impl FnOnce(&Utf8Path) -> BootstrapResult<usize>,
+    created: impl FnOnce(),
+) -> BootstrapResult<ClusterSlot> {
     std::fs::create_dir_all(parent).map_err(|err| slot_error(parent, "create", err))?;
-    sweep_dead_slots(parent, &orphan::SignalStop)?;
-    let name = slot_name();
     let _guard = ClaimGuard::acquire(parent.as_std_path())
         .map_err(|err| slot_error(&parent.join(CLAIM_GUARD), "lock", err))?;
+    sweep(parent)?;
+    let name = slot_name();
     let lock = lock_new_slot(parent, &name)?;
+    created();
     HELD.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .push(lock);
@@ -306,44 +327,6 @@ fn take_dead_lock(parent: &Utf8Path, name: &str) -> Option<File> {
     FileExt::try_lock(&file).ok().map(|()| file)
 }
 
-/// Removes a dead slot's directory, password file and lock file, and logs
-/// the outcome.
-fn remove_slot(name: &str, slot: &ClusterSlot) {
-    match remove_slot_files(slot) {
-        Ok(()) => log_swept(name),
-        Err(err) => log_removal_failed(name, &err),
-    }
-}
-
-/// Logs that a dead slot was removed.
-fn log_swept(name: &str) {
-    info!(target: LOG_TARGET, slot = name, "swept a dead cluster's data directory");
-}
-
-/// Logs that a dead slot could not be fully removed.
-fn log_removal_failed(name: &str, err: &io::Error) {
-    warn!(target: LOG_TARGET, slot = name, error = %err, "could not fully remove a dead slot");
-}
-
-/// Removes every file of a slot, reporting the first failure after trying
-/// them all so one stubborn leftover does not strand the others.
-fn remove_slot_files(slot: &ClusterSlot) -> io::Result<()> {
-    let results = [
-        remove_if_present(std::fs::remove_dir_all(&slot.data_dir)),
-        remove_if_present(std::fs::remove_file(&slot.password_file)),
-        remove_if_present(std::fs::remove_file(lock_path(&slot.data_dir))),
-    ];
-    results.into_iter().collect()
-}
-
-/// Treats "already gone" as success.
-fn remove_if_present(result: io::Result<()>) -> io::Result<()> {
-    match result {
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        other => other,
-    }
-}
-
 /// Creates and locks a new slot's lock file, refusing an existing one.
 fn lock_new_slot(parent: &Utf8Path, name: &str) -> BootstrapResult<File> {
     let path = parent.join(format!("{name}{LOCK_SUFFIX}"));
@@ -395,6 +378,9 @@ fn slot_error(path: &Utf8Path, action: &str, err: io::Error) -> BootstrapError {
     BootstrapError::from(Report::new(err).wrap_err(format!("cannot {action} {path}")))
 }
 
+mod removal;
+
 #[cfg(test)]
-#[path = "cluster_slot_tests.rs"]
+mod claim_guard_tests;
+#[cfg(test)]
 mod tests;
