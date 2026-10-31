@@ -8,6 +8,7 @@ contract test can drive each one against a mutated fixture.
 
 from __future__ import annotations
 
+import re
 import typing as typ
 
 
@@ -160,3 +161,27 @@ def mdlint_faults(makefile: str, target: str) -> list[str]:
                 "selection must come from the shared configuration"
             )
     return faults
+
+
+def mdlint_runner_faults(makefile: str) -> list[str]:
+    """Return what is wrong with the default ``MDLINT`` runner.
+
+    Parameters
+    ----------
+    makefile : str
+        The Makefile text.
+
+    Returns
+    -------
+    list[str]
+        One message per fault; empty when ``MDLINT`` references
+        ``$(MARKDOWNLINT_CLI2_VERSION)``. An override may change the runner,
+        but not the version the pinned CI action bundles.
+    """
+    match = re.search(r"^MDLINT\s*\?=\s*(.+)$", makefile, re.MULTILINE)
+    if match is None:
+        return ["Makefile does not declare MDLINT"]
+    runner = match.group(1).split("#", 1)[0].strip()
+    if "$(MARKDOWNLINT_CLI2_VERSION)" not in runner:
+        return [f"MDLINT does not use $(MARKDOWNLINT_CLI2_VERSION): {runner!r}"]
+    return []

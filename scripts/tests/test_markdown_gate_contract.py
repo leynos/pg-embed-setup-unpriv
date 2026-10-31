@@ -13,7 +13,11 @@ import typing as typ
 from pathlib import Path
 
 import pytest
-from makefile_gate import mdlint_faults, prerequisite_faults
+from makefile_gate import (
+    mdlint_faults,
+    mdlint_runner_faults,
+    prerequisite_faults,
+)
 from markdown_gate import (
     ACTION,
     config_faults,
@@ -84,6 +88,9 @@ def test_the_reference_inputs_satisfy_the_contract() -> None:
     )
     assert mdlint_faults(_GOOD_MAKEFILE, "fmt") == [], (
         "the fmt recipe may pass only `--fix`"
+    )
+    assert mdlint_runner_faults(_GOOD_MAKEFILE) == [], (
+        "the default runner must use the pinned CLI version"
     )
     assert config_faults(_GOOD_CONFIG) == [], (
         "the reference configuration must select Markdown"
@@ -160,6 +167,30 @@ def test_misleading_recipe_invocations_are_reported(
     """A glob, an echo or an ignored failure weakens the local gate."""
     assert old in _GOOD_MAKEFILE, f"the mutation target {old!r} must exist"
     assert mdlint_faults(_GOOD_MAKEFILE.replace(old, new), target), (
+        f"{new!r} must be reported"
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)",
+            "markdownlint-cli2@0.23.1",
+        ),
+        (
+            "MDLINT ?= npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)\n",
+            "",
+        ),
+    ],
+    ids=["literal-version", "missing"],
+)
+def test_the_default_runner_must_use_the_pinned_variable(
+    old: str, new: str
+) -> None:
+    """A runner override may change the tool, not the pinned version."""
+    assert old in _GOOD_MAKEFILE, f"the mutation target {old!r} must exist"
+    assert mdlint_runner_faults(_GOOD_MAKEFILE.replace(old, new)), (
         f"{new!r} must be reported"
     )
 
@@ -244,6 +275,18 @@ def test_configuration_ignores_are_judged(
     )
 
 
+def test_strings_keep_comment_and_comma_sequences() -> None:
+    """A `//` or `,]` inside a JSON string is data, not syntax."""
+    config = _GOOD_CONFIG.replace(
+        '"gitignore": true',
+        '"frontMatter": "http://example.com,] // data",\n  "gitignore": true',
+    )
+    assert config != _GOOD_CONFIG, "the reference gitignore line must exist"
+    assert config_faults(config) == [], (
+        "string content must survive the JSONC clean-up"
+    )
+
+
 @pytest.mark.parametrize(
     ("old", "new"),
     [
@@ -274,6 +317,7 @@ def test_the_repository_holds_the_contract() -> None:
         ),
         "markdownlint recipe": mdlint_faults(makefile, "markdownlint"),
         "fmt recipe": mdlint_faults(makefile, "fmt"),
+        "MDLINT runner": mdlint_runner_faults(makefile),
         "configuration globs": config_faults(configuration),
     }
     assert not any(faults.values()), faults
