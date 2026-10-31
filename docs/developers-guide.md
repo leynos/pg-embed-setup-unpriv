@@ -329,6 +329,10 @@ through a different runner. `scripts/tests/test_markdown_gate_contract.py`
 checks the pairing, the glob-free invocations, the shared selection and
 membership of `make all`.
 
+When the action commit changes, update its entry in `APPROVED_PAIRINGS` in
+`scripts/tests/markdown_gate.py` and `MARKDOWNLINT_CLI2_VERSION` in the
+`Makefile` together; the contract test fails until both agree.
+
 ## Spelling policy
 
 Run `make spelling` to enforce en-GB-oxendict spelling. The target invokes the
