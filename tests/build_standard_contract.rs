@@ -113,9 +113,10 @@ fn the_coverage_recipe_assigns_its_recorded_environment() -> Result<(), String> 
 /// The inherited settings the Whitaker route must clear, so its installer-managed toolchain builds
 /// with Cargo's repository defaults: flags, encoded flags, backend, target, the linker and
 /// rustflags of each supported host's target, and the C compiler's flags.
-const WHITAKER_CLEARED: [&str; 12] = [
+const WHITAKER_CLEARED: [&str; 13] = [
     "RUSTFLAGS",
     "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_BUILD_RUSTFLAGS",
     "CARGO_PROFILE_DEV_CODEGEN_BACKEND",
     "CARGO_BUILD_TARGET",
     "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
@@ -153,6 +154,7 @@ fn whitaker_route_problems(recipe: &str, host: &str) -> Problems {
     let assigns_flags = whitaker.split_whitespace().any(|word| {
         word.starts_with("RUSTFLAGS=")
             || word.starts_with("CARGO_ENCODED_RUSTFLAGS=")
+            || word.starts_with("CARGO_BUILD_RUSTFLAGS=")
             || (word.starts_with("CARGO_PROFILE_") && word.contains("_CODEGEN_BACKEND="))
     });
     if assigns_flags || whitaker.contains("=llvm") {
@@ -221,7 +223,8 @@ fn lint_runs_clippy_and_whitaker() -> Result<(), String> {
 
 /// A compliant `lint-whitaker` line, as `make -n` prints it.
 const WHITAKER_OK: &str =
-    "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_PROFILE_DEV_CODEGEN_BACKEND -u \
+    "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u \
+     CARGO_PROFILE_DEV_CODEGEN_BACKEND -u \
      CARGO_BUILD_TARGET -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER -u \
      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -u CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER \
      -u CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS -u CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER -u \
@@ -238,7 +241,7 @@ fn the_whitaker_and_lint_readers_refuse_each_broken_recipe() -> Result<(), Strin
         &format!("{WHITAKER_OK} --locked"),
         "Linux",
     ))?;
-    let broken: [(&str, String); 7] = [
+    let broken: [(&str, String); 8] = [
         (
             "echoed",
             WHITAKER_OK.replace("whitaker --all", "echo whitaker --all"),
@@ -260,6 +263,10 @@ fn the_whitaker_and_lint_readers_refuse_each_broken_recipe() -> Result<(), Strin
             WHITAKER_OK.replace("DYLINT", "CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm DYLINT"),
         ),
         ("kept flags", WHITAKER_OK.replace("-u RUSTFLAGS ", "")),
+        (
+            "kept build flags",
+            WHITAKER_OK.replace("-u CARGO_BUILD_RUSTFLAGS ", ""),
+        ),
         (
             "no warning policy",
             WHITAKER_OK.replace("DYLINT_RUSTFLAGS=\"-D warnings\" ", ""),

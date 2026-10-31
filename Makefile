@@ -151,6 +151,7 @@ lint-clippy: ## Run docstring coverage, rustdoc and Clippy with warnings denied
 # clears them and takes the repository's Cargo defaults instead. Dylint reads
 # the warning policy from DYLINT_RUSTFLAGS.
 WHITAKER_CLEAN_ENV = env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+	-u CARGO_BUILD_RUSTFLAGS \
 	-u CARGO_PROFILE_DEV_CODEGEN_BACKEND -u CARGO_BUILD_TARGET \
 	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER \
 	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS \
