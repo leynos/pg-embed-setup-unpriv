@@ -33,6 +33,15 @@ const CHILD_TEST: &str = "cache::lock::tests::cache_lock_child";
 /// Prefix of every line the child reports.
 const REPORT: &str = "CACHE-LOCK-CHILD:";
 
+/// Report the child sends immediately before it attempts to acquire.
+///
+/// The parent waits for this line before timing a conflict, so the window
+/// measures lock contention rather than process startup.
+const READY: &str = "ready";
+
+/// Report the child sends once it holds the lock.
+const ACQUIRED: &str = "acquired";
+
 /// How long a child gets to exit after its stdin closes, before it is killed.
 const EXIT_GRACE: Duration = Duration::from_secs(30);
 
@@ -85,8 +94,17 @@ impl ChildLock {
         })
     }
 
+    /// Waits up to `timeout` for the child to report that it is about to
+    /// acquire, before any conflict window starts.
+    pub(super) fn ready_within(&self, timeout: Duration) -> bool { self.wait_for(READY, timeout) }
+
     /// Waits up to `timeout` for the child to report that it holds the lock.
     pub(super) fn acquired_within(&self, timeout: Duration) -> bool {
+        self.wait_for(ACQUIRED, timeout)
+    }
+
+    /// Consumes reports until `expected` arrives or `timeout` elapses.
+    fn wait_for(&self, expected: &str, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -94,7 +112,7 @@ impl ChildLock {
                 return false;
             }
             match self.lines.recv_timeout(remaining) {
-                Ok(line) if line == "acquired" => return true,
+                Ok(line) if line == expected => return true,
                 Ok(_) => {}
                 Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => return false,
             }

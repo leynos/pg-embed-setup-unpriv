@@ -222,10 +222,11 @@ fn acquire_rejects_invalid_version_strings(
 
 /// Child process for the cross-process cases.
 ///
-/// Reads its cache coordinates from the environment, acquires the named lock,
-/// reports that fact, then holds the guard until stdin reaches EOF. The
-/// parent harness starts it with `--ignored`, so a normal run never executes
-/// it as a standalone case.
+/// Reads its cache coordinates from the environment, reports readiness,
+/// acquires the named lock, reports that fact, then holds the guard until
+/// stdin reaches EOF. Reporting before acquiring lets the parent time
+/// contention rather than process startup. The parent harness starts it with
+/// `--ignored`, so a normal run never executes it as a standalone case.
 ///
 /// `#[ignore]` hides the case from a normal run but not from an explicit
 /// `--ignored` run, which has none of the parent's coordinates. Returning
@@ -250,6 +251,9 @@ fn cache_lock_child() {
         other => panic!("unknown child lock mode: {other}"),
     };
 
+    // Report before blocking on the lock: a parent that waited for the
+    // acquisition report would measure child startup, not contention.
+    process::report("ready").expect("report readiness");
     let _lock = acquire(&cache_dir, &version, lock_type).expect("child lock");
     process::report("acquired").expect("report acquisition");
 
@@ -269,6 +273,10 @@ fn an_exclusive_parent_blocks_an_exclusive_child(
     let child = process::ChildLock::spawn(&cache_dir, "17.4.0", "exclusive").expect("spawn child");
 
     assert!(
+        child.ready_within(READY_TIMEOUT),
+        "the child must reach its acquisition attempt before the window opens"
+    );
+    assert!(
         !child.acquired_within(CONFLICT_WINDOW),
         "an exclusive child must not acquire while the parent holds the lock"
     );
@@ -287,6 +295,10 @@ fn a_shared_parent_lets_a_shared_child_acquire(cache_fixture: io::Result<(TempDi
     let _held = CacheLock::acquire_shared(&cache_dir, "17.4.0").expect("parent lock");
     let child = process::ChildLock::spawn(&cache_dir, "17.4.0", "shared").expect("spawn child");
 
+    assert!(
+        child.ready_within(READY_TIMEOUT),
+        "the child must reach its acquisition attempt"
+    );
     assert!(
         child.acquired_within(ACQUIRE_TIMEOUT),
         "a shared child must acquire while the parent holds a shared lock"
