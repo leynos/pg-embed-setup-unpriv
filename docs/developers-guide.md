@@ -211,7 +211,7 @@ executable and pointer publication are covered by
 
 ## Lint and formatting toolchain
 
-The repository pins `rust-toolchain.toml` to `nightly-2026-10-23` because the
+The repository pins `rust-toolchain.toml` to `nightly-2026-10-30` because the
 imported `rustfmt.toml` template uses unstable rustfmt options. Use the
 Makefile targets rather than invoking Cargo directly so local checks and CI
 exercise the same nightly formatter and Clippy policy:
@@ -1172,7 +1172,7 @@ it only where the full suite passes under it, and that is not shown here on the
 pinned `nightly-2026-04-25` (measured 2026-10-02): 13 tests (the
 `scenario_fixture_*` scenarios in `tests/test_cluster_fixture/steps.rs` among
 them) fail under it while the suite passes under LLVM, 799 of 799 in the full
-run. That measurement predates the bump to `nightly-2026-10-23` and has not
+run. That measurement predates the bump to `nightly-2026-10-30` and has not
 been repeated on it, so it is evidence of a past result, not of current
 behaviour. Re-measure the whole suite under the backend, with CI's environment,
 on the next attempt to adopt it, and adopt it only if every test passes.

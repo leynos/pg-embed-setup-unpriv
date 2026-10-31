@@ -39,10 +39,6 @@ fn skip_reason(err: &BootstrapError) -> Option<String> {
 
 /// Verifies that `shared_cluster_handle()` returns the same leaked reference
 /// on subsequent calls, proving that successful initialization is cached.
-#[expect(
-    clippy::cognitive_complexity,
-    reason = "Test readability benefits from linear flow rather than excessive fragmentation"
-)]
 #[test]
 fn caches_successful_initialization() {
     let sandbox = tempdir().expect("sandbox tempdir should be created");
