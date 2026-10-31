@@ -13,14 +13,13 @@ import typing as typ
 from pathlib import Path
 
 import pytest
+from makefile_gate import mdlint_faults, prerequisite_faults
 from markdown_gate import (
     ACTION,
     config_faults,
     glob_faults,
-    mdlint_faults,
     pairing_faults,
     pairing_faults_for,
-    prerequisite_faults,
 )
 from workflow_reader import Workflow
 
