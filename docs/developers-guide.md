@@ -862,7 +862,8 @@ that second bootstrap chose. Three things about it are deliberate.
   starves both. Group membership makes nextest queue them before starting them,
   so the per-test slow-timeout measures the test rather than the wait for the
   lock (#254). A new binary that compiles the serial module must join the
-  filter; the `serial_group` contract in `scripts/tests/` enforces it.
+  filter and the `LOCK_TAKING_BINARIES` pin in `scripts/tests/serial_group.py`;
+  the `serial_group` contract enforces both.
 - Its crate name is in the `no_std_fs_operations` exclusion list in
   `dylint.toml`, for the reason the list already gives for the other
   integration-test crates: they share the ambient `tests/support` modules,
