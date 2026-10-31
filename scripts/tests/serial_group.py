@@ -17,22 +17,20 @@ The filter grammar is deliberately narrow: exact ``binary(=name)`` terms
 joined by ``|``. A broader filter, a negation or a conjunction would make
 the group mean something this contract cannot compare with the inventory.
 
-Discovery is narrow in the same way: a binary is lock-taking when its
-declared root file names the module directly, as every current root does.
-A support module that compiled the module on a root's behalf would hide the
-dependency, so the contract reports such a file instead of guessing which
-binary reaches it; move the attribute into the root to make the binary
-discoverable.
+The inventory itself comes from :mod:`serial_inventory`, which discovers
+the binaries and reports a serial-module inclusion that cannot be
+attributed to a root file.
 """
 
 from __future__ import annotations
 
 import re
-import tomllib
 import typing as typ
 from pathlib import Path
 
 from nextest_budgets import _parsed
+from serial_inventory import lock_taking_binaries
+from timeout_budgets import mapping_or_empty, sequence_or_empty
 
 REPOSITORY_ROOT: typ.Final[Path] = Path(__file__).resolve().parents[2]
 NEXTEST_CONFIG: typ.Final[Path] = REPOSITORY_ROOT / ".config" / "nextest.toml"
@@ -41,17 +39,6 @@ TESTS_DIRECTORY: typ.Final[Path] = REPOSITORY_ROOT / "tests"
 
 #: The group whose ``max-threads = 1`` queues the lock-taking binaries.
 SERIAL_GROUP: typ.Final[str] = "serial"
-
-#: The module a root file names to take the cross-process scenario lock.
-#:
-#: A directory module's root, such as ``tests/test_cluster_fixture/mod.rs``,
-#: reaches the shared file as ``../support/serial.rs``, so the attribute
-#: pattern accepts any relative prefix instead of pinning the top-level
-#: spelling only.
-SERIAL_MODULE_PATH: typ.Final[str] = "support/serial.rs"
-_SERIAL_MODULE_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
-    r'#\[path\s*=\s*"[^"]*' + re.escape(SERIAL_MODULE_PATH) + r'"\]'
-)
 
 #: Every integration-test binary that compiles ``tests/support/serial.rs``.
 #:
@@ -82,46 +69,6 @@ LOCK_TAKING_BINARIES: typ.Final[frozenset[str]] = frozenset(
 _BINARY_TERM: typ.Final[re.Pattern[str]] = re.compile(r"binary\(=([A-Za-z0-9_]+)\)")
 
 
-def _mapping(value: object) -> dict[str, object]:
-    """Return a TOML table as a mapping, or an empty one.
-
-    Parameters
-    ----------
-    value : object
-        A value read from ``tomllib``.
-
-    Returns
-    -------
-    dict of str to object
-        The table, or an empty mapping when the value is not one.
-    """
-    match value:
-        case dict():
-            return value
-        case _:
-            return {}
-
-
-def _sequence(value: object) -> list[object]:
-    """Return a TOML array as a list, or an empty one.
-
-    Parameters
-    ----------
-    value : object
-        A value read from ``tomllib``.
-
-    Returns
-    -------
-    list of object
-        The array, or an empty list when the value is not one.
-    """
-    match value:
-        case list():
-            return value
-        case _:
-            return []
-
-
 def _serial_limit_faults(config: dict[str, object]) -> list[str]:
     """Report a ``test-groups.serial.max-threads`` other than one.
 
@@ -135,8 +82,8 @@ def _serial_limit_faults(config: dict[str, object]) -> list[str]:
     list of str
         One fault when the limit is absent or not exactly one, else empty.
     """
-    groups = _mapping(config.get("test-groups"))
-    serial = _mapping(groups.get(SERIAL_GROUP))
+    groups = mapping_or_empty(config.get("test-groups"))
+    serial = mapping_or_empty(groups.get(SERIAL_GROUP))
     limit = serial.get("max-threads")
     if type(limit) is int and limit == 1:
         return []
@@ -158,11 +105,13 @@ def _serial_overrides(config: dict[str, object]) -> list[dict[str, object]]:
     list of dict
         Every override whose ``test-group`` names ``serial``, in file order.
     """
-    profile = _mapping(_mapping(config.get("profile")).get("default"))
+    profile = mapping_or_empty(
+        mapping_or_empty(config.get("profile")).get("default")
+    )
     return [
         table
-        for override in _sequence(profile.get("overrides"))
-        if (table := _mapping(override)).get("test-group") == SERIAL_GROUP
+        for override in sequence_or_empty(profile.get("overrides"))
+        if (table := mapping_or_empty(override)).get("test-group") == SERIAL_GROUP
     ]
 
 
@@ -226,117 +175,6 @@ def _filter_names(
     return frozenset(names), faults
 
 
-def _declared_targets(manifest: dict[str, object], root: Path) -> dict[str, Path]:
-    """Return integration-test names mapped to their declared root files.
-
-    Parameters
-    ----------
-    manifest : dict of str to object
-        The parsed ``Cargo.toml``.
-    root : Path
-        The directory the manifest's relative paths are resolved against.
-
-    Returns
-    -------
-    dict of str to Path
-        One entry per ``[[test]]`` declaration.
-    """
-    targets: dict[str, Path] = {}
-    for entry in _sequence(manifest.get("test")):
-        table = _mapping(entry)
-        match table.get("path"), table.get("name"):
-            case (str() as path, str() as name):
-                targets[name] = root / path
-            case (str() as path, _):
-                targets[Path(path).stem] = root / path
-            case (_, str() as name):
-                targets[name] = root / "tests" / f"{name}.rs"
-    return targets
-
-
-def _serial_includers(
-    tests_directory: Path,
-) -> tuple[frozenset[Path], list[str]]:
-    """Return every file under ``tests`` that compiles the serial module.
-
-    Parameters
-    ----------
-    tests_directory : Path
-        The ``tests`` directory to scan.
-
-    Returns
-    -------
-    tuple
-        The resolved paths that name the module, and any read faults.
-    """
-    includers: set[Path] = set()
-    faults: list[str] = []
-    for path in sorted(tests_directory.rglob("*.rs")):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as error:
-            faults.append(f"cannot read {path}: {error}")
-            continue
-        if _SERIAL_MODULE_PATTERN.search(text):
-            includers.add(path.resolve())
-    return frozenset(includers), faults
-
-
-def _lock_taking_binaries(
-    manifest_text: str, tests_directory: Path
-) -> tuple[frozenset[str], list[str]]:
-    """Discover the binaries whose root file compiles the serial module.
-
-    Declared ``[[test]]`` targets and undeclared top-level ``tests/*.rs``
-    files are both considered, so a new binary that includes the module is
-    found even before its manifest entry or filter term is added. Only a
-    root file counts, so any other file that compiles the module is reported
-    rather than silently left unattributable.
-
-    Parameters
-    ----------
-    manifest_text : str
-        The ``Cargo.toml`` text.
-    tests_directory : Path
-        The ``tests`` directory to scan.
-
-    Returns
-    -------
-    tuple
-        The discovered lock-taking names, and any discovery faults.
-    """
-    try:
-        manifest = tomllib.loads(manifest_text)
-    except tomllib.TOMLDecodeError as error:
-        return frozenset(), [f"Cargo.toml is not valid TOML: {error}"]
-    targets = _declared_targets(manifest, tests_directory.parent)
-    for path in sorted(tests_directory.glob("*.rs")):
-        targets.setdefault(path.stem, path)
-    lock_taking: set[str] = set()
-    faults: list[str] = []
-    for name, root_file in sorted(targets.items()):
-        try:
-            text = root_file.read_text(encoding="utf-8")
-        except OSError as error:
-            faults.append(
-                f"cannot read the root file for binary {name!r} at "
-                f"{root_file}: {error}"
-            )
-            continue
-        if _SERIAL_MODULE_PATTERN.search(text):
-            lock_taking.add(name)
-    includers, read_faults = _serial_includers(tests_directory)
-    faults.extend(read_faults)
-    hidden = sorted(includers - {target.resolve() for target in targets.values()})
-    if hidden:
-        faults.append(
-            "the serial module is compiled outside a declared test root, so "
-            "no binary can be attributed: "
-            + ", ".join(str(path) for path in hidden)
-        )
-    return frozenset(lock_taking), faults
-
-
 def _difference_faults(
     label: str, actual: frozenset[str], expected: frozenset[str]
 ) -> list[str]:
@@ -394,7 +232,7 @@ def serial_group_faults(
     if override is not None:
         filter_names, grammar_faults = _filter_names(override)
         faults.extend(grammar_faults)
-    discovered, discovery_faults = _lock_taking_binaries(
+    discovered, discovery_faults = lock_taking_binaries(
         manifest_text, tests_directory
     )
     faults.extend(discovery_faults)
