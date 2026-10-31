@@ -113,7 +113,10 @@ build: ## Build debug binary
 release: ## Build release binaries
 	RUSTFLAGS="$${RUSTFLAGS-}" $(CARGO) build $(BUILD_JOBS) --release $(foreach bin,$(RELEASE_BINARIES),--bin $(bin))
 
-all: check-fmt lint test test-scripts spelling test-workflow-contracts ## Perform all commit gate checks
+# `nixie` and `test-loom` are deliberately outside the local gate. Nixie and
+# Merman are not provisioned by local Make, and Loom is opt-in and bounded at
+# ten minutes in CI. `AGENTS.md` states when each must be run by hand.
+all: check-fmt markdownlint lint test test-scripts spelling test-workflow-contracts ## Perform local commit gates except nixie and test-loom (see AGENTS.md)
 
 clean: ## Remove build artefacts
 	$(CARGO) clean

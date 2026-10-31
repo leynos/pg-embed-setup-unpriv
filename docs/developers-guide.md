@@ -313,6 +313,22 @@ suite-version input, and [shared-actions#454][shared-actions-suite-pin] asks
 [whitaker-suite-pin]: https://github.com/leynos/whitaker/issues/402
 [shared-actions-suite-pin]: https://github.com/leynos/shared-actions/issues/454
 
+### Markdown lint toolchain
+
+`make markdownlint` lints the Markdown with `markdownlint-cli2` after enforcing
+en-GB-oxendict spelling. File selection, rule configuration and ignores live
+only in `.markdownlint-cli2.jsonc`. The CI action step and the Makefile pass no
+positional globs, because the CLI appends configuration globs to command-line
+globs, so a caller glob would widen the set rather than replace it.
+
+The local CLI runs through `npx` and is pinned by `MARKDOWNLINT_CLI2_VERSION`
+in the `Makefile` (currently `0.23.2`), which must equal the version bundled by
+the pinned `DavidAnson/markdownlint-cli2-action` commit in `ci.yml`. Node.js 22
+or later is required. Override `MDLINT` only to run the same pinned version
+through a different runner. `scripts/tests/test_markdown_gate_contract.py`
+checks the pairing, the glob-free invocations, the shared selection and
+membership of `make all`.
+
 ## Spelling policy
 
 Run `make spelling` to enforce en-GB-oxendict spelling. The target invokes the
@@ -339,6 +355,8 @@ mistakes.
 `make nixie` validates the repository's Mermaid diagrams. CI installs Nixie
 1.1.0 and caches Merman CLI 0.7.0, compiling Merman with an isolated Rust
 1.95.0 toolchain so the product's pinned nightly toolchain remains unchanged.
+Local Make does not provision Nixie, Merman or that toolchain, so `make all`
+omits `nixie`; run it by hand after changing a Mermaid diagram.
 
 ## Release process
 

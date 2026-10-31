@@ -61,6 +61,17 @@
     above.
   - Passes lint checks
   - Adheres to formatting standards tested using a formatting validator.
+- **Commit gate:** Run `make all` before committing. It runs `check-fmt`,
+  `markdownlint`, `lint`, `test`, `test-scripts`, `spelling` and
+  `test-workflow-contracts`; `markdownlint` depends on `spelling`. Two gates
+  that CI runs are deliberately excluded from the local target:
+  - `make nixie` needs Nixie 1.1.0 and Merman 0.7.0, and Merman compiles under
+    a separate Rust 1.95.0 toolchain. Local Make does not provision either, so
+    run `make nixie` after changing a Mermaid diagram.
+  - `make test-loom` runs the opt-in Loom models behind the `loom-tests`
+    feature. The models are `#[ignore]`d, so `make test` leaves them dormant,
+    and CI bounds the run at ten minutes. Run `make test-loom` after changing
+    Loom-modelled code or its scheduler bounds.
 - **Committing:**
   - Only changes that meet all the quality gates above should be committed.
   - Write clear, descriptive commit messages summarizing the change, following
@@ -230,6 +241,15 @@ project:
 
 - Validate Markdown files using `make markdownlint`. This target also enforces
   en-GB-oxendict spelling.
+- Both `make markdownlint` and the Markdown lint CI step take their file
+  selection from `.markdownlint-cli2.jsonc`. Do not pass globs on the command
+  line: `markdownlint-cli2` appends the configuration globs to caller globs, so
+  a caller glob widens the set rather than replacing it.
+- The target runs `markdownlint-cli2` through `npx`, at the version pinned by
+  `MARKDOWNLINT_CLI2_VERSION` in the `Makefile`. That version must match the
+  one bundled by the pinned CI action, and the local runner needs Node.js 22 or
+  later. Override `MDLINT` only to use a different runner for the same pinned
+  version.
 - Quoted APIs and identifiers retain their upstream spelling. Put Markdown
   quotations in backticks or fenced code blocks where practical, and use only
   narrow exact patterns for source-code machine interfaces.
