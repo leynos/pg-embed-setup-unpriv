@@ -57,3 +57,61 @@ fn ci_rustflags_assignments_keep_the_standard_flags() {
         }
     }
 }
+
+/// Returns the lines of the workflow step whose `- name:` is `name`: from that line to the next line
+/// indented no deeper than the list item, so a re-indented workflow or a later step cannot lend it
+/// an environment it does not carry.
+fn step_lines(name: &str) -> Vec<&'static str> {
+    let marker = format!("- name: {name}");
+    let mut lines = CI.lines().skip_while(|line| line.trim() != marker);
+    let Some(first) = lines.next() else {
+        return Vec::new();
+    };
+    let indent = first.len() - first.trim_start().len();
+    std::iter::once(first)
+        .chain(lines.take_while(|line| {
+            line.trim().is_empty() || line.len() - line.trim_start().len() > indent
+        }))
+        .collect()
+}
+
+/// Returns the `RUSTFLAGS` value a workflow step assigns in its own `env:` block.
+fn step_env_rustflags(name: &str) -> Option<String> {
+    step_lines(name).into_iter().find_map(|line| {
+        line.trim()
+            .strip_prefix("RUSTFLAGS:")
+            .map(|value| value.trim().to_owned())
+    })
+}
+
+/// Scenario: the root job's direct `cargo build`, which `setup-rust`'s exported `-D warnings` would
+/// otherwise leave without the build standard's flags (Concordat BD-009).
+///
+/// Invariant: the step assigns the warning policy, the parallel frontend and the mold linker in its
+/// own `env:`, so dropping any of them, or the whole assignment, fails here.
+#[test]
+fn the_root_step_restates_the_build_standard_in_its_environment() {
+    let value = step_env_rustflags("Install cargo-nextest and test (root)")
+        .expect("the root test step must assign RUSTFLAGS in its env");
+    let words: Vec<&str> = value.split_whitespace().collect();
+    assert!(
+        words.windows(2).any(|pair| pair == ["-D", "warnings"]),
+        "the root step must keep denying warnings: {value}"
+    );
+    for flag in ["-Zthreads=8", "-Clink-arg=-fuse-ld=mold"] {
+        assert!(
+            words.contains(&flag),
+            "the root step must restate {flag}: {value}"
+        );
+    }
+}
+
+/// The step reader stays inside its own step: a later step's assignment is not lent to an earlier one.
+#[test]
+fn the_step_reader_does_not_read_past_its_step() {
+    assert_eq!(
+        step_env_rustflags("Test with all features (unprivileged)"),
+        None,
+        "the unprivileged step assigns RUSTFLAGS on its command line, not in an env block"
+    );
+}

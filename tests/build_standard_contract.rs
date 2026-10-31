@@ -47,7 +47,7 @@ use ci_steps::workflow_problems;
 use config::{CONFIG, Pin, Problems, TOOLCHAIN, config_problems};
 use coverage_env::coverage_recipe_problems;
 use development::development_problems;
-use make::{Host, held_out_problems, held_out_target_count};
+use make::{Host, Target, held_out_problems, held_out_target_count};
 use process::real_make;
 
 /// Turns a list of complaints into a test result.
@@ -108,4 +108,218 @@ fn coverage_and_release_take_neither_flag() -> Result<(), String> {
 #[test]
 fn the_coverage_recipe_assigns_its_recorded_environment() -> Result<(), String> {
     none_of(&coverage_recipe_problems(real_make)?)
+}
+
+/// The inherited settings the Whitaker route must clear, so its installer-managed toolchain builds
+/// with Cargo's repository defaults: flags, encoded flags, backend, target, the linker and
+/// rustflags of each supported host's target, and the C compiler's flags.
+const WHITAKER_CLEARED: [&str; 13] = [
+    "RUSTFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_BUILD_RUSTFLAGS",
+    "CARGO_PROFILE_DEV_CODEGEN_BACKEND",
+    "CARGO_BUILD_TARGET",
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
+    "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER",
+    "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS",
+    "CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER",
+    "CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS",
+    "CFLAGS",
+    "LDFLAGS",
+];
+
+/// Returns the complaints about the `make -n lint-whitaker` output of one host. The command is the
+/// line whose program the shell executes is Whitaker (after assignments and the `env` wrapper), so
+/// a line that only prints its name does not count; it must clear every inherited setting, assign
+/// no flag, backend or profile in any spelling, pass the warning policy through Dylint's input and
+/// keep the target and feature selections as words, since other Cargo options may follow them.
+fn whitaker_route_problems(recipe: &str, host: &str) -> Problems {
+    let Some(whitaker) = recipe.lines().find(|line| {
+        shell::executed_program(line).is_some_and(|word| shell::names_program(word, "whitaker"))
+    }) else {
+        return vec![format!(
+            "`make lint-whitaker` on {host} must execute the Whitaker program: {recipe}"
+        )];
+    };
+    let whitaker = shell::without_comment(whitaker);
+    let mut problems = clearing_problems(whitaker, host);
+    problems.extend(assignment_problems(whitaker));
+    problems.extend(selection_problems(whitaker));
+    problems
+}
+
+/// Returns a complaint for each inherited setting the Whitaker command does not clear with `-u`.
+fn clearing_problems(whitaker: &str, host: &str) -> Problems {
+    WHITAKER_CLEARED
+        .iter()
+        .filter(|setting| !whitaker.contains(&format!("-u {setting} ")))
+        .map(|setting| format!("Whitaker on {host} must remove inherited {setting}: {whitaker}"))
+        .collect()
+}
+
+/// Returns whether a word assigns a flag, encoded-flag or backend variable in any spelling (empty,
+/// bare, single or double quoted), each of which replaces Cargo's repository defaults.
+fn assigns_build_variable(word: &str) -> bool {
+    [
+        "RUSTFLAGS=",
+        "CARGO_ENCODED_RUSTFLAGS=",
+        "CARGO_BUILD_RUSTFLAGS=",
+    ]
+    .iter()
+    .any(|prefix| word.starts_with(prefix))
+        || (word.starts_with("CARGO_PROFILE_") && word.contains("_CODEGEN_BACKEND="))
+}
+
+/// Returns the complaint when the Whitaker command assigns flags or selects LLVM.
+fn assignment_problems(whitaker: &str) -> Problems {
+    if whitaker.split_whitespace().any(assigns_build_variable) || whitaker.contains("=llvm") {
+        return vec![format!(
+            "Whitaker must not replace Cargo defaults with assigned flags or LLVM: {whitaker}"
+        )];
+    }
+    Problems::new()
+}
+
+/// Returns the complaints about the warning policy and the target and feature selections, which
+/// are read as words because other Cargo options may follow them.
+fn selection_problems(whitaker: &str) -> Problems {
+    let mut problems = Problems::new();
+    if !whitaker.contains("DYLINT_RUSTFLAGS=\"-D warnings") {
+        problems.push(format!(
+            "warnings must reach the check through Dylint's input: {whitaker}"
+        ));
+    }
+    problems.extend(
+        ["--all-targets", "--all-features"]
+            .iter()
+            .filter(|option| !whitaker.split_whitespace().any(|word| word == **option))
+            .map(|option| {
+                format!(
+                    "the check must keep {option}, which is how Whitaker reaches every target: \
+                     {whitaker}"
+                )
+            }),
+    );
+    problems
+}
+
+/// Returns the complaints about the `make -n lint` output: one command executes Cargo with the
+/// `clippy` word and another executes Whitaker, so isolating the Whitaker route cannot drop either
+/// from the gate, and a recipe that only prints their names runs neither.
+fn lint_problems(recipe: &str) -> Problems {
+    let runs = |program: &str, subcommand: Option<&str>| {
+        recipe.lines().any(|line| {
+            shell::executed_program(line).is_some_and(|word| shell::names_program(word, program))
+                && subcommand.is_none_or(|sub| line.split_whitespace().any(|word| word == sub))
+        })
+    };
+    let mut problems = Problems::new();
+    if !runs("cargo", Some("clippy")) {
+        problems.push(format!(
+            "`make lint` no longer executes `cargo clippy`: {recipe}"
+        ));
+    }
+    if !runs("whitaker", None) {
+        problems.push(format!("`make lint` no longer executes Whitaker: {recipe}"));
+    }
+    problems
+}
+
+/// Whitaker builds with its own installer-managed toolchain, so its route clears every inherited
+/// flag, backend and linker setting instead of restating the standard, and passes the warning
+/// policy through Dylint's own input. It neither assigns `RUSTFLAGS` nor selects LLVM, so Cargo's
+/// repository defaults stay in force for the checked crate. The route runs on Linux and macOS
+/// hosts, so both are read and each clears its own target settings.
+#[test]
+fn whitaker_clears_inherited_settings_and_takes_the_repository_defaults() -> Result<(), String> {
+    let mut problems = Problems::new();
+    for host in [Host::Linux, Host::Darwin] {
+        let recipe = real_make(Target("lint-whitaker"), host)?;
+        problems.extend(whitaker_route_problems(&recipe, host.make_value()));
+    }
+    none_of(&problems)
+}
+
+/// `make lint` runs both halves, so isolating Whitaker cannot drop either from the gate.
+#[test]
+fn lint_runs_clippy_and_whitaker() -> Result<(), String> {
+    none_of(&lint_problems(&real_make(Target("lint"), Host::Linux)?))
+}
+
+/// A compliant `lint-whitaker` line, as `make -n` prints it.
+const WHITAKER_OK: &str =
+    "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u \
+     CARGO_PROFILE_DEV_CODEGEN_BACKEND -u CARGO_BUILD_TARGET -u \
+     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER -u \
+     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -u CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER \
+     -u CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS -u CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER -u \
+     CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS -u CFLAGS -u LDFLAGS DYLINT_RUSTFLAGS=\"-D \
+     warnings\" whitaker --all -- --all-targets --all-features";
+
+/// The readers judge canned recipes, so the checks above cannot pass by finding nothing: the
+/// compliant line passes, with and without a trailing Cargo option, and each broken variant is
+/// refused by name.
+#[test]
+fn the_whitaker_and_lint_readers_refuse_each_broken_recipe() -> Result<(), String> {
+    none_of(&whitaker_route_problems(WHITAKER_OK, "Linux"))?;
+    none_of(&whitaker_route_problems(
+        &format!("{WHITAKER_OK} --locked"),
+        "Linux",
+    ))?;
+    none_of(&whitaker_route_problems(
+        &format!("{WHITAKER_OK} --note \"a #b\""),
+        "Linux",
+    ))?;
+    let broken: [(&str, String); 10] = [
+        (
+            "echoed",
+            WHITAKER_OK.replace("whitaker --all", "echo whitaker --all"),
+        ),
+        (
+            "empty RUSTFLAGS",
+            WHITAKER_OK.replace("DYLINT", "RUSTFLAGS= DYLINT"),
+        ),
+        (
+            "single quoted",
+            WHITAKER_OK.replace("DYLINT", "RUSTFLAGS='-Zthreads=8' DYLINT"),
+        ),
+        (
+            "bare",
+            WHITAKER_OK.replace("DYLINT", "RUSTFLAGS=-Zthreads=8 DYLINT"),
+        ),
+        (
+            "LLVM",
+            WHITAKER_OK.replace("DYLINT", "CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm DYLINT"),
+        ),
+        ("kept flags", WHITAKER_OK.replace("-u RUSTFLAGS ", "")),
+        (
+            "options hidden by a comment",
+            WHITAKER_OK.replace(" --all-targets --all-features", " # --all-targets --all-features"),
+        ),
+        (
+            "options hidden by a tab-led comment",
+            WHITAKER_OK.replace(" --all-targets --all-features", "\t# --all-targets --all-features"),
+        ),
+        (
+            "kept build flags",
+            WHITAKER_OK.replace("-u CARGO_BUILD_RUSTFLAGS ", ""),
+        ),
+        (
+            "no warning policy",
+            WHITAKER_OK.replace("DYLINT_RUSTFLAGS=\"-D warnings\" ", ""),
+        ),
+    ];
+    for (name, recipe) in broken {
+        if whitaker_route_problems(&recipe, "Linux").is_empty() {
+            return Err(format!("a recipe with {name} passed: {recipe}"));
+        }
+    }
+    let printed = "echo cargo clippy --all-targets\necho whitaker --all";
+    if lint_problems(printed).len() != 2 {
+        return Err(format!("a lint recipe that only prints passed: {printed}"));
+    }
+    let real = "RUSTFLAGS=\"-D warnings\" cargo clippy --all-targets\nenv -u X \
+                DYLINT_RUSTFLAGS=\"-D warnings\" whitaker --all";
+    none_of(&lint_problems(real))
 }

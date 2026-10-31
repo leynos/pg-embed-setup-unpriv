@@ -1165,14 +1165,40 @@ workflow's `Build release archive` step. The script tests read that assignment
 from the execution context, and the release workflow contract requires every
 release build in `release.yml` to go through the script.
 
+### The Whitaker route
+
+`make lint` runs `lint-clippy` (which takes the standard's flags, as before) and
+`lint-whitaker`. Whitaker builds with its own installer-managed toolchain,
+which must not inherit the repository's development flags, so the route clears
+inherited `RUSTFLAGS`, encoded flags, backend, target and linker settings
+through `WHITAKER_CLEAN_ENV` and passes the warning policy through
+`DYLINT_RUSTFLAGS`. It neither assigns `RUSTFLAGS` nor selects LLVM, so Cargo's
+repository defaults stay in force. `tests/build_standard_contract.rs` reads
+`make -n lint-whitaker` on a Linux and a macOS host for exactly that. In CI,
+the root job's direct `cargo build` assigns the standard's flags in its step
+environment, because `setup-rust` would otherwise export `-D warnings` alone.
+
+### The development footprint
+
+The Concordat `rust-dev-build-footprint` rule keeps default development builds
+small. `Cargo.toml` sets `incremental = false` and `debug = 0` in
+`[profile.dev]`, which the test profile inherits, and `.cargo/config.toml` sets
+`[unstable] embed-metadata = false`, the native Cargo setting for dated
+nightlies from 2026-07-31. The trade-off is that a debugger sees no symbols or
+line tables in a default development build and every rebuild recompiles whole
+crates. To debug, run with `CARGO_PROFILE_DEV_DEBUG=true`; to rebuild
+incrementally, set `CARGO_INCREMENTAL=1`. `tests/build_footprint_contract.rs`
+holds all three settings.
+
 ### Cranelift
 
 Exception: Cranelift is not the development-profile backend. The estate adopts
-it only where the full suite passes under it, and that is not shown here on the
-pinned `nightly-2026-04-25` (measured 2026-10-02): 13 tests (the
-`scenario_fixture_*` scenarios in `tests/test_cluster_fixture/steps.rs` among
-them) fail under it while the suite passes under LLVM, 799 of 799 in the full
-run. That measurement predates the bump to `nightly-2026-10-30` and has not
-been repeated on it, so it is evidence of a past result, not of current
-behaviour. Re-measure the whole suite under the backend, with CI's environment,
-on the next attempt to adopt it, and adopt it only if every test passes.
+it only where the full suite passes under it, and that is not shown here. The
+repository pins `nightly-2026-10-30`, and no measurement was taken on it
+(recorded 2026-10-31). The last measurement was on `nightly-2026-04-25`
+(2026-10-02): 13 tests (the `scenario_fixture_*` scenarios in
+`tests/test_cluster_fixture/steps.rs` among them) failed under it while the
+suite passed under LLVM, 799 of 799 in the full run. That is evidence of a past
+result, not of current behaviour, and no deferral date is set. Re-measure the
+whole suite under the backend, with CI's environment, on the next attempt to
+adopt it, and adopt it only if every test passes.

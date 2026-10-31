@@ -16,15 +16,16 @@ use super::{
 const DEVELOPMENT_TARGETS: &[&str] = &[
     "test",
     "typecheck",
-    "lint",
+    "lint-clippy",
     "build",
     "test-doc",
     "test-loom",
 ];
 /// The tools each development target runs, as recorded when the contract was written: for example
-/// `cargo build`, `cargo clippy`, `cargo nextest run`, `whitaker`. A target that stops running one
-/// of them fails the contract, so a version probe cannot replace `cargo build` and one lint command
-/// cannot replace the other required ones.
+/// `cargo build`, `cargo clippy`, `cargo nextest run`. A target that stops running one of them
+/// fails the contract, so a version probe cannot replace `cargo build`. The Whitaker route is not a
+/// development target: it must not inherit the standard flags, so `lint-whitaker` has a contract of
+/// its own.
 const EXPECTED_TOOLS: &[Tools] = &[
     Tools {
         target: "test",
@@ -35,8 +36,8 @@ const EXPECTED_TOOLS: &[Tools] = &[
         keys: &["cargo check"],
     },
     Tools {
-        target: "lint",
-        keys: &["cargo clippy", "whitaker"],
+        target: "lint-clippy",
+        keys: &["cargo clippy"],
     },
     Tools {
         target: "build",
