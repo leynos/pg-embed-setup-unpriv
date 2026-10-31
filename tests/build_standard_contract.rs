@@ -142,39 +142,60 @@ fn whitaker_route_problems(recipe: &str, host: &str) -> Problems {
             "`make lint-whitaker` on {host} must execute the Whitaker program: {recipe}"
         )];
     };
-    let mut problems = Problems::new();
-    for setting in WHITAKER_CLEARED {
-        if !whitaker.contains(&format!("-u {setting} ")) {
-            problems.push(format!(
-                "Whitaker on {host} must remove inherited {setting}: {whitaker}"
-            ));
-        }
-    }
-    // Any assignment form replaces the defaults: empty, bare, single or double quoted.
-    let assigns_flags = whitaker.split_whitespace().any(|word| {
-        word.starts_with("RUSTFLAGS=")
-            || word.starts_with("CARGO_ENCODED_RUSTFLAGS=")
-            || word.starts_with("CARGO_BUILD_RUSTFLAGS=")
-            || (word.starts_with("CARGO_PROFILE_") && word.contains("_CODEGEN_BACKEND="))
-    });
-    if assigns_flags || whitaker.contains("=llvm") {
-        problems.push(format!(
+    let mut problems = clearing_problems(whitaker, host);
+    problems.extend(assignment_problems(whitaker));
+    problems.extend(selection_problems(whitaker));
+    problems
+}
+
+/// Returns a complaint for each inherited setting the Whitaker command does not clear with `-u`.
+fn clearing_problems(whitaker: &str, host: &str) -> Problems {
+    WHITAKER_CLEARED
+        .iter()
+        .filter(|setting| !whitaker.contains(&format!("-u {setting} ")))
+        .map(|setting| format!("Whitaker on {host} must remove inherited {setting}: {whitaker}"))
+        .collect()
+}
+
+/// Returns whether a word assigns a flag, encoded-flag or backend variable in any spelling (empty,
+/// bare, single or double quoted), each of which replaces Cargo's repository defaults.
+fn assigns_build_variable(word: &str) -> bool {
+    ["RUSTFLAGS=", "CARGO_ENCODED_RUSTFLAGS=", "CARGO_BUILD_RUSTFLAGS="]
+        .iter()
+        .any(|prefix| word.starts_with(prefix))
+        || (word.starts_with("CARGO_PROFILE_") && word.contains("_CODEGEN_BACKEND="))
+}
+
+/// Returns the complaint when the Whitaker command assigns flags or selects LLVM.
+fn assignment_problems(whitaker: &str) -> Problems {
+    if whitaker.split_whitespace().any(assigns_build_variable) || whitaker.contains("=llvm") {
+        return vec![format!(
             "Whitaker must not replace Cargo defaults with assigned flags or LLVM: {whitaker}"
-        ));
+        )];
     }
+    Problems::new()
+}
+
+/// Returns the complaints about the warning policy and the target and feature selections, which
+/// are read as words because other Cargo options may follow them.
+fn selection_problems(whitaker: &str) -> Problems {
+    let mut problems = Problems::new();
     if !whitaker.contains("DYLINT_RUSTFLAGS=\"-D warnings") {
         problems.push(format!(
             "warnings must reach the check through Dylint's input: {whitaker}"
         ));
     }
-    for option in ["--all-targets", "--all-features"] {
-        if !whitaker.split_whitespace().any(|word| word == option) {
-            problems.push(format!(
-                "the check must keep {option}, which is how Whitaker reaches every target: \
-                 {whitaker}"
-            ));
-        }
-    }
+    problems.extend(
+        ["--all-targets", "--all-features"]
+            .iter()
+            .filter(|option| !whitaker.split_whitespace().any(|word| word == **option))
+            .map(|option| {
+                format!(
+                    "the check must keep {option}, which is how Whitaker reaches every target: \
+                     {whitaker}"
+                )
+            }),
+    );
     problems
 }
 
