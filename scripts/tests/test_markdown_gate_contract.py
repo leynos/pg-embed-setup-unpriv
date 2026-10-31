@@ -71,12 +71,22 @@ def parse_ci(text: str) -> Workflow:
 
 def test_the_reference_inputs_satisfy_the_contract() -> None:
     """The reference fixtures are fault-free, so each mutation isolates one."""
-    assert glob_faults(parse_ci(_GOOD_CI)) == []
-    assert pairing_faults_for(parse_ci(_GOOD_CI), _GOOD_MAKEFILE) == []
-    assert prerequisite_faults(_GOOD_MAKEFILE, "all", ["markdownlint"]) == []
-    assert mdlint_faults(_GOOD_MAKEFILE, "markdownlint") == []
-    assert mdlint_faults(_GOOD_MAKEFILE, "fmt") == []
-    assert config_faults(_GOOD_CONFIG) == []
+    assert glob_faults(parse_ci(_GOOD_CI)) == [], "the action must pass no globs"
+    assert pairing_faults_for(parse_ci(_GOOD_CI), _GOOD_MAKEFILE) == [], (
+        "the reference action must pair with the pinned CLI"
+    )
+    assert prerequisite_faults(_GOOD_MAKEFILE, "all", ["markdownlint"]) == [], (
+        "`all` must include `markdownlint`"
+    )
+    assert mdlint_faults(_GOOD_MAKEFILE, "markdownlint") == [], (
+        "the lint recipe must pass no arguments"
+    )
+    assert mdlint_faults(_GOOD_MAKEFILE, "fmt") == [], (
+        "the fmt recipe may pass only `--fix`"
+    )
+    assert config_faults(_GOOD_CONFIG) == [], (
+        "the reference configuration must select Markdown"
+    )
 
 
 @pytest.mark.parametrize(
@@ -90,7 +100,9 @@ def test_the_reference_inputs_satisfy_the_contract() -> None:
 def test_globs_passed_to_the_action_are_reported(old: str, new: str) -> None:
     """Only an explicit empty input leaves selection to the configuration."""
     assert old in _GOOD_CI, f"the mutation target {old!r} must exist"
-    assert glob_faults(parse_ci(_GOOD_CI.replace(old, new)))
+    assert glob_faults(parse_ci(_GOOD_CI.replace(old, new))), (
+        "a non-empty `globs` input must be reported"
+    )
 
 
 @pytest.mark.parametrize(
@@ -106,7 +118,9 @@ def test_an_unapproved_or_mismatched_pairing_is_refused(
     revision: str, version: str
 ) -> None:
     """An off-list revision or a mismatched CLI version is reported."""
-    assert pairing_faults(revision, version)
+    assert pairing_faults(revision, version), (
+        "an off-list or mismatched pairing must be reported"
+    )
 
 
 def test_a_missing_all_prerequisite_is_reported() -> None:
@@ -115,7 +129,9 @@ def test_a_missing_all_prerequisite_is_reported() -> None:
         "all: check-fmt markdownlint lint", "all: check-fmt lint"
     )
     assert shortened != _GOOD_MAKEFILE, "the reference `all` line must exist"
-    assert prerequisite_faults(shortened, "all", ["markdownlint"])
+    assert prerequisite_faults(shortened, "all", ["markdownlint"]), (
+        "dropping `markdownlint` from `all` must be reported"
+    )
 
 
 @pytest.mark.parametrize(
@@ -142,7 +158,9 @@ def test_misleading_recipe_invocations_are_reported(
 ) -> None:
     """A glob, an echo or an ignored failure weakens the local gate."""
     assert old in _GOOD_MAKEFILE, f"the mutation target {old!r} must exist"
-    assert mdlint_faults(_GOOD_MAKEFILE.replace(old, new), target)
+    assert mdlint_faults(_GOOD_MAKEFILE.replace(old, new), target), (
+        f"{new!r} must be reported"
+    )
 
 
 @pytest.mark.parametrize(
@@ -160,6 +178,10 @@ def test_misleading_recipe_invocations_are_reported(
             '"globs": ["**/*.md"],',
             '"globs": ["**/*.md", "!**/*.{md,markdown}"],',
         ),
+        (
+            '"globs": ["**/*.md"],',
+            '"globs": ["**/*.md", "#**/*.md"],',
+        ),
     ],
     ids=[
         "empty",
@@ -168,6 +190,7 @@ def test_misleading_recipe_invocations_are_reported(
         "partial-selection",
         "cancelling-negation",
         "brace-cancelling-negation",
+        "hash-cancelling-negation",
     ],
 )
 def test_empty_or_missing_configuration_globs_are_reported(
@@ -175,13 +198,15 @@ def test_empty_or_missing_configuration_globs_are_reported(
 ) -> None:
     """Selection must be a non-empty array covering every Markdown file."""
     assert old in _GOOD_CONFIG, f"the mutation target {old!r} must exist"
-    assert config_faults(_GOOD_CONFIG.replace(old, new))
+    assert config_faults(_GOOD_CONFIG.replace(old, new)), (
+        f"{new!r} must be reported"
+    )
 
 
 @pytest.mark.parametrize(
     "negation",
-    ["!**/*.json", "!**/*.{json,jsonc}"],
-    ids=["plain", "brace"],
+    ["!**/*.json", "!**/*.{json,jsonc}", "#**/*.json", "#**/*.{json,jsonc}"],
+    ids=["plain", "brace", "hash", "hash-brace"],
 )
 def test_a_negation_of_a_non_markdown_pattern_is_allowed(negation: str) -> None:
     """Negating a pattern that cannot remove Markdown keeps the selection whole."""
@@ -189,7 +214,26 @@ def test_a_negation_of_a_non_markdown_pattern_is_allowed(negation: str) -> None:
         '"globs": ["**/*.md"],', f'"globs": ["**/*.md", "{negation}"],'
     )
     assert config != _GOOD_CONFIG, "the reference globs line must exist"
-    assert config_faults(config) == []
+    assert config_faults(config) == [], (
+        f"{negation!r} negates no Markdown pattern"
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ('"globs": ["**/*.md"],', '"globs": ["**/*.md",],'),
+        ('"gitignore": true', '"gitignore": true,'),
+    ],
+    ids=["array", "object"],
+)
+def test_jsonc_trailing_commas_are_accepted(old: str, new: str) -> None:
+    """The pinned CLI allows trailing commas, so the contract must too."""
+    config = _GOOD_CONFIG.replace(old, new)
+    assert config != _GOOD_CONFIG, f"the mutation target {old!r} must exist"
+    assert config_faults(config) == [], (
+        "a trailing comma is valid JSONC for markdownlint-cli2"
+    )
 
 
 def test_the_repository_holds_the_contract() -> None:

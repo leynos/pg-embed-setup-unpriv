@@ -35,6 +35,10 @@ _CANCELLING_NEGATIONS: typ.Final[frozenset[str]] = frozenset(
     {"*", "**", "**/*", "**/*.md"}
 )
 
+#: Prefixes that negate a glob. The pinned CLI documents both because some
+#: shells treat `!` specially, so a configuration may use either.
+_NEGATION_PREFIXES: typ.Final[tuple[str, ...]] = ("!", "#")
+
 
 def _strip_jsonc_comments(text: str) -> str:
     """Return JSONC text with comments removed and strings left intact.
@@ -78,6 +82,44 @@ def _strip_jsonc_comments(text: str) -> str:
     return "".join(stripped)
 
 
+def _strip_trailing_commas(text: str) -> str:
+    """Return comment-free JSON text without commas before a closing bracket.
+
+    The pinned CLI parses its JSONC with ``allowTrailingComma``, so a valid
+    configuration may carry one and ``json.loads`` would reject it.
+    """
+    stripped: list[str] = []
+    index = 0
+    in_string = False
+    while index < len(text):
+        character = text[index]
+        if in_string:
+            stripped.append(character)
+            if character == "\\" and index + 1 < len(text):
+                index += 1
+                stripped.append(text[index])
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+            stripped.append(character)
+        elif character == ",":
+            following = index + 1
+            while following < len(text) and text[following].isspace():
+                following += 1
+            if following == len(text) or text[following] not in "]}":
+                stripped.append(character)
+        else:
+            stripped.append(character)
+        index += 1
+    return "".join(stripped)
+
+
+def _jsonc_to_json(text: str) -> str:
+    """Return a JSONC document with comments and trailing commas removed."""
+    return _strip_trailing_commas(_strip_jsonc_comments(text))
+
+
 def _brace_alternatives(pattern: str) -> list[str]:
     """Expand the first brace group into its comma-separated alternatives."""
     start = pattern.find("{")
@@ -117,7 +159,7 @@ def config_faults(text: str) -> list[str]:
         non-empty, selects every Markdown file and carries no negation that
         cancels that selection.
     """
-    globs = json.loads(_strip_jsonc_comments(text)).get("globs")
+    globs = json.loads(_jsonc_to_json(text)).get("globs")
     if not isinstance(globs, list) or not globs:
         return [f"globs must be a non-empty array, got {globs!r}"]
     if "**/*.md" not in globs:
@@ -125,7 +167,8 @@ def config_faults(text: str) -> list[str]:
     cancelling = [
         glob
         for glob in globs
-        if isinstance(glob, str) and glob.startswith("!")
+        if isinstance(glob, str)
+        and glob.startswith(_NEGATION_PREFIXES)
         and _cancels_markdown_selection(glob[1:])
     ]
     if cancelling:
