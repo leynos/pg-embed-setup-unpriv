@@ -1,5 +1,5 @@
 .PHONY: help all clean test test-doc test-loom test-scripts msrv build release \
-	release-archive lint fmt \
+	release-archive lint lint-clippy lint-whitaker fmt \
 	check-fmt markdownlint nixie spelling typecheck test-workflow-contracts
 
 APP ?= pg_embedded_setup_unpriv
@@ -139,13 +139,30 @@ release-archive: ## Package release binaries for cargo-binstall
 		$(if $(BUILD_JOBS),--build-jobs "$(BUILD_JOBS)") \
 		$(foreach bin,$(RELEASE_BINARIES),--binary $(bin))
 
-lint: ## Run Clippy and the Whitaker Dylint suite with warnings denied
+lint: lint-clippy lint-whitaker ## Run Clippy and the Whitaker Dylint suite with warnings denied
+
+lint-clippy: ## Run docstring coverage, rustdoc and Clippy with warnings denied
 	$(INTERROGATE) --fail-under $(PY_DOCSTRING_COVERAGE) $(INTERROGATE_EXCLUDES) .
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) clippy $(CLIPPY_FLAGS)
+
+# Whitaker builds with its own installer-managed toolchain, which must not
+# inherit this repository's development flags, backend or linker, so the route
+# clears them and takes the repository's Cargo defaults instead. Dylint reads
+# the warning policy from DYLINT_RUSTFLAGS.
+WHITAKER_CLEAN_ENV = env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+	-u CARGO_PROFILE_DEV_CODEGEN_BACKEND -u CARGO_BUILD_TARGET \
+	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER \
+	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS \
+	-u CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER \
+	-u CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS \
+	-u CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER \
+	-u CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS -u CFLAGS -u LDFLAGS
+
 # --ignore-rust-version: the Whitaker Dylint driver toolchain predates the
 # rust-version of some dependencies; the repo toolchain still enforces MSRV.
-	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(WHITAKER) --all -- --all-targets --all-features --ignore-rust-version
+lint-whitaker: ## Run the Whitaker Dylint suite with clean driver inputs and warnings denied
+	$(WHITAKER_CLEAN_ENV) DYLINT_RUSTFLAGS="-D warnings" $(WHITAKER) --all -- --all-targets --all-features --ignore-rust-version
 
 typecheck: ## Typecheck the workspace
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) check --workspace --all-targets --all-features $(BUILD_JOBS)

@@ -12,6 +12,11 @@
 # recipes set. Coverage and release builds assign `RUSTFLAGS` without them on
 # purpose: a measurement and a shipped artefact stay on the platform linker
 # and the single-threaded frontend.
+# The native Cargo setting for the development footprint rule: dependencies are
+# built without embedded metadata (nightly-2026-07-31 and later).
+[unstable]
+embed-metadata = false
+
 [build]
 rustflags = ["-Zthreads=8"]
 

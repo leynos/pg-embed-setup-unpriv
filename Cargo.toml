@@ -294,3 +294,10 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 mockall = "0.15"
 trybuild = "1.0.122"
 insta = "1"
+
+# The development footprint (concordat rule `rust-dev-build-footprint`): no
+# incremental state and no debug information in default development builds.
+# The test profile inherits both.
+[profile.dev]
+incremental = false
+debug = 0

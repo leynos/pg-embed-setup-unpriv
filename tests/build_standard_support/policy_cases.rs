@@ -9,6 +9,7 @@ use super::{
     development::{runs_tests, test_policy_problems, tool_key},
     make::{Assignment, Command, Host, Target},
     reader_cases::Fixture,
+    shell::executed_program,
 };
 
 /// One command of the `test` target in a case: its text and the flags its `RUSTFLAGS` assigns.
@@ -113,4 +114,39 @@ fn the_tool_reader_names_what_a_command_runs(
     #[case] expected: Option<&str>,
 ) {
     assert_eq!(tool_key(command.0).as_deref(), expected, "{}", command.0);
+}
+
+/// Scenario: command lines in the spellings `make -n` prints, reduced to the program the shell
+/// executes.
+///
+/// Invariant: assignments and an `env` wrapper with its options are skipped, so the program is the
+/// word that runs; a program name that only appears as an argument of another command, such as
+/// `echo`, is not the program, so a recipe that only prints `whitaker` or `cargo clippy` is not
+/// read as running it.
+#[rstest]
+#[case::a_bare_program(Fixture("cargo clippy --all-targets"), Some("cargo"))]
+#[case::an_assignment(Fixture("RUSTFLAGS=\"-D warnings\" cargo clippy"), Some("cargo"))]
+#[case::several_assignments(Fixture("A=\"x y\" B='z w' C=v whitaker --all"), Some("whitaker"))]
+#[case::an_env_wrapper(Fixture("env -u RUSTFLAGS -u CFLAGS whitaker --all"), Some("whitaker"))]
+#[case::env_with_an_assignment(
+    Fixture("env -u X DYLINT_RUSTFLAGS=\"-D warnings\" whitaker --all"),
+    Some("whitaker")
+)]
+#[case::env_cleared(Fixture("env -i PATH=/bin cargo test"), Some("cargo"))]
+#[case::a_path(
+    Fixture("/home/me/.local/bin/whitaker --all"),
+    Some("/home/me/.local/bin/whitaker")
+)]
+#[case::a_printed_program(Fixture("echo whitaker --all -- --all-targets"), Some("echo"))]
+#[case::a_printed_cargo(Fixture("echo cargo clippy"), Some("echo"))]
+#[case::a_wrapped_print(
+    Fixture("env -u X DYLINT_RUSTFLAGS=\"-D warnings\" echo whitaker --all"),
+    Some("echo")
+)]
+#[case::nothing(Fixture("A=1"), None)]
+fn the_program_reader_names_the_word_the_shell_executes(
+    #[case] command: Fixture,
+    #[case] expected: Option<&str>,
+) {
+    assert_eq!(executed_program(command.0), expected, "{}", command.0);
 }

@@ -84,11 +84,11 @@ compliant_make!(
      warnings\" cargo doc"
 );
 
-/// A fake runner whose `lint` target runs Clippy and not Whitaker, and whose other targets run
-/// tests.
-fn lint_without_whitaker_make(target: Target<'_>, host: Host) -> Result<String, String> {
+/// A fake runner whose `lint-clippy` target runs Clippy and not a type check, and whose other
+/// targets run tests.
+fn lint_without_check_make(target: Target<'_>, host: Host) -> Result<String, String> {
     let linker = linker_flag(host);
-    let tool = if target.name() == "lint" {
+    let tool = if target.name() == "lint-clippy" {
         "cargo clippy --all-targets"
     } else {
         "cargo test"
@@ -222,21 +222,22 @@ fn a_target_that_stops_running_a_recorded_tool_is_refused() -> Result<(), String
             keys: &["cargo test"],
         },
         Tools {
-            target: "lint",
-            keys: &["cargo clippy", "whitaker"],
+            target: "lint-clippy",
+            keys: &["cargo clippy", "cargo check"],
         },
     ];
     let (problems, _) = development_problems_expecting(
-        lint_without_whitaker_make,
+        lint_without_check_make,
         Host::Linux,
         Pin::Nightly,
         &recorded,
     )?;
     ensure(
         problems.iter().any(|problem| {
-            problem.contains("`make lint`") && problem.contains("no longer runs `whitaker`")
+            problem.contains("`make lint-clippy`")
+                && problem.contains("no longer runs `cargo check`")
         }),
-        "a lint target without Whitaker passed",
+        "a lint target without a type check passed",
     )?;
     ensure(
         !problems
@@ -250,16 +251,12 @@ fn a_target_that_stops_running_a_recorded_tool_is_refused() -> Result<(), String
             keys: &["cargo test"],
         },
         Tools {
-            target: "lint",
+            target: "lint-clippy",
             keys: &["cargo clippy"],
         },
     ];
-    let (clean, _) = development_problems_expecting(
-        lint_without_whitaker_make,
-        Host::Linux,
-        Pin::Nightly,
-        &kept,
-    )?;
+    let (clean, _) =
+        development_problems_expecting(lint_without_check_make, Host::Linux, Pin::Nightly, &kept)?;
     ensure(
         clean
             .iter()
