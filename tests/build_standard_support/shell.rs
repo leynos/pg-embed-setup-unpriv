@@ -136,3 +136,65 @@ fn split_value(after: &str) -> (&str, &str) {
         .or_else(|| quoted('\''))
         .unwrap_or_else(|| after.split_once(char::is_whitespace).unwrap_or((after, "")))
 }
+
+/// Returns the command line after its leading `NAME=value` assignments.
+fn after_assignments(command: &str) -> &str {
+    let mut rest = command.trim_start();
+    while let Some((name, after)) = rest.split_once('=') {
+        let is_name = name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !is_name {
+            break;
+        }
+        rest = split_value(after).1.trim_start();
+    }
+    rest
+}
+
+/// Returns the program a shell command executes: its first word after any leading assignments and
+/// any `env` wrapper with its `-i` and `-u NAME` options and its own assignments. A word that only
+/// appears as an argument (`echo whitaker --all`) is not the program, so it does not count as
+/// running it.
+///
+/// ```text
+/// executed_program("A=1 cargo clippy")                   == Some("cargo")
+/// executed_program("env -u X Y=\"a b\" whitaker --all")  == Some("whitaker")
+/// executed_program("echo whitaker --all")                == Some("echo")
+/// ```
+pub fn executed_program(command: &str) -> Option<&str> {
+    let mut rest = after_assignments(command.trim());
+    loop {
+        let (word, after) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        if word.is_empty() {
+            return None;
+        }
+        if !names_program(word, "env") {
+            return Some(word);
+        }
+        rest = skip_env_arguments(after.trim_start());
+    }
+}
+
+/// Skips the options and assignments an `env` wrapper takes before the program it runs.
+fn skip_env_arguments(mut rest: &str) -> &str {
+    loop {
+        if let Some(after) = rest.strip_prefix("-i ") {
+            rest = after.trim_start();
+        } else if let Some(after) = rest.strip_prefix("-u ") {
+            rest = after
+                .trim_start()
+                .split_once(char::is_whitespace)
+                .map_or("", |(_, tail)| tail)
+                .trim_start();
+        } else {
+            let stripped = after_assignments(rest);
+            if stripped.len() == rest.len() {
+                return rest;
+            }
+            rest = stripped;
+        }
+    }
+}
