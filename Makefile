@@ -76,7 +76,11 @@ VERSION_GUARD := $(error VERSION is empty; set [package].version in Cargo.toml o
 endif
 CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
-MDLINT ?= markdownlint-cli2
+# The local CLI must stay on the version bundled by the pinned
+# DavidAnson/markdownlint-cli2-action commit in `.github/workflows/ci.yml`.
+# `scripts/tests/test_markdown_gate_contract.py` holds the pairing.
+MARKDOWNLINT_CLI2_VERSION ?= 0.23.2
+MDLINT ?= npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)
 # `make fmt` and `make check-fmt` call mdtablefix directly. `--git` selects the
 # Markdown files Git tracks and `--include-untracked` adds the untracked files
 # Git does not ignore, so a new document is formatted before it is staged.
@@ -181,14 +185,14 @@ typecheck: ## Typecheck the workspace
 fmt: ## Format Rust and Markdown sources
 	$(CARGO) fmt --all
 	$(MDTABLEFIX) --in-place $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
-	$(MDLINT) --fix "**/*.md"
+	$(MDLINT) --fix
 
 check-fmt: ## Verify formatting
 	$(CARGO) fmt --all -- --check
 	$(MDTABLEFIX) --check $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 
 markdownlint: spelling ## Lint Markdown files and enforce spelling
-	$(MDLINT) "**/*.md" "#.uv-cache" "#.uv-tools"
+	$(MDLINT)
 
 spelling: ## Enforce en-GB-oxendict spelling
 	$(TYPOS_CONFIG_BUILDER) gate --repository .

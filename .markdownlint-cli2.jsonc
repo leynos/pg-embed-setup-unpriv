@@ -1,4 +1,9 @@
 {
+  // File selection lives only here. markdownlint-cli2 appends this array to
+  // any positional globs, so a caller that passes its own globs widens the
+  // set instead of replacing it. The Makefile and the CI action therefore
+  // pass none, and both lint exactly these files.
+  "globs": ["**/*.md"],
   "gitignore": true,
   "config": {
     "MD004": { "style": "dash" },
