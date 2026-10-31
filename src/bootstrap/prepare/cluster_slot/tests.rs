@@ -7,7 +7,7 @@ use color_eyre::eyre::{Result, eyre};
 use fs4::FileExt;
 use rstest::{fixture, rstest};
 
-use super::{claim_guard_for, claim_slot, has_live_peers, sweep_dead_slots};
+use super::{claim_guard_for, claim_slot, claim_slot_with_sweep, has_live_peers, sweep_dead_slots};
 use crate::bootstrap::prepare::orphan::{OrphanStop, ProcessId};
 
 /// A data parent directory under a temporary root.
@@ -115,6 +115,60 @@ fn a_claim_waits_for_the_claim_guard(parent: Result<Parent>) {
         .join()
         .expect("join the claimer")
         .expect("the claim succeeds");
+}
+
+/// Another bootstrap cannot enter its sweep while the first claim holds the
+/// guard across sweeping and slot creation.
+#[rstest]
+fn a_claim_holds_the_guard_while_sweeping(parent: Result<Parent>) {
+    let dir = parent.expect("data parent");
+    let first_parent = dir.dir.clone();
+    let (sweep_started_tx, sweep_started_rx) = std::sync::mpsc::channel();
+    let (continue_sweep_tx, continue_sweep_rx) = std::sync::mpsc::channel();
+    let first = std::thread::spawn(move || {
+        claim_slot_with_sweep(&first_parent, |_| {
+            sweep_started_tx.send(()).expect("report sweep start");
+            continue_sweep_rx
+                .recv()
+                .expect("wait for the test to release the sweep");
+            Ok(0)
+        })
+    });
+    sweep_started_rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the first claim starts sweeping");
+
+    let second_parent = dir.dir.clone();
+    let (claim_started_tx, claim_started_rx) = std::sync::mpsc::channel();
+    let (claim_finished_tx, claim_finished_rx) = std::sync::mpsc::channel();
+    let second = std::thread::spawn(move || {
+        claim_started_tx.send(()).expect("report claim start");
+        let claimed = claim_slot(&second_parent);
+        claim_finished_tx
+            .send(claimed.is_ok())
+            .expect("report claim result");
+    });
+    claim_started_rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the second claim starts");
+    assert!(
+        claim_finished_rx
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .is_err(),
+        "a second claim must wait until sweeping and slot creation finish"
+    );
+
+    continue_sweep_tx.send(()).expect("release the first sweep");
+    first
+        .join()
+        .expect("join the first claim")
+        .expect("the first claim succeeds");
+    assert!(
+        claim_finished_rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the second claim proceeds")
+    );
+    second.join().expect("join the second claim");
 }
 
 /// The claim guard sits among the slots but is not one: a sweep leaves it, and

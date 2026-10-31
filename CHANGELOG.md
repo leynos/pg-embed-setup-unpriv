@@ -5,6 +5,21 @@ All notable changes to this crate are recorded here. The format follows
 
 ## Unreleased
 
+### Slot claim and build script
+
+- A slot claim now holds `.claim-guard` across both the dead-slot sweep and the
+  creation and locking of the next slot. Before, the sweep ran before the guard
+  was taken, so a concurrent bootstrap could open and lock a newly created but
+  not-yet-locked `.lock` file in the gap. The owner then failed with "slot lock
+  is already held", and the shared test-cluster singleton cached that failure
+  for the process. A regression test pauses the first claim in its sweep and
+  checks that a second claim waits for the guard.
+- `build.rs` registers and emits `privileged_unix_platform` directly with
+  `cargo:rustc-check-cfg` and `cargo:rustc-cfg`, and the `cfg_aliases` build
+  dependency is gone. Its macro expansion triggered a future-incompatible
+  trailing-semicolon warning on current toolchains. The cfg is set for Linux,
+  Android, FreeBSD, OpenBSD and DragonFly targets, as before.
+
 ### Lint toolchain
 
 - The pinned lint toolchain moves from `nightly-2026-04-25` to

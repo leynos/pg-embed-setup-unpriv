@@ -1052,13 +1052,16 @@ default and the opt-out. Each is mutation-proved.
 
 ADR 005 records the design; this section covers the code.
 
-- `src/bootstrap/prepare/cluster_slot.rs` holds `claim_slot` and
-  `sweep_dead_slots`. `claim_derived_slot` in `prepare/layout.rs` calls
-  `claim_slot` on both preparation paths, and only when the data directory was
-  derived from a root. It sweeps first, then creates and locks `<name>.lock`
-  with `create_new`, and keeps the `File` in a process-global list so the lock
-  lasts until exit. Do not drop those files early: a dropped lock lets another
-  process sweep a live cluster.
+- `src/bootstrap/prepare/cluster_slot/mod.rs` holds `claim_slot` and
+  `sweep_dead_slots`; `cluster_slot/removal.rs` removes a swept slot's files.
+  `claim_derived_slot` in `prepare/layout.rs` calls `claim_slot` on both
+  preparation paths, and only when the data directory was derived from a root.
+  It takes `.claim-guard` first and holds it across the sweep and the creation
+  of the next slot, so another bootstrap never sees a created but not yet
+  locked file and mistakes it for a dead slot. It then sweeps, creates and locks
+  `<name>.lock` with `create_new`, and keeps the `File` in a process-global
+  list so the lock lasts until exit. Do not drop those files early: a dropped
+  lock lets another process sweep a live cluster.
 - `src/bootstrap/prepare/orphan.rs` decides whether a dead slot's directory
   still has a server. `OrphanStop` is the seam the tests use to refuse a stop.
   `SignalStop` sends `SIGQUIT` and waits. The identity check binds a PID to the
@@ -1094,7 +1097,7 @@ ADR 005 records the design; this section covers the code.
 - `DataLayout` (in `src/bootstrap/prepare/layout.rs`) says whether a derived
   data directory becomes a slot: `PerCluster` for test bootstraps, `Persistent`
   for the setup-only `run`. `has_live_peers` and `ClaimGuard` (in
-  `cluster_slot.rs`) let `plan_cleanup` in `src/cluster/cleanup.rs` demote
+  `cluster_slot/mod.rs`) let `plan_cleanup` in `src/cluster/cleanup.rs` demote
   `CleanupMode::Full` to data-only while another slot in the root holds its
   lock. The plan holds the claim guard across the probe and the removal, and
   `claim_slot` takes the same guard, so a claim cannot slip between them.
@@ -1110,7 +1113,7 @@ ADR 005 records the design; this section covers the code.
   --nocapture`
   starts N processes at once and prints wall, lock wait and phase medians. Use
   a RAM-backed root to keep `initdb`'s fsync out of the numbers.
-- Tests: `cluster_slot_tests.rs` and `orphan_tests.rs` hold the unit cases.
+- Tests: `cluster_slot/tests.rs` and `orphan_tests.rs` hold the unit cases.
   Their `FakePostgres` copies `/bin/sh` as `postgres` and runs `read line`.
   `tests/per_cluster_directories.rs` drives real children through concurrent
   bootstraps, a live-kept and dead-swept sweep with an orphaned server, the

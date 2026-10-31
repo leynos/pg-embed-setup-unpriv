@@ -2600,7 +2600,6 @@ version = "0.6.3"
 dependencies = [
  "camino",
  "cap-std",
- "cfg_aliases",
  "clap",
  "color-eyre",
  "dashmap",
