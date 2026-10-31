@@ -34,6 +34,7 @@ mod layout;
 pub(super) use self::layout::DataLayout;
 use self::layout::claim_derived_slot;
 mod orphan;
+
 #[cfg(target_os = "linux")]
 mod orphan_watch;
 #[cfg(all(test, target_os = "linux"))]
@@ -41,6 +42,7 @@ pub(crate) use orphan_watch::is_watching;
 #[cfg(target_os = "linux")]
 pub(crate) use orphan_watch::{release_watcher, watch_slot_owner};
 mod password;
+
 mod stale_password;
 pub use password::{PasswordReuseOutcome, reuse_existing_password, stored_cluster_password};
 
@@ -321,10 +323,11 @@ fn ensure_pgpass_permissions(path: &Utf8PathBuf) -> BootstrapResult<()> {
 ///
 /// The cache surface only stores extracted binaries and log files, so it
 /// remains group/world-readable (0o755) to make debugging easier when the
-/// helper runs inside CI sandboxes. The runtime directory, however, holds the
-/// `PostgreSQL` socket, `postmaster.pid`, and `.pgpass`, so it is locked down
-/// to user-only access (0o700) to avoid leaking credentials or allowing other
-/// processes to tamper with the instance.
+/// helper runs inside CI sandboxes. The runtime directory, `<install>/run`, is
+/// instead locked down to user-only access (0o700), which enforces owner-only
+/// access and gives runtime resources a private location. It is also exported
+/// as `XDG_RUNTIME_DIR`, so other processes must not be able to read it or
+/// tamper with what it holds.
 ///
 /// # Examples
 ///
@@ -342,7 +345,7 @@ fn prepare_xdg_dirs(install_dir: &Utf8PathBuf) -> BootstrapResult<XdgDirs> {
     let runtime = install_dir.join("run");
     // Cache files are harmless to share, so grant read access for debugging.
     ensure_dir_with_mode(&cache, 0o755)?;
-    // Runtime dir holds sockets/pids; clamp to user-only for safety.
+    // Runtime resources must stay private to the owner, so clamp to 0o700.
     ensure_dir_with_mode(&runtime, 0o700)?;
     Ok(XdgDirs {
         home: install_dir.clone(),
@@ -385,9 +388,12 @@ fn sorted_configuration_keys(settings: &Settings) -> Vec<&str> {
     keys.sort_unstable();
     keys
 }
+
 #[cfg(test)]
 mod property_tests;
+
 #[cfg(test)]
 mod tests;
+
 #[cfg(all(unix, privileged_unix_platform))]
 mod unix_user;
