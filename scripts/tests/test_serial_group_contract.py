@@ -82,7 +82,8 @@ def _serial_attribute(relative: str) -> str:
     return f'#[path = "{prefix}support/serial.rs"]'
 
 
-def _write_repository(tmp_path: Path) -> tuple[Path, str]:
+@pytest.fixture
+def repository(tmp_path: Path) -> tuple[Path, str]:
     """Write a reference manifest and tests tree.
 
     Parameters
@@ -120,9 +121,11 @@ def _write_repository(tmp_path: Path) -> tuple[Path, str]:
     return tests_directory, "\n".join(declarations)
 
 
-def test_the_reference_shape_has_no_fault(tmp_path: Path) -> None:
+def test_the_reference_shape_has_no_fault(
+    repository: tuple[Path, str],
+) -> None:
     """The reference configuration, manifest and tree agree with the pin."""
-    tests_directory, manifest = _write_repository(tmp_path)
+    tests_directory, manifest = repository
     faults = serial_group_faults(_GOOD_CONFIG, manifest, tests_directory)
     assert faults == [], f"the reference repository must be fault-free, got {faults}"
 
@@ -175,13 +178,13 @@ def test_the_reference_shape_has_no_fault(tmp_path: Path) -> None:
     ],
 )
 def test_a_mutation_is_a_fault(
-    tmp_path: Path, old: str, new: str, keyword: str
+    repository: tuple[Path, str], old: str, new: str, keyword: str
 ) -> None:
     """Each mutation is reported, naming the binary or setting at fault."""
     assert old in _GOOD_CONFIG, (
         f"the mutation target {old!r} must exist in the reference configuration"
     )
-    tests_directory, manifest = _write_repository(tmp_path)
+    tests_directory, manifest = repository
     faults = serial_group_faults(
         _GOOD_CONFIG.replace(old, new), manifest, tests_directory
     )
@@ -191,9 +194,11 @@ def test_a_mutation_is_a_fault(
     )
 
 
-def test_an_undeclared_lock_taking_binary_is_named(tmp_path: Path) -> None:
+def test_an_undeclared_lock_taking_binary_is_named(
+    repository: tuple[Path, str],
+) -> None:
     """A new top-level file that includes the module cannot join unseen."""
-    tests_directory, manifest = _write_repository(tmp_path)
+    tests_directory, manifest = repository
     stray = tests_directory / "stray_suite.rs"
     stray.write_text(
         f"{_serial_attribute('tests/stray_suite.rs')}\nmod serial;\n",
@@ -206,10 +211,10 @@ def test_an_undeclared_lock_taking_binary_is_named(tmp_path: Path) -> None:
 
 
 def test_a_support_module_compiling_the_serial_module_is_named(
-    tmp_path: Path,
+    repository: tuple[Path, str],
 ) -> None:
     """A root that hides the module behind a support module cannot pass."""
-    tests_directory, manifest = _write_repository(tmp_path)
+    tests_directory, manifest = repository
     support = tests_directory / "support"
     support.mkdir(exist_ok=True)
     hidden = support / "shared.rs"
