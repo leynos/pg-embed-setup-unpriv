@@ -125,6 +125,7 @@ def test_a_missing_all_prerequisite_is_reported() -> None:
         ("markdownlint", "$(MDLINT)\n", '$(MDLINT) "**/*.md"\n'),
         ("markdownlint", "$(MDLINT)\n", '$(MDLINT) "#.uv-cache"\n'),
         ("markdownlint", "$(MDLINT)\n", "@echo $(MDLINT)\n"),
+        ("markdownlint", "$(MDLINT)\n", "-$(MDLINT)\n"),
         ("fmt", "$(MDLINT) --fix\n", '$(MDLINT) --fix "**/*.md"\n'),
         ("fmt", "$(MDLINT) --fix\n", "$(MDLINT) --fix #.uv-cache\n"),
     ],
@@ -132,14 +133,15 @@ def test_a_missing_all_prerequisite_is_reported() -> None:
         "lint-glob",
         "lint-exclusion",
         "lint-echo-only",
+        "lint-ignore-failure",
         "fmt-glob",
         "fmt-exclusion",
     ],
 )
-def test_caller_globs_in_a_recipe_are_reported(
+def test_misleading_recipe_invocations_are_reported(
     target: str, old: str, new: str
 ) -> None:
-    """A recipe that names files or exclusions splits the selection in two."""
+    """A glob, an echo or an ignored failure weakens the local gate."""
     assert old in _GOOD_MAKEFILE, f"the mutation target {old!r} must exist"
     assert mdlint_faults(_GOOD_MAKEFILE.replace(old, new), target)
 
@@ -155,6 +157,10 @@ def test_caller_globs_in_a_recipe_are_reported(
             '"globs": ["**/*.md"],',
             '"globs": ["**/*.md", "!**/*.md"],',
         ),
+        (
+            '"globs": ["**/*.md"],',
+            '"globs": ["**/*.md", "!**/*.{md,markdown}"],',
+        ),
     ],
     ids=[
         "empty",
@@ -162,6 +168,7 @@ def test_caller_globs_in_a_recipe_are_reported(
         "missing-key",
         "partial-selection",
         "cancelling-negation",
+        "brace-cancelling-negation",
     ],
 )
 def test_empty_or_missing_configuration_globs_are_reported(
@@ -172,10 +179,15 @@ def test_empty_or_missing_configuration_globs_are_reported(
     assert config_faults(_GOOD_CONFIG.replace(old, new))
 
 
-def test_a_negation_of_a_non_markdown_pattern_is_allowed() -> None:
+@pytest.mark.parametrize(
+    "negation",
+    ["!**/*.json", "!**/*.{json,jsonc}"],
+    ids=["plain", "brace"],
+)
+def test_a_negation_of_a_non_markdown_pattern_is_allowed(negation: str) -> None:
     """Negating a pattern that cannot remove Markdown keeps the selection whole."""
     config = _GOOD_CONFIG.replace(
-        '"globs": ["**/*.md"],', '"globs": ["**/*.md", "!**/*.json"],'
+        '"globs": ["**/*.md"],', f'"globs": ["**/*.md", "{negation}"],'
     )
     assert config != _GOOD_CONFIG, "the reference globs line must exist"
     assert config_faults(config) == []

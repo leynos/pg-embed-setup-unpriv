@@ -78,12 +78,28 @@ def _strip_jsonc_comments(text: str) -> str:
     return "".join(stripped)
 
 
+def _brace_alternatives(pattern: str) -> list[str]:
+    """Expand the first brace group into its comma-separated alternatives."""
+    start = pattern.find("{")
+    end = pattern.find("}", start + 1) if start != -1 else -1
+    if start == -1 or end == -1:
+        return [pattern]
+    prefix, body, suffix = pattern[:start], pattern[start + 1 : end], pattern[end + 1 :]
+    return [
+        prefix + alternative + expanded
+        for alternative in body.split(",")
+        for expanded in _brace_alternatives(suffix)
+    ]
+
+
 def _cancels_markdown_selection(pattern: str) -> bool:
     """Return whether a negated glob can remove Markdown from the selection."""
-    if pattern in _CANCELLING_NEGATIONS:
-        return True
-    lowered = pattern.lower()
-    return lowered.endswith(".md") or pattern.endswith("/**")
+    return any(
+        expanded in _CANCELLING_NEGATIONS
+        or expanded.lower().endswith(".md")
+        or expanded.endswith("/**")
+        for expanded in _brace_alternatives(pattern)
+    )
 
 
 def config_faults(text: str) -> list[str]:
@@ -109,8 +125,7 @@ def config_faults(text: str) -> list[str]:
     cancelling = [
         glob
         for glob in globs
-        if isinstance(glob, str)
-        and glob.startswith("!")
+        if isinstance(glob, str) and glob.startswith("!")
         and _cancels_markdown_selection(glob[1:])
     ]
     if cancelling:
@@ -330,6 +345,12 @@ def recipe_lines(makefile: str, target: str) -> list[str]:
     return recipe
 
 
+def _make_prefixes(head: str) -> str:
+    """Return the run of Make recipe prefixes at the start of a command."""
+    stop = next((i for i, char in enumerate(head) if char not in "@-+"), len(head))
+    return head[:stop]
+
+
 def mdlint_faults(makefile: str, target: str) -> list[str]:
     """Return what is wrong with a recipe's ``$(MDLINT)`` invocation.
 
@@ -344,7 +365,9 @@ def mdlint_faults(makefile: str, target: str) -> list[str]:
     -------
     list[str]
         One message per fault; empty when the recipe passes no globs or
-        exclusion arguments. Only ``--fix`` is allowed, on ``fmt``.
+        exclusion arguments. Only ``--fix`` is allowed, on ``fmt``, and the
+        invocation must not carry Make's ``-`` prefix, which ignores the
+        command's exit status.
     """
     invocations = [
         line.strip()
@@ -357,9 +380,15 @@ def mdlint_faults(makefile: str, target: str) -> list[str]:
     faults: list[str] = []
     for line in invocations:
         head, _separator, tail = line.partition("$(MDLINT)")
-        if head.lstrip("@-+ \t"):
+        prefixes = _make_prefixes(head)
+        if head[len(prefixes) :].strip():
             faults.append(
                 f"{target} mentions $(MDLINT) without running it: {line!r}"
+            )
+            continue
+        if "-" in prefixes:
+            faults.append(
+                f"{target} ignores a $(MDLINT) failure with the '-' prefix: {line!r}"
             )
             continue
         extra = [argument for argument in tail.split() if argument not in allowed]
