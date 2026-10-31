@@ -59,6 +59,7 @@ _GOOD_CONFIG = """\
 {
   // Selection lives only here.
   "globs": ["**/*.md"],
+  "ignores": ["**/execplans/**"],
   "gitignore": true
 }
 """
@@ -216,6 +217,30 @@ def test_a_negation_of_a_non_markdown_pattern_is_allowed(negation: str) -> None:
     assert config != _GOOD_CONFIG, "the reference globs line must exist"
     assert config_faults(config) == [], (
         f"{negation!r} negates no Markdown pattern"
+    )
+
+
+@pytest.mark.parametrize(
+    ("ignores", "is_reported"),
+    [
+        ('["**/*.md"]', True),
+        ('["**/*.{md,markdown}"]', True),
+        ('["**"]', True),
+        ('["**/dist/**"]', False),
+        ('["docs/**"]', False),
+    ],
+    ids=["all-markdown", "brace", "everything", "subtree", "directory"],
+)
+def test_configuration_ignores_are_judged(
+    ignores: str, is_reported: bool
+) -> None:
+    """Only an ignore that removes every Markdown file defeats the gate."""
+    config = _GOOD_CONFIG.replace(
+        '"ignores": ["**/execplans/**"]', f'"ignores": {ignores}'
+    )
+    assert config != _GOOD_CONFIG, "the reference ignores line must exist"
+    assert bool(config_faults(config)) is is_reported, (
+        f"ignores {ignores!r} should be reported: {is_reported}"
     )
 
 

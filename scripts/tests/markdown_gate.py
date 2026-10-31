@@ -39,6 +39,13 @@ _CANCELLING_NEGATIONS: typ.Final[frozenset[str]] = frozenset(
 #: shells treat `!` specially, so a configuration may use either.
 _NEGATION_PREFIXES: typ.Final[tuple[str, ...]] = ("!", "#")
 
+#: Ignore patterns that remove every Markdown file. An `ignores` entry may
+#: narrow the tree (for example, `**/execplans/**`) without defeating the
+#: gate, so only these whole-selection patterns are faults.
+_WHOLE_SELECTION_EXCLUSIONS: typ.Final[frozenset[str]] = frozenset(
+    {"**", "**/*", "**/*.md"}
+)
+
 
 def _strip_jsonc_comments(text: str) -> str:
     """Return JSONC text with comments removed and strings left intact.
@@ -144,6 +151,14 @@ def _cancels_markdown_selection(pattern: str) -> bool:
     )
 
 
+def _excludes_all_markdown(pattern: str) -> bool:
+    """Return whether an ignore pattern removes every Markdown file."""
+    return any(
+        expanded in _WHOLE_SELECTION_EXCLUSIONS
+        for expanded in _brace_alternatives(pattern)
+    )
+
+
 def config_faults(text: str) -> list[str]:
     """Return what is wrong with a configuration's file selection.
 
@@ -156,10 +171,12 @@ def config_faults(text: str) -> list[str]:
     -------
     list[str]
         One message per fault; empty when the top-level ``globs`` array is
-        non-empty, selects every Markdown file and carries no negation that
-        cancels that selection.
+        non-empty, selects every Markdown file, carries no negation that
+        cancels that selection, and no ``ignores`` entry excludes every
+        Markdown file.
     """
-    globs = json.loads(_jsonc_to_json(text)).get("globs")
+    document = json.loads(_jsonc_to_json(text))
+    globs = document.get("globs")
     if not isinstance(globs, list) or not globs:
         return [f"globs must be a non-empty array, got {globs!r}"]
     if "**/*.md" not in globs:
@@ -173,6 +190,15 @@ def config_faults(text: str) -> list[str]:
     ]
     if cancelling:
         return [f"globs negate the Markdown selection with {cancelling!r}"]
+    ignores = document.get("ignores")
+    if isinstance(ignores, list):
+        excluding = [
+            pattern
+            for pattern in ignores
+            if isinstance(pattern, str) and _excludes_all_markdown(pattern)
+        ]
+        if excluding:
+            return [f"ignores exclude every Markdown file with {excluding!r}"]
     return []
 
 
