@@ -397,6 +397,18 @@ does what is needed, or raise `rust-version` deliberately and say so in the
 change log. `scripts/tests/test_msrv_check.py` holds the script's steps and the
 contract that CI runs `make msrv`.
 
+## File-locking dependency
+
+The binary cache's `CacheLock` uses `fs4` 1.1.0 for cross-platform file
+locks[^1]. It is licensed `MIT OR Apache-2.0` and was released on 28 April
+2026. Its declared minimum Rust version is 1.75, comfortably below this crate's
+1.92 floor. The dependency is declared with `default-features = false` and only
+the `sync` feature, because the cache is synchronous and the async backends
+would add unused dependencies. Upstream `al8n/fs4` is actively maintained;
+1.1.0 was its latest release when this note was written.
+
+[^1]: `fs4` on crates.io: <https://crates.io/crates/fs4>
+
 ## The default PostgreSQL version
 
 `PgEnvCfg::apply_version` in `src/lib.rs` sets `Settings::version` from the
