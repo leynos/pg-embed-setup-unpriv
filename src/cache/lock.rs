@@ -123,7 +123,7 @@ impl CacheLock {
         // out through the trait rather than relying on the shorter name to
         // read as "exclusive" at the call site. The fully qualified form also
         // keeps these calls on `fs4` rather than the inherent `File::lock`
-        // and `File::lock_shared` methods stabilised in Rust 1.89, so both
+        // and `File::lock_shared` methods stabilized in Rust 1.89, so both
         // platforms share one implementation.
         match lock_type {
             LockType::Exclusive => FileExt::lock(&file)?,

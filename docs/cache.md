@@ -245,7 +245,10 @@ directory is ignored rather than served.
 
 ## Cache maintenance
 
-The cache does not perform automatic cleanup. To clear stale entries:
+The cache does not perform automatic cleanup. Stop every process that uses the
+cache before clearing entries: the commands below also remove `.locks/`.
+
+To clear stale entries:
 
 ```bash
 rm -rf ~/.cache/pg-embedded/binaries
@@ -257,12 +260,11 @@ Or remove specific versions:
 rm -rf ~/.cache/pg-embedded/binaries/16.3.0
 ```
 
-Delete lock files in `.locks/` only when no process holds them. On Windows,
-removing a lock file that another process still has open leaves the name
-unusable until that handle closes, and the next caller fails to open it with
-`ERROR_ACCESS_DENIED` (os error 5). That is how the early non-Unix
-implementation failed: it removed its temporary lock file while still holding
-the handle. On Unix the name is simply detached, so the same mistake fails
-silently instead.
+Deleting a lock file that another process still holds breaks the next caller on
+Windows: the name stays unusable until that handle closes, and the next caller
+fails to open it with `ERROR_ACCESS_DENIED` (os error 5). That is how the early
+non-Unix implementation failed: it removed its temporary lock file while still
+holding the handle. On Unix the name is simply detached, so the same mistake
+fails silently instead.
 
 [^1]: `fs4` 1.1.0: <https://crates.io/crates/fs4>.
