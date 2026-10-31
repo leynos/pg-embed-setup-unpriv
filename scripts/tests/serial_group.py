@@ -35,21 +35,21 @@ TESTS_DIRECTORY: typ.Final[Path] = REPOSITORY_ROOT / "tests"
 #: The group whose ``max-threads = 1`` queues the lock-taking binaries.
 SERIAL_GROUP: typ.Final[str] = "serial"
 
-#: The attribute a root file carries to compile the scenario lock module.
+#: The module a root file names to take the cross-process scenario lock.
 #:
 #: A directory module's root, such as ``tests/test_cluster_fixture/mod.rs``,
-#: reaches the shared file as ``../support/serial.rs``, so the pattern
-#: accepts a relative prefix instead of pinning the top-level spelling only.
-SERIAL_MODULE_ATTRIBUTE: typ.Final[str] = '#[path = "support/serial.rs"]'
+#: reaches the shared file as ``../support/serial.rs``, so the attribute
+#: pattern accepts any relative prefix instead of pinning the top-level
+#: spelling only.
+SERIAL_MODULE_PATH: typ.Final[str] = "support/serial.rs"
 _SERIAL_MODULE_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
-    r'#\[path\s*=\s*"[^"]*support/serial\.rs"\]'
+    r'#\[path\s*=\s*"[^"]*' + re.escape(SERIAL_MODULE_PATH) + r'"\]'
 )
 
 #: Every integration-test binary that compiles ``tests/support/serial.rs``.
 #:
 #: Changing this set is a deliberate scheduling change. The pin exists so
-#: that adding a binary to—or removing one from—the nextest filter cannot
-#: pass unnoticed.
+#: that a change to the nextest filter's membership cannot pass unnoticed.
 LOCK_TAKING_BINARIES: typ.Final[frozenset[str]] = frozenset(
     {
         "bootstrap_privileges",
