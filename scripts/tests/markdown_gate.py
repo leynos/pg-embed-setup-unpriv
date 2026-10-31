@@ -186,8 +186,11 @@ def config_faults(text: str) -> list[str]:
     """
     document = json.loads(_jsonc_to_json(text))
     globs = document.get("globs")
-    if not isinstance(globs, list) or not globs:
-        return [f"globs must be a non-empty array, got {globs!r}"]
+    match globs:
+        case list() if globs:
+            pass
+        case _:
+            return [f"globs must be a non-empty array, got {globs!r}"]
     if "**/*.md" not in globs:
         return [f"globs must include **/*.md, got {globs!r}"]
     cancelling = [
@@ -245,10 +248,13 @@ def glob_faults(workflow: Workflow) -> list[str]:
         return [f"no {ACTION} step"]
     faults: list[str] = []
     for step in steps:
-        inputs = step.get("with")
-        globs = inputs.get("globs") if isinstance(inputs, dict) else None
-        if globs != "":
-            faults.append(f"{ACTION} passes globs {globs!r}; it must pass none")
+        match step.get("with"):
+            case {"globs": ""}:
+                continue
+            case {"globs": globs}:
+                faults.append(f"{ACTION} passes globs {globs!r}; it must pass none")
+            case _:
+                faults.append(f"{ACTION} passes globs None; it must pass none")
     return faults
 
 

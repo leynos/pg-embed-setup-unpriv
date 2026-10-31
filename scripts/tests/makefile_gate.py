@@ -9,7 +9,7 @@ contract test can drive each one against a mutated fixture.
 from __future__ import annotations
 
 import re
-import typing as typ
+from collections.abc import Iterable
 
 
 def _target_declaration(makefile: str, target: str) -> str | None:
@@ -43,7 +43,7 @@ def prerequisites(makefile: str, target: str) -> list[str]:
 
 
 def prerequisite_faults(
-    makefile: str, target: str, wanted: typ.Iterable[str]
+    makefile: str, target: str, wanted: Iterable[str]
 ) -> list[str]:
     """Return each wanted prerequisite that a target does not name.
 
@@ -53,7 +53,7 @@ def prerequisite_faults(
         The Makefile text.
     target : str
         The target whose prerequisites are required.
-    wanted : typing.Iterable[str]
+    wanted : collections.abc.Iterable[str]
         The prerequisite names that must be present.
 
     Returns

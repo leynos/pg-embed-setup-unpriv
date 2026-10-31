@@ -9,7 +9,6 @@ so the mutations are what make the contract evidence.
 
 from __future__ import annotations
 
-import typing as typ
 from pathlib import Path
 
 import pytest
