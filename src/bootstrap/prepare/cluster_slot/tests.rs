@@ -7,7 +7,7 @@ use color_eyre::eyre::{Result, eyre};
 use fs4::FileExt;
 use rstest::{fixture, rstest};
 
-use super::{claim_guard_for, claim_slot, claim_slot_with_sweep, has_live_peers, sweep_dead_slots};
+use super::{claim_guard_for, claim_slot, claim_slot_with_hooks, has_live_peers, sweep_dead_slots};
 use crate::bootstrap::prepare::orphan::{OrphanStop, ProcessId};
 
 /// A data parent directory under a temporary root.
@@ -117,26 +117,59 @@ fn a_claim_waits_for_the_claim_guard(parent: Result<Parent>) {
         .expect("the claim succeeds");
 }
 
-/// Another bootstrap cannot enter its sweep while the first claim holds the
-/// guard across sweeping and slot creation.
+/// The point at which a test pauses the first claim.
+#[derive(Clone, Copy, Debug)]
+enum PausePoint {
+    /// Inside the dead-slot sweep.
+    Sweep,
+    /// After the new slot's lock file is created and locked.
+    SlotCreation,
+}
+
+/// Another bootstrap cannot claim while the first claim holds the guard, from
+/// the sweep through the creation and locking of its slot.
 #[rstest]
-fn a_claim_holds_the_guard_while_sweeping(parent: Result<Parent>) {
+#[case::sweep(PausePoint::Sweep)]
+#[case::slot_creation(PausePoint::SlotCreation)]
+fn a_claim_holds_the_guard_until_its_slot_is_locked(
+    parent: Result<Parent>,
+    #[case] pause: PausePoint,
+) {
     let dir = parent.expect("data parent");
     let first_parent = dir.dir.clone();
-    let (sweep_started_tx, sweep_started_rx) = std::sync::mpsc::channel();
-    let (continue_sweep_tx, continue_sweep_rx) = std::sync::mpsc::channel();
+    let (paused_tx, paused_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    let resume_rx = std::sync::Arc::new(std::sync::Mutex::new(resume_rx));
+    let pause_at = move |at: PausePoint| {
+        let (paused_tx, resume_rx) = (paused_tx.clone(), std::sync::Arc::clone(&resume_rx));
+        move || {
+            if std::mem::discriminant(&at) == std::mem::discriminant(&pause) {
+                paused_tx.send(()).expect("report the pause");
+                resume_rx
+                    .lock()
+                    .expect("resume receiver")
+                    .recv()
+                    .expect("wait for the test to resume");
+            }
+        }
+    };
+    let (on_sweep, on_created) = (
+        pause_at(PausePoint::Sweep),
+        pause_at(PausePoint::SlotCreation),
+    );
     let first = std::thread::spawn(move || {
-        claim_slot_with_sweep(&first_parent, |_| {
-            sweep_started_tx.send(()).expect("report sweep start");
-            continue_sweep_rx
-                .recv()
-                .expect("wait for the test to release the sweep");
-            Ok(0)
-        })
+        claim_slot_with_hooks(
+            &first_parent,
+            move |_| {
+                on_sweep();
+                Ok(0)
+            },
+            on_created,
+        )
     });
-    sweep_started_rx
+    paused_rx
         .recv_timeout(std::time::Duration::from_secs(30))
-        .expect("the first claim starts sweeping");
+        .expect("the first claim reaches the pause point");
 
     let second_parent = dir.dir.clone();
     let (claim_started_tx, claim_started_rx) = std::sync::mpsc::channel();
@@ -155,10 +188,10 @@ fn a_claim_holds_the_guard_while_sweeping(parent: Result<Parent>) {
         claim_finished_rx
             .recv_timeout(std::time::Duration::from_millis(500))
             .is_err(),
-        "a second claim must wait until sweeping and slot creation finish"
+        "a second claim must wait until sweeping and slot creation finish ({pause:?})"
     );
 
-    continue_sweep_tx.send(()).expect("release the first sweep");
+    resume_tx.send(()).expect("resume the first claim");
     first
         .join()
         .expect("join the first claim")

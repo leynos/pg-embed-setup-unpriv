@@ -215,3 +215,16 @@ outlives the cluster. `PG_EMBED_ORPHAN_WATCHER=off` skips it, as does a host
 without `setsid` or `flock`, where the sweep stays the only reclaim. While a
 watcher holds the slot lock a sweep skips that slot and the next bootstrap
 reclaims it.
+
+## Addendum, 2026-10-31: the claim guard spans the sweep and slot creation
+
+A claim used to sweep dead slots first and take `.claim-guard` afterwards. A
+second bootstrap that swept in the gap could open and lock a lock file that the
+first had created but not yet locked, treat it as a dead slot's lock, and
+remove it. The owner then failed with "slot lock is already held", and the
+shared test-cluster singleton cached that failure for the process. `claim_slot`
+now takes the guard first and holds it until the new slot's lock file is
+created and locked, so a sweep never observes a half-made slot. The regression
+test `a_claim_holds_the_guard_until_its_slot_is_locked` pauses the first claim
+once inside its sweep and once after its slot is created and locked, and checks
+that a second claim waits for the guard in both cases.

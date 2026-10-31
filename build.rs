@@ -1,4 +1,5 @@
-//! Build-time cfg aliases shared across crate targets and tests.
+//! Build script: exports the compile target and emits the
+//! `privileged_unix_platform` cfg for the targets that can drop privileges.
 
 #![recursion_limit = "1024"]
 

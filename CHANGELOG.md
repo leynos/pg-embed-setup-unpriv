@@ -13,7 +13,7 @@ All notable changes to this crate are recorded here. The format follows
   not-yet-locked `.lock` file in the gap. The owner then failed with "slot lock
   is already held", and the shared test-cluster singleton cached that failure
   for the process. A regression test pauses the first claim in its sweep and
-  checks that a second claim waits for the guard.
+  after its slot is created and checks that a second claim waits for the guard.
 - `build.rs` registers and emits `privileged_unix_platform` directly with
   `cargo:rustc-check-cfg` and `cargo:rustc-cfg`, and the `cfg_aliases` build
   dependency is gone. Its macro expansion triggered a future-incompatible

@@ -142,14 +142,23 @@ fn slot_lookup(data_dir: &std::path::Path) -> SlotLookup<'_> {
 /// Returns an error when the guard cannot be locked, `parent` cannot be
 /// created or listed, or the new slot's lock file cannot be created and locked.
 pub(super) fn claim_slot(parent: &Utf8Path) -> BootstrapResult<ClusterSlot> {
-    claim_slot_with_sweep(parent, |slots| sweep_dead_slots(slots, &orphan::SignalStop))
+    claim_slot_with_hooks(
+        parent,
+        |slots| sweep_dead_slots(slots, &orphan::SignalStop),
+        || {},
+    )
 }
 
 /// Sweeps and claims while holding the guard, so another bootstrap cannot
 /// mistake a newly created but not-yet-locked file for a dead slot.
-fn claim_slot_with_sweep(
+///
+/// `sweep` runs once the guard is held. `created` runs after the new slot's
+/// lock file is created and locked, still under the guard; production passes
+/// a no-op, and tests pause there to prove the guard covers slot creation.
+fn claim_slot_with_hooks(
     parent: &Utf8Path,
     sweep: impl FnOnce(&Utf8Path) -> BootstrapResult<usize>,
+    created: impl FnOnce(),
 ) -> BootstrapResult<ClusterSlot> {
     std::fs::create_dir_all(parent).map_err(|err| slot_error(parent, "create", err))?;
     let _guard = ClaimGuard::acquire(parent.as_std_path())
@@ -157,6 +166,7 @@ fn claim_slot_with_sweep(
     sweep(parent)?;
     let name = slot_name();
     let lock = lock_new_slot(parent, &name)?;
+    created();
     HELD.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .push(lock);
