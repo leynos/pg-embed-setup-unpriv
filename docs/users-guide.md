@@ -1006,8 +1006,10 @@ reuse, depends on the layout. `<install>` is the install tree, which is
   `TestCluster` constructor. The password file is `<root>/data/<name>.pgpass`,
   beside that cluster's data directory.
 
-`bootstrap_for_tests().environment.pgpass_file` returns the selected path, and
-the bootstrap exports that same path as `PGPASSFILE`.
+`bootstrap_for_tests().environment.pgpass_file` returns the selected path. The
+returned environment includes that path as `PGPASSFILE`; direct callers apply
+the environment themselves, while `TestCluster` applies it for the cluster's
+lifetime.
 
 ADR 005 records the design.
 
