@@ -402,30 +402,37 @@ cluster on first access and reuses it across all tests in the same binary,
 eliminating per-test bootstrap overhead.
 
 ```rust,no_run
-use pg_embedded_setup_unpriv::{test_support::shared_test_cluster, TestCluster};
+use pg_embedded_setup_unpriv::{
+    test_support::shared_test_cluster, BootstrapResult, TestCluster,
+};
 use rstest::rstest;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_database_name() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
     let id = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("shared_cluster_test_{}_{id}", std::process::id())
+    format!("shared_db_{}_{timestamp}_{id}", std::process::id())
 }
 
 #[rstest]
-fn uses_shared_cluster(shared_test_cluster: &'static TestCluster) {
+fn uses_shared_cluster(shared_test_cluster: &'static TestCluster) -> BootstrapResult<()> {
     let db_name = unique_database_name();
 
     // Create a per-test database for isolation.
-    shared_test_cluster.create_database(db_name.as_str()).unwrap();
+    shared_test_cluster.create_database(db_name.as_str())?;
 
     // Run tests against the database.
     let url = shared_test_cluster.connection().database_url(&db_name);
     assert!(url.contains(&db_name));
 
     // Clean up the per-test database.
-    shared_test_cluster.drop_database(db_name.as_str()).unwrap();
+    shared_test_cluster.drop_database(db_name.as_str())?;
+    Ok(())
 }
 ```
 
@@ -574,8 +581,9 @@ cluster.create_database_from_template("test_db_2", "my_template")?;
 ```
 
 Template helpers live on `TestClusterConnection` and are also exposed on
-`TestCluster` for convenience. Use unique database names (for example, a
-process ID plus an atomic counter) to avoid collisions under parallel execution.
+`TestCluster` for convenience. Use unique database names. The examples combine
+a process ID, current timestamp, and atomic counter to reduce collisions
+between parallel tests and with databases retained from earlier runs.
 
 The `ensure_template_exists` method provides concurrency-safe template creation
 with per-template locking to prevent race conditions when multiple tests try to
@@ -649,13 +657,15 @@ _Table 3: Performance comparison for test isolation approaches._
 
 ### Database cleanup strategies
 
-Databases created in a shared cluster persist for the process lifetime unless
-explicitly dropped. This can consume disk space during a run and cause name
-collisions if names are reused. At process exit, the hook stops the server and
-handles directories according to `CleanupMode`; databases in a preserved data
-directory remain on disk. Use unique per-test database names. Close clients and
-drain connection pools before cleanup: `drop_database` fails if the database is
-missing or has active connections.
+Databases created directly with `create_database` in a shared cluster remain
+present for the process lifetime unless explicitly dropped; cluster shutdown
+does not drop them individually. This can consume disk space during a run and
+cause name collisions if names are reused. At process exit, the hook stops the
+server and handles directories according to `CleanupMode`; databases in a
+preserved data directory remain on disk. Use unique per-test database names.
+Close clients and drain connection pools before cleanup: `drop_database` fails
+if the database is missing or has active connections. `TemporaryDatabase`
+provides best-effort implicit cleanup when its guard leaves scope.
 
 **Explicit cleanup:** Drop databases after each test to reclaim disk space and
 prevent name collisions:
@@ -663,12 +673,16 @@ prevent name collisions:
 ```rust,no_run
 use pg_embedded_setup_unpriv::test_support::shared_cluster;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_database_name() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
     let id = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("shared_cluster_test_{}_{id}", std::process::id())
+    format!("shared_db_{}_{timestamp}_{id}", std::process::id())
 }
 
 # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
@@ -699,12 +713,16 @@ cleanup; use `force_drop()` if sessions remain open.
 ```rust,no_run
 use pg_embedded_setup_unpriv::test_support::shared_cluster;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_database_name() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
     let id = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("shared_cluster_test_{}_{id}", std::process::id())
+    format!("shared_db_{}_{timestamp}_{id}", std::process::id())
 }
 
 # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
