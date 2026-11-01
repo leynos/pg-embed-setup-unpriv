@@ -24,6 +24,8 @@ import re
 import typing as typ
 from pathlib import Path
 
+import pytest
+
 from test_nextest_tier_contract import CLUSTER_BINARIES, SERIAL_BINARIES
 
 TESTS_DIR = Path(__file__).resolve().parents[2] / "tests"
@@ -99,14 +101,23 @@ def _source_files(tests_dir: Path = TESTS_DIR) -> typ.Iterator[tuple[str, Path]]
         yield "test_cluster_fixture", fixture
 
 
-def _module_directory(declaring_file: Path) -> Path:
-    """Return where a plain ``mod name;`` next to ``declaring_file`` lives."""
-    if declaring_file.name == "mod.rs":
+def _module_directory(declaring_file: Path, *, is_crate_root: bool) -> Path:
+    """Return where a plain ``mod name;`` declared by this file lives.
+
+    A crate root and a ``mod.rs`` both search their own directory: for
+    ``tests/parent.rs``, ``mod child;`` is ``tests/child.rs``, not
+    ``tests/parent/child.rs``. Only an ordinary module file, such as
+    ``tests/parent.rs``'s ``tests/parent/child.rs``, searches a
+    directory named after itself.
+    """
+    if is_crate_root or declaring_file.name == "mod.rs":
         return declaring_file.parent
     return declaring_file.parent / declaring_file.stem
 
 
-def _module_file(declaring_file: Path, declared: re.Match[str]) -> Path | None:
+def _module_file(
+    declaring_file: Path, declared: re.Match[str], *, is_crate_root: bool
+) -> Path | None:
     """Return the file a module declaration compiles in, if it exists.
 
     A ``#[path]`` attribute overrides the search and is taken relative
@@ -120,12 +131,14 @@ def _module_file(declaring_file: Path, declared: re.Match[str]) -> Path | None:
     if override is not None:
         candidates = [declaring_file.parent / override]
     else:
-        base = _module_directory(declaring_file)
+        base = _module_directory(declaring_file, is_crate_root=is_crate_root)
         candidates = [base / f"{name}.rs", base / name / "mod.rs"]
     return next((path for path in candidates if path.is_file()), None)
 
 
-def _compiled_sources(path: Path, seen: dict[Path, str]) -> dict[Path, str]:
+def _compiled_sources(
+    path: Path, seen: dict[Path, str], *, is_crate_root: bool
+) -> dict[Path, str]:
     """Return every source file a test binary compiles in, by path.
 
     Parameters
@@ -135,6 +148,9 @@ def _compiled_sources(path: Path, seen: dict[Path, str]) -> dict[Path, str]:
     seen : dict[Path, str]
         The files already read, mapping each to its text, which also
         stops a module cycle from recursing.
+    is_crate_root : bool
+        Whether ``path`` is the binary's root, which changes where its
+        plain module declarations resolve.
 
     Returns
     -------
@@ -148,9 +164,9 @@ def _compiled_sources(path: Path, seen: dict[Path, str]) -> dict[Path, str]:
     source = resolved.read_text(encoding="utf-8")
     seen[resolved] = source
     for declared in _MODULE_DECLARATION.finditer(source):
-        module = _module_file(resolved, declared)
+        module = _module_file(resolved, declared, is_crate_root=is_crate_root)
         if module is not None:
-            _compiled_sources(module, seen)
+            _compiled_sources(module, seen, is_crate_root=False)
     return seen
 
 
@@ -175,7 +191,7 @@ def spawning_cluster_binaries(
     """
     found = set()
     for name, path in _source_files(tests_dir):
-        sources = _compiled_sources(path, {})
+        sources = _compiled_sources(path, {}, is_crate_root=True)
         text = "\n".join(sources[source] for source in sorted(sources))
         if _CHILD_PROCESS.search(text) and _CLUSTER_API.search(text):
             found.add(name)
@@ -203,27 +219,57 @@ def test_the_scan_names_the_known_parent_child_cluster_binaries() -> None:
     )
 
 
-def test_markers_in_separate_included_modules_are_found(tmp_path: Path) -> None:
+_SPAWN = "fn spawn() { spawn_child(); }\n"
+_BOOTSTRAP = "fn bootstrap() -> TestCluster { todo!() }\n"
+
+#: Module layouts a test binary can use, each placing the spawn marker
+#: and the cluster marker in different files. The crate-root case is the
+#: one most easily got wrong: ``mod cluster_api;`` beside a crate root
+#: resolves next to it, not into a directory named after the root.
+_SEPARATE_MODULE_LAYOUTS: dict[str, dict[str, str]] = {
+    "crate-root-siblings": {
+        "parent.rs": (
+            '#[path = "spawned_child.rs"]\nmod spawned_child;\nmod cluster_api;\n'
+        ),
+        "spawned_child.rs": _SPAWN,
+        "cluster_api.rs": _BOOTSTRAP,
+    },
+    "ordinary-module-file": {
+        "parent.rs": "mod child;\n",
+        "child.rs": f"mod cluster_api;\n{_SPAWN}",
+        "child/cluster_api.rs": _BOOTSTRAP,
+    },
+    "directory-form": {
+        "parent.rs": "mod child;\n",
+        "child/mod.rs": f"mod cluster_api;\n{_SPAWN}",
+        "child/cluster_api.rs": _BOOTSTRAP,
+    },
+}
+
+
+@pytest.mark.parametrize(
+    "layout",
+    _SEPARATE_MODULE_LAYOUTS.values(),
+    ids=_SEPARATE_MODULE_LAYOUTS.keys(),
+)
+def test_markers_in_separate_included_modules_are_found(
+    layout: dict[str, str], tmp_path: Path
+) -> None:
     """A parent may spawn in one module and bootstrap in another.
 
     Both marker searches run over every file the binary compiles in, so
     a parent that keeps the child-process spawn and the cluster
-    bootstrap in different modules is still detected. The ``#[path]``
-    module and the plain sibling module are both exercised here.
+    bootstrap in different modules is still detected. Each layout is a
+    module-resolution rule: a ``#[path]`` override beside the crate
+    root, an ordinary module file's own directory, and the directory
+    form of a plain declaration.
     """
-    (tmp_path / "split_parent.rs").write_text(
-        '#[path = "spawned_child.rs"]\nmod spawned_child;\nmod cluster_api;\n',
-        encoding="utf-8",
-    )
-    (tmp_path / "spawned_child.rs").write_text(
-        "fn spawn() { spawn_child(); }\n", encoding="utf-8"
-    )
-    (tmp_path / "split_parent").mkdir()
-    (tmp_path / "split_parent" / "cluster_api.rs").write_text(
-        "fn bootstrap() -> TestCluster { todo!() }\n", encoding="utf-8"
-    )
+    for relative, source in layout.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
 
-    assert spawning_cluster_binaries(tmp_path) == frozenset({"split_parent"}), (
+    assert spawning_cluster_binaries(tmp_path) == frozenset({"parent"}), (
         "markers split across included modules must still name the parent"
     )
 
