@@ -57,7 +57,9 @@ def test_a_binary_disjunction_reads_as_its_names(
     whitespace or on newlines instead would leave a leading ``binary(=``
     attached to the previous term and produce names nextest never sees.
     """
-    assert binary_names_in_filter(filter_text) == expected
+    assert binary_names_in_filter(filter_text) == expected, (
+        f"filter {filter_text!r} must read as {sorted(expected)}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -96,7 +98,10 @@ def test_the_serial_reader_separates_binaries_from_the_embedded_term() -> None:
     """
     filter_text = f"\n  binary(=ui)\n  | {EMBEDDED_SERIAL_TERM}\n"
 
-    assert serial_group_binaries(filter_text) == frozenset({"ui"})
+    assert serial_group_binaries(filter_text) == frozenset({"ui"}), (
+        "the serial reader must return the binary names alone and leave the "
+        f"embedded test-name term out of the registry: {filter_text!r}"
+    )
 
 
 @pytest.mark.parametrize(

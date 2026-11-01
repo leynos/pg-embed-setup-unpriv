@@ -31,6 +31,7 @@ from nextest_filters import (
 )
 from timeout_budgets import (
     REQUIRED_GLOBAL_TIMEOUT_SECONDS,
+    UnboundedTestError,
     seconds,
 )
 
@@ -187,12 +188,16 @@ def test_only_ui_and_the_cluster_tier_exceed_the_default_budget(
         f"`binary(=ui)` must be the first above-default override; found "
         f"{longer[0]['filter']!r}"
     )
-    assert _budget(longer[0]["slow-timeout"]) == UI_BUDGET_SECONDS
+    assert _budget(longer[0]["slow-timeout"]) == UI_BUDGET_SECONDS, (
+        f"the `binary(=ui)` override must give {UI_BUDGET_SECONDS:.0f}s"
+    )
     assert binary_names_in_filter(str(longer[1]["filter"])) == CLUSTER_BINARIES, (
         "the second above-default override must name every cluster binary and "
         f"nothing else; found {binary_names_in_filter(str(longer[1]['filter']))}"
     )
-    assert _budget(longer[1]["slow-timeout"]) == CLUSTER_BUDGET_SECONDS
+    assert _budget(longer[1]["slow-timeout"]) == CLUSTER_BUDGET_SECONDS, (
+        f"the cluster override must give {CLUSTER_BUDGET_SECONDS:.0f}s"
+    )
 
 
 def _cluster_declaration(nextest_config: str) -> dict[str, object]:
@@ -365,9 +370,15 @@ def _budget(slow_timeout: dict[str, object]) -> Fraction:
     # shared duration reader, so any spelling nextest accepts reads the
     # same.
     if "terminate-after" not in slow_timeout:
-        raise ValueError(
-            "a slow-timeout without terminate-after never terminates the test, "
-            "so it has no budget"
+        # `UnboundedTestError` is the domain error for this case: the shared
+        # reader in `nextest_budgets` raises it when `terminate-after` is
+        # absent, so a bare `ValueError` would be the odd one out.
+        message = (
+            "the slow-timeout table sets no terminate-after, so nextest marks the "
+            "test slow and lets it run on; there is no per-test tier to compare"
+        )
+        raise UnboundedTestError(
+            message, field="terminate-after", value=slow_timeout
         )
     return seconds(str(slow_timeout["period"])) * int(
         typ.cast("int", slow_timeout["terminate-after"])

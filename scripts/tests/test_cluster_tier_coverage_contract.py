@@ -36,9 +36,21 @@ _CLUSTER_API = re.compile(
 #: A reference to spawning another process from a test.
 _CHILD_PROCESS = re.compile(r"current_exe\(|spawn_child\(|Command::new\(")
 
+#: A module declaration a test binary compiles in, with or without a
+#: `#[path]` attribute that overrides where its file lives.
+_MODULE_DECLARATION = re.compile(
+    r'(?:#\[path\s*=\s*"(?P<path>[^"]+)"\]\s*)?'
+    r"(?:pub(?:\([^)]*\))?\s+)?mod\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*;"
+)
+
 #: Binaries that spawn children and reference a cluster API, but are not
 #: normal-run parents whose allowance covers real cluster startup.
 CHILD_CLUSTER_EXCEPTIONS: typ.Final[dict[str, str]] = {
+    "bootstrap_worker_binary": (
+        "the child it spawns is the `pg_worker` helper, and the tests cover "
+        "worker-path validation that fails before any cluster starts; its "
+        "`bootstrap_for_tests` calls run in-process to produce that failure"
+    ),
     "shared_cluster_retry": (
         "each child points every proxy at a closed port, so its bootstrap "
         "fails without starting a cluster; the parent is bounded by the "
@@ -66,22 +78,95 @@ LOCAL_GUARD_BINARIES: typ.Final[frozenset[str]] = frozenset(
 )
 
 
-def _source_files() -> typ.Iterator[tuple[str, Path]]:
-    """Yield each test binary's name and its source path.
+def _source_files(tests_dir: Path = TESTS_DIR) -> typ.Iterator[tuple[str, Path]]:
+    """Yield each test binary's name and its crate-root source path.
+
+    Parameters
+    ----------
+    tests_dir : Path
+        The directory holding the integration-test sources.
 
     Returns
     -------
     Iterator[tuple[str, Path]]
         Top-level ``tests/*.rs`` binaries, plus the directory-backed
-        ``test_cluster_fixture`` target.
+        ``test_cluster_fixture`` target when it exists.
     """
-    for path in sorted(TESTS_DIR.glob("*.rs")):
+    for path in sorted(tests_dir.glob("*.rs")):
         yield path.stem, path
-    yield "test_cluster_fixture", TESTS_DIR / "test_cluster_fixture" / "mod.rs"
+    fixture = tests_dir / "test_cluster_fixture" / "mod.rs"
+    if fixture.is_file():
+        yield "test_cluster_fixture", fixture
 
 
-def spawning_cluster_binaries() -> frozenset[str]:
+def _module_directory(declaring_file: Path) -> Path:
+    """Return where a plain ``mod name;`` next to ``declaring_file`` lives."""
+    if declaring_file.name == "mod.rs":
+        return declaring_file.parent
+    return declaring_file.parent / declaring_file.stem
+
+
+def _module_file(declaring_file: Path, declared: re.Match[str]) -> Path | None:
+    """Return the file a module declaration compiles in, if it exists.
+
+    A ``#[path]`` attribute overrides the search and is taken relative
+    to the declaring file, which is how the test crates reach
+    ``tests/support``. A plain declaration searches the sibling file
+    and then the directory form. Declarations nested inside inline
+    ``mod`` blocks are not modelled; no test crate uses that shape.
+    """
+    override = declared.group("path")
+    name = declared.group("name")
+    if override is not None:
+        candidates = [declaring_file.parent / override]
+    else:
+        base = _module_directory(declaring_file)
+        candidates = [base / f"{name}.rs", base / name / "mod.rs"]
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def _compiled_sources(path: Path, seen: dict[Path, str]) -> dict[Path, str]:
+    """Return every source file a test binary compiles in, by path.
+
+    Parameters
+    ----------
+    path : Path
+        A crate root or an included module file.
+    seen : dict[Path, str]
+        The files already read, mapping each to its text, which also
+        stops a module cycle from recursing.
+
+    Returns
+    -------
+    dict[Path, str]
+        The text of ``path`` and, transitively, of every module it
+        declares.
+    """
+    resolved = path.resolve()
+    if resolved in seen:
+        return seen
+    source = resolved.read_text(encoding="utf-8")
+    seen[resolved] = source
+    for declared in _MODULE_DECLARATION.finditer(source):
+        module = _module_file(resolved, declared)
+        if module is not None:
+            _compiled_sources(module, seen)
+    return seen
+
+
+def spawning_cluster_binaries(
+    tests_dir: Path = TESTS_DIR,
+) -> frozenset[str]:
     """Return binaries that spawn children and reference a cluster API.
+
+    The markers are searched across every file the binary compiles in,
+    not only its crate root: a parent can put the child-process spawn in
+    one module and the cluster bootstrap in another.
+
+    Parameters
+    ----------
+    tests_dir : Path
+        The directory holding the integration-test sources.
 
     Returns
     -------
@@ -89,9 +174,10 @@ def spawning_cluster_binaries() -> frozenset[str]:
         Test binary names matching both lexical markers.
     """
     found = set()
-    for name, path in _source_files():
-        source = path.read_text(encoding="utf-8")
-        if _CHILD_PROCESS.search(source) and _CLUSTER_API.search(source):
+    for name, path in _source_files(tests_dir):
+        sources = _compiled_sources(path, {})
+        text = "\n".join(sources[source] for source in sorted(sources))
+        if _CHILD_PROCESS.search(text) and _CLUSTER_API.search(text):
             found.add(name)
     return frozenset(found)
 
@@ -106,6 +192,7 @@ def test_the_scan_names_the_known_parent_child_cluster_binaries() -> None:
     """
     assert spawning_cluster_binaries() == frozenset(
         {
+            "bootstrap_worker_binary",
             "durability_defaults",
             "fresh_cluster_per_process",
             "per_cluster_directories",
@@ -113,6 +200,31 @@ def test_the_scan_names_the_known_parent_child_cluster_binaries() -> None:
             "shutdown_hook_lifecycle",
             "start_ramp",
         }
+    )
+
+
+def test_markers_in_separate_included_modules_are_found(tmp_path: Path) -> None:
+    """A parent may spawn in one module and bootstrap in another.
+
+    Both marker searches run over every file the binary compiles in, so
+    a parent that keeps the child-process spawn and the cluster
+    bootstrap in different modules is still detected. The ``#[path]``
+    module and the plain sibling module are both exercised here.
+    """
+    (tmp_path / "split_parent.rs").write_text(
+        '#[path = "spawned_child.rs"]\nmod spawned_child;\nmod cluster_api;\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "spawned_child.rs").write_text(
+        "fn spawn() { spawn_child(); }\n", encoding="utf-8"
+    )
+    (tmp_path / "split_parent").mkdir()
+    (tmp_path / "split_parent" / "cluster_api.rs").write_text(
+        "fn bootstrap() -> TestCluster { todo!() }\n", encoding="utf-8"
+    )
+
+    assert spawning_cluster_binaries(tmp_path) == frozenset({"split_parent"}), (
+        "markers split across included modules must still name the parent"
     )
 
 
