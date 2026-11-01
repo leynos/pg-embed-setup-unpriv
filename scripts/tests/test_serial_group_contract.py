@@ -8,6 +8,9 @@ judged last.
 
 from __future__ import annotations
 
+import os
+import re
+import subprocess
 import typing as typ
 from pathlib import Path
 
@@ -20,6 +23,7 @@ from serial_group import (
     TESTS_DIRECTORY,
     serial_group_faults,
 )
+from serial_inventory import lock_taking_binaries
 
 _GOOD_FILTER = "\n  | ".join(
     f"binary(={name})" for name in sorted(LOCK_TAKING_BINARIES)
@@ -270,4 +274,199 @@ def test_the_real_repository_serial_group_holds_every_lock_taking_binary() -> No
     assert faults == [], (
         "the real serial group must hold every lock-taking binary, "
         f"got {faults}"
+    )
+
+
+def test_a_manifest_that_is_not_toml_yields_a_fault_and_no_inventory(
+    repository: tuple[Path, str],
+) -> None:
+    """Unreadable manifest text is reported instead of raising."""
+    tests_directory, _ = repository
+    inventory, faults = lock_taking_binaries("[test\nname = ", tests_directory)
+    assert inventory == frozenset(), (
+        "a manifest that cannot be parsed must not yield an inventory"
+    )
+    assert any("not valid TOML" in fault for fault in faults), (
+        f"the parse failure must be reported: {faults}"
+    )
+
+
+def test_a_declared_root_that_cannot_be_read_is_reported(
+    repository: tuple[Path, str],
+) -> None:
+    """A manifest entry with no root file is named, and is not a member."""
+    tests_directory, manifest = repository
+    (tests_directory / "data_dir_recovery.rs").unlink()
+    inventory, faults = lock_taking_binaries(manifest, tests_directory)
+    assert "data_dir_recovery" not in inventory, (
+        "a binary whose root cannot be read must not be inventoried"
+    )
+    assert any(
+        "cannot read" in fault and "data_dir_recovery" in fault for fault in faults
+    ), f"the missing root must be reported by name: {faults}"
+
+
+def test_a_scanned_file_that_cannot_be_read_is_reported(
+    repository: tuple[Path, str],
+) -> None:
+    """An unreadable ``.rs`` entry under ``tests`` is reported, not skipped."""
+    tests_directory, manifest = repository
+    (tests_directory / "unreadable.rs").mkdir()
+    _, faults = lock_taking_binaries(manifest, tests_directory)
+    assert any(
+        "cannot read" in fault and "unreadable.rs" in fault for fault in faults
+    ), f"an unreadable scanned file must be reported: {faults}"
+
+
+def test_the_public_contract_reports_a_missing_root(
+    repository: tuple[Path, str],
+) -> None:
+    """The discovery fault reaches the caller through the public boundary."""
+    tests_directory, manifest = repository
+    (tests_directory / "timezone_regression.rs").unlink()
+    faults = serial_group_faults(_GOOD_CONFIG, manifest, tests_directory)
+    assert any(
+        "cannot read" in fault and "timezone_regression" in fault for fault in faults
+    ), f"the public contract must surface the discovery fault: {faults}"
+
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+_GROUP_HEADER = re.compile(
+    r"^group: (?P<name>\S+) \(max threads = (?P<limit>\d+)\)$", re.MULTILINE
+)
+_BINARY_ENTRY = re.compile(r"^\s+\w+::(?P<name>\S+):$", re.MULTILINE)
+
+
+def _group_members(output: str) -> dict[str, tuple[int, set[str]]]:
+    """Map each printed group to its thread limit and member binaries.
+
+    Parameters
+    ----------
+    output : str
+        Standard output of ``cargo nextest show-config test-groups``.
+
+    Returns
+    -------
+    dict of str to tuple
+        One entry per group, holding ``max threads`` and the binary names
+        nextest reported under that group.
+    """
+    text = _ANSI_ESCAPE.sub("", output)
+    headers = list(_GROUP_HEADER.finditer(text))
+    groups: dict[str, tuple[int, set[str]]] = {}
+    for index, header in enumerate(headers):
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        block = text[header.end() : end]
+        groups[header["name"]] = (
+            int(header["limit"]),
+            set(_BINARY_ENTRY.findall(block)),
+        )
+    return groups
+
+
+_FILTER_BINARY = re.compile(r"binary\(=([A-Za-z0-9_-]+)\)")
+
+#: Where the probe's generated crate lives. Cargo keys a path package's
+#: freshness on its manifest's location, so a stable path — not just a stable
+#: ``CARGO_TARGET_DIR`` — is what lets the dependency-free crate stay warm:
+#: the behavioural check then costs a compile only when nextest, the toolchain
+#: or the checked-in configuration changes.
+_PROBE_CRATE = Path(__file__).resolve().parents[2] / "target" / "serial-group-probe-crate"
+_PROBE_TARGET = _PROBE_CRATE / "target"
+
+
+def _configured_binaries() -> frozenset[str]:
+    """Return every binary name the real configuration mentions.
+
+    nextest rejects a ``binary(=name)`` term that matches nothing, so the
+    probe must define a binary for each name the checked-in overrides use,
+    including the ones that only narrow a timeout.
+
+    Returns
+    -------
+    frozenset of str
+        The lock-taking binaries and the timeout-only names.
+    """
+    mentioned = _FILTER_BINARY.findall(NEXTEST_CONFIG.read_text(encoding="utf-8"))
+    return frozenset(mentioned) | LOCK_TAKING_BINARIES
+
+
+def _write_if_changed(path: Path, text: str) -> None:
+    """Write ``text`` unless ``path`` already holds it.
+
+    Leaving an unchanged file untouched preserves its modification time, which
+    is what lets Cargo treat the probe as fresh on the next run.
+    """
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+@pytest.fixture
+def nextest_probe() -> Path:
+    """Write a dependency-free crate that carries the real nextest config.
+
+    nextest answers a question about test binaries, so the probe needs one
+    test case per lock-taking binary. Copying the checked-in configuration
+    verbatim is the point: the grammar under test is nextest's own, not a
+    restatement of it.
+
+    Returns
+    -------
+    Path
+        The probe crate's root directory.
+    """
+    crate = _PROBE_CRATE
+    # `[workspace]` stops the probe from searching upwards and finding the
+    # repository's workspace, which would reject it as a non-member.
+    _write_if_changed(
+        crate / "Cargo.toml",
+        '[package]\nname = "probe"\nversion = "0.0.0"\nedition = "2021"\n'
+        "\n[workspace]\n",
+    )
+    _write_if_changed(crate / "src" / "lib.rs", "")
+    _write_if_changed(
+        crate / ".config" / "nextest.toml",
+        NEXTEST_CONFIG.read_text(encoding="utf-8"),
+    )
+    configured = _configured_binaries()
+    tests_directory = crate / "tests"
+    tests_directory.mkdir(exist_ok=True)
+    for stale in tests_directory.glob("*.rs"):
+        if stale.stem not in configured:
+            stale.unlink()
+    for name in sorted(configured):
+        _write_if_changed(
+            tests_directory / f"{name}.rs", "#[test]\nfn ok() {}\n"
+        )
+    return crate
+
+
+def test_nextest_places_every_lock_taking_binary_in_the_serial_group(
+    nextest_probe: Path,
+) -> None:
+    """nextest's own parser agrees with the pinned inventory and the limit."""
+    version = subprocess.run(
+        ["cargo", "nextest", "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if version.returncode != 0:
+        pytest.skip("cargo-nextest is not installed, so the parser cannot be asked")
+    result = subprocess.run(
+        ["cargo", "nextest", "show-config", "test-groups", "--all-targets", "--offline"],
+        cwd=nextest_probe,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+        env={**os.environ, "CARGO_TARGET_DIR": str(_PROBE_TARGET)},
+    )
+    assert result.returncode == 0, f"cargo nextest failed: {result.stderr}"
+    groups = _group_members(result.stdout)
+    assert groups.get("serial") == (1, set(LOCK_TAKING_BINARIES)), (
+        "nextest must place every lock-taking binary in one serial group with "
+        f"max threads 1, got {groups}"
     )
