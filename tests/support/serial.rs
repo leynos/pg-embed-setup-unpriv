@@ -122,12 +122,17 @@ fn acquire_scenario_guard() -> MutexGuard<'static, ()> {
 #[cfg(unix)]
 const SLOW_LOCK_WAIT_THRESHOLD: Duration = Duration::from_secs(1);
 
-/// Return the diagnostic for a scenario-lock wait worth reporting.
+/// Return the diagnostic for a completed scenario-lock wait worth reporting.
 ///
 /// nextest stops the `slow-timeout` clock while a test waits for a slot in the
 /// `serial` test group, but it keeps counting while the test blocks in
-/// `flock`. Reporting a residual wait separately is what lets a timeout show
+/// `flock`. Reporting a completed wait separately is what lets a timeout show
 /// lock queueing rather than only cluster work.
+///
+/// The call site starts the clock immediately before `flock` and reaches this
+/// function only after `flock` returns. A test that nextest terminates while
+/// it is still blocked therefore emits nothing, so an absent diagnostic does
+/// not mean the test never waited.
 ///
 /// # Examples
 ///
@@ -139,19 +144,19 @@ const SLOW_LOCK_WAIT_THRESHOLD: Duration = Duration::from_secs(1);
 fn slow_lock_wait_message(lock_path: &Path, waited: Duration) -> Option<String> {
     (waited >= SLOW_LOCK_WAIT_THRESHOLD).then(|| {
         format!(
-            "scenario lock wait at {} lasted {waited:?}; runtime lock waiting counts against \
-             nextest slow-timeout, unlike waiting for the serial test-group slot",
+            "scenario lock wait at {} completed after {waited:?}; runtime lock waiting counts \
+             against nextest slow-timeout, unlike waiting for the serial test-group slot",
             lock_path.display()
         )
     })
 }
 
-/// Write a residual-wait diagnostic to nextest's captured standard error.
+/// Write a completed-wait diagnostic to nextest's captured standard error.
 #[cfg(unix)]
 #[expect(
     clippy::print_stderr,
-    reason = "the residual wait must reach nextest's captured test output; these binaries install \
-              no tracing subscriber, so an event would lose the diagnostic"
+    reason = "the completed wait must reach nextest's captured test output; these binaries \
+              install no tracing subscriber, so an event would lose the diagnostic"
 )]
 fn report_slow_lock_wait(message: &str) { eprintln!("{message}") }
 

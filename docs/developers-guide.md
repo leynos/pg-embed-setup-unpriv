@@ -25,11 +25,15 @@ consumer-facing guidance.
   `serial::tests::*` lock cases, joins the one-slot nextest `serial` group.
   nextest does not count a wait for a group slot against `slow-timeout`, but it
   does count time blocked in `flock` once the test has started.
-  `tests/support/serial.rs` reports a residual wait of one second or more on
-  stderr, so a timeout separates lock queueing from cluster work.
+  `tests/support/serial.rs` reports a completed wait of one second or more on
+  stderr, so a timeout separates lock queueing from cluster work. A test that
+  nextest terminates while it is still blocked emits no such line: the
+  diagnostic covers waits that completed, not waits in progress.
 - Tests that use the local guard with an isolated root stay out of the group.
-  They share no lock or directory with the other scenarios, so serializing them
-  would add wall time without preventing contention.
+  `observability`, `data_dir_recovery` and `test_cluster_async` are the
+  examples. They share no lock or directory with the other scenarios, so
+  serializing them would add wall time without preventing contention. Their
+  embedded `serial::tests::*` cases still join through the test-name term.
 
 ## Feature coverage in CI
 
@@ -582,11 +586,20 @@ nothing else in the same nextest run took 132.893 s. That leaves about 26% of
 headroom under 180 s, and one full `make test` on the same host timed out sixty
 cluster tests at exactly 180.00 s.
 
-The cluster override gives the seventeen binaries that start or share a real
+The cluster override gives the twenty binaries that start or share a real
 PostgreSQL cluster 300 s. That is 2.25 times the measurement, leaving 167 s of
 headroom for a loaded developer host or a cold CI runner. The five-second grace
 period is explicit: omitting it would select nextest's ten-second default and
 raise the watchdog floor the contract derives from 1,765 s to 1,770 s.
+
+The tier also covers parent tests whose children bootstrap a real cluster:
+`shutdown_hook_lifecycle` was already listed, and the three added for #247 are
+`durability_defaults`, `fresh_cluster_per_process` and
+`per_cluster_directories`. The three added here have isolated roots, so they
+take no scenario lock and stay out of the `serial` group, but the parent's
+allowance still covers child startup and waiting. Tier membership and
+serial-group membership are separate questions, and the contracts check each
+list on its own terms.
 
 The cluster tier is 300 s, not the 360 s the `ui` override used before it was
 raised for the macOS trybuild builds. `ui` remains at 900 s.

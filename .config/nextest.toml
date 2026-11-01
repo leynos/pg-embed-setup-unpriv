@@ -29,6 +29,13 @@ slow-timeout = { period = "900s", terminate-after = 1, grace-period = "5s" }
 # host or a cold CI runner. A warm repeat on the same host class ran the test
 # in 1.479 s, so the tier is for the cold case rather than the steady state.
 #
+# `durability_defaults`, `fresh_cluster_per_process` and
+# `per_cluster_directories` are listed here even though their roots are
+# isolated and they take no scenario lock: each re-runs itself as a child, and
+# the child bootstraps a real cluster, so the parent's allowance covers child
+# startup and waiting. Timeout-tier membership therefore says nothing about
+# membership in the `serial` group below.
+#
 # The grace period is explicit: omitting it selects nextest's own 10 s default
 # and raises the watchdog floor this contract derives from 1,765 s to 1,770 s.
 [[profile.default.overrides]]
@@ -37,8 +44,11 @@ filter = """
   | binary(=cluster_split_constructors)
   | binary(=data_dir_recovery)
   | binary(=database_lifecycle)
+  | binary(=durability_defaults)
+  | binary(=fresh_cluster_per_process)
   | binary(=observability)
   | binary(=password_reuse_e2e)
+  | binary(=per_cluster_directories)
   | binary(=settings_logging)
   | binary(=shared_cluster_handle_success)
   | binary(=shutdown_hook)
@@ -59,10 +69,15 @@ serial = { max-threads = 1 }
 # Everything that takes the cross-process scenario lock joins this group, so
 # nextest queues it before the test starts. Group queue time is not counted by
 # `slow-timeout`; time blocked in `flock` after the test has started is, and
-# `tests/support/serial.rs` reports a residual wait worth noticing on stderr.
+# `tests/support/serial.rs` reports a completed wait worth noticing on stderr.
 # Grouping adds no serial wall time, because `flock` already serialized these
 # tests against one another; it only stops the wait counting against a test's
-# own allowance.
+# own allowance. The three child-spawning cluster binaries in the tier above
+# are absent here: their roots are isolated, so they take no scenario lock.
+#
+# `observability` is absent too. Its scenarios use the local guard with
+# isolated sandboxes, and its embedded `serial::tests::*` cases still join
+# through the term below.
 #
 # The embedded `serial::tests::*` cases take the same lock in every integration
 # binary, so they join by test name as well as whole binaries. The ignored
@@ -73,7 +88,6 @@ filter = """
   binary(=bootstrap_privileges)
   | binary(=cluster_split_constructors)
   | binary(=database_lifecycle)
-  | binary(=observability)
   | binary(=password_reuse_e2e)
   | binary(=settings_logging)
   | binary(=shutdown_hook)

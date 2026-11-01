@@ -12,9 +12,14 @@ All notable changes to this crate are recorded here. The format follows
   queues it before the `slow-timeout` clock starts (#247). The tier is 2.25
   times the 132.893 s measured for `test_cluster_fixture`'s
   `fixture_exposes_connection_metadata` run alone; before it, one full
-  `make test` timed out sixty cluster tests at 180.00 s. A residual `flock`
-  wait of one second or more is now reported on stderr, so a timeout separates
-  lock queueing from cluster work.
+  `make test` timed out sixty cluster tests at 180.00 s. The twenty binaries in
+  the tier include the parent tests whose children bootstrap real clusters
+  (`durability_defaults`, `fresh_cluster_per_process` and
+  `per_cluster_directories`); their isolated roots keep them out of the
+  `serial` group, because timeout-tier membership and lock-group membership are
+  separate. A completed `flock` wait of one second or more is now reported on
+  stderr, so a timeout separates lock queueing from cluster work; a test
+  terminated while still blocked emits no line.
 
 ### Lint toolchain
 

@@ -55,14 +55,20 @@ CLUSTER_BUDGET_SECONDS: typ.Final[Fraction] = Fraction(300)
 #: The integration binaries that start or share a real PostgreSQL cluster.
 #: Pinned exactly, so a filter widened to `all()` or a neighbouring binary
 #: named by accident is a visible change rather than a silent one.
+#: ``test_cluster_tier_coverage_contract.py`` derives the child-spawning
+#: members from the test sources, so a new parent/child cluster binary
+#: cannot be left on the default budget unnoticed.
 CLUSTER_BINARIES: typ.Final[frozenset[str]] = frozenset(
     {
         "bootstrap_privileges",
         "cluster_split_constructors",
         "data_dir_recovery",
         "database_lifecycle",
+        "durability_defaults",
+        "fresh_cluster_per_process",
         "observability",
         "password_reuse_e2e",
+        "per_cluster_directories",
         "settings_logging",
         "shared_cluster_handle_success",
         "shutdown_hook",
@@ -80,14 +86,14 @@ CLUSTER_BINARIES: typ.Final[frozenset[str]] = frozenset(
 #: The whole binaries that take the cross-process scenario lock directly.
 #: `test_cluster_async` and `data_dir_recovery` are deliberately absent:
 #: their scenarios use the local guard and isolated roots, and only their
-#: embedded `serial::tests::*` cases take the lock. `shared_cluster_handle_success`
-#: also stays out, because it takes no scenario lock at all.
+#: embedded `serial::tests::*` cases take the lock. `observability` is absent
+#: for the same reason. `shared_cluster_handle_success` also stays out,
+#: because it takes no scenario lock at all.
 SERIAL_BINARIES: typ.Final[frozenset[str]] = frozenset(
     {
         "bootstrap_privileges",
         "cluster_split_constructors",
         "database_lifecycle",
-        "observability",
         "password_reuse_e2e",
         "settings_logging",
         "shutdown_hook",
