@@ -223,6 +223,26 @@ def test_an_undeclared_lock_taking_binary_is_named(
     )
 
 
+def test_a_directory_based_root_is_discovered(
+    repository: tuple[Path, str],
+) -> None:
+    """A ``tests/<name>/main.rs`` root is attributed, not called hidden."""
+    tests_directory, manifest = repository
+    suite = tests_directory / "dir_suite" / "main.rs"
+    suite.parent.mkdir()
+    suite.write_text(
+        f'{_serial_attribute("tests/dir_suite/main.rs")}\nmod serial;\n',
+        encoding="utf-8",
+    )
+    faults = serial_group_faults(_GOOD_CONFIG, manifest, tests_directory)
+    assert any(
+        "dir_suite" in fault and "unexpected" in fault for fault in faults
+    ), f"a directory-based root must count as a binary: {faults}"
+    assert not any("outside a declared test root" in fault for fault in faults), (
+        f"a directory-based root must not be called hidden: {faults}"
+    )
+
+
 def test_a_support_module_compiling_the_serial_module_is_named(
     repository: tuple[Path, str],
 ) -> None:

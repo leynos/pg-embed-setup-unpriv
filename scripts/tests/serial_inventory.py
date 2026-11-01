@@ -3,8 +3,9 @@
 A binary that compiles ``tests/support/serial.rs`` takes the cross-process
 scenario lock (``pg-embed-setup-unpriv.serial.lock``), so the nextest
 ``serial`` group must hold it (#254). Discovery is deliberately narrow: a
-binary counts when its declared root file names the module directly, as
-every current root does.
+binary counts when its root file names the module directly, as every
+current root does, whether Cargo finds that root as ``tests/<name>.rs`` or
+``tests/<name>/main.rs``.
 
 A support module that compiled the module on a root's behalf would hide the
 dependency, so the inventory reports such a file instead of guessing which
@@ -171,11 +172,12 @@ def lock_taking_binaries(
 ) -> tuple[frozenset[str], list[str]]:
     """Discover the binaries whose root file compiles the serial module.
 
-    Declared ``[[test]]`` targets and undeclared top-level ``tests/*.rs``
-    files are both considered, so a new binary that includes the module is
-    found even before its manifest entry or filter term is added. Only a
-    root file counts, so any other file that compiles the module is reported
-    rather than silently left unattributable.
+    Declared ``[[test]]`` targets and undeclared roots are all considered,
+    whether a root is ``tests/<name>.rs`` or ``tests/<name>/main.rs``, so a
+    new binary that includes the module is found even before its manifest
+    entry or filter term is added. Only a root file counts, so any other file
+    that compiles the module is reported rather than silently left
+    unattributable.
 
     Parameters
     ----------
@@ -196,6 +198,8 @@ def lock_taking_binaries(
     targets = _declared_targets(manifest, tests_directory.parent)
     for path in sorted(tests_directory.glob("*.rs")):
         targets.setdefault(path.stem, path)
+    for path in sorted(tests_directory.glob("*/main.rs")):
+        targets.setdefault(path.parent.name, path)
     lock_taking, faults = _lock_taking_names(targets)
     includers, read_faults = _serial_includers(tests_directory)
     faults.extend(read_faults)
