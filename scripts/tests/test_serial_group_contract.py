@@ -157,6 +157,12 @@ def test_the_reference_shape_has_no_fault(
             'platform = "x86_64-unknown-linux-gnu"\ntest-group = "serial"',
             "platform",
         ),
+        (
+            "[[profile.default.overrides]]",
+            '[[profile.default.overrides]]\nfilter = "all()"\n'
+            'test-group = "other"\n\n[[profile.default.overrides]]',
+            "before the serial one",
+        ),
         ("binary(=bootstrap_privileges)", "all()", "binary(=name)"),
         (
             "binary(=test_cluster_fixture)",
@@ -178,6 +184,7 @@ def test_the_reference_shape_has_no_fault(
         "renamed-group",
         "removed-group",
         "platform-restricted",
+        "competing-earlier-group",
         "all-operator",
         "negation",
         "conjunction",

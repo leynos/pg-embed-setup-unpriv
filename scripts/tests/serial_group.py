@@ -17,7 +17,9 @@ The filter grammar is deliberately narrow: exact ``binary(=name)`` terms
 joined by ``|``. A broader filter, a negation or a conjunction would make
 the group mean something this contract cannot compare with the inventory.
 The override must also apply on every platform: a ``platform`` restriction
-would leave the binaries out of the group everywhere else.
+would leave the binaries out of the group everywhere else. It must come
+before any other override that assigns a test group, because nextest applies
+the first matching override and a later serial assignment would never run.
 
 The inventory itself comes from :mod:`serial_inventory`, which discovers
 the binaries and reports a serial-module inclusion that cannot be
@@ -94,6 +96,28 @@ def _serial_limit_faults(config: dict[str, object]) -> list[str]:
     ]
 
 
+def _default_overrides(config: dict[str, object]) -> list[dict[str, object]]:
+    """Return the ``profile.default`` overrides in the order nextest applies.
+
+    Parameters
+    ----------
+    config : dict of str to object
+        The parsed nextest configuration.
+
+    Returns
+    -------
+    list of dict
+        Every override under ``profile.default``, in file order.
+    """
+    profile = mapping_or_empty(
+        mapping_or_empty(config.get("profile")).get("default")
+    )
+    return [
+        mapping_or_empty(override)
+        for override in sequence_or_empty(profile.get("overrides"))
+    ]
+
+
 def _serial_overrides(config: dict[str, object]) -> list[dict[str, object]]:
     """Return the ``profile.default`` overrides that assign the serial group.
 
@@ -107,14 +131,48 @@ def _serial_overrides(config: dict[str, object]) -> list[dict[str, object]]:
     list of dict
         Every override whose ``test-group`` names ``serial``, in file order.
     """
-    profile = mapping_or_empty(
-        mapping_or_empty(config.get("profile")).get("default")
-    )
     return [
-        table
-        for override in sequence_or_empty(profile.get("overrides"))
-        if (table := mapping_or_empty(override)).get("test-group") == SERIAL_GROUP
+        override
+        for override in _default_overrides(config)
+        if override.get("test-group") == SERIAL_GROUP
     ]
+
+
+def _competing_group_faults(config: dict[str, object]) -> list[str]:
+    """Report an earlier override that assigns a test group of its own.
+
+    nextest applies the first matching override, so an override ahead of the
+    serial one that assigns any ``test-group`` can capture a lock-taking
+    binary and leave the serial override unused. Requiring the serial group
+    to be the first group assignment is simpler to check than deciding
+    whether an earlier filter matches a binary.
+
+    Parameters
+    ----------
+    config : dict of str to object
+        The parsed nextest configuration.
+
+    Returns
+    -------
+    list of str
+        One fault naming the earlier filters, or empty when no override
+        before the serial one assigns a group.
+    """
+    overrides = _default_overrides(config)
+    for index, override in enumerate(overrides):
+        if override.get("test-group") != SERIAL_GROUP:
+            continue
+        earlier = [
+            entry for entry in overrides[:index] if "test-group" in entry
+        ]
+        if not earlier:
+            return []
+        filters = ", ".join(repr(entry.get("filter")) for entry in earlier)
+        return [
+            "no override may assign a test group before the serial one, "
+            f"found {len(earlier)}: {filters}"
+        ]
+    return []
 
 
 def _one_serial_override(
@@ -254,6 +312,7 @@ def serial_group_faults(
     """
     config = _parsed(config_text)
     faults = _serial_limit_faults(config)
+    faults.extend(_competing_group_faults(config))
     override, override_faults = _one_serial_override(config)
     faults.extend(override_faults)
     filter_names: frozenset[str] = frozenset()
