@@ -38,6 +38,7 @@ excluded_crates = [
     "settings",
     "settings_logging",
     "settings_snapshot_roundtrip",
+    "scenario_lock_wait",
     "shared_cluster_handle_failure",
     "shared_cluster_handle_success",
     "shutdown_hook",

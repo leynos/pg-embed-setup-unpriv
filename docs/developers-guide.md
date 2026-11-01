@@ -29,6 +29,12 @@ consumer-facing guidance.
   stderr, so a timeout separates lock queueing from cluster work. A test that
   nextest terminates while it is still blocked emits no such line: the
   diagnostic covers waits that completed, not waits in progress.
+  `tests/scenario_lock_wait.rs` drives that path end to end: it holds the lock,
+  a spawned child blocks in the same `acquire_process_lock` call, and the
+  parent releases only after the child has waited past the threshold, then
+  asserts the captured stderr names the lock file and the completed duration.
+  The binary gives the child a private `CARGO_TARGET_DIR`, so it takes no
+  `serial` group slot.
 - Tests that use the local guard with an isolated root stay out of the group.
   `observability`, `data_dir_recovery` and `test_cluster_async` are the
   examples. They share no lock or directory with the other scenarios, so
@@ -382,6 +388,28 @@ archive packager and the workflow contract tests in
 `gh`-invoking job has a checkout or `GH_REPO`, that release-writing jobs request
 `contents: write`, and that the staged archive name and members render the
 `[package.metadata.binstall]` templates exactly.
+
+The same target holds the nextest timeout contracts. They share
+`scripts/tests/nextest_filters.py`, a reader that accepts only a flat
+disjunction of `binary(=name)` terms and, for the serial group, one exact
+`kind(test) & test(/^serial::/)` term selecting the lock's embedded unit tests;
+`all()`, an intersection, negation, nesting and a duplicated embedded term are
+refused rather than interpreted. The reader carries doctests, which the second
+`make test-scripts` command collects with `--doctest-modules`.
+
+`test_nextest_tier_contract.py` pins the default, cluster, UI and whole-run
+budgets and the exact cluster and serial registries by value.
+`test_nextest_filters_contract.py` pins the reader's accepted and refused
+shapes, and `test_timeout_ordering_contract.py` and
+`test_timeout_exactness_contract.py` check the tiers against each other and the
+watchdog. `test_cluster_tier_coverage_contract.py` derives the child-spawning
+cluster binaries from the test sources, so a binary missing from both manually
+maintained lists is still caught. Timeout-tier membership is separate from
+serial-group membership: a binary whose cluster roots are isolated pays cold
+startup without taking the shared scenario lock.
+`test_nextest_filters_properties.py` uses Hypothesis for filters no file in the
+repository writes, such as a name using every permitted character and a term
+placed anywhere in the disjunction.
 
 ## Minimum supported Rust version
 

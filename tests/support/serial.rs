@@ -160,8 +160,15 @@ fn slow_lock_wait_message(lock_path: &Path, waited: Duration) -> Option<String> 
 )]
 fn report_slow_lock_wait(message: &str) { eprintln!("{message}") }
 
+/// Take the cross-process scenario lock, reporting a completed slow wait.
+///
+/// The lock file lives in `CARGO_TARGET_DIR`, so a caller that sets that
+/// variable to an isolated directory gets a lock nothing else contends
+/// for. `tests/scenario_lock_wait.rs` holds the lock while a child
+/// process blocks in `flock`, exercising the diagnostic through the real
+/// acquisition path rather than only its formatter.
 #[cfg(unix)]
-fn acquire_process_lock() -> ProcessLock {
+pub fn acquire_process_lock() -> ProcessLock {
     let target_dir =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| PathBuf::from("target"), PathBuf::from);
     if let Err(err) = std::fs::create_dir_all(&target_dir) {

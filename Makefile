@@ -32,6 +32,7 @@ PYYAML_VERSION ?= 6.0.3
 SCRIPT_PY_TESTS := scripts/tests/test_cluster_tier_coverage_contract.py \
 	scripts/tests/test_msrv_check.py \
 	scripts/tests/test_nextest_filters_contract.py \
+	scripts/tests/test_nextest_filters_properties.py \
 	scripts/tests/test_nextest_tier_contract.py \
 	scripts/tests/test_release_archive.py \
 	scripts/tests/test_release_archive_failures.py \
