@@ -246,7 +246,9 @@ directory is ignored rather than served.
 ## Cache maintenance
 
 The cache does not perform automatic cleanup. Stop every process that uses the
-cache before clearing entries: the commands below also remove `.locks/`.
+cache before clearing entries: the full-cache command below also removes
+`.locks/`, while the per-version command removes only that version's directory
+and leaves `.locks/` in place.
 
 To clear stale entries:
 
