@@ -20,6 +20,7 @@ third: the module file a crate root declares at the tree root is itself a
 target, so the same text is compiled by two different binaries.
 """
 
+import dataclasses
 import typing as typ
 from pathlib import Path
 
@@ -124,13 +125,16 @@ def _units(
     ]
 
 
+@dataclasses.dataclass(frozen=True)
+class _Placement:
+    """Which compiled file carries each marker, when it is present."""
+
+    child: int | None
+    cluster: int | None
+
+
 def _placed_texts(
-    units: list[tuple[Path, str]],
-    *,
-    has_child: bool,
-    has_cluster: bool,
-    child_unit: int,
-    cluster_unit: int,
+    units: list[tuple[Path, str]], placement: _Placement
 ) -> dict[Path, str]:
     """Write each unit's declaration and the markers it was chosen to hold.
 
@@ -142,9 +146,9 @@ def _placed_texts(
     texts: dict[Path, str] = {}
     for index, (path, declaration) in enumerate(units):
         markers = declaration
-        if has_child and index == child_unit:
+        if index == placement.child:
             markers += _CHILD_MARKER
-        if has_cluster and index == cluster_unit:
+        if index == placement.cluster:
             markers += _CLUSTER_MARKER
         texts[path] = markers or _UNMARKED
     return texts
@@ -188,16 +192,14 @@ def _binary(
     """
     layout = draw(st.sampled_from(_LAYOUTS))
     units = _units(root, name, layout, is_fixture=name == _FIXTURE)
-    has_child = draw(st.booleans())
-    has_cluster = draw(st.booleans())
-    texts = _placed_texts(
-        units,
-        has_child=has_child,
-        has_cluster=has_cluster,
-        child_unit=draw(st.integers(min_value=0, max_value=len(units) - 1)),
-        cluster_unit=draw(st.integers(min_value=0, max_value=len(units) - 1)),
+    units_range = st.integers(min_value=0, max_value=len(units) - 1)
+    placement = _Placement(
+        child=draw(units_range) if draw(st.booleans()) else None,
+        cluster=draw(units_range) if draw(st.booleans()) else None,
     )
-    targets = {name} if has_child and has_cluster else set()
+    texts = _placed_texts(units, placement)
+    is_both = placement.child is not None and placement.cluster is not None
+    targets = {name} if is_both else set()
     targets |= _extra_root_targets(root, units[0][0], texts)
     return texts, frozenset(targets)
 
