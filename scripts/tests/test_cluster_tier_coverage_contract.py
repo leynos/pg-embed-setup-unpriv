@@ -144,6 +144,36 @@ def test_markers_in_separate_included_modules_are_found(
     )
 
 
+def test_a_parent_relative_path_override_is_followed(tmp_path: Path) -> None:
+    """A ``#[path = "../support/..."]`` module is part of its binary.
+
+    The directory-backed ``test_cluster_fixture`` target reaches
+    ``tests/support`` by stepping out of its own directory, so the
+    declared path carries a ``..`` component. Sources are keyed by
+    resolved path, so an override that is not normalised lexically never
+    matches, and a marker inside the included module would silently stop
+    counting. This layout puts the child-process marker inside such a
+    module and the cluster marker in the target's own root.
+    """
+    layout = {
+        "test_cluster_fixture/mod.rs": (
+            '#[path = "../support/spawned_child.rs"]\n'
+            "mod spawned_child;\n"
+            "mod cluster_api;\n"
+        ),
+        "support/spawned_child.rs": _SPAWN,
+        "test_cluster_fixture/cluster_api.rs": _BOOTSTRAP,
+    }
+    for relative, source in layout.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+    assert scan_spawning_cluster_binaries(tmp_path) == frozenset(
+        {"test_cluster_fixture"}
+    ), "a parent-relative #[path] module must contribute its markers"
+
+
 def test_every_normal_run_child_cluster_binary_is_in_the_tier() -> None:
     """A normal-run parent that starts a real cluster is in the cluster tier.
 

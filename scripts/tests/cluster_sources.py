@@ -22,6 +22,7 @@ See "Test timeouts: four tiers, outermost last" in
 """
 
 import collections.abc as cabc
+import os
 import re
 import typing as typ
 from pathlib import Path
@@ -139,6 +140,19 @@ def _module_directory(declaring_file: Path, *, is_crate_root: bool) -> Path:
     return declaring_file.parent / declaring_file.stem
 
 
+def _lexically_normalized(path: Path) -> Path:
+    """Collapse ``.`` and ``..`` components without touching the filesystem.
+
+    The loader keys sources by resolved path. A ``#[path]`` override is
+    written relative to the declaring file, and a directory-backed target
+    such as ``test_cluster_fixture`` reaches ``tests/support`` as
+    ``../support/name.rs``, so the joined candidate carries ``..`` and
+    never compares equal to a resolved key. Normalising here keeps the
+    classifier pure: it matches path strings, it does not probe the disk.
+    """
+    return Path(os.path.normpath(path))
+
+
 def _module_file(
     declaring_file: Path,
     declared: re.Match[str],
@@ -157,7 +171,7 @@ def _module_file(
     override = declared.group("path")
     name = declared.group("name")
     if override is not None:
-        candidates = [declaring_file.parent / override]
+        candidates = [_lexically_normalized(declaring_file.parent / override)]
     else:
         base = _module_directory(declaring_file, is_crate_root=is_crate_root)
         candidates = [base / f"{name}.rs", base / name / "mod.rs"]

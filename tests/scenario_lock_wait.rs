@@ -40,6 +40,16 @@ const LOCK_FILE: &str = "pg-embed-setup-unpriv.serial.lock";
 /// even if scheduling delays its `flock` call slightly.
 const HOLD: Duration = Duration::from_secs(2);
 
+/// How many times the parent will hold the lock before giving up.
+///
+/// The child announces readiness before it blocks, so the parent cannot
+/// know it has actually entered `flock`. If the child is descheduled
+/// between the two, a single fixed hold can release the lock before the
+/// wait clears the one-second threshold and the diagnostic is never
+/// produced. Retrying with a longer hold separates that scheduling
+/// accident from a diagnostic that does not appear at all.
+const ATTEMPTS: u32 = 3;
+
 /// Remove a directory this test owns, treating "already gone" as success.
 ///
 /// The path is keyed on this process id, so an absent directory means
@@ -51,22 +61,14 @@ fn remove_owned_dir(path: &Path) {
     }
 }
 
-/// The child waits for the lock while the parent holds it.
+/// Run one child against a held lock and return the child's stderr.
 ///
-/// The report names the lock path and the completed duration, and the
-/// wait is real: the parent owns the descriptor until after `HOLD`.
-#[test]
-fn a_completed_lock_wait_reports_the_path_and_duration() {
-    let tmp_dir = env::temp_dir().join(format!("pg-lock-wait-{}", std::process::id()));
-    remove_owned_dir(&tmp_dir);
-    std::fs::create_dir_all(&tmp_dir).expect("create the isolated CARGO_TARGET_DIR");
-
-    let _env_guard = scoped_env(vec![(
-        OsString::from("CARGO_TARGET_DIR"),
-        Some(tmp_dir.clone().into_os_string()),
-    )]);
-    let held = serial::acquire_process_lock();
-
+/// The parent takes the lock, spawns the child, waits for its readiness
+/// marker, holds for `hold`, then releases. The child's success is part
+/// of the contract, so a failing child is reported here rather than
+/// being mistaken for a missing diagnostic.
+fn child_stderr_after_held_wait(tmp_dir: &Path, hold: Duration) -> String {
+    let parent_lock = serial::acquire_process_lock();
     let mut child = Command::new(env::current_exe().expect("resolve the test binary"))
         .args([
             "--exact",
@@ -75,7 +77,7 @@ fn a_completed_lock_wait_reports_the_path_and_duration() {
             "--nocapture",
             "--test-threads=1",
         ])
-        .env("CARGO_TARGET_DIR", &tmp_dir)
+        .env("CARGO_TARGET_DIR", tmp_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -92,8 +94,8 @@ fn a_completed_lock_wait_reports_the_path_and_duration() {
         "the child must announce readiness before it blocks on the lock"
     );
 
-    thread::sleep(HOLD);
-    drop(held);
+    thread::sleep(hold);
+    drop(parent_lock);
 
     let status = child.wait().expect("wait for the lock-waiting child");
     let mut stderr = String::new();
@@ -103,9 +105,36 @@ fn a_completed_lock_wait_reports_the_path_and_duration() {
         .expect("child stderr is piped")
         .read_to_string(&mut stderr)
         .expect("read the child's diagnostic");
-    remove_owned_dir(&tmp_dir);
-
     assert!(status.success(), "the child failed: {stderr}");
+    stderr
+}
+
+/// The child waits for the lock while the parent holds it.
+///
+/// The report names the lock path and the completed duration, and the
+/// wait is real: the parent owns the descriptor until after the hold.
+/// A child that was slow to reach `flock` gets a longer hold on the next
+/// attempt, so a scheduling accident cannot be read as a missing
+/// diagnostic.
+#[test]
+fn a_completed_lock_wait_reports_the_path_and_duration() {
+    let tmp_dir = env::temp_dir().join(format!("pg-lock-wait-{}", std::process::id()));
+    remove_owned_dir(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir).expect("create the isolated CARGO_TARGET_DIR");
+
+    let _env_guard = scoped_env(vec![(
+        OsString::from("CARGO_TARGET_DIR"),
+        Some(tmp_dir.clone().into_os_string()),
+    )]);
+
+    let mut stderr = String::new();
+    for attempt in 0..ATTEMPTS {
+        stderr = child_stderr_after_held_wait(&tmp_dir, HOLD * (1 << attempt));
+        if stderr.contains("completed after") {
+            break;
+        }
+    }
+    remove_owned_dir(&tmp_dir);
 
     let lock_path = tmp_dir.join(LOCK_FILE);
     assert!(
