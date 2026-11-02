@@ -25,14 +25,14 @@ use std::{
     env,
     ffi::OsString,
     io::{BufRead, BufReader, Read},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
-    sync::{Mutex, mpsc},
+    sync::{Mutex, MutexGuard, mpsc},
     thread,
     time::{Duration, Instant},
 };
 
-use pg_embedded_setup_unpriv::test_support::scoped_env;
+use pg_embedded_setup_unpriv::{ScopedEnv, test_support::scoped_env};
 
 /// Printed before the child blocks, so the parent releases on a signal
 /// rather than on a guessed startup delay.
@@ -87,6 +87,48 @@ fn remove_owned_dir(path: &Path) {
     if path.exists() {
         std::fs::remove_dir_all(path).expect("remove the test's own directory");
     }
+}
+
+/// An isolated `CARGO_TARGET_DIR` that both the parent and its child use.
+///
+/// The guard holds the process-wide mutex for as long as it lives, because
+/// `scoped_env` writes a process-wide variable and libtest runs these tests
+/// as threads of one process. The directory is removed on drop, including
+/// when an assertion fails, so a failed run leaves nothing behind.
+struct IsolatedTargetDir {
+    _target_dir: MutexGuard<'static, ()>,
+    _env: ScopedEnv,
+    path: PathBuf,
+}
+
+impl IsolatedTargetDir {
+    fn new(label: &str) -> Self {
+        let target_dir = TARGET_DIR_MUTEX
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let path = env::temp_dir().join(format!("{label}-{}", std::process::id()));
+        remove_owned_dir(&path);
+        std::fs::create_dir_all(&path).expect("create the isolated CARGO_TARGET_DIR");
+        let scoped = scoped_env(vec![(
+            OsString::from("CARGO_TARGET_DIR"),
+            Some(path.clone().into_os_string()),
+        )]);
+        Self {
+            _target_dir: target_dir,
+            _env: scoped,
+            path,
+        }
+    }
+
+    fn path(&self) -> &Path { &self.path }
+}
+
+impl Drop for IsolatedTargetDir {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "cleanup must not panic while an assertion is already unwinding"
+    )]
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.path); }
 }
 
 /// What one child run reported.
@@ -237,28 +279,17 @@ fn child_run_against_held_lock(tmp_dir: &Path, hold: Duration) -> ChildRun {
 /// diagnostic.
 #[test]
 fn a_completed_lock_wait_reports_the_path_and_duration() {
-    let _target_dir = TARGET_DIR_MUTEX
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp_dir = env::temp_dir().join(format!("pg-lock-wait-{}", std::process::id()));
-    remove_owned_dir(&tmp_dir);
-    std::fs::create_dir_all(&tmp_dir).expect("create the isolated CARGO_TARGET_DIR");
+    let target_dir = IsolatedTargetDir::new("pg-lock-wait");
 
-    let _env_guard = scoped_env(vec![(
-        OsString::from("CARGO_TARGET_DIR"),
-        Some(tmp_dir.clone().into_os_string()),
-    )]);
-
-    let mut run = child_run_against_held_lock(&tmp_dir, HOLD);
+    let mut run = child_run_against_held_lock(target_dir.path(), HOLD);
     for attempt in 1..ATTEMPTS {
         if run.stderr.contains("completed after") {
             break;
         }
-        run = child_run_against_held_lock(&tmp_dir, HOLD * (1 << attempt));
+        run = child_run_against_held_lock(target_dir.path(), HOLD * (1 << attempt));
     }
-    remove_owned_dir(&tmp_dir);
 
-    let lock_path = tmp_dir.join(LOCK_FILE);
+    let lock_path = target_dir.path().join(LOCK_FILE);
     assert!(
         run.stderr.contains(&lock_path.display().to_string()),
         "the completed wait must name the lock file {}: {}",
@@ -283,26 +314,15 @@ fn a_completed_lock_wait_reports_the_path_and_duration() {
 /// rather than read as a broken threshold.
 #[test]
 fn a_short_lock_wait_is_not_reported() {
-    let _target_dir = TARGET_DIR_MUTEX
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let tmp_dir = env::temp_dir().join(format!("pg-lock-wait-short-{}", std::process::id()));
-    remove_owned_dir(&tmp_dir);
-    std::fs::create_dir_all(&tmp_dir).expect("create the isolated CARGO_TARGET_DIR");
+    let target_dir = IsolatedTargetDir::new("pg-lock-wait-short");
 
-    let _env_guard = scoped_env(vec![(
-        OsString::from("CARGO_TARGET_DIR"),
-        Some(tmp_dir.clone().into_os_string()),
-    )]);
-
-    let mut run = child_run_against_held_lock(&tmp_dir, SHORT_HOLD);
+    let mut run = child_run_against_held_lock(target_dir.path(), SHORT_HOLD);
     for _ in 1..ATTEMPTS {
         if !run.stderr.contains("completed after") {
             break;
         }
-        run = child_run_against_held_lock(&tmp_dir, SHORT_HOLD);
+        run = child_run_against_held_lock(target_dir.path(), SHORT_HOLD);
     }
-    remove_owned_dir(&tmp_dir);
 
     assert!(
         run.waited >= SHORT_HOLD / 2,
