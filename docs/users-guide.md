@@ -92,13 +92,15 @@ cargo binstall pg-embed-setup-unpriv
    export PG_SUPERUSER="postgres"
    : "${PG_PASSWORD:?Set PG_PASSWORD externally to a strong, unique password}"
    export PG_PASSWORD
+   # If the guard fails, stop here. Do not run step 3 until PG_PASSWORD is set.
    ```
 
    This walkthrough initializes a fresh cluster and requires a strong, unique
    `PG_PASSWORD` supplied by the caller, for example from a password manager or
    a random generator. The guard aborts the command with the message shown when
-   the value is unset or empty, and it does not print the value. Supply the
-   value before running `pg_embedded_setup_unpriv` in step 3.
+   the value is unset or empty, and it does not print the value. If the guard
+   fails, stop before step 3 rather than continuing with the variable unset.
+   Supply the value before running `pg_embedded_setup_unpriv` in step 3.
 
    For an existing cluster, skip the guard and the `export PG_PASSWORD` line,
    and run `unset PG_PASSWORD` to reuse the password stored in
