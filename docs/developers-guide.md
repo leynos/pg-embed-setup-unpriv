@@ -866,10 +866,16 @@ that second bootstrap chose. Three things about it are deliberate.
   lanes build `--no-default-features --features cluster-unit-tests,async-api`
   on runners with no `libpq`. The Linux lane runs `--all-features` and does
   execute it.
-- It joins the `serial` group in `.config/nextest.toml`, alongside every other
-  binary that starts a cluster. It takes the process lock and starts a
-  postmaster, so running it concurrently starves both itself and the tests
-  sharing that lock.
+- It joins the `serial` group in `.config/nextest.toml`, as does every other
+  integration-test binary that compiles `tests/support/serial.rs`. Those
+  binaries take the cross-process scenario lock
+  (`pg-embed-setup-unpriv.serial.lock`) and share the PostgreSQL cache, the
+  installation directories and process-wide state, so running any two at once
+  starves both. Group membership makes nextest queue them before starting them,
+  so the per-test slow-timeout measures the test rather than the wait for the
+  lock (#254). A new binary that compiles the serial module must join the
+  filter and the `LOCK_TAKING_BINARIES` pin in `scripts/tests/serial_group.py`;
+  the `serial_group` contract enforces both.
 - Its crate name is in the `no_std_fs_operations` exclusion list in
   `dylint.toml`, for the reason the list already gives for the other
   integration-test crates: they share the ambient `tests/support` modules,
@@ -1014,7 +1020,9 @@ reads it (#259). The design document records the reasoning.
   test that reaches the root path, in the CI root lane.
   `tests/fresh_cluster_per_process.rs` runs two child processes in one root.
   Each case creates its own temporary root, so the cases share no state and
-  stay out of the nextest `serial` group.
+  stay out of the nextest `serial` group. That exemption is specific to this
+  binary because it does not compile `tests/support/serial.rs`; a binary that
+  does so joins the group even when its cases use isolated roots.
 
 `cluster::connection::admin_connect_error` wraps a failed admin connection. It
 keeps the `postgres` error as the source and appends that error's own source to

@@ -5,6 +5,16 @@ All notable changes to this crate are recorded here. The format follows
 
 ## Unreleased
 
+### Test scheduling
+
+- Every integration-test binary that compiles `tests/support/serial.rs` now
+  joins the nextest `serial` group (#254). Seven binaries were outside it, so
+  they started while another held the cross-process scenario lock; the per-test
+  180 s slow-timeout then measured that wait rather than the test and killed
+  it. Group membership makes nextest queue a test before its clock starts. A new
+  `serial_group` contract in `scripts/tests/` fails `make test-scripts` when
+  the filter and the lock-taking binaries drift apart.
+
 ### Lint toolchain
 
 - The pinned lint toolchain moves from `nightly-2026-04-25` to

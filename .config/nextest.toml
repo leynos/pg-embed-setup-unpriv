@@ -23,16 +23,31 @@ slow-timeout = { period = "900s", terminate-after = 1, grace-period = "5s" }
 [test-groups]
 serial = { max-threads = 1 }
 
+# Every integration-test binary that compiles `tests/support/serial.rs` joins
+# the serial group. Each takes the cross-process scenario lock
+# (`pg-embed-setup-unpriv.serial.lock`) because they share the PostgreSQL
+# cache, the installation directories and process-wide state. The module's
+# own unit tests take `serial_guard`, so a binary whose cases use only
+# `local_serial_guard` still contends for that lock. Group membership makes
+# nextest queue these tests before starting them, so the per-test
+# slow-timeout measures the test rather than the wait for the lock (#254).
 [[profile.default.overrides]]
 filter = """
   binary(=bootstrap_privileges)
+  | binary(=cluster_split_constructors)
+  | binary(=data_dir_recovery)
   | binary(=database_lifecycle)
   | binary(=observability)
   | binary(=password_reuse_e2e)
   | binary(=settings_logging)
+  | binary(=shutdown_hook)
+  | binary(=shutdown_hook_lifecycle)
+  | binary(=test_cluster_async)
   | binary(=test_cluster_behaviour)
   | binary(=test_cluster_connection)
   | binary(=test_cluster_drop)
+  | binary(=test_cluster_extensions)
+  | binary(=test_cluster_fixture)
   | binary(=timezone_regression)
 """
 test-group = "serial"
