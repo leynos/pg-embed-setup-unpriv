@@ -100,10 +100,10 @@ cargo binstall pg-embed-setup-unpriv
    the value is unset or empty, and it does not print the value. Supply the
    value before running `pg_embedded_setup_unpriv` in step 3.
 
-   For an existing cluster, omit the guard and the `export PG_PASSWORD` line to
-   reuse the password stored in `<install>/.pgpass`, or supply the original
-   password. A newly supplied value overrides the stored password and can cause
-   authentication to fail.
+   For an existing cluster, skip the guard and the `export PG_PASSWORD` line,
+   and run `unset PG_PASSWORD` to reuse the password stored in
+   `<install>/.pgpass`, or supply the original password. A value left exported
+   overrides the stored password and can cause authentication to fail.
 
    Without `PG_RUNTIME_DIR` and `PG_DATA_DIR` the helper derives both under
    `/var/tmp/pg-embed-{uid}` on Linux and the BSDs, one tree per user that
