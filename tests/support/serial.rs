@@ -160,6 +160,55 @@ fn slow_lock_wait_message(lock_path: &Path, waited: Duration) -> Option<String> 
 )]
 fn report_slow_lock_wait(message: &str) { eprintln!("{message}") }
 
+/// Open, but do not lock, the scenario lock file.
+#[cfg(unix)]
+fn open_scenario_lock(lock_path: &Path) -> ProcessLock {
+    let open_result = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path);
+    match open_result {
+        Ok(file) => file,
+        Err(err) => panic!(
+            "failed to open scenario lock file at {}: {err}",
+            lock_path.display()
+        ),
+    }
+}
+
+/// Take the lock, measuring the blocked wait with the supplied clock.
+///
+/// `now` is read immediately before `flock` and again once it returns, so
+/// a caller can pass a deterministic clock and check the measured wait
+/// without blocking for a second. [`acquire_process_lock`] is the only
+/// production caller and passes [`Instant::now`]; keeping the measurement
+/// here leaves that edge responsible for the path and the report.
+#[cfg(unix)]
+fn acquire_locked_file(
+    lock_path: &Path,
+    mut now: impl FnMut() -> Instant,
+) -> (ProcessLock, Duration) {
+    let lock_file = open_scenario_lock(lock_path);
+    let started = now();
+    // SAFETY: The file descriptor obtained from `lock_file.as_raw_fd()` is valid
+    // because `lock_file` was opened via `OpenOptions::open` and remains owned by
+    // this scope until after the `flock` call completes. No other code moves or
+    // closes the descriptor while this block runs. The `libc::flock` syscall
+    // operates on the OS-level file descriptor and does not access Rust memory,
+    // so there are no data-race concerns from Rust's perspective.
+    let result = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+    let waited = now().saturating_duration_since(started);
+    assert!(
+        result == 0,
+        "failed to acquire scenario lock at {}: {}",
+        lock_path.display(),
+        std::io::Error::last_os_error()
+    );
+    (lock_file, waited)
+}
+
 /// Take the cross-process scenario lock, reporting a completed slow wait.
 ///
 /// The lock file lives in `CARGO_TARGET_DIR`, so a caller that sets that
@@ -178,34 +227,7 @@ pub fn acquire_process_lock() -> ProcessLock {
         );
     }
     let lock_path = target_dir.join("pg-embed-setup-unpriv.serial.lock");
-    let open_result = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path);
-    let lock_file = match open_result {
-        Ok(file) => file,
-        Err(err) => panic!(
-            "failed to open scenario lock file at {}: {err}",
-            lock_path.display()
-        ),
-    };
-    let started = Instant::now();
-    // SAFETY: The file descriptor obtained from `lock_file.as_raw_fd()` is valid
-    // because `lock_file` was opened via `OpenOptions::open` and remains owned by
-    // this scope until after the `flock` call completes. No other code moves or
-    // closes the descriptor while this block runs. The `libc::flock` syscall
-    // operates on the OS-level file descriptor and does not access Rust memory,
-    // so there are no data-race concerns from Rust's perspective.
-    let result = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
-    let waited = started.elapsed();
-    assert!(
-        result == 0,
-        "failed to acquire scenario lock at {}: {}",
-        lock_path.display(),
-        std::io::Error::last_os_error()
-    );
+    let (lock_file, waited) = acquire_locked_file(&lock_path, Instant::now);
     if let Some(message) = slow_lock_wait_message(&lock_path, waited) {
         report_slow_lock_wait(&message);
     }
@@ -273,6 +295,31 @@ mod tests {
             message.contains(&format!("{waited:?}")),
             "the message must state the duration: {message}"
         );
+    }
+
+    /// A supplied clock, not the wall clock, decides the measured wait.
+    ///
+    /// The deterministic readings make the measurement observable without
+    /// blocking for a second, so the reported duration is pinned to what
+    /// `flock` was told to measure rather than to how long the test ran.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_acquisition_measures_its_wait_with_the_clock_it_is_given() {
+        let dir = std::env::temp_dir().join(format!("pg-lock-clock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create the clock test directory");
+        let lock_path = dir.join("scenario.lock");
+
+        let started = Instant::now();
+        let mut readings = [started, started + Duration::from_secs(3)].into_iter();
+        let (lock, waited) = acquire_locked_file(&lock_path, || {
+            readings
+                .next()
+                .expect("the acquisition reads the clock exactly twice")
+        });
+
+        drop(lock);
+        std::fs::remove_dir_all(&dir).expect("remove the clock test directory");
+        assert_eq!(waited, Duration::from_secs(3));
     }
 
     #[cfg(unix)]

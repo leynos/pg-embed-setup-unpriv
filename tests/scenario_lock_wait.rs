@@ -3,10 +3,11 @@
 //! `tests/support/serial.rs` reports a completed `flock` wait once it
 //! passes a second, because nextest stops counting a test's allowance
 //! while it queues for a group slot but keeps counting a wait inside the
-//! test. The unit tests there pin the formatter; this binary pins the
-//! behaviour: the parent takes the lock, a child process for the same
-//! `CARGO_TARGET_DIR` blocks in `acquire_process_lock`, and the parent
-//! releases after long enough for the child's wait to be reported.
+//! test. The unit tests there pin the formatter and the measurement; this
+//! binary pins the behaviour in both directions. The parent takes the
+//! lock, a child process for the same `CARGO_TARGET_DIR` blocks in
+//! `acquire_process_lock`, and the parent releases: after a long hold the
+//! child reports the wait, and after a short one it stays silent.
 //!
 //! The two processes share an isolated target directory, so the real
 //! scenario lock is untouched and this binary needs no `serial` group
@@ -39,6 +40,9 @@ const LOCK_FILE: &str = "pg-embed-setup-unpriv.serial.lock";
 /// Long enough for the child's wait to clear the one-second threshold
 /// even if scheduling delays its `flock` call slightly.
 const HOLD: Duration = Duration::from_secs(2);
+
+/// Short enough that the child's wait stays below the reporting threshold.
+const SHORT_HOLD: Duration = Duration::from_millis(100);
 
 /// How many times the parent will hold the lock before giving up.
 ///
@@ -145,6 +149,33 @@ fn a_completed_lock_wait_reports_the_path_and_duration() {
     assert!(
         stderr.contains("completed after"),
         "the completed wait must state how long it blocked: {stderr}"
+    );
+}
+
+/// A wait below the threshold is silent, so a report means something.
+///
+/// Reporting every short wait would bury the waits that matter, and never
+/// reporting one would be indistinguishable from a detector that does not
+/// fire. A scheduling delay that turns one attempt into a long wait is
+/// retried rather than read as a broken threshold.
+#[test]
+fn a_short_lock_wait_is_not_reported() {
+    let tmp_dir = env::temp_dir().join(format!("pg-lock-wait-short-{}", std::process::id()));
+    remove_owned_dir(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir).expect("create the isolated CARGO_TARGET_DIR");
+
+    let mut stderr = String::new();
+    for _ in 0..ATTEMPTS {
+        stderr = child_stderr_after_held_wait(&tmp_dir, SHORT_HOLD);
+        if !stderr.contains("completed after") {
+            break;
+        }
+    }
+    remove_owned_dir(&tmp_dir);
+
+    assert!(
+        !stderr.contains("completed after"),
+        "a wait below the one-second threshold must not be reported: {stderr}"
     );
 }
 
