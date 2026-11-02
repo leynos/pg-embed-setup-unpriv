@@ -124,6 +124,84 @@ def _units(
     ]
 
 
+def _placed_texts(
+    units: list[tuple[Path, str]],
+    *,
+    has_child: bool,
+    has_cluster: bool,
+    child_unit: int,
+    cluster_unit: int,
+) -> dict[Path, str]:
+    """Write each unit's declaration and the markers it was chosen to hold.
+
+    Returns
+    -------
+    dict[Path, str]
+        Every compiled file's final text, keyed by path.
+    """
+    texts: dict[Path, str] = {}
+    for index, (path, declaration) in enumerate(units):
+        markers = declaration
+        if has_child and index == child_unit:
+            markers += _CHILD_MARKER
+        if has_cluster and index == cluster_unit:
+            markers += _CLUSTER_MARKER
+        texts[path] = markers or _UNMARKED
+    return texts
+
+
+def _extra_root_targets(
+    root: Path, crate_root: Path, texts: dict[Path, str]
+) -> frozenset[str]:
+    """Return the targets a module file at the tree root creates for itself.
+
+    Cargo compiles every ``tests/*.rs`` as a target, so a file a crate
+    root declares at the tree root is also a binary, with only its own
+    text compiled in.
+
+    Returns
+    -------
+    frozenset[str]
+        Names of those root-level files that carry both markers.
+    """
+    return frozenset(
+        path.stem
+        for path, text in texts.items()
+        if path.parent == root
+        and path != crate_root
+        and _CHILD_MARKER in text
+        and _CLUSTER_MARKER in text
+    )
+
+
+@st.composite
+def _binary(
+    draw: st.DrawFn, root: Path, name: str
+) -> tuple[dict[Path, str], frozenset[str]]:
+    """Generate one binary's files and the targets they prove.
+
+    Returns
+    -------
+    tuple[dict[Path, str], frozenset[str]]
+        The binary's compiled files with their final text, and every
+        target name the generated text must make the scanner report.
+    """
+    layout = draw(st.sampled_from(_LAYOUTS))
+    units = _units(root, name, layout, is_fixture=name == _FIXTURE)
+    has_child = draw(st.booleans())
+    has_cluster = draw(st.booleans())
+    texts = _placed_texts(
+        units,
+        has_child=has_child,
+        has_cluster=has_cluster,
+        child_unit=draw(st.integers(min_value=0, max_value=len(units) - 1)),
+        cluster_unit=draw(st.integers(min_value=0, max_value=len(units) - 1)),
+    )
+    targets = {name} if has_child and has_cluster else set()
+    targets |= _extra_root_targets(root, units[0][0], texts)
+    return texts, frozenset(targets)
+
+
 @st.composite
 def _module_tree(
     draw: st.DrawFn,
@@ -140,37 +218,15 @@ def _module_tree(
     sources: dict[Path, str] = {
         root / "support" / "orphan.rs": _CHILD_MARKER + _CLUSTER_MARKER
     }
-    expected: set[str] = set()
-
     names = draw(st.lists(_BINARY_NAME, min_size=1, max_size=3, unique=True))
     if draw(st.booleans()):
         names = [*names, _FIXTURE]
 
+    expected: set[str] = set()
     for name in names:
-        layout = draw(st.sampled_from(_LAYOUTS))
-        units = _units(root, name, layout, is_fixture=name == _FIXTURE)
-        has_child = draw(st.booleans())
-        has_cluster = draw(st.booleans())
-        child_unit = draw(st.integers(min_value=0, max_value=len(units) - 1))
-        cluster_unit = draw(st.integers(min_value=0, max_value=len(units) - 1))
-        texts: dict[Path, str] = {}
-        for index, (path, declaration) in enumerate(units):
-            markers = declaration
-            if has_child and index == child_unit:
-                markers += _CHILD_MARKER
-            if has_cluster and index == cluster_unit:
-                markers += _CLUSTER_MARKER
-            texts[path] = markers or _UNMARKED
+        texts, targets = draw(_binary(root, name))
         sources.update(texts)
-        if has_child and has_cluster:
-            expected.add(name)
-        # A module file at the tree root is also a test target in its
-        # own right, with only its own text compiled in.
-        for path, text in texts.items():
-            if path.parent == root and path != units[0][0]:
-                if _CHILD_MARKER in text and _CLUSTER_MARKER in text:
-                    expected.add(path.stem)
-
+        expected.update(targets)
     return sources, root, frozenset(expected)
 
 
