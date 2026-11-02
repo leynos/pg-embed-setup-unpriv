@@ -7,11 +7,14 @@
 //! binary pins the behaviour in both directions. The parent takes the
 //! lock, a child process for the same `CARGO_TARGET_DIR` blocks in
 //! `acquire_process_lock`, and the parent releases: after a long hold the
-//! child reports the wait, and after a short one it stays silent.
+//! child reports the wait, and after a short one it stays silent. The
+//! child also reports the duration it measured across its own
+//! acquisition, so the silent case proves contention rather than merely
+//! the absence of a message.
 //!
-//! The two processes share an isolated target directory, so the real
-//! scenario lock is untouched and this binary needs no `serial` group
-//! membership.
+//! Both processes receive the same isolated `CARGO_TARGET_DIR`, so the
+//! real scenario lock is untouched and this binary needs no `serial`
+//! group membership.
 
 #![cfg(unix)]
 
@@ -23,9 +26,10 @@ use std::{
     ffi::OsString,
     io::{BufRead, BufReader, Read},
     path::Path,
-    process::{Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::{Mutex, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use pg_embedded_setup_unpriv::test_support::scoped_env;
@@ -34,8 +38,28 @@ use pg_embedded_setup_unpriv::test_support::scoped_env;
 /// rather than on a guessed startup delay.
 const READY: &str = "LOCK-WAIT-CHILD: ready";
 
+/// Printed after `acquire_process_lock` returns, with the milliseconds
+/// the child spent blocked. Seeing it proves the child reached the lock,
+/// which readiness alone does not.
+const WAITED: &str = "LOCK-WAIT-CHILD: waited";
+
 /// The lock file `acquire_process_lock` creates in `CARGO_TARGET_DIR`.
 const LOCK_FILE: &str = "pg-embed-setup-unpriv.serial.lock";
+
+/// How long the parent waits for any one child signal or exit.
+///
+/// A child that never announces readiness, never returns from `flock`, or
+/// never exits must fail this test rather than hang the suite, so every
+/// synchronization point is bounded by the same generous allowance.
+const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Serializes the tests that set `CARGO_TARGET_DIR` for the parent.
+///
+/// `scoped_env` writes a process-wide variable. nextest gives each test
+/// its own process, but libtest runs them as threads of one, where the
+/// two tests would otherwise read each other's target directory and stop
+/// contending for the same lock.
+static TARGET_DIR_MUTEX: Mutex<()> = Mutex::new(());
 
 /// Long enough for the child's wait to clear the one-second threshold
 /// even if scheduling delays its `flock` call slightly.
@@ -65,13 +89,87 @@ fn remove_owned_dir(path: &Path) {
     }
 }
 
-/// Run one child against a held lock and return the child's stderr.
+/// What one child run reported.
+#[derive(Debug)]
+struct ChildRun {
+    /// Everything the child wrote to standard error.
+    stderr: String,
+    /// How long the child spent inside `acquire_process_lock`.
+    waited: Duration,
+}
+
+/// Kill and reap a child so a failed assertion leaves no process behind.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "best-effort cleanup while a child is already failing the test"
+)]
+fn terminate(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Read child output until the marker appears, or fail after cleaning up.
+///
+/// The child writes libtest's own progress lines to the same pipe, so
+/// lines that do not carry the marker are skipped. Both failure modes —
+/// the stream ending and the deadline passing — stop the child first, so
+/// a hung child cannot outlive the test that spawned it.
+fn expect_line(
+    lines: &mpsc::Receiver<String>,
+    marker: &str,
+    expectation: &str,
+    child: &mut Child,
+) -> String {
+    let deadline = Instant::now() + SYNC_TIMEOUT;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match lines.recv_timeout(remaining) {
+            Ok(line) if line.contains(marker) => return line,
+            Ok(_) => {}
+            Err(error) => {
+                terminate(child);
+                panic!("the child must {expectation} within {SYNC_TIMEOUT:?}: {error}");
+            }
+        }
+    }
+}
+
+/// Reap the child, killing it if it outstays the synchronization allowance.
+fn wait_bounded(child: &mut Child) -> ExitStatus {
+    let deadline = Instant::now() + SYNC_TIMEOUT;
+    loop {
+        if let Some(status) = child.try_wait().expect("query the child's status") {
+            return status;
+        }
+        if Instant::now() >= deadline {
+            terminate(child);
+            panic!("the child must exit within {SYNC_TIMEOUT:?}");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Read the milliseconds the child measured while it was blocked.
+fn parse_waited(line: &str) -> Duration {
+    let Some(millis) = line
+        .rsplit_once(' ')
+        .and_then(|(_, value)| value.strip_suffix("ms"))
+        .and_then(|value| value.parse::<u64>().ok())
+    else {
+        panic!("the child's wait line must end in milliseconds: {line}");
+    };
+    Duration::from_millis(millis)
+}
+
+/// Run one child against a held lock and return what it observed.
 ///
 /// The parent takes the lock, spawns the child, waits for its readiness
 /// marker, holds for `hold`, then releases. The child's success is part
-/// of the contract, so a failing child is reported here rather than
-/// being mistaken for a missing diagnostic.
-fn child_stderr_after_held_wait(tmp_dir: &Path, hold: Duration) -> String {
+/// of the contract, so a failing child is reported here rather than being
+/// mistaken for a missing diagnostic. The returned wait is the child's
+/// own measurement across `acquire_process_lock`, which is what shows the
+/// child actually queued behind the parent's descriptor.
+fn child_run_against_held_lock(tmp_dir: &Path, hold: Duration) -> ChildRun {
     let parent_lock = serial::acquire_process_lock();
     let mut child = Command::new(env::current_exe().expect("resolve the test binary"))
         .args([
@@ -89,19 +187,33 @@ fn child_stderr_after_held_wait(tmp_dir: &Path, hold: Duration) -> String {
         .expect("spawn the lock-waiting child");
 
     let stdout = child.stdout.take().expect("child stdout is piped");
-    let mut lines = BufReader::new(stdout).lines();
-    let ready = lines
-        .by_ref()
-        .find(|line| line.as_ref().is_ok_and(|text| text.contains(READY)));
-    assert!(
-        ready.is_some(),
-        "the child must announce readiness before it blocks on the lock"
+    let (sender, lines) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    expect_line(
+        &lines,
+        READY,
+        "announce readiness before it blocks on the lock",
+        &mut child,
     );
 
     thread::sleep(hold);
     drop(parent_lock);
 
-    let status = child.wait().expect("wait for the lock-waiting child");
+    let waited_line = expect_line(
+        &lines,
+        WAITED,
+        "report the wait it measured across the acquisition",
+        &mut child,
+    );
+    let status = wait_bounded(&mut child);
+
     let mut stderr = String::new();
     child
         .stderr
@@ -110,7 +222,10 @@ fn child_stderr_after_held_wait(tmp_dir: &Path, hold: Duration) -> String {
         .read_to_string(&mut stderr)
         .expect("read the child's diagnostic");
     assert!(status.success(), "the child failed: {stderr}");
-    stderr
+    ChildRun {
+        stderr,
+        waited: parse_waited(&waited_line),
+    }
 }
 
 /// The child waits for the lock while the parent holds it.
@@ -122,6 +237,9 @@ fn child_stderr_after_held_wait(tmp_dir: &Path, hold: Duration) -> String {
 /// diagnostic.
 #[test]
 fn a_completed_lock_wait_reports_the_path_and_duration() {
+    let _target_dir = TARGET_DIR_MUTEX
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp_dir = env::temp_dir().join(format!("pg-lock-wait-{}", std::process::id()));
     remove_owned_dir(&tmp_dir);
     std::fs::create_dir_all(&tmp_dir).expect("create the isolated CARGO_TARGET_DIR");
@@ -131,24 +249,26 @@ fn a_completed_lock_wait_reports_the_path_and_duration() {
         Some(tmp_dir.clone().into_os_string()),
     )]);
 
-    let mut stderr = String::new();
-    for attempt in 0..ATTEMPTS {
-        stderr = child_stderr_after_held_wait(&tmp_dir, HOLD * (1 << attempt));
-        if stderr.contains("completed after") {
+    let mut run = child_run_against_held_lock(&tmp_dir, HOLD);
+    for attempt in 1..ATTEMPTS {
+        if run.stderr.contains("completed after") {
             break;
         }
+        run = child_run_against_held_lock(&tmp_dir, HOLD * (1 << attempt));
     }
     remove_owned_dir(&tmp_dir);
 
     let lock_path = tmp_dir.join(LOCK_FILE);
     assert!(
-        stderr.contains(&lock_path.display().to_string()),
-        "the completed wait must name the lock file {}: {stderr}",
-        lock_path.display()
+        run.stderr.contains(&lock_path.display().to_string()),
+        "the completed wait must name the lock file {}: {}",
+        lock_path.display(),
+        run.stderr
     );
     assert!(
-        stderr.contains("completed after"),
-        "the completed wait must state how long it blocked: {stderr}"
+        run.stderr.contains("completed after"),
+        "the completed wait must state how long it blocked: {}",
+        run.stderr
     );
 }
 
@@ -156,35 +276,57 @@ fn a_completed_lock_wait_reports_the_path_and_duration() {
 ///
 /// Reporting every short wait would bury the waits that matter, and never
 /// reporting one would be indistinguishable from a detector that does not
-/// fire. A scheduling delay that turns one attempt into a long wait is
-/// retried rather than read as a broken threshold.
+/// fire. The child's own measurement is asserted to have spanned most of
+/// the parent's hold, so silence cannot come from two processes locking
+/// different files: the child demonstrably queued behind the parent. A
+/// scheduling delay that turns one attempt into a long wait is retried
+/// rather than read as a broken threshold.
 #[test]
 fn a_short_lock_wait_is_not_reported() {
+    let _target_dir = TARGET_DIR_MUTEX
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp_dir = env::temp_dir().join(format!("pg-lock-wait-short-{}", std::process::id()));
     remove_owned_dir(&tmp_dir);
     std::fs::create_dir_all(&tmp_dir).expect("create the isolated CARGO_TARGET_DIR");
 
-    let mut stderr = String::new();
-    for _ in 0..ATTEMPTS {
-        stderr = child_stderr_after_held_wait(&tmp_dir, SHORT_HOLD);
-        if !stderr.contains("completed after") {
+    let _env_guard = scoped_env(vec![(
+        OsString::from("CARGO_TARGET_DIR"),
+        Some(tmp_dir.clone().into_os_string()),
+    )]);
+
+    let mut run = child_run_against_held_lock(&tmp_dir, SHORT_HOLD);
+    for _ in 1..ATTEMPTS {
+        if !run.stderr.contains("completed after") {
             break;
         }
+        run = child_run_against_held_lock(&tmp_dir, SHORT_HOLD);
     }
     remove_owned_dir(&tmp_dir);
 
     assert!(
-        !stderr.contains("completed after"),
-        "a wait below the one-second threshold must not be reported: {stderr}"
+        run.waited >= SHORT_HOLD / 2,
+        "the child must block behind the parent's lock for about {SHORT_HOLD:?}, but it measured \
+         {:?}: {}",
+        run.waited,
+        run.stderr
+    );
+    assert!(
+        !run.stderr.contains("completed after"),
+        "a wait below the one-second threshold must not be reported: {}",
+        run.stderr
     );
 }
 
-/// Blocks in `acquire_process_lock` until the parent drops its lock.
+/// Blocks in `acquire_process_lock` until the parent drops its lock, then
+/// reports how long the acquisition took.
 ///
-/// Run only as a child of the test above; it is `#[ignore]` so a normal
-/// run does not hold the lock while the parent test waits for it.
+/// Run only as a child of the tests above; it is `#[ignore]` so a normal
+/// run does not hold the lock while the parent test waits for it. The
+/// reported duration is the evidence that this child, not some other
+/// process, queued behind the parent's descriptor.
 #[test]
-#[ignore = "spawned by a_completed_lock_wait_reports_the_path_and_duration"]
+#[ignore = "spawned by the lock-wait tests"]
 fn lock_wait_child_blocks_until_released() {
     use std::io::Write as _;
 
@@ -194,5 +336,11 @@ fn lock_wait_child_blocks_until_released() {
         out.flush().expect("flush the readiness marker");
     }
 
+    let started = Instant::now();
     let _held = serial::acquire_process_lock();
+    let waited = started.elapsed();
+
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "{WAITED} {}ms", waited.as_millis()).expect("report the measured wait");
+    out.flush().expect("flush the measured wait");
 }
