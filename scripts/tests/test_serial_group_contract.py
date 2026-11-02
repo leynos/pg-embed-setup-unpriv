@@ -446,20 +446,49 @@ def nextest_probe() -> Path:
     return crate
 
 
+def _cargo_executable() -> str:
+    """Return the Cargo executable the surrounding build is using.
+
+    Cargo exports ``CARGO`` to the processes it runs, so honouring it keeps
+    the probe on the same toolchain as the gate that invokes the suite.
+    """
+    return os.environ.get("CARGO", "cargo")
+
+
+def _nextest_is_available() -> bool:
+    """Report whether ``cargo nextest`` can be run at all.
+
+    The probe is an optional cross-check, so a host without cargo-nextest —
+    or without a Cargo executable on ``PATH`` — skips it rather than failing
+    the contract, which does not depend on nextest being installed.
+    """
+    try:
+        version = subprocess.run(
+            [_cargo_executable(), "nextest", "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return version.returncode == 0
+
+
 def test_nextest_places_every_lock_taking_binary_in_the_serial_group(
     nextest_probe: Path,
 ) -> None:
     """nextest's own parser agrees with the pinned inventory and the limit."""
-    version = subprocess.run(
-        ["cargo", "nextest", "--version"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if version.returncode != 0:
+    if not _nextest_is_available():
         pytest.skip("cargo-nextest is not installed, so the parser cannot be asked")
     result = subprocess.run(
-        ["cargo", "nextest", "show-config", "test-groups", "--all-targets", "--offline"],
+        [
+            _cargo_executable(),
+            "nextest",
+            "show-config",
+            "test-groups",
+            "--all-targets",
+            "--offline",
+        ],
         cwd=nextest_probe,
         capture_output=True,
         text=True,
