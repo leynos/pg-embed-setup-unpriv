@@ -11,16 +11,19 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 import typing as typ
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from serial_group import (
     CARGO_MANIFEST,
     LOCK_TAKING_BINARIES,
     NEXTEST_CONFIG,
     TESTS_DIRECTORY,
+    _filter_names,
     serial_group_faults,
 )
 from serial_inventory import lock_taking_binaries
@@ -469,4 +472,115 @@ def test_nextest_places_every_lock_taking_binary_in_the_serial_group(
     assert groups.get("serial") == (1, set(LOCK_TAKING_BINARIES)), (
         "nextest must place every lock-taking binary in one serial group with "
         f"max threads 1, got {groups}"
+    )
+
+
+def test_a_nextest_configuration_that_is_not_toml_is_a_fault(
+    repository: tuple[Path, str],
+) -> None:
+    """A malformed nextest file is reported, not raised, at the boundary."""
+    tests_directory, manifest = repository
+    faults = serial_group_faults("[profile.default\n", manifest, tests_directory)
+    assert any("not valid TOML" in fault for fault in faults), (
+        "a configuration that cannot be parsed must surface as a fault: "
+        f"{faults}"
+    )
+
+
+#: Names the generated filters may use: nextest's own ``[A-Za-z0-9_]`` set.
+_BINARY_NAMES = st.from_regex(r"[a-z][a-z0-9_]{0,15}", fullmatch=True)
+
+#: Whitespace and separators an author might place between two terms.
+_SEPARATORS = st.sampled_from(["|", " | ", "\n| ", "\n  |  "])
+
+#: Terms that are not the single exact form the contract accepts.
+_BAD_TERMS = st.sampled_from(
+    [
+        "all()",
+        "binary(=)",
+        "binary(=a b)",
+        "binary(=a-b)",
+        "not(binary(=a))",
+        "binary(=a) & binary(=b)",
+    ]
+)
+
+
+@settings(max_examples=50, deadline=None)
+@given(names=st.lists(_BINARY_NAMES, unique=True, max_size=8), separator=_SEPARATORS)
+def test_an_exact_filter_names_exactly_its_terms(
+    names: list[str], separator: str
+) -> None:
+    """Any sequence of exact terms parses to that set, whatever separates them."""
+    filter_text = separator.join(f"binary(={name})" for name in names)
+    parsed, faults = _filter_names({"filter": filter_text})
+    if not names:
+        assert faults, "an empty filter names no binary and must be a fault"
+        return
+    assert faults == [], f"{filter_text!r} must be accepted, got {faults}"
+    assert parsed == frozenset(names)
+
+
+@settings(max_examples=50, deadline=None)
+@given(names=st.lists(_BINARY_NAMES, unique=True, max_size=5), bad=_BAD_TERMS)
+def test_a_term_outside_the_grammar_is_a_fault(
+    names: list[str], bad: str
+) -> None:
+    """A foreign term is reported while the exact terms beside it survive."""
+    terms = [f"binary(={name})" for name in names]
+    terms.append(bad)
+    parsed, faults = _filter_names({"filter": " | ".join(terms)})
+    assert len(faults) == 1, f"{bad!r} must be the only fault, got {faults}"
+    assert parsed == frozenset(names), (
+        "the exact terms must still be read beside a foreign one"
+    )
+
+
+@settings(max_examples=25, deadline=None)
+@given(
+    names=st.lists(_BINARY_NAMES, unique=True, max_size=6),
+    layout=st.lists(
+        st.tuples(st.booleans(), st.booleans()), min_size=6, max_size=6
+    ),
+)
+def test_discovery_follows_which_roots_compile_the_module(
+    names: list[str], layout: list[tuple[bool, bool]]
+) -> None:
+    """Every root layout is discovered, and only includers join the inventory.
+
+    Hypothesis reuses one pytest fixture value across examples, so the tree
+    is built in its own temporary directory rather than under ``tmp_path``.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        tests_directory = Path(directory) / "tests"
+        tests_directory.mkdir()
+        expected: set[str] = set()
+        for name, (includes, is_directory_module) in zip(names, layout):
+            if is_directory_module:
+                root = tests_directory / name / "main.rs"
+                root.parent.mkdir()
+                attribute = '#[path = "../support/serial.rs"]'
+            else:
+                root = tests_directory / f"{name}.rs"
+                attribute = '#[path = "support/serial.rs"]'
+            body = f"{attribute}\nmod serial;\n" if includes else "// unrelated\n"
+            root.write_text(body, encoding="utf-8")
+            if includes:
+                expected.add(name)
+        inventory, faults = lock_taking_binaries("", tests_directory)
+    assert faults == [], f"the generated tree must be clean, got {faults}"
+    assert inventory == frozenset(expected)
+
+
+def test_an_inclusion_outside_a_root_is_always_reported(tmp_path: Path) -> None:
+    """A support file that compiles the module is a fault, never a silent skip."""
+    tests_directory = tmp_path / "tests"
+    (tests_directory / "support").mkdir(parents=True)
+    (tests_directory / "support" / "extra.rs").write_text(
+        '#[path = "support/serial.rs"]\n', encoding="utf-8"
+    )
+    inventory, faults = lock_taking_binaries("", tests_directory)
+    assert inventory == frozenset()
+    assert any("outside a declared test root" in fault for fault in faults), (
+        f"the unattributable inclusion must be reported: {faults}"
     )

@@ -88,6 +88,38 @@ def _read_text(path: Path, label: str) -> tuple[str | None, str | None]:
         return None, f"cannot read {label}: {error}"
 
 
+def _scanned_paths(
+    directory: Path, pattern: str, *, recursive: bool
+) -> tuple[list[Path], list[str]]:
+    """List matching files under ``directory``, reporting a scan failure.
+
+    Enumeration itself can fail — an unreadable directory, a symlink loop —
+    and a discovery contract that raised there would hide the failure from
+    the caller that reports every other read fault.
+
+    Parameters
+    ----------
+    directory : Path
+        The directory to search.
+    pattern : str
+        The glob pattern to match.
+    recursive : bool
+        Whether to search subdirectories as well.
+
+    Returns
+    -------
+    tuple
+        The matching paths in a stable order, and any scan fault.
+    """
+    try:
+        matches = (
+            directory.rglob(pattern) if recursive else directory.glob(pattern)
+        )
+        return sorted(matches), []
+    except OSError as error:
+        return [], [f"cannot list {pattern} under {directory}: {error}"]
+
+
 def _serial_includers(
     tests_directory: Path,
 ) -> tuple[frozenset[Path], list[str]]:
@@ -104,8 +136,8 @@ def _serial_includers(
         The resolved paths that name the module, and any read faults.
     """
     includers: set[Path] = set()
-    faults: list[str] = []
-    for path in sorted(tests_directory.rglob("*.rs")):
+    paths, faults = _scanned_paths(tests_directory, "*.rs", recursive=True)
+    for path in paths:
         text, fault = _read_text(path, str(path))
         if fault is not None:
             faults.append(fault)
@@ -196,12 +228,20 @@ def lock_taking_binaries(
     except tomllib.TOMLDecodeError as error:
         return frozenset(), [f"Cargo.toml is not valid TOML: {error}"]
     targets = _declared_targets(manifest, tests_directory.parent)
-    for path in sorted(tests_directory.glob("*.rs")):
+    flat_roots, flat_faults = _scanned_paths(
+        tests_directory, "*.rs", recursive=False
+    )
+    directory_roots, directory_faults = _scanned_paths(
+        tests_directory, "*/main.rs", recursive=False
+    )
+    for path in flat_roots:
         targets.setdefault(path.stem, path)
-    for path in sorted(tests_directory.glob("*/main.rs")):
+    for path in directory_roots:
         targets.setdefault(path.parent.name, path)
     lock_taking, faults = _lock_taking_names(targets)
     includers, read_faults = _serial_includers(tests_directory)
+    faults.extend(flat_faults)
+    faults.extend(directory_faults)
     faults.extend(read_faults)
     faults.extend(_hidden_includer_faults(targets, includers))
     return frozenset(lock_taking), faults

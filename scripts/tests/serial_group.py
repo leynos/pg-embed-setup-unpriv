@@ -34,7 +34,11 @@ from pathlib import Path
 
 from nextest_budgets import _parsed
 from serial_inventory import lock_taking_binaries
-from timeout_budgets import mapping_or_empty, sequence_or_empty
+from timeout_budgets import (
+    NextestConfigurationError,
+    mapping_or_empty,
+    sequence_or_empty,
+)
 
 REPOSITORY_ROOT: typ.Final[Path] = Path(__file__).resolve().parents[2]
 NEXTEST_CONFIG: typ.Final[Path] = REPOSITORY_ROOT / ".config" / "nextest.toml"
@@ -308,9 +312,14 @@ def serial_group_faults(
     -------
     list of str
         The faults, empty when the filter, its limit and the discovered
-        binaries all agree with the pinned inventory.
+        binaries all agree with the pinned inventory. A configuration that
+        cannot be parsed is reported as a fault rather than raised, so every
+        way of drifting reaches the caller through one channel.
     """
-    config = _parsed(config_text)
+    try:
+        config = _parsed(config_text)
+    except NextestConfigurationError as error:
+        return [str(error)]
     faults = _serial_limit_faults(config)
     faults.extend(_competing_group_faults(config))
     override, override_faults = _one_serial_override(config)
