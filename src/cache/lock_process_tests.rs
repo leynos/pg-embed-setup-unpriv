@@ -8,7 +8,7 @@
 use std::{
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdout, Command, Stdio},
-    sync::mpsc::{self, Receiver, RecvTimeoutError},
+    sync::mpsc::{self, Receiver},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -106,17 +106,16 @@ impl ChildLock {
     /// Consumes reports until `expected` arrives or `timeout` elapses.
     fn wait_for(&self, expected: &str, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return false;
-            }
-            match self.lines.recv_timeout(remaining) {
-                Ok(line) if line == expected => return true,
-                Ok(_) => {}
-                Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => return false,
-            }
-        }
+        std::iter::from_fn(|| self.report_before(deadline)).any(|line| line == expected)
+    }
+
+    /// Returns the next report due before `deadline`.
+    ///
+    /// `None` means the deadline passed or the child closed its stream; either
+    /// way no further report can satisfy a wait.
+    fn report_before(&self, deadline: Instant) -> Option<String> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        self.lines.recv_timeout(remaining).ok()
     }
 
     /// Polls until the child exits, reporting whether it did so within
