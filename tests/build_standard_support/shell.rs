@@ -212,15 +212,25 @@ pub fn without_comment(command: &str) -> &str {
     let mut quote: Option<char> = None;
     let mut after_space = true;
     for (index, c) in command.char_indices() {
-        match quote {
-            Some(open) if c == open => quote = None,
-            None if c == '\'' || c == '"' => quote = Some(c),
-            None if c == '#' && after_space => {
-                return command.get(..index).unwrap_or(command);
-            }
-            Some(_) | None => {}
+        if quote.is_none() && opens_comment(c, after_space) {
+            return command.get(..index).unwrap_or(command);
         }
+        quote = next_quote_state(quote, c);
         after_space = c.is_whitespace();
     }
     command
+}
+
+/// Whether `c` starts a shell comment: a `#` at the start of a word.
+fn opens_comment(c: char, after_space: bool) -> bool { c == '#' && after_space }
+
+/// The quote state after reading `c`: a matching character closes an open
+/// quote, and a quote character opens one when none is open.
+fn next_quote_state(quote: Option<char>, c: char) -> Option<char> {
+    match quote {
+        Some(open) if c == open => None,
+        Some(open) => Some(open),
+        None if c == '\'' || c == '"' => Some(c),
+        None => None,
+    }
 }
