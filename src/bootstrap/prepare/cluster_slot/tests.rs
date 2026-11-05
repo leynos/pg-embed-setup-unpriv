@@ -11,14 +11,14 @@ use super::{claim_guard_for, claim_slot, has_live_peers, sweep_dead_slots};
 use crate::bootstrap::prepare::orphan::{OrphanStop, ProcessId};
 
 /// A data parent directory under a temporary root.
-struct Parent {
+pub(super) struct Parent {
     _temp: tempfile::TempDir,
-    dir: Utf8PathBuf,
+    pub(super) dir: Utf8PathBuf,
 }
 
 /// An empty data parent.
 #[fixture]
-fn parent() -> Result<Parent> {
+pub(super) fn parent() -> Result<Parent> {
     let temp = tempfile::tempdir()?;
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf())
         .map_err(|path| eyre!("non-UTF-8 tempdir {}", path.display()))?;

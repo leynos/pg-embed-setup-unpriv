@@ -1,19 +1,19 @@
-//! Build-time cfg aliases shared across crate targets and tests.
+//! Build script: exports the compile target and emits the
+//! `privileged_unix_platform` cfg for the targets that can drop privileges.
 
 #![recursion_limit = "1024"]
 
+#[path = "build_support/target_os.rs"]
+mod target_os;
+
 fn main() {
     export_target_triple();
-    cfg_aliases::cfg_aliases! {
-        privileged_unix_platform: {
-            any(
-                target_os = "linux",
-                target_os = "android",
-                target_os = "freebsd",
-                target_os = "openbsd",
-                target_os = "dragonfly"
-            )
-        },
+    println!("cargo:rustc-check-cfg=cfg(privileged_unix_platform)");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
+
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").ok();
+    if target_os::is_privileged_unix_platform(target_os.as_deref()) {
+        println!("cargo:rustc-cfg=privileged_unix_platform");
     }
 }
 

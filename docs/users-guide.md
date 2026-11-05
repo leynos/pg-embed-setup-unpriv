@@ -14,11 +14,10 @@ tool and integrate it into automated test flows.
   privilege-dropping path and the unprivileged path; macOS and Windows support
   the unprivileged path.
 - Rust toolchain specified in `rust-toolchain.toml` for developing this crate.
-  A project that depends on it needs Rust 1.92 or newer, the crate's
-  `rust-version`. Releases before 0.6.2 declared 1.85, but no release of
-  `postgresql_embedded` that this crate accepts builds on anything older than
-  1.92, and 0.6.1 additionally required 1.94 through a direct
-  `postgresql_archive` requirement. The `msrv` CI job now enforces the declared
+  A project that depends on it needs Rust 1.94 or newer, the crate's
+  `rust-version` from 0.7.0. Releases 0.6.2 and 0.6.3 declared 1.92, releases
+  before 0.6.2 declared 1.85, and 0.6.1 required 1.94 through a direct
+  `postgresql_archive` requirement. The `msrv` CI job enforces the declared
   version, and the change log records any later change to it.
 - Outbound network access to crates.io and the PostgreSQL binary archive.
 - System timezone database where required. On Unix-like systems, this package is
@@ -105,12 +104,12 @@ cargo binstall pg-embed-setup-unpriv
    defaults apply, and with it the same two leaves are derived.
 
    If no configuration source supplies a version requirement, the helper
-   selects PostgreSQL `=18.6.0`. Set `PG_VERSION_REQ` or `version_req` in a
-   configuration file to a semver requirement to choose a different release.
-   When an installation directory contains version-named subdirectories, the
-   highest version matching that requirement is selected; non-matching
-   versioned directories are ignored. A direct installation containing `bin/`
-   is reused.
+   accepts any release, so upstream's newest listed release wins. Set
+   `PG_VERSION_REQ` or `version_req` in a configuration file to a semver
+   requirement to choose a specific release. When an installation directory
+   contains version-named subdirectories, the highest version matching that
+   requirement is selected; non-matching versioned directories are ignored. A
+   direct installation containing `bin/` is reused.
 
    The diagram shows how subdirectories are filtered and ordered: directories
    without `bin/` are ignored, non-semver names remain as lexical fallbacks,
@@ -136,11 +135,11 @@ cargo binstall pg-embed-setup-unpriv
    _Figure: Installation subdirectories are filtered by `bin/` and the version
    requirement, then sorted to select the highest eligible candidate._
 
-   The default avoids newer archives whose hard-linked time-zone files are not
-   extracted by the current archive dependency. An explicit override can still
-   select an affected release. If named zones fail, check the selected version
-   and remove an incomplete cache entry before retrying; see
-   [binary cache troubleshooting](cache.md#cache-entries-and-the-default-version-pin).
+   Releases before 0.7.0 failed on named time zones with PostgreSQL 18.6.1 and
+   later, because their archive dependency dropped the hard-linked time-zone
+   files. 0.7.0 extracts them. If named zones still fail, remove a cache entry
+   that an older release filled before retrying; see
+   [binary cache troubleshooting](cache.md#cache-entries-and-stale-time-zone-data).
 
    Test clusters cap `max_connections` at 20 (a `postgres` container defaults
    to 100); set `PG_MAX_CONNECTIONS` when parallel test runners need more. The
@@ -264,7 +263,7 @@ Enable the feature in your `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-pg-embed-setup-unpriv = { version = "0.6.3", features = ["async-api"] }
+pg-embed-setup-unpriv = { version = "0.7.0", features = ["async-api"] }
 ```
 
 Then use `start_async()` and `stop_async()` in your async tests:
@@ -1096,7 +1095,7 @@ the warm step.
   archive whose extracted `share/timezone` is incomplete, host `tzdata` cannot
   restore the missing files. Check the selected version and remove the
   incomplete cache entry before retrying; see
-  [binary cache troubleshooting](cache.md#cache-entries-and-the-default-version-pin).
+  [binary cache troubleshooting](cache.md#cache-entries-and-stale-time-zone-data).
 - **Download rate limits**: `postgresql_embedded` fetches binaries from the
   Theseus GitHub releases. Supply a `GITHUB_TOKEN` environment variable if you
   hit rate limits in CI.

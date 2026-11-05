@@ -288,39 +288,6 @@ fn is_blank(value: &serde_json::Value) -> bool {
     value.is_null() || value.as_object().is_some_and(serde_json::Map::is_empty)
 }
 
-/// The `PostgreSQL` release used when `PG_VERSION_REQ` names none.
-///
-/// Without a requirement the upstream release lookup picks the highest match,
-/// which is usually what a user wants, but from `18.6.1` onward the Linux and
-/// macOS archives pack most of `share/timezone` as tar hard links. The
-/// `postgresql_archive` release this crate builds against extracts regular
-/// files, directories and symlinks and silently drops hard links, so such an
-/// installation has no `share/timezone/UTC` and every session that names a zone
-/// fails with `invalid value for parameter "TimeZone": "UTC"` (#351,
-/// leynos/mxd#665).
-///
-/// `18.6.0` predates that change and its archives were built against the host
-/// zoneinfo database, so they carry no `share/timezone` at all and resolve
-/// names from `/usr/share/zoneinfo` as before. Pinning the default keeps the
-/// failure out of downstream projects until `postgresql_archive` 0.22.0, which
-/// extracts hard links, can be required; that release needs Rust 1.94 and so
-/// raises this crate's minimum supported Rust version, which is a breaking
-/// change for its own release. `PG_VERSION_REQ` still overrides the pin, so a
-/// user who needs another version keeps control of the consequence.
-const DEFAULT_VERSION_REQ: &str = "=18.6.0";
-
-/// Parses [`DEFAULT_VERSION_REQ`] into the requirement `Settings` carries.
-///
-/// The literal is reviewed with this code, so a parse failure means the
-/// constant is wrong rather than the caller's configuration; it is still
-/// returned as an error, so a bad edit cannot abort a caller's process, and the
-/// message names the constant to fix.
-fn default_version_requirement() -> ConfigResult<VersionReq> {
-    VersionReq::parse(DEFAULT_VERSION_REQ)
-        .context("DEFAULT_VERSION_REQ is not a valid semver requirement")
-        .map_err(error::ConfigError::from)
-}
-
 /// Captures `PostgreSQL` settings supplied via environment variables.
 #[derive(Debug, Clone, Serialize, Deserialize, OrthoConfig, Default)]
 #[ortho_config(prefix = "PG")]
@@ -502,19 +469,19 @@ impl PgEnvCfg {
         Ok(s)
     }
 
-    /// Replaces the settings' version requirement with the configured one, or
-    /// the default pin when no explicit requirement was supplied.
+    /// Replaces the settings' version requirement with the configured one.
     ///
-    /// For example, `=17.4.0` takes precedence over the default `=18.6.0`.
-    /// An invalid explicit requirement, or an invalid default, returns a
-    /// configuration error without changing the settings.
+    /// When no requirement was supplied the settings keep their default, which
+    /// accepts the newest release upstream lists. For example, `=17.4.0`
+    /// takes precedence over that default. An invalid explicit requirement
+    /// returns a configuration error without changing the settings.
     fn apply_version(&self, settings: &mut Settings) -> ConfigResult<()> {
         let (version, source) = match self.version_req.as_deref() {
             Some(spec) => (
                 VersionReq::parse(spec).context("PG_VERSION_REQ invalid semver spec")?,
                 "configured",
             ),
-            None => (default_version_requirement()?, "default"),
+            None => (settings.version.clone(), "default"),
         };
         Self::log_version_requirement(&version, source);
         settings.version = version;

@@ -1,20 +1,37 @@
 # v0.7.0 migration guide
 
-This guide covers migration from `v0.6.x` to the next minor release. It is
-organized by the change a consumer has to make. No change in it is breaking: a
-consumer that does nothing keeps compiling and behaves as before, except where
-noted below.
+This guide covers migration from `v0.6.x` to `v0.7.0`. It is organized by the
+change a consumer has to make. One change can break a build: the minimum
+supported Rust version rises to 1.94. The rest need nothing from a consumer
+that does nothing, except where noted below.
 
-## The default PostgreSQL version is pinned
+## Rust 1.94 or newer
 
-When no configuration source supplies a version requirement, bootstrap now
-selects PostgreSQL `=18.6.0` instead of the newest matching upstream release.
-Set `PG_VERSION_REQ` or the configuration file's `version_req` to retain an
-explicit version choice. The pin avoids archives whose hard-linked time-zone
-files the current extractor omits; explicit overrides can still select those
-archives. See the [user guide](users-guide.md) and
-[cache troubleshooting](cache.md#cache-entries-and-the-default-version-pin) for
-selection and recovery details.
+The crate's `rust-version` is now 1.94 (it was 1.92), and it depends on
+`postgresql_embedded` and `postgresql_archive` 0.22.0, which declare 1.94. A
+project on an older toolchain must upgrade before adopting 0.7.0. A project
+that keeps 0.6.x stays on 1.92. The `msrv` CI job builds every target at the
+declared version.
+
+## Named time zones work on every PostgreSQL release
+
+PostgreSQL archives from 18.6.1 onward store many `share/timezone` files as tar
+hard links. `postgresql_archive` before 0.22.0 dropped them, so
+`share/timezone/UTC` was missing and any session that named a zone failed with
+`invalid value for parameter "TimeZone": "UTC"` (leynos/mxd#665). 0.22.0
+extracts hard links, so this release needs no workaround.
+
+- **No default pin.** An unset `PG_VERSION_REQ` accepts any release, as in
+  0.6.2 and earlier, so upstream's newest listed release wins. Development
+  builds between 0.6.3 and 0.7.0 pinned `=18.6.0` to avoid the failure; that
+  pin never shipped in a release. Set `PG_VERSION_REQ` or the configuration
+  file's `version_req` to keep an explicit choice. A consumer that carries its
+  own `PG_VERSION_REQ` pin or a time-zone alias repair for this failure can
+  drop it.
+- **Stale cache entries.** An `18.6.1` or later entry that an older release
+  extracted still lacks `share/timezone/UTC`, and the cache reuses it. Delete
+  it once: see
+  [cache troubleshooting](cache.md#cache-entries-and-stale-time-zone-data).
 
 When reusing an installation root with version-named subdirectories, bootstrap
 selects the highest installed version accepted by the effective requirement.

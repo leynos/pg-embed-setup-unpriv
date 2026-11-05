@@ -1,20 +1,18 @@
 //! Regression coverage: a started cluster resolves named time zones.
 //!
 //! `PostgreSQL` archives from `18.6.1` onward pack most of `share/timezone` as
-//! tar hard links, and the `postgresql_archive` release this crate builds
-//! against extracts plain files, directories and symlinks but silently drops
-//! hard links. Such a tree therefore has no `share/timezone/UTC`, and any
-//! session that names a zone fails with
+//! tar hard links. `postgresql_archive` before 0.22.0 extracted plain files,
+//! directories and symlinks but silently dropped hard links, so such a tree had
+//! no `share/timezone/UTC` and any session that names a zone failed with
 //! `invalid value for parameter "TimeZone": "UTC"` (leynos/mxd#665, and #351
-//! here). The `18.6.0` archives predate that switch and were built against the
-//! host zoneinfo database, so they carry no `share/timezone` at all and are
-//! unaffected.
+//! here). The `18.6.0` archives predate that switch and carry no
+//! `share/timezone` at all.
 //!
-//! [`PgEnvCfg`] pins its default version to `18.6.0` for that reason. This
-//! suite proves the pin end to end: it starts one real cluster and asks the
-//! server for three named zones. Moving the default back to a release whose
-//! time zone files are hard links, or extracting one with an archive library
-//! that still drops them, fails here rather than in a downstream project.
+//! This suite proves the fix end to end: it starts one real cluster with the
+//! default (unpinned) version requirement, so it runs the newest release
+//! upstream lists, and asks the server for three named zones. Extracting hard
+//! links wrongly, or moving to an archive library that drops them, fails here
+//! rather than in a downstream project.
 //!
 //! The zones share one cluster on purpose: starting a cluster is the expensive
 //! part, and every case exercises the same server. `rstest` cases would each

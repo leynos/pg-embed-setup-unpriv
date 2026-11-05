@@ -143,12 +143,12 @@ all setup/teardown details:
   `PgEnvCfg::load()` (from the existing OrthoConfig integration) to gather any
   env/file configs, but if none are provided, use
   `postgresql_embedded::Settings::default()` with smart tweaks (see
-  docs/next-steps.md). The PostgreSQL version requirement defaults to `=18.6.0`;
-  `PG_VERSION_REQ` or `version_req` in a configuration file can override it.
-  Other defaults include a random free port and temporary data directories. All
-  of this happens behind the scenes, so in most cases **test code simply
-  creates a `TestCluster` with no arguments**. The dated implementation update
-  below records why the version default is pinned.
+  docs/next-steps.md). The PostgreSQL version requirement defaults to any
+  release; `PG_VERSION_REQ` or `version_req` in a configuration file can
+  override it. Other defaults include a random free port and temporary data
+  directories. All of this happens behind the scenes, so in most cases **test
+  code simply creates a `TestCluster` with no arguments**. The dated
+  implementation update below records why the version default is pinned.
 
 ## Bootstrapping and configuration handling
 
@@ -812,9 +812,9 @@ extremely easy and consistent:
   against the database, relying on RAII for cleanup.
 
 - **Defaults with escape hatches:** By default, ports and temporary directories
-  are chosen automatically, and PostgreSQL is pinned to `=18.6.0`. Developers
-  can override the version via `PG_VERSION_REQ` or `version_req` in a
-  configuration file, using the OrthoConfig system (see README.md). In most
+  are chosen automatically, and the PostgreSQL version is not pinned.
+  Developers can override the version via `PG_VERSION_REQ` or `version_req` in
+  a configuration file, using the OrthoConfig system (see README.md). In most
   cases “it just works” with zero config.
 
 In conclusion, **pg-embedded-setup-unpriv** will evolve from a low-level
@@ -1030,19 +1030,20 @@ records the decision and the alternatives.
 
 ### Implementation update (2026-10-27): PostgreSQL archive compatibility
 
-- **Default version.** Bootstrap uses PostgreSQL `=18.6.0` when no
-  configuration source supplies `version_req`. `PG_VERSION_REQ` and the
-  configuration file's `version_req` remain explicit overrides.
+- **Default version.** Bootstrap accepts any PostgreSQL release when no
+  configuration source supplies `version_req`. A short-lived default pin to
+  `=18.6.0` (0.6.3 to the 0.7.0 development builds) is removed.
+  `PG_VERSION_REQ` and the configuration file's `version_req` remain explicit
+  overrides.
 - **Installed versions.** When the installation root contains versioned
   subdirectories, bootstrap selects the highest installed version accepted by
   the effective requirement. A candidate must contain `bin/`; semver names
   rejected by the requirement are ignored. Names that do not parse as semver
   remain lexical fallbacks when no eligible versioned candidate exists.
-- **Archive limitation.** PostgreSQL archives from 18.6.1 onward store many
-  `share/timezone` files as tar hard links. The current `postgresql_archive`
-  extractor drops hard links, leaving named time-zone resolution incomplete.
-  Version 18.6.0 predates this archive change.
-- **MSRV decision.** The project remains at Rust 1.92 and currently uses
-  `postgresql_embedded` and `postgresql_archive` 0.20.2. Upgrades to 0.20.3 or
-  later require Rust 1.94, so they are deferred. The version pin and regression
-  coverage remain until the MSRV decision changes.
+- **Archive limitation, resolved in 0.7.0.** PostgreSQL archives from 18.6.1
+  onward store many `share/timezone` files as tar hard links, which
+  `postgresql_archive` before 0.22.0 dropped. The project now declares Rust
+  1.94 and requires `postgresql_embedded` and `postgresql_archive` 0.22.0,
+  which extract hard links, so the pin is unnecessary.
+  `tests/timezone_regression.rs` keeps the end-to-end check against an unpinned
+  cluster.

@@ -4,7 +4,7 @@ use pg_embedded_setup_unpriv::{PgEnvCfg, test_support::capture_debug_logs};
 use rstest::rstest;
 
 #[rstest]
-#[case::default(None, "default", "=18.6.0")]
+#[case::default(None, "default", "*")]
 #[case::configured(Some("=17.4.0"), "configured", "=17.4.0")]
 fn version_resolution_reports_source_and_requirement(
     #[case] requirement: Option<&str>,

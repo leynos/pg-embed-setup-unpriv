@@ -5,27 +5,27 @@ use pg_embedded_setup_unpriv::PgEnvCfg;
 use postgresql_embedded::VersionReq;
 use rstest::rstest;
 
-/// Without `PG_VERSION_REQ` the settings carry the reviewed default pin.
+/// Without `PG_VERSION_REQ` the settings accept any release, so upstream's
+/// newest listed release wins.
 ///
-/// The pin keeps the crate off archives whose `share/timezone` is packed as tar
-/// hard links, which the pinned `postgresql_archive` drops silently; see
-/// `DEFAULT_VERSION_REQ` in `src/lib.rs` and `tests/timezone_regression.rs`.
+/// There is no default pin: `postgresql_archive` 0.22.0 extracts the tar hard
+/// links in the 18.6.1 and later archives, so named time zones resolve on
+/// every release (see `tests/timezone_regression.rs`).
 #[rstest]
-fn to_settings_defaults_to_the_pinned_postgresql_version() -> color_eyre::Result<()> {
+fn to_settings_defaults_to_any_postgresql_version() -> color_eyre::Result<()> {
     let settings = PgEnvCfg::default().to_settings()?;
-    let expected = VersionReq::parse("=18.6.0").map_err(|err| eyre!(err))?;
 
     ensure!(
-        settings.version == expected,
-        "expected the default pin =18.6.0, found {}",
+        settings.version == VersionReq::STAR,
+        "expected an unpinned default requirement, found {}",
         settings.version,
     );
     Ok(())
 }
 
-/// `PG_VERSION_REQ` takes precedence over the default pin.
+/// `PG_VERSION_REQ` takes precedence over the default.
 #[rstest]
-fn version_req_override_wins_over_the_default_pin() -> color_eyre::Result<()> {
+fn version_req_override_wins_over_the_default() -> color_eyre::Result<()> {
     let cfg = PgEnvCfg {
         version_req: Some("=17.4.0".into()),
         ..PgEnvCfg::default()
