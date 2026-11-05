@@ -3,23 +3,18 @@
 
 #![recursion_limit = "1024"]
 
+#[path = "build_support/target_os.rs"]
+mod target_os;
+
 fn main() {
     export_target_triple();
     println!("cargo:rustc-check-cfg=cfg(privileged_unix_platform)");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
 
-    if is_privileged_unix_platform() {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").ok();
+    if target_os::is_privileged_unix_platform(target_os.as_deref()) {
         println!("cargo:rustc-cfg=privileged_unix_platform");
     }
-}
-
-fn is_privileged_unix_platform() -> bool {
-    std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target_os| {
-        matches!(
-            target_os.as_str(),
-            "linux" | "android" | "freebsd" | "openbsd" | "dragonfly"
-        )
-    })
 }
 
 /// Exposes the compile target so the extension hook can match manifest

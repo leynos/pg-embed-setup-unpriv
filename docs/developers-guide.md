@@ -915,6 +915,15 @@ CLI setup-only path (`startup_setup_only.rs`) runs the hook without a `Start`.
 a `const fn` over `env!`, which `tests/ui/pass/extensions_compile_target.rs`
 proves usable in a const context. Manifest artefacts match on that triple.
 
+`build.rs` also registers the `privileged_unix_platform` cfg
+(`cargo:rustc-check-cfg`) and emits it when `CARGO_CFG_TARGET_OS` is `linux`,
+`android`, `freebsd`, `openbsd` or `dragonfly`. It reruns when
+`CARGO_CFG_TARGET_OS` or `TARGET` changes. The classification lives in
+`build_support/target_os.rs`, which both the build script and
+`tests/build_target_os.rs` include, so the accepted values, an unsupported
+value and an absent value are tested directly. The `cfg_aliases` build
+dependency is gone.
+
 ### Tests
 
 Unit tests live under `src/extensions/tests/` with an in-memory archive builder
