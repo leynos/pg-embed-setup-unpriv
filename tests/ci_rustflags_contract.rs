@@ -58,9 +58,9 @@ fn ci_rustflags_assignments_keep_the_standard_flags() {
     }
 }
 
-/// Returns the lines of the workflow step whose `- name:` is `name`: from that line to the next line
-/// indented no deeper than the list item, so a re-indented workflow or a later step cannot lend it
-/// an environment it does not carry.
+/// Returns the lines of the workflow step whose `- name:` is `name`: from that line to the next
+/// line indented no deeper than the list item, so a re-indented workflow or a later step cannot
+/// lend it an environment it does not carry.
 fn step_lines(name: &str) -> Vec<&'static str> {
     let marker = format!("- name: {name}");
     let mut lines = CI.lines().skip_while(|line| line.trim() != marker);
@@ -106,7 +106,8 @@ fn the_root_step_restates_the_build_standard_in_its_environment() {
     }
 }
 
-/// The step reader stays inside its own step: a later step's assignment is not lent to an earlier one.
+/// The step reader stays inside its own step: a later step's assignment is not lent to an earlier
+/// one.
 #[test]
 fn the_step_reader_does_not_read_past_its_step() {
     assert_eq!(

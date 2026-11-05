@@ -295,11 +295,17 @@ fn the_whitaker_and_lint_readers_refuse_each_broken_recipe() -> Result<(), Strin
         ("kept flags", WHITAKER_OK.replace("-u RUSTFLAGS ", "")),
         (
             "options hidden by a comment",
-            WHITAKER_OK.replace(" --all-targets --all-features", " # --all-targets --all-features"),
+            WHITAKER_OK.replace(
+                " --all-targets --all-features",
+                " # --all-targets --all-features",
+            ),
         ),
         (
             "options hidden by a tab-led comment",
-            WHITAKER_OK.replace(" --all-targets --all-features", "\t# --all-targets --all-features"),
+            WHITAKER_OK.replace(
+                " --all-targets --all-features",
+                "\t# --all-targets --all-features",
+            ),
         ),
         (
             "kept build flags",

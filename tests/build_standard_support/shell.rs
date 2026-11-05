@@ -199,9 +199,9 @@ fn skip_env_arguments(mut rest: &str) -> &str {
     }
 }
 
-/// Returns the command without a trailing shell comment: from the first unquoted `#` that starts a word
-/// (after whitespace, tab included) to the end of the line. A `#` inside quotes, or inside a word such
-/// as `a#b`, is not a comment.
+/// Returns the command without a trailing shell comment: from the first unquoted `#` that starts a
+/// word (after whitespace, tab included) to the end of the line. A `#` inside quotes, or inside a
+/// word such as `a#b`, is not a comment.
 ///
 /// ```text
 /// without_comment("whitaker --all # --all-targets")  == "whitaker --all "

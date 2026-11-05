@@ -153,14 +153,23 @@ fn the_program_reader_names_the_word_the_shell_executes(
 
 /// Scenario: command lines with and without a trailing shell comment.
 ///
-/// Invariant: a `#` that starts a word outside quotes (after a space or a tab) begins a comment and is
-/// cut with what follows; a quoted `#` and a `#` inside a word are not comments.
+/// Invariant: a `#` that starts a word outside quotes (after a space or a tab) begins a comment and
+/// is cut with what follows; a quoted `#` and a `#` inside a word are not comments.
 #[rstest]
-#[case::no_comment(Fixture("whitaker --all -- --all-targets"), "whitaker --all -- --all-targets")]
+#[case::no_comment(
+    Fixture("whitaker --all -- --all-targets"),
+    "whitaker --all -- --all-targets"
+)]
 #[case::a_space_led_comment(Fixture("whitaker --all # --all-targets"), "whitaker --all ")]
 #[case::a_tab_led_comment(Fixture("whitaker --all\t# --all-targets"), "whitaker --all\t")]
-#[case::a_quoted_hash(Fixture("whitaker --note \"a #b\" --all"), "whitaker --note \"a #b\" --all")]
-#[case::a_single_quoted_hash(Fixture("whitaker --note 'a #b' --all"), "whitaker --note 'a #b' --all")]
+#[case::a_quoted_hash(
+    Fixture("whitaker --note \"a #b\" --all"),
+    "whitaker --note \"a #b\" --all"
+)]
+#[case::a_single_quoted_hash(
+    Fixture("whitaker --note 'a #b' --all"),
+    "whitaker --note 'a #b' --all"
+)]
 #[case::a_hash_inside_a_word(Fixture("whitaker --all a#b"), "whitaker --all a#b")]
 fn the_comment_reader_cuts_only_a_real_comment(#[case] command: Fixture, #[case] expected: &str) {
     assert_eq!(without_comment(command.0), expected, "{}", command.0);
