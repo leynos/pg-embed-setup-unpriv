@@ -214,10 +214,11 @@ pub fn without_comment(command: &str) -> &str {
     for (index, c) in command.char_indices() {
         match quote {
             Some(open) if c == open => quote = None,
-            Some(_) => {}
             None if c == '\'' || c == '"' => quote = Some(c),
-            None if c == '#' && after_space => return &command[..index],
-            None => {}
+            None if c == '#' && after_space => {
+                return command.get(..index).unwrap_or(command);
+            }
+            Some(_) | None => {}
         }
         after_space = c.is_whitespace();
     }

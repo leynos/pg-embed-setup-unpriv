@@ -142,10 +142,10 @@ fn whitaker_route_problems(recipe: &str, host: &str) -> Problems {
             "`make lint-whitaker` on {host} must execute the Whitaker program: {recipe}"
         )];
     };
-    let whitaker = shell::without_comment(whitaker);
-    let mut problems = clearing_problems(whitaker, host);
-    problems.extend(assignment_problems(whitaker));
-    problems.extend(selection_problems(whitaker));
+    let command = shell::without_comment(whitaker);
+    let mut problems = clearing_problems(command, host);
+    problems.extend(assignment_problems(command));
+    problems.extend(selection_problems(command));
     problems
 }
 
