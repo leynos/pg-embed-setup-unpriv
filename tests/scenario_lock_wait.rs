@@ -95,9 +95,12 @@ fn remove_owned_dir(path: &Path) {
 /// `scoped_env` writes a process-wide variable and libtest runs these tests
 /// as threads of one process. The directory is removed on drop, including
 /// when an assertion fails, so a failed run leaves nothing behind.
+///
+/// Field order is drop order: `_env` restores `CARGO_TARGET_DIR` before
+/// `_target_dir` unlocks, so the next test cannot observe the stale value.
 struct IsolatedTargetDir {
-    _target_dir: MutexGuard<'static, ()>,
     _env: ScopedEnv,
+    _target_dir: MutexGuard<'static, ()>,
     path: PathBuf,
 }
 
@@ -114,8 +117,8 @@ impl IsolatedTargetDir {
             Some(path.clone().into_os_string()),
         )]);
         Self {
-            _target_dir: target_dir,
             _env: scoped,
+            _target_dir: target_dir,
             path,
         }
     }
@@ -309,16 +312,20 @@ fn a_completed_lock_wait_reports_the_path_and_duration() {
 /// reporting one would be indistinguishable from a detector that does not
 /// fire. The child's own measurement is asserted to have spanned most of
 /// the parent's hold, so silence cannot come from two processes locking
-/// different files: the child demonstrably queued behind the parent. A
-/// scheduling delay that turns one attempt into a long wait is retried
-/// rather than read as a broken threshold.
+/// different files: the child demonstrably queued behind the parent. Two
+/// scheduling accidents are retried rather than read as a broken
+/// threshold: a delay that turns one attempt into a long wait, and a
+/// delay that lets the parent release before the child blocks, which
+/// leaves the measured wait too short to prove contention.
 #[test]
 fn a_short_lock_wait_is_not_reported() {
     let target_dir = IsolatedTargetDir::new("pg-lock-wait-short");
 
     let mut run = child_run_against_held_lock(target_dir.path(), SHORT_HOLD);
     for _ in 1..ATTEMPTS {
-        if !run.stderr.contains("completed after") {
+        let reported = run.stderr.contains("completed after");
+        let contended = run.waited >= SHORT_HOLD / 2;
+        if !reported && contended {
             break;
         }
         run = child_run_against_held_lock(target_dir.path(), SHORT_HOLD);

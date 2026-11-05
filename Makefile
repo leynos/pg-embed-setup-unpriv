@@ -29,7 +29,8 @@ CMD_MOX_VERSION ?= 0.2.0
 HYPOTHESIS_VERSION ?= 6.167.1
 PYTEST_VERSION ?= 9.0.2
 PYYAML_VERSION ?= 6.0.3
-SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_properties.py \
+SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
+	scripts/tests/test_cluster_sources_properties.py \
 	scripts/tests/test_cluster_tier_coverage_contract.py \
 	scripts/tests/test_msrv_check.py \
 	scripts/tests/test_nextest_filters_contract.py \

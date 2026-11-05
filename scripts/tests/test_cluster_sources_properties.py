@@ -45,16 +45,103 @@ _CLUSTER_MARKER: typ.Final[str] = "fn boot() -> TestCluster { todo!() }\n"
 #: A line neither marker matches.
 _UNMARKED: typ.Final[str] = "// nothing to see here\n"
 
+#: A layout builder: the crate root, the target name, and whether the
+#: crate root is the directory-backed fixture.
+_LayoutBuilder: typ.TypeAlias = typ.Callable[
+    [Path, str], list[tuple[Path, str]]
+]
+
+
+def _tree_root(crate_root: Path, *, is_fixture: bool) -> Path:
+    """Return the synthetic ``tests`` directory a crate root sits under."""
+    return crate_root.parent.parent if is_fixture else crate_root.parent
+
+
+def _flat(
+    crate_root: Path, name: str, *, is_fixture: bool
+) -> list[tuple[Path, str]]:
+    """A crate root with no modules."""
+    return [(crate_root, "")]
+
+
+def _support_override(
+    crate_root: Path, name: str, *, is_fixture: bool
+) -> list[tuple[Path, str]]:
+    """A ``#[path]`` override reaching ``support`` from the crate root."""
+    prefix = "../support" if is_fixture else "support"
+    helper = _tree_root(crate_root, is_fixture=is_fixture) / "support" / f"{name}_helper.rs"
+    declaration = f'#[path = "{prefix}/{name}_helper.rs"]\nmod helper;\n'
+    return [(crate_root, declaration), (helper, "")]
+
+
+def _directory_module(
+    crate_root: Path, name: str, *, is_fixture: bool
+) -> list[tuple[Path, str]]:
+    """A plain ``mod`` resolving to a directory-form module.
+
+    A plain ``mod`` searches the declaring file's own directory, so a
+    ``mod.rs`` crate root looks inside the fixture directory rather than
+    beside it.
+    """
+    helper = crate_root.parent / f"{name}_helper" / "mod.rs"
+    return [(crate_root, f"mod {name}_helper;\n"), (helper, "")]
+
+
+def _crate_root_sibling(
+    crate_root: Path, name: str, *, is_fixture: bool
+) -> list[tuple[Path, str]]:
+    """A plain sibling declared from a crate root at the tree root."""
+    sibling = crate_root.parent / f"Child_{name}.rs"
+    return [(crate_root, f"mod Child_{name};\n"), (sibling, "")]
+
+
+def _missing_candidate(
+    crate_root: Path, name: str, *, is_fixture: bool
+) -> list[tuple[Path, str]]:
+    """A declaration whose file is absent from the tree."""
+    declaration = f'#[path = "support/{name}_absent.rs"]\nmod absent;\n'
+    return [(crate_root, declaration)]
+
+
+def _cycle(crate_root: Path, name: str, *, is_fixture: bool) -> list[tuple[Path, str]]:
+    """Two modules that declare each other."""
+    module_dir = crate_root.parent / name
+    first, second = module_dir / "a.rs", module_dir / "b.rs"
+    return [
+        (crate_root, f'#[path = "{name}/a.rs"]\nmod a;\n'),
+        (first, '#[path = "b.rs"]\nmod b;\n'),
+        (second, '#[path = "a.rs"]\nmod a;\n'),
+    ]
+
+
+def _nested(crate_root: Path, name: str, *, is_fixture: bool) -> list[tuple[Path, str]]:
+    """A module that declares a module of its own.
+
+    ``#[path]`` is relative to the declaring file, so the fixture's
+    private module directory sits inside the fixture directory too.
+    """
+    helper = crate_root.parent / name / "helper.rs"
+    inner = helper.parent / "helper" / "inner.rs"
+    return [
+        (crate_root, f'#[path = "{name}/helper.rs"]\nmod helper;\n'),
+        (helper, "mod inner;\n"),
+        (inner, ""),
+    ]
+
+
+#: The module shapes a binary can be built from, and how to build each.
+_LAYOUT_BUILDERS: typ.Final[dict[str, _LayoutBuilder]] = {
+    "flat": _flat,
+    "support_override": _support_override,
+    "directory_module": _directory_module,
+    "nested": _nested,
+    "crate_root_sibling": _crate_root_sibling,
+    "missing_candidate": _missing_candidate,
+    "cycle": _cycle,
+}
+
 #: The module shapes a binary can be built from.
-_LAYOUTS: typ.Final[tuple[str, ...]] = (
-    "flat",
-    "support_override",
-    "directory_module",
-    "nested",
-    "crate_root_sibling",
-    "missing_candidate",
-    "cycle",
-)
+_LAYOUTS: typ.Final[tuple[str, ...]] = tuple(_LAYOUT_BUILDERS)
 
 
 def _units(
@@ -87,42 +174,7 @@ def _units(
         lowercase target names.
     """
     crate_root = root / _FIXTURE / "mod.rs" if is_fixture else root / f"{name}.rs"
-    if layout == "flat":
-        return [(crate_root, "")]
-    if layout == "support_override":
-        prefix = "../support" if is_fixture else "support"
-        helper = root / "support" / f"{name}_helper.rs"
-        declaration = f'#[path = "{prefix}/{name}_helper.rs"]\nmod helper;\n'
-        return [(crate_root, declaration), (helper, "")]
-    if layout == "directory_module":
-        # A plain `mod` searches the declaring file's own directory, so a
-        # `mod.rs` crate root looks inside the fixture directory rather
-        # than beside it.
-        helper = crate_root.parent / f"{name}_helper" / "mod.rs"
-        return [(crate_root, f"mod {name}_helper;\n"), (helper, "")]
-    if layout == "crate_root_sibling":
-        sibling = crate_root.parent / f"Child_{name}.rs"
-        return [(crate_root, f"mod Child_{name};\n"), (sibling, "")]
-    if layout == "missing_candidate":
-        declaration = f'#[path = "support/{name}_absent.rs"]\nmod absent;\n'
-        return [(crate_root, declaration)]
-    if layout == "cycle":
-        module_dir = crate_root.parent / name
-        first, second = module_dir / "a.rs", module_dir / "b.rs"
-        return [
-            (crate_root, f'#[path = "{name}/a.rs"]\nmod a;\n'),
-            (first, '#[path = "b.rs"]\nmod b;\n'),
-            (second, '#[path = "a.rs"]\nmod a;\n'),
-        ]
-    # `#[path]` is relative to the declaring file, so the fixture's
-    # private module directory sits inside the fixture directory too.
-    helper = crate_root.parent / name / "helper.rs"
-    inner = helper.parent / "helper" / "inner.rs"
-    return [
-        (crate_root, f'#[path = "{name}/helper.rs"]\nmod helper;\n'),
-        (helper, "mod inner;\n"),
-        (inner, ""),
-    ]
+    return _LAYOUT_BUILDERS[layout](crate_root, name, is_fixture=is_fixture)
 
 
 @dataclasses.dataclass(frozen=True)

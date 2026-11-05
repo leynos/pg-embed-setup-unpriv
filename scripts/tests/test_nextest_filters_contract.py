@@ -125,3 +125,34 @@ def test_the_serial_reader_requires_the_embedded_term_once(
     """
     with pytest.raises(NextestConfigurationError):
         serial_group_binaries(filter_text)
+
+
+@pytest.mark.parametrize(
+    "filter_text",
+    [
+        pytest.param(f"{EMBEDDED_SERIAL_TERM} | all()", id="all-widens-the-group"),
+        pytest.param(
+            f"{EMBEDDED_SERIAL_TERM} | test(/^ui::/)", id="a-test-term"
+        ),
+        pytest.param(
+            f"{EMBEDDED_SERIAL_TERM} | binary(=a) & binary(=b)",
+            id="an-intersection",
+        ),
+        pytest.param(
+            f"{EMBEDDED_SERIAL_TERM} | binary(ui)", id="a-malformed-binary-term"
+        ),
+    ],
+)
+def test_the_serial_reader_refuses_terms_that_are_not_binary_names(
+    filter_text: str,
+) -> None:
+    """Only whole-binary terms may sit beside the embedded term.
+
+    ``all()`` would widen the group to every binary, a ``test(...)`` term
+    would hide cases behind a name that looks pinned, an intersection
+    names two binaries in one term, and a malformed term is not a name at
+    all. Reading any of them as a binary would report a scope the filter
+    does not select.
+    """
+    with pytest.raises(NextestConfigurationError):
+        serial_group_binaries(filter_text)

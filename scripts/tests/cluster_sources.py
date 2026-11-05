@@ -22,7 +22,6 @@ See "Test timeouts: four tiers, outermost last" in
 """
 
 import collections.abc as cabc
-import os
 import re
 import typing as typ
 from pathlib import Path
@@ -149,8 +148,22 @@ def _lexically_normalized(path: Path) -> Path:
     ``../support/name.rs``, so the joined candidate carries ``..`` and
     never compares equal to a resolved key. Normalising here keeps the
     classifier pure: it matches path strings, it does not probe the disk.
+
+    The collapse is lexical, so it must not use ``Path.resolve``: that
+    would consult the filesystem and follow symlinks. A leading ``..``
+    survives on a relative path, and the anchor is never popped, so
+    ``/..`` stays ``/``.
     """
-    return Path(os.path.normpath(path))
+    parts: list[str] = []
+    for part in path.parts:
+        if part == "..":
+            if parts and parts[-1] not in {"..", path.anchor}:
+                parts.pop()
+            elif not path.is_absolute():
+                parts.append(part)
+        elif part != ".":
+            parts.append(part)
+    return Path(*parts)
 
 
 def _module_file(
