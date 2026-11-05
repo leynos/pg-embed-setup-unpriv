@@ -21,6 +21,25 @@ consumer-facing guidance.
   short owner grace window for missing, malformed, or unreadable owner files,
   so a competing process cannot delete a newly created lock while the owner is
   still being recorded.
+- Every binary that takes that lock directly, and every binary's embedded
+  `serial::tests::*` lock cases, joins the one-slot nextest `serial` group.
+  nextest does not count a wait for a group slot against `slow-timeout`, but it
+  does count time blocked in `flock` once the test has started.
+  `tests/support/serial.rs` reports a completed wait of one second or more on
+  stderr, so a timeout separates lock queueing from cluster work. A test that
+  nextest terminates while it is still blocked emits no such line: the
+  diagnostic covers waits that completed, not waits in progress.
+  `tests/scenario_lock_wait.rs` drives that path end to end: it holds the lock,
+  a spawned child blocks in the same `acquire_process_lock` call, and the
+  parent releases only after the child has waited past the threshold, then
+  asserts the captured stderr names the lock file and the completed duration.
+  The binary gives the child a private `CARGO_TARGET_DIR`, so it takes no
+  `serial` group slot.
+- Tests that use the local guard with an isolated root stay out of the group.
+  `observability`, `data_dir_recovery` and `test_cluster_async` are the
+  examples. They share no lock or directory with the other scenarios, so
+  serializing them would add wall time without preventing contention. Their
+  embedded `serial::tests::*` cases still join through the test-name term.
 
 ## Feature coverage in CI
 
@@ -370,6 +389,28 @@ archive packager and the workflow contract tests in
 `contents: write`, and that the staged archive name and members render the
 `[package.metadata.binstall]` templates exactly.
 
+The same target holds the nextest timeout contracts. They share
+`scripts/tests/nextest_filters.py`, a reader that accepts only a flat
+disjunction of `binary(=name)` terms and, for the serial group, one exact
+`kind(test) & test(/^serial::/)` term selecting the lock's embedded unit tests;
+`all()`, an intersection, negation, nesting and a duplicated embedded term are
+refused rather than interpreted. The reader carries doctests, which the second
+`make test-scripts` command collects with `--doctest-modules`.
+
+`test_nextest_tier_contract.py` pins the default, cluster, UI and whole-run
+budgets and the exact cluster and serial registries by value.
+`test_nextest_filters_contract.py` pins the reader's accepted and refused
+shapes, and `test_timeout_ordering_contract.py` and
+`test_timeout_exactness_contract.py` check the tiers against each other and the
+watchdog. `test_cluster_tier_coverage_contract.py` derives the child-spawning
+cluster binaries from the test sources, so a binary missing from both manually
+maintained lists is still caught. Timeout-tier membership is separate from
+serial-group membership: a binary whose cluster roots are isolated pays cold
+startup without taking the shared scenario lock.
+`test_nextest_filters_properties.py` uses Hypothesis for filters no file in the
+repository writes, such as a name using every permitted character and a term
+placed anywhere in the disjunction.
+
 ## Minimum supported Rust version
 
 `rust-version` in `Cargo.toml` is a promise to downstream projects. It is 1.92
@@ -567,14 +608,50 @@ Four independent timers can end a test run, and the canonical statement of how
 they must be ordered lives in the `generate-coverage` README in
 [`leynos/shared-actions`][shared-actions-coverage]. All four are set here.
 
-| Tier                     | What it bounds                     | Where it is set                               | Current value                                   |
-| ------------------------ | ---------------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s and 900 s for two overrides |
-| nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 1,100 s                                         |
-| Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                  |
-| Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 66 m                                            |
+| Tier                     | What it bounds                     | Where it is set                               | Current value                                            |
+| ------------------------ | ---------------------------------- | --------------------------------------------- | -------------------------------------------------------- |
+| Per-test `slow-timeout`  | one test                           | `.config/nextest.toml`                        | 180 s default; 30 s, 300 s and 900 s for three overrides |
+| nextest `global-timeout` | the whole test run                 | `.config/nextest.toml`                        | 1,100 s                                                  |
+| Cargo watchdog           | one `cargo` invocation, wall clock | `RUN_RUST_CARGO_WAIT_TIMEOUT` at job level    | 1,800 s (30 m)                                           |
+| Job `timeout-minutes`    | the whole job                      | job level in `ci.yml` and `coverage-main.yml` | 66 m                                                     |
 
 *Table: the timers that can end a run, innermost first.*
+
+### The cluster tier is sized against a measurement
+
+The 180 s default was nextest's own default, not a figure chosen for these
+tests. On the 6-core Rocky 10 host where #247 was filed, a single
+`test_cluster_fixture unit_tests::fixture_exposes_connection_metadata` run with
+nothing else in the same nextest run took 132.893 s. That leaves about 26% of
+headroom under 180 s, and one full `make test` on the same host timed out sixty
+cluster tests at exactly 180.00 s.
+
+The cluster override gives the twenty binaries that start or share a real
+PostgreSQL cluster 300 s. That is 2.25 times the measurement, leaving 167 s of
+headroom for a loaded developer host or a cold CI runner. The five-second grace
+period is explicit: omitting it would select nextest's ten-second default and
+raise the watchdog floor the contract derives from 1,765 s to 1,770 s.
+
+The tier also covers parent tests whose children bootstrap a real cluster:
+`shutdown_hook_lifecycle` was already listed, and the three added for #247 are
+`durability_defaults`, `fresh_cluster_per_process` and
+`per_cluster_directories`. The three added here have isolated roots, so they
+take no scenario lock and stay out of the `serial` group, but the parent's
+allowance still covers child startup and waiting. Tier membership and
+serial-group membership are separate questions, and the contracts check each
+list on its own terms.
+
+The cluster tier is 300 s, not the 360 s the `ui` override used before it was
+raised for the macOS trybuild builds. `ui` remains at 900 s.
+
+A repeat on a warm host of the same class, after the tier was in place, ran the
+same single test in 1.479 s and the whole suite in 920 s: 1,062 of 1,063 tests
+passed with no cluster timeout, and the slowest cluster test took 1.900 s. The
+132.893 s figure is the cold, uncontended measurement the tier is sized
+against; the warm repeat shows the allowance stops binding once the install
+tree is cached. The run's one timeout was the `ui` trybuild test, which
+compiles six fixtures inside a shared and heavily loaded compiler pool and has
+its own 900 s tier.
 
 ### The outermost tier was missing
 
@@ -867,9 +944,12 @@ that second bootstrap chose. Three things about it are deliberate.
   on runners with no `libpq`. The Linux lane runs `--all-features` and does
   execute it.
 - It joins the `serial` group in `.config/nextest.toml`, alongside every other
-  binary that starts a cluster. It takes the process lock and starts a
+  binary that takes the process lock directly. It takes that lock and starts a
   postmaster, so running it concurrently starves both itself and the tests
-  sharing that lock.
+  sharing the lock. The group makes the wait for the lock nextest queue time,
+  which `slow-timeout` does not count, instead of runtime `flock` waiting,
+  which it does. The wait itself is unchanged: `flock` already serialized these
+  tests.
 - Its crate name is in the `no_std_fs_operations` exclusion list in
   `dylint.toml`, for the reason the list already gives for the other
   integration-test crates: they share the ambient `tests/support` modules,
@@ -1013,8 +1093,10 @@ reads it (#259). The design document records the reasoning.
   binary, drives preparation through `bootstrap_for_tests`, and it is the only
   test that reaches the root path, in the CI root lane.
   `tests/fresh_cluster_per_process.rs` runs two child processes in one root.
-  Each case creates its own temporary root, so the cases share no state and
-  stay out of the nextest `serial` group.
+  Each case creates its own temporary root, so the cases share no state, take
+  no cross-process scenario lock, and stay out of the `serial` group. They run
+  in parallel with one another and with the grouped scenarios, and serializing
+  them would only lengthen the run.
 
 `cluster::connection::admin_connect_error` wraps a failed admin connection. It
 keeps the `postgres` error as the source and appends that error's own source to
