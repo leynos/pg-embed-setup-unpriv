@@ -30,6 +30,7 @@ PLACEMENTS = [
     (".github/workflows/ci.yml", "build-test", "ubicloud-standard-4", 66),
     (".github/workflows/ci.yml", "msrv", "ubicloud-standard-4", 30),
     (".github/workflows/ci.yml", "binstall-packaging", "ubicloud-standard-2", 15),
+    (".github/workflows/coverage-main.yml", "coverage-upload", "ubicloud-standard-2", 66),
 ]
 
 
