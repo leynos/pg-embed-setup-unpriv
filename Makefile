@@ -155,9 +155,11 @@ lint-clippy: ## Run docstring coverage, rustdoc and Clippy with warnings denied
 
 # Whitaker builds with its own installer-managed toolchain, which must not
 # inherit this repository's development flags, backend or linker, so the route
-# clears them and takes the repository's Cargo defaults instead. Dylint reads
+# clears them. `RUSTFLAGS` is assigned empty rather than removed: an empty
+# assignment is a boundary the Concordat rule can read, and with the variable
+# unset Cargo would fall back to the flags in .cargo/config.toml. Dylint reads
 # the warning policy from DYLINT_RUSTFLAGS.
-WHITAKER_CLEAN_ENV = env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+WHITAKER_CLEAN_ENV = env -u CARGO_ENCODED_RUSTFLAGS \
 	-u CARGO_BUILD_RUSTFLAGS \
 	-u CARGO_PROFILE_DEV_CODEGEN_BACKEND -u CARGO_BUILD_TARGET \
 	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER \
@@ -165,7 +167,8 @@ WHITAKER_CLEAN_ENV = env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
 	-u CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER \
 	-u CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS \
 	-u CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER \
-	-u CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS -u CFLAGS -u LDFLAGS
+	-u CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS -u CFLAGS -u LDFLAGS \
+	RUSTFLAGS=
 
 # --ignore-rust-version: the Whitaker Dylint driver toolchain predates the
 # rust-version of some dependencies; the repo toolchain still enforces MSRV.

@@ -1251,13 +1251,15 @@ release build in `release.yml` to go through the script.
 `make lint` runs `lint-clippy` (which takes the standard's flags, as before) and
 `lint-whitaker`. Whitaker builds with its own installer-managed toolchain,
 which must not inherit the repository's development flags, so the route clears
-inherited `RUSTFLAGS`, encoded flags, backend, target and linker settings
-through `WHITAKER_CLEAN_ENV` and passes the warning policy through
-`DYLINT_RUSTFLAGS`. It neither assigns `RUSTFLAGS` nor selects LLVM, so Cargo's
-repository defaults stay in force. `tests/build_standard_contract.rs` reads
-`make -n lint-whitaker` on a Linux and a macOS host for exactly that. In CI,
-the root job's direct `cargo build` assigns the standard's flags in its step
-environment, because `setup-rust` would otherwise export `-D warnings` alone.
+encoded flags, backend, target and linker settings through
+`WHITAKER_CLEAN_ENV`, assigns `RUSTFLAGS` empty (an unset variable would let
+Cargo fall back to the flags in `.cargo/config.toml`, and the Concordat rule
+reads an explicit empty assignment as the isolation boundary), and passes the
+warning policy through `DYLINT_RUSTFLAGS`. It selects no LLVM backend.
+`tests/build_standard_contract.rs` reads `make -n lint-whitaker` on a Linux and
+a macOS host for exactly that. In CI, the root job's direct `cargo build`
+assigns the standard's flags in its step environment, because `setup-rust`
+would otherwise export `-D warnings` alone.
 
 ### The development footprint
 

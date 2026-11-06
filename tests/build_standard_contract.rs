@@ -153,7 +153,13 @@ fn whitaker_route_problems(recipe: &str, host: &str) -> Problems {
 fn clearing_problems(whitaker: &str, host: &str) -> Problems {
     WHITAKER_CLEARED
         .iter()
-        .filter(|setting| !whitaker.contains(&format!("-u {setting} ")))
+        .filter(|setting| {
+            // `RUSTFLAGS` may be assigned empty instead of removed: the Concordat rule reads an
+            // explicit empty assignment as a statically known boundary, and an unset variable
+            // lets Cargo fall back to the configuration's flags.
+            let emptied = **setting == "RUSTFLAGS" && whitaker.contains(" RUSTFLAGS= ");
+            !emptied && !whitaker.contains(&format!("-u {setting} "))
+        })
         .map(|setting| format!("Whitaker on {host} must remove inherited {setting}: {whitaker}"))
         .collect()
 }
@@ -167,7 +173,7 @@ fn assigns_build_variable(word: &str) -> bool {
         "CARGO_BUILD_RUSTFLAGS=",
     ]
     .iter()
-    .any(|prefix| word.starts_with(prefix))
+    .any(|prefix| word.starts_with(prefix) && word != "RUSTFLAGS=")
         || (word.starts_with("CARGO_PROFILE_") && word.contains("_CODEGEN_BACKEND="))
 }
 
@@ -249,13 +255,12 @@ fn lint_runs_clippy_and_whitaker() -> Result<(), String> {
 
 /// A compliant `lint-whitaker` line, as `make -n` prints it.
 const WHITAKER_OK: &str =
-    "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u \
-     CARGO_PROFILE_DEV_CODEGEN_BACKEND -u CARGO_BUILD_TARGET -u \
-     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER -u \
+    "env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u CARGO_PROFILE_DEV_CODEGEN_BACKEND \
+     -u CARGO_BUILD_TARGET -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER -u \
      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -u CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER \
      -u CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS -u CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER -u \
-     CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS -u CFLAGS -u LDFLAGS DYLINT_RUSTFLAGS=\"-D \
-     warnings\" whitaker --all -- --all-targets --all-features";
+     CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS -u CFLAGS -u LDFLAGS RUSTFLAGS= \
+     DYLINT_RUSTFLAGS=\"-D warnings\" whitaker --all -- --all-targets --all-features";
 
 /// The readers judge canned recipes, so the checks above cannot pass by finding nothing: the
 /// compliant line passes, with and without a trailing Cargo option, and each broken variant is
@@ -271,14 +276,10 @@ fn the_whitaker_and_lint_readers_refuse_each_broken_recipe() -> Result<(), Strin
         &format!("{WHITAKER_OK} --note \"a #b\""),
         "Linux",
     ))?;
-    let broken: [(&str, String); 10] = [
+    let broken: [(&str, String); 9] = [
         (
             "echoed",
             WHITAKER_OK.replace("whitaker --all", "echo whitaker --all"),
-        ),
-        (
-            "empty RUSTFLAGS",
-            WHITAKER_OK.replace("DYLINT", "RUSTFLAGS= DYLINT"),
         ),
         (
             "single quoted",
@@ -292,7 +293,7 @@ fn the_whitaker_and_lint_readers_refuse_each_broken_recipe() -> Result<(), Strin
             "LLVM",
             WHITAKER_OK.replace("DYLINT", "CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm DYLINT"),
         ),
-        ("kept flags", WHITAKER_OK.replace("-u RUSTFLAGS ", "")),
+        ("kept flags", WHITAKER_OK.replace("RUSTFLAGS= ", "")),
         (
             "options hidden by a comment",
             WHITAKER_OK.replace(
