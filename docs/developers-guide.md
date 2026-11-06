@@ -124,10 +124,10 @@ duplicate keys and says nothing.
 
 ## Runner placement
 
-`ci.yml`'s `build-test` runs on `ubicloud-standard-4`. `coverage-main.yml`'s
-`coverage-upload` runs on `ubuntu-latest`, because a main coverage upload
-blocks no one's work. `runs-on` selects the class with the runner-selection
-expression, shown here for `standard-2`:
+`ci.yml`'s `build-test` runs on `ubicloud-standard-4` and `coverage-main.yml`'s
+`coverage-upload`, main's only cache writer, on `ubicloud-standard-2`.
+`runs-on` selects the class with the runner-selection expression, shown here for
+`standard-2`:
 
 ```yaml
 runs-on: >-
