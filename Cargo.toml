@@ -286,7 +286,7 @@ rstest-bdd = "0.6.0"
 rstest-bdd-macros = "0.6.0"
 once_cell = "1"
 unic-langid = "0.9"
-serial_test = { version = "3.4.0", features = ["file_locks"] }
+serial_test = { version = "4.0.1", features = ["file_locks"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 mockall = "0.15"
 trybuild = "1.0.122"
