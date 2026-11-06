@@ -120,6 +120,8 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           TARGET: ${{ matrix.target }}
+          # Clear any wrapper the runner image or an earlier step exported.
+          RUSTC_WRAPPER: ''
         run: >-
           uv run --script scripts/release_archive.py
           "$TARGET"
