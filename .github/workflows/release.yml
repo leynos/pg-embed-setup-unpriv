@@ -104,8 +104,13 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
+      # A release archive gains little from sccache, and on Windows the wrapper
+      # spawns rustc with a command line over the OS limit for this crate
+      # (os error 206), so release builds do not use it.
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        with:
+          use-sccache: 'false'
       - name: Setup uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
         with:
