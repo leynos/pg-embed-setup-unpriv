@@ -24,6 +24,10 @@ concurrency:
 
 jobs:
   coverage-upload:
+    # Stays on Ubicloud for now. A trial on ubuntu-latest (6 November) failed
+    # `bootstrap::prepare::orphan_watch::tests::
+    # a_live_process_that_is_not_this_slots_postgres_survives` under coverage
+    # on the hosted image, a test that depends on the runner's process table.
     # Ubicloud's cache proxy is scoped by ref, so a pull request's Ubicloud
     # build-test reads a warm main scope only if a main job on Ubicloud
     # writes it. This is that writer. The fork arm never applies on push or
