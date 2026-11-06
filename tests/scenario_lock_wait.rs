@@ -16,6 +16,8 @@
 //! real scenario lock is untouched and this binary needs no `serial`
 //! group membership.
 
+// nested-cargo-allow: target no cargo runs here; the variable only locates a lock file
+
 #![cfg(unix)]
 
 #[path = "support/serial.rs"]
