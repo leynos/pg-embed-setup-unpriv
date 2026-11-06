@@ -58,3 +58,20 @@ the workflows, so a flag lost through a recipe or workflow edit fails there.
 - A change to a recipe or workflow step that assigns `RUSTFLAGS` must restate
   the flags, and the contract says which clause fails when it does not.
 - Revisit Cranelift when the toolchain or the failing tests change.
+
+## Addendum, 2026-10-31: the Whitaker route and the footprint
+
+- `make lint` is now two routes, `lint-clippy` and `lint-whitaker`. Clippy and
+  rustdoc keep taking the standard's flags. Whitaker builds with its own
+  installer-managed toolchain, which must not inherit the repository's
+  development flags, so its route clears inherited `RUSTFLAGS`, encoded flags,
+  build rustflags, backend, target and linker settings and receives the warning
+  policy through `DYLINT_RUSTFLAGS`. The contract reads `make -n lint-whitaker`
+  on a Linux and a macOS host, and the program the shell executes rather than
+  any word that names it.
+- The root job's direct `cargo build` in CI assigns the standard's flags in its
+  step environment, because `setup-rust` exports `-D warnings` alone, which
+  replaces the configuration; `ci_rustflags_contract.rs` holds it.
+- The development footprint (`incremental = false`, `debug = 0`, and
+  `[unstable] embed-metadata = false`) joins the configuration, held by
+  `tests/build_footprint_contract.rs`.

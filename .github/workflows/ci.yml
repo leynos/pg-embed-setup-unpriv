@@ -163,6 +163,11 @@ jobs:
           publish-artefact: 'false'
       - name: Install cargo-nextest and test (root)
         if: ${{ matrix.privilege == 'root' }}
+        env:
+          # The toolchain action exports `-D warnings` for the whole job, which
+          # replaces .cargo/config.toml, so the `cargo build` below restates the
+          # build standard's flags. `make test` assigns its own.
+          RUSTFLAGS: -D warnings -Zthreads=8 -Clink-arg=-fuse-ld=mold
         run: |
           # A privilege-dropped worker cannot traverse every runner workspace.
           # Give every test, including those reading the variable directly, an

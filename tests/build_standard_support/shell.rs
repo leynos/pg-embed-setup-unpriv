@@ -136,3 +136,101 @@ fn split_value(after: &str) -> (&str, &str) {
         .or_else(|| quoted('\''))
         .unwrap_or_else(|| after.split_once(char::is_whitespace).unwrap_or((after, "")))
 }
+
+/// Returns the command line after its leading `NAME=value` assignments.
+fn after_assignments(command: &str) -> &str {
+    let mut rest = command.trim_start();
+    while let Some((name, after)) = rest.split_once('=') {
+        let is_name = name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !is_name {
+            break;
+        }
+        rest = split_value(after).1.trim_start();
+    }
+    rest
+}
+
+/// Returns the program a shell command executes: its first word after any leading assignments and
+/// any `env` wrapper with its `-i` and `-u NAME` options and its own assignments. A word that only
+/// appears as an argument (`echo whitaker --all`) is not the program, so it does not count as
+/// running it.
+///
+/// ```text
+/// executed_program("A=1 cargo clippy")                   == Some("cargo")
+/// executed_program("env -u X Y=\"a b\" whitaker --all")  == Some("whitaker")
+/// executed_program("echo whitaker --all")                == Some("echo")
+/// ```
+pub fn executed_program(command: &str) -> Option<&str> {
+    let mut rest = after_assignments(command.trim());
+    loop {
+        let (word, after) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        if word.is_empty() {
+            return None;
+        }
+        if !names_program(word, "env") {
+            return Some(word);
+        }
+        rest = skip_env_arguments(after.trim_start());
+    }
+}
+
+/// Skips the options and assignments an `env` wrapper takes before the program it runs.
+fn skip_env_arguments(mut rest: &str) -> &str {
+    loop {
+        if let Some(after) = rest.strip_prefix("-i ") {
+            rest = after.trim_start();
+        } else if let Some(after) = rest.strip_prefix("-u ") {
+            rest = after
+                .trim_start()
+                .split_once(char::is_whitespace)
+                .map_or("", |(_, tail)| tail)
+                .trim_start();
+        } else {
+            let stripped = after_assignments(rest);
+            if stripped.len() == rest.len() {
+                return rest;
+            }
+            rest = stripped;
+        }
+    }
+}
+
+/// Returns the command without a trailing shell comment: from the first unquoted `#` that starts a
+/// word (after whitespace, tab included) to the end of the line. A `#` inside quotes, or inside a
+/// word such as `a#b`, is not a comment.
+///
+/// ```text
+/// without_comment("whitaker --all # --all-targets")  == "whitaker --all "
+/// without_comment("whitaker --all\t# --all-targets") == "whitaker --all\t"
+/// without_comment("whitaker --note \"a #b\" --all")  == "whitaker --note \"a #b\" --all"
+/// ```
+pub fn without_comment(command: &str) -> &str {
+    let mut quote: Option<char> = None;
+    let mut after_space = true;
+    for (index, c) in command.char_indices() {
+        if quote.is_none() && opens_comment(c, after_space) {
+            return command.get(..index).unwrap_or(command);
+        }
+        quote = next_quote_state(quote, c);
+        after_space = c.is_whitespace();
+    }
+    command
+}
+
+/// Whether `c` starts a shell comment: a `#` at the start of a word.
+fn opens_comment(c: char, after_space: bool) -> bool { c == '#' && after_space }
+
+/// The quote state after reading `c`: a matching character closes an open
+/// quote, and a quote character opens one when none is open.
+fn next_quote_state(quote: Option<char>, c: char) -> Option<char> {
+    match quote {
+        Some(open) if c == open => None,
+        Some(open) => Some(open),
+        None if c == '\'' || c == '"' => Some(c),
+        None => None,
+    }
+}
