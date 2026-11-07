@@ -686,12 +686,11 @@ because an algorithm needs the processor to make progress. A `timeout` means
 the model exceeded the profile's per-model wall-clock ceiling, or that the
 whole-run budget was already spent when its turn came. An `incomplete` outcome
 means the markers, the executed test count or the profile disagreed with what
-the runner expected. Rerun the whole profile with the command in the
-`Reproduce` section of `summary.md`, which is also the one `summary.json`
-records:
+the runner expected. Rerun the whole profile with the command `summary.md`
+records under `Reproduce`:
 
 ```sh
-make test-loom LOOM_PROFILE=scheduled
+make test-loom LOOM_PROFILE=scheduled LOOM_OUTPUT_DIR=target/loom-report
 ```
 
 To rerun one model, build the binary and run it with the model's exact name and

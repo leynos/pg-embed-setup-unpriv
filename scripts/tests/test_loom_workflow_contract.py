@@ -194,6 +194,18 @@ def test_setup_rust_installs_mold_and_setup_uv_follows() -> None:
     )
 
 
+def test_the_profile_variable_maps_each_event_to_its_profile() -> None:
+    """Pull requests run `pr`, the schedule runs `scheduled`, dispatch uses its input."""
+    _, job = loom().jobs()[0]
+    expression = " ".join(str(job["env"]["LOOM_PROFILE"]).split())
+
+    assert expression == (
+        "${{ github.event_name == 'pull_request' && 'pr' "
+        "|| github.event_name == 'schedule' && 'scheduled' "
+        "|| inputs.profile }}"
+    ), "each event must select its documented profile"
+
+
 def test_the_run_step_selects_the_profile_and_clears_the_wrapper() -> None:
     """The profile reaches the runner, and no local admission wrapper is used."""
     run = step_named(loom(), "Run Loom models")
