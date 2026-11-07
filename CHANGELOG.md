@@ -45,6 +45,14 @@ This release raises the minimum supported Rust version to 1.94.
   separate. A completed `flock` wait of one second or more is now reported on
   stderr, so a timeout separates lock queueing from cluster work; a test
   terminated while still blocked emits no line.
+- `make test-scripts` now derives the binaries that take the scenario lock
+  from the test sources and requires the `serial` group's filter to name them
+  (#254). The derivation follows `#[path]` declarations into `tests/support`
+  and excludes the lock module's own files, whose uses the group's embedded
+  `serial::tests::*` term covers. A binary that starts calling `serial_guard`
+  therefore fails the contract rather than timing out on a cold full run, and
+  the same check refuses a `platform`-restricted serial override or a test
+  group assigned ahead of it.
 
 ### Lint toolchain
 
