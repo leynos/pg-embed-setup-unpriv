@@ -182,6 +182,11 @@ pub(super) fn validate_explicit_shutdown_timeout(timeout: Duration) -> Bootstrap
     Ok(timeout)
 }
 
+/// Resolves the worker binary from `PG_EMBEDDED_WORKER`.
+///
+/// The variable is read only for privileged execution, so a non-UTF-8 value
+/// stays invisible to unprivileged runs. Validation and `PATH` discovery are
+/// shared with [`resolve_explicit_worker`] to keep both paths in step.
 pub(super) fn worker_binary_from_env(
     privileges: ExecutionPrivileges,
 ) -> BootstrapResult<Option<Utf8PathBuf>> {
@@ -189,28 +194,19 @@ pub(super) fn worker_binary_from_env(
         return Ok(None);
     }
 
-    if let Some(raw) = env::var_os("PG_EMBEDDED_WORKER") {
-        let path = Utf8PathBuf::from_path_buf(PathBuf::from(&raw)).map_err(|_| {
-            let invalid_value = raw.to_string_lossy().to_string();
-            BootstrapError::from(color_eyre::eyre::eyre!(
-                "PG_EMBEDDED_WORKER contains a non-UTF-8 value: {invalid_value:?}. Provide a \
-                 UTF-8 encoded absolute path to the worker binary."
-            ))
-        })?;
+    let supplied = env::var_os("PG_EMBEDDED_WORKER")
+        .map(|raw| {
+            Utf8PathBuf::from_path_buf(PathBuf::from(&raw)).map_err(|_| {
+                let invalid_value = raw.to_string_lossy().to_string();
+                BootstrapError::from(color_eyre::eyre::eyre!(
+                    "PG_EMBEDDED_WORKER contains a non-UTF-8 value: {invalid_value:?}. Provide a \
+                     UTF-8 encoded absolute path to the worker binary."
+                ))
+            })
+        })
+        .transpose()?;
 
-        validate_worker_path(&path)?;
-        return Ok(Some(path));
-    }
-
-    #[cfg(unix)]
-    {
-        if let Some(worker) = discover_worker_from_path()? {
-            validate_worker_path(&worker)?;
-            return Ok(Some(worker));
-        }
-    }
-
-    Ok(None)
+    resolve_explicit_worker(privileges, supplied)
 }
 
 /// Resolves the worker binary for an explicit bootstrap.

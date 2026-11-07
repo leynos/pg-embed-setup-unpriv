@@ -360,6 +360,8 @@ seconds; the default is 15 seconds.
 Some inputs are still ambient by design. They are read after configuration
 resolution, and none of them can be supplied through `TestBootstrapConfig`:
 
+Table 1: Inputs that remain ambient after explicit configuration resolution.
+
 | Input                         | When it is read                                                    |
 | ----------------------------- | ------------------------------------------------------------------ |
 | `PG_EMBED_DURABLE`            | converting the `PgEnvCfg` into settings for a test bootstrap       |
