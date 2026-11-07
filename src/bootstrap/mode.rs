@@ -66,9 +66,15 @@ pub(crate) fn unsupported_root_privilege_drop_error() -> BootstrapError {
     ))
 }
 
+/// Chooses how the bootstrap runs once the worker binary is resolved.
+///
+/// `missing_worker_hint` is the error text used when root execution has no
+/// worker binary. Callers supply it because the ambient and explicit paths read
+/// different sources, and each must name the input the user should change.
 pub(super) fn determine_execution_mode(
     privileges: ExecutionPrivileges,
     worker_binary: Option<&Utf8PathBuf>,
+    missing_worker_hint: &str,
 ) -> BootstrapResult<ExecutionMode> {
     match privileges {
         ExecutionPrivileges::Root => {
@@ -77,7 +83,7 @@ pub(super) fn determine_execution_mode(
             }
             if worker_binary.is_none() {
                 Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                    "PG_EMBEDDED_WORKER must be set when running with root privileges"
+                    "{missing_worker_hint}"
                 )))
             } else {
                 Ok(ExecutionMode::Subprocess)
@@ -93,10 +99,13 @@ mod tests {
 
     use super::*;
 
+    const AMBIENT_WORKER_HINT: &str =
+        "PG_EMBEDDED_WORKER must be set when running with root privileges";
+
     #[cfg(all(unix, privileged_unix_platform))]
     #[test]
     fn determine_execution_mode_requires_worker_when_root() {
-        let err = determine_execution_mode(ExecutionPrivileges::Root, None)
+        let err = determine_execution_mode(ExecutionPrivileges::Root, None, AMBIENT_WORKER_HINT)
             .expect_err("root execution without worker must error");
         let message = err.to_string();
         assert!(
@@ -109,16 +118,21 @@ mod tests {
     #[test]
     fn determine_execution_mode_allows_subprocess_with_worker() {
         let worker = Utf8PathBuf::from("/tmp/pg_worker");
-        let mode = determine_execution_mode(ExecutionPrivileges::Root, Some(&worker))
-            .expect("root execution with worker should succeed");
+        let mode = determine_execution_mode(
+            ExecutionPrivileges::Root,
+            Some(&worker),
+            AMBIENT_WORKER_HINT,
+        )
+        .expect("root execution with worker should succeed");
         assert_eq!(mode, ExecutionMode::Subprocess);
     }
 
     #[cfg(unix)]
     #[test]
     fn determine_execution_mode_in_process_when_unprivileged() {
-        let mode = determine_execution_mode(ExecutionPrivileges::Unprivileged, None)
-            .expect("unprivileged execution should succeed");
+        let mode =
+            determine_execution_mode(ExecutionPrivileges::Unprivileged, None, AMBIENT_WORKER_HINT)
+                .expect("unprivileged execution should succeed");
         assert_eq!(mode, ExecutionMode::InProcess);
     }
 
@@ -126,8 +140,12 @@ mod tests {
     #[test]
     fn determine_execution_mode_ignores_worker_when_unprivileged() {
         let worker = Utf8PathBuf::from("/tmp/pg_worker");
-        let mode = determine_execution_mode(ExecutionPrivileges::Unprivileged, Some(&worker))
-            .expect("unprivileged execution should succeed with worker configured");
+        let mode = determine_execution_mode(
+            ExecutionPrivileges::Unprivileged,
+            Some(&worker),
+            AMBIENT_WORKER_HINT,
+        )
+        .expect("unprivileged execution should succeed with worker configured");
         assert_eq!(mode, ExecutionMode::InProcess);
     }
 
@@ -135,8 +153,12 @@ mod tests {
     #[test]
     fn determine_execution_mode_rejects_root_when_privilege_drop_is_unsupported() {
         let worker = Utf8PathBuf::from("/tmp/pg_worker");
-        let err = determine_execution_mode(ExecutionPrivileges::Root, Some(&worker))
-            .expect_err("non-unix root execution should fail before worker dispatch");
+        let err = determine_execution_mode(
+            ExecutionPrivileges::Root,
+            Some(&worker),
+            AMBIENT_WORKER_HINT,
+        )
+        .expect_err("non-unix root execution should fail before worker dispatch");
         let message = err.to_string();
         assert!(
             message.contains("privilege drop is not supported"),

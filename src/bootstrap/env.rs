@@ -187,6 +187,7 @@ const WORKER_ENV_SOURCE: &str = "PG_EMBEDDED_WORKER";
 /// Label for a worker path supplied through configuration.
 pub(super) const EXPLICIT_WORKER_SOURCE: &str = "the explicit worker binary";
 /// Label for a worker path found by searching `PATH`.
+#[cfg(unix)]
 const DISCOVERED_WORKER_SOURCE: &str = "the worker binary discovered on PATH";
 
 /// Resolves the worker binary from `PG_EMBEDDED_WORKER`.

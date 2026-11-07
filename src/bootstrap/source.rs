@@ -32,6 +32,19 @@ use crate::{
     error::{BootstrapError, BootstrapResult},
 };
 
+/// Error text for the ambient path when root execution has no worker binary.
+const AMBIENT_MISSING_WORKER_HINT: &str =
+    "PG_EMBEDDED_WORKER must be set when running with root privileges";
+
+/// Error text for the explicit path when root execution has no worker binary.
+///
+/// The explicit path never reads `PG_EMBEDDED_WORKER`, so the message names the
+/// inputs that actually apply.
+const EXPLICIT_MISSING_WORKER_HINT: &str = concat!(
+    "explicit configuration must supply a worker binary when running with root ",
+    "privileges; call TestBootstrapConfig::with_worker_binary or put pg_worker on PATH"
+);
+
 /// Where a bootstrap takes its inputs from.
 pub(super) enum BootstrapSource {
     /// Read the process environment, as `run` and `bootstrap_for_tests` do.
@@ -73,7 +86,11 @@ fn resolve_ambient_inputs(
     let cfg = PgEnvCfg::load().context("failed to load configuration via OrthoConfig")?;
     let settings = build_settings(kind, &cfg)?;
     let worker_binary = worker_binary_from_env(privileges)?;
-    let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
+    let execution_mode = determine_execution_mode(
+        privileges,
+        worker_binary.as_ref(),
+        AMBIENT_MISSING_WORKER_HINT,
+    )?;
     let shutdown_timeout = shutdown_timeout_from_env()?;
 
     Ok(ResolvedInputs {
@@ -102,7 +119,11 @@ fn resolve_explicit_inputs(
         config.worker_binary().cloned(),
         EXPLICIT_WORKER_SOURCE,
     )?;
-    let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
+    let execution_mode = determine_execution_mode(
+        privileges,
+        worker_binary.as_ref(),
+        EXPLICIT_MISSING_WORKER_HINT,
+    )?;
     let shutdown_timeout = match config.shutdown_timeout() {
         Some(timeout) => validate_explicit_shutdown_timeout(timeout)?,
         None => DEFAULT_SHUTDOWN_TIMEOUT,

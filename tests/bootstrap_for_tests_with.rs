@@ -347,6 +347,34 @@ fn explicit_worker_binary_must_be_a_regular_file_when_root() -> Result<()> {
 }
 
 #[test]
+fn explicit_missing_worker_error_names_the_explicit_option() -> Result<()> {
+    if !geteuid().is_root() {
+        tracing::warn!("skipping explicit missing-worker message: requires root privileges");
+        return Ok(());
+    }
+
+    let scratch = scratch()?;
+    let config = TestBootstrapConfig::new(explicit_cfg(&scratch));
+    // `tzdir` is an empty directory, so `PATH` discovery finds no worker.
+    let vars = [
+        (
+            OsString::from("PATH"),
+            Some(OsString::from(scratch.tzdir.as_str())),
+        ),
+        (OsString::from("PG_EMBEDDED_WORKER"), None),
+    ];
+
+    let err = env::with_scoped_env(vars, || bootstrap_for_tests_with(config))
+        .expect_err("root execution without a worker must fail");
+    let message = err.to_string();
+    ensure!(
+        !message.contains("PG_EMBEDDED_WORKER") && message.contains("with_worker_binary"),
+        "explicit error must point at the explicit option, not the ambient variable: {message}"
+    );
+    Ok(())
+}
+
+#[test]
 fn explicit_worker_binary_must_be_executable_when_root() -> Result<()> {
     if skip_worker_validation_when_unprivileged("explicit worker executability validation") {
         return Ok(());
