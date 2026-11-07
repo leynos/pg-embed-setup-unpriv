@@ -1,4 +1,4 @@
-"""Reading the test sources that start child processes.
+"""Reading the test sources and the modules each binary compiles in.
 
 ``test_cluster_tier_coverage_contract.py`` needs the set of integration
 binaries that spawn children and reference a cluster-bootstrap API. The
@@ -6,16 +6,16 @@ answer has to come from the sources rather than from another list,
 because a value pinned in a manually maintained list cannot notice a
 binary nobody listed.
 
-This module owns both halves of that reading. ``load_test_sources`` does
-every filesystem call and reports a failure as ``SourceLoadError``;
+This module owns the reading. ``load_test_sources`` does every filesystem
+call and reports a failure as ``SourceLoadError``; ``binary_sources``
+resolves each binary's crate root and the modules it compiles in;
 ``spawning_cluster_binaries`` is then a pure classification of the text
-it is given; ``scan_spawning_cluster_binaries`` is the entry point that
-does both. Keeping the split explicit means the scanner can be tested
-against a constructed tree without touching the disk.
+that resolution yields. Keeping the split explicit means a scanner can be
+tested against a constructed tree without touching the disk.
 
-The scan is lexical, so a reference in a comment counts. A false
-positive is a prompt to review the binary rather than a defect in the
-reader.
+The classification is lexical, so a reference in a comment counts. A
+false positive is a prompt to review the binary rather than a defect in
+the reader.
 
 See "Test timeouts: four tiers, outermost last" in
 ``docs/developers-guide.md``.
@@ -141,12 +141,16 @@ def _source_files(
     Returns
     -------
     Iterator[tuple[str, Path]]
-        Top-level ``tests/*.rs`` binaries, plus the directory-backed
-        ``test_cluster_fixture`` target when it is present.
+        Top-level ``tests/*.rs`` binaries, the ``tests/<name>/main.rs``
+        directories Cargo finds on its own, and the directory-backed
+        ``test_cluster_fixture`` target the manifest declares with a
+        ``mod.rs`` root.
     """
     for path in sorted(sources):
         if path.parent == root:
             yield path.stem, path
+        elif path.parent.parent == root and path.name == "main.rs":
+            yield path.parent.name, path
     fixture = root / "test_cluster_fixture" / "mod.rs"
     if fixture in sources:
         yield "test_cluster_fixture", fixture
@@ -262,6 +266,37 @@ def _compiled_sources(
     return seen
 
 
+def binary_sources(
+    sources: cabc.Mapping[Path, str], *, root: Path
+) -> dict[str, frozenset[Path]]:
+    """Return each test binary's name mapped to the files it compiles in.
+
+    A binary's own crate root and every module it declares, transitively,
+    form one unit of classification. A source outside that relation is
+    compiled by no binary, which is how a coverage contract notices a
+    declaration it cannot attribute.
+
+    Parameters
+    ----------
+    sources : Mapping[Path, str]
+        The loaded test sources, keyed by resolved path.
+    root : Path
+        The resolved directory holding the integration-test sources.
+
+    Returns
+    -------
+    dict[str, frozenset[Path]]
+        One entry per binary, in a stable order, each holding the
+        resolved paths of its crate root and included modules.
+    """
+    return {
+        name: frozenset(
+            _compiled_sources(path, {}, is_crate_root=True, sources=sources)
+        )
+        for name, path in sorted(_source_files(sources, root))
+    }
+
+
 def spawning_cluster_binaries(
     sources: cabc.Mapping[Path, str], *, root: Path
 ) -> frozenset[str]:
@@ -285,11 +320,8 @@ def spawning_cluster_binaries(
         Test binary names matching both lexical markers.
     """
     found = set()
-    for name, path in _source_files(sources, root):
-        compiled = _compiled_sources(
-            path, {}, is_crate_root=True, sources=sources
-        )
-        text = "\n".join(compiled[source] for source in sorted(compiled))
+    for name, compiled in binary_sources(sources, root=root).items():
+        text = "\n".join(sources[source] for source in sorted(compiled))
         if _CHILD_PROCESS.search(text) and _CLUSTER_API.search(text):
             found.add(name)
     return frozenset(found)
