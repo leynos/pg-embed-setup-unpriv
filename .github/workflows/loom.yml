@@ -1,0 +1,94 @@
+name: Loom
+
+# Model checking is independent of the build-and-test lane: it needs its own
+# compilation, its own cache, and a wall-clock budget far larger than a pull
+# request can spend. A pull request runs the `pr` profile; the daily schedule
+# runs the larger `scheduled` profile; a manual dispatch chooses either.
+'on':
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    # Daily at 17:45 UTC, off the hour so it does not race the other schedules.
+    - cron: '45 17 * * *'
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Exploration profile to run.
+        type: choice
+        options: [pr, scheduled]
+        default: scheduled
+
+permissions:
+  contents: read
+
+# A pull request supersedes its own earlier runs. A scheduled or manual run is
+# never cancelled by a newer one, so a long exploration is not thrown away.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  loom:
+    name: Loom model checking (${{ github.event_name }})
+    # One literal hosted runner, so the job needs no matrix or placement
+    # expression. The job ceiling sits above the step ceiling: a cancelled job
+    # discards the log that would explain the overrun, while an overrun step
+    # still uploads the report.
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      # Pull requests explore the small bounds; the daily run explores the
+      # larger ones; a manual dispatch takes the chosen profile.
+      LOOM_PROFILE: >-
+        ${{
+          github.event_name == 'pull_request' && 'pr'
+          || github.event_name == 'schedule' && 'scheduled'
+          || inputs.profile
+        }}
+    steps:
+      # The default checkout is what each trigger wants: the merge commit for a
+      # pull request, the default branch for the schedule, and the selected ref
+      # for a manual dispatch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Cache Cargo registry and target
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          # The feature configuration is fixed (`loom-tests`), so it is part
+          # of the key. The runtime exploration profile is not: both profiles
+          # compile the same binary.
+          key: loom-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}-loom-tests
+      - name: Cache rustup toolchains
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.rustup/toolchains
+          key: loom-rustup-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        with:
+          install-mold: 'true'
+      - name: Setup uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
+        with:
+          enable-cache: false
+      - name: Run Loom models
+        # Local admission wrappers do not exist on a hosted runner, and the
+        # step owns its own compilation.
+        env:
+          RUSTC_WRAPPER: ''
+        timeout-minutes: 60
+        run: make test-loom LOOM_PROFILE="$LOOM_PROFILE"
+      - name: Upload Loom report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: loom-report-${{ github.event_name }}
+          path: target/loom-report
+          if-no-files-found: warn
+          retention-days: 14
