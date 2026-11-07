@@ -16,6 +16,7 @@ use loom::{
 };
 
 use super::shared_singleton_core::{SharedInitState, get_or_try_init_shared};
+use crate::loom_model::run_loom_model;
 
 const FIRST_FAILURE: usize = 13;
 const CACHED_FAILURE: usize = 17;
@@ -62,17 +63,6 @@ impl LoomSharedState {
             |cached| *cached,
         )
     }
-}
-
-fn run_loom_model<F>(f: F)
-where
-    F: Fn() + Send + Sync + 'static,
-{
-    let mut builder = loom::model::Builder::new();
-    builder.max_threads = 3;
-    builder.max_branches = 64;
-    builder.preemption_bound = Some(3);
-    builder.check(f);
 }
 
 #[test]
