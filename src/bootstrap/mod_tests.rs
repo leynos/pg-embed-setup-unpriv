@@ -11,7 +11,7 @@ use rstest::{fixture, rstest};
 use serial_test::serial;
 use tempfile::tempdir;
 
-use super::{source::BootstrapSource, *};
+use super::*;
 use crate::test_support::scoped_env;
 
 /// Converts string key-value pairs to `OsString` pairs for `scoped_env`.
@@ -55,7 +55,7 @@ fn orchestrate_bootstrap_respects_env_overrides(run_test_paths: Result<Option<Ru
         ("PG_PASSWORD", Some("bootstrap_test_pw")),
         ("PG_EMBEDDED_WORKER", None),
     ]));
-    let settings = orchestrate_bootstrap(BootstrapKind::Default, BootstrapSource::Ambient)
+    let settings = orchestrate_bootstrap(BootstrapKind::Default, ConfigSource::Ambient)
         .expect("bootstrap to succeed");
 
     assert_paths!(&settings, &paths.runtime_path, &paths.data_path);
@@ -106,7 +106,7 @@ fn bootstrap_creates_expected_directories(run_test_paths: Result<Option<RunTestP
         ("PG_EMBEDDED_WORKER", None),
     ]));
 
-    orchestrate_bootstrap(BootstrapKind::Default, BootstrapSource::Ambient)
+    orchestrate_bootstrap(BootstrapKind::Default, ConfigSource::Ambient)
         .expect("bootstrap should succeed");
 
     assert!(
@@ -205,7 +205,7 @@ fn orchestrate_with_cache_env(paths: &BootstrapPaths) -> Result<TestBootstrapSet
     ]));
     Ok(orchestrate_bootstrap(
         BootstrapKind::Default,
-        BootstrapSource::Ambient,
+        ConfigSource::Ambient,
     )?)
 }
 

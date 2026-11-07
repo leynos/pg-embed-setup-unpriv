@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use super::{
     bootstrap_retry::{RetryPolicy, retry_transient},
     fixtures::ensure_worker_env,
-    shared_config::{SharedOrigin, resolve_origin},
+    shared_config::resolve_origin,
     shared_singleton_core::{SharedInitState, get_or_try_init_shared},
 };
 use crate::{
@@ -17,6 +17,7 @@ use crate::{
     ClusterHandle,
     TestBootstrapConfig,
     TestCluster,
+    bootstrap::ConfigSource,
     env::ScopedEnv,
     error::{BootstrapError, BootstrapResult},
 };
@@ -38,7 +39,7 @@ static SHARED_CLUSTER_HANDLE: OnceLock<Mutex<SharedHandleState>> = OnceLock::new
 /// Cached handle state plus the configuration that produced it.
 struct SharedHandleState {
     state: SharedInitState<&'static ClusterHandle, Arc<BootstrapError>>,
-    origin: Option<SharedOrigin>,
+    origin: Option<ConfigSource>,
 }
 
 impl SharedHandleState {
@@ -92,7 +93,7 @@ impl SharedHandleState {
 /// # }
 /// ```
 pub fn shared_cluster_handle() -> BootstrapResult<&'static ClusterHandle> {
-    shared_cluster_handle_with_origin(SharedOrigin::Ambient)
+    shared_cluster_handle_with_origin(ConfigSource::Ambient)
 }
 
 /// Returns a reference to the shared cluster handle built from `config`.
@@ -129,11 +130,11 @@ pub fn shared_cluster_handle() -> BootstrapResult<&'static ClusterHandle> {
 pub fn shared_cluster_handle_with(
     config: impl Into<TestBootstrapConfig>,
 ) -> BootstrapResult<&'static ClusterHandle> {
-    shared_cluster_handle_with_origin(SharedOrigin::Explicit(Box::new(config.into())))
+    shared_cluster_handle_with_origin(ConfigSource::Explicit(Box::new(config.into())))
 }
 
 fn shared_cluster_handle_with_origin(
-    requested: SharedOrigin,
+    requested: ConfigSource,
 ) -> BootstrapResult<&'static ClusterHandle> {
     let mutex =
         SHARED_CLUSTER_HANDLE.get_or_init(|| Mutex::new(SharedHandleState::uninitialized()));
@@ -143,12 +144,12 @@ fn shared_cluster_handle_with_origin(
     resolve_origin(&mut guard.origin, &requested)?;
 
     match requested {
-        SharedOrigin::Ambient => get_or_try_init_shared(
+        ConfigSource::Ambient => get_or_try_init_shared(
             &mut guard.state,
             initialize_shared_cluster_handle,
             cached_shared_handle_error,
         ),
-        SharedOrigin::Explicit(config) => get_or_try_init_shared(
+        ConfigSource::Explicit(config) => get_or_try_init_shared(
             &mut guard.state,
             move || initialize_shared_cluster_handle_with(&config),
             cached_shared_handle_error,

@@ -6,43 +6,17 @@
 //! only reuse a result produced by an equal explicit configuration.
 
 use crate::{
-    TestBootstrapConfig,
+    bootstrap::ConfigSource,
     error::{BootstrapError, BootstrapResult},
 };
-
-/// How the shared cluster singleton was first initialized.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) enum SharedOrigin {
-    /// Initialized from the process environment.
-    Ambient,
-    /// Initialized from an explicit configuration.
-    ///
-    /// Boxed because the configuration is much larger than the `Ambient`
-    /// variant, and the origin is cloned and compared on every call.
-    Explicit(Box<TestBootstrapConfig>),
-}
-
-impl SharedOrigin {
-    /// Returns whether a call with `requested` may reuse the cached result.
-    ///
-    /// Ambient callers always accept the cached result. Explicit callers only
-    /// accept a result produced by an equal explicit configuration.
-    pub(super) fn permits(&self, requested: &Self) -> bool {
-        match (self, requested) {
-            (_, Self::Ambient) => true,
-            (Self::Explicit(existing), Self::Explicit(requested_cfg)) => existing == requested_cfg,
-            (Self::Ambient, Self::Explicit(_)) => false,
-        }
-    }
-}
 
 /// Records `requested` as the singleton origin, or rejects a conflicting call.
 ///
 /// The first call wins. Later calls are accepted only when
-/// [`SharedOrigin::permits`] allows them to reuse the cached result.
+/// [`ConfigSource::permits`] allows them to reuse the cached result.
 pub(super) fn resolve_origin(
-    origin: &mut Option<SharedOrigin>,
-    requested: &SharedOrigin,
+    origin: &mut Option<ConfigSource>,
+    requested: &ConfigSource,
 ) -> BootstrapResult<()> {
     match origin {
         None => {
@@ -72,11 +46,12 @@ mod tests {
     use super::*;
     use crate::{
         PgEnvCfg,
+        TestBootstrapConfig,
         test_support::shared_singleton_core::{SharedInitState, get_or_try_init_shared},
     };
 
-    fn explicit(port: u16) -> SharedOrigin {
-        SharedOrigin::Explicit(Box::new(TestBootstrapConfig::new(PgEnvCfg {
+    fn explicit(port: u16) -> ConfigSource {
+        ConfigSource::Explicit(Box::new(TestBootstrapConfig::new(PgEnvCfg {
             port: Some(port),
             ..PgEnvCfg::default()
         })))
@@ -85,7 +60,7 @@ mod tests {
     /// Minimal state machine mirroring the singleton's origin and cache rules.
     struct Harness {
         state: SharedInitState<u32, &'static str>,
-        origin: Option<SharedOrigin>,
+        origin: Option<ConfigSource>,
     }
 
     impl Harness {
@@ -98,7 +73,7 @@ mod tests {
 
         fn call(
             &mut self,
-            requested: &SharedOrigin,
+            requested: &ConfigSource,
             init: impl FnOnce() -> Result<u32, (&'static str, &'static str)>,
         ) -> Result<u32, &'static str> {
             resolve_origin(&mut self.origin, requested).map_err(|_| "conflict")?;
@@ -137,7 +112,7 @@ mod tests {
     fn ambient_first_then_explicit_is_rejected() {
         let mut harness = Harness::new();
         harness
-            .call(&SharedOrigin::Ambient, || Ok(7))
+            .call(&ConfigSource::Ambient, || Ok(7))
             .expect("ambient initialization should succeed");
 
         let err = harness
@@ -155,7 +130,7 @@ mod tests {
             .expect("explicit initialization should succeed");
 
         let value = harness
-            .call(&SharedOrigin::Ambient, || panic!("must not reinitialize"))
+            .call(&ConfigSource::Ambient, || panic!("must not reinitialize"))
             .expect("ambient call should reuse the cached value");
 
         assert_eq!(value, 7);

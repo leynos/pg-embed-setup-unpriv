@@ -45,15 +45,35 @@ const EXPLICIT_MISSING_WORKER_HINT: &str = concat!(
     "privileges; call TestBootstrapConfig::with_worker_binary or put pg_worker on PATH"
 );
 
-/// Where a bootstrap takes its inputs from.
-pub(super) enum BootstrapSource {
+/// Where a cluster's settings come from.
+///
+/// One type covers both the bootstrap pipeline, which consumes a source once,
+/// and the shared-cluster singleton, which remembers the source that produced
+/// its cached settings so later callers can be checked against it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ConfigSource {
     /// Read the process environment, as `run` and `bootstrap_for_tests` do.
     Ambient,
     /// Use a caller-supplied [`TestBootstrapConfig`].
     ///
     /// Boxed because the configuration is much larger than the `Ambient`
-    /// variant, and this enum is moved through the bootstrap pipeline.
+    /// variant, and the source is moved through the bootstrap pipeline and
+    /// compared in the shared-cluster cache.
     Explicit(Box<TestBootstrapConfig>),
+}
+
+impl ConfigSource {
+    /// Returns whether a call with `requested` may reuse the cached settings.
+    ///
+    /// Ambient callers always accept cached settings. Explicit callers only
+    /// accept settings produced by an equal explicit configuration.
+    pub(crate) fn permits(&self, requested: &Self) -> bool {
+        match (self, requested) {
+            (_, Self::Ambient) => true,
+            (Self::Explicit(existing), Self::Explicit(requested_cfg)) => existing == requested_cfg,
+            (Self::Ambient, Self::Explicit(_)) => false,
+        }
+    }
 }
 
 /// Inputs resolved from either source before preparation begins.
@@ -68,12 +88,12 @@ pub(super) struct ResolvedInputs {
 /// Resolves the inputs for `source`, dispatching to the matching reader.
 pub(super) fn resolve_inputs(
     kind: BootstrapKind,
-    source: BootstrapSource,
+    source: ConfigSource,
     privileges: ExecutionPrivileges,
 ) -> BootstrapResult<ResolvedInputs> {
     match source {
-        BootstrapSource::Ambient => resolve_ambient_inputs(kind, privileges),
-        BootstrapSource::Explicit(config) => resolve_explicit_inputs(kind, &config, privileges),
+        ConfigSource::Ambient => resolve_ambient_inputs(kind, privileges),
+        ConfigSource::Explicit(config) => resolve_explicit_inputs(kind, &config, privileges),
     }
 }
 
