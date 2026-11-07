@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use super::{
     bootstrap_retry::{RetryPolicy, retry_transient},
     fixtures::ensure_worker_env,
-    shared_config::resolve_origin,
+    shared_config::{ensure_compatible, record_origin},
     shared_singleton_core::{SharedInitState, get_or_try_init_shared},
 };
 use crate::{
@@ -93,7 +93,7 @@ impl SharedHandleState {
 /// # }
 /// ```
 pub fn shared_cluster_handle() -> BootstrapResult<&'static ClusterHandle> {
-    shared_cluster_handle_with_origin(ConfigSource::Ambient)
+    shared_cluster_handle_with_origin(&ConfigSource::Ambient)
 }
 
 /// Returns a reference to the shared cluster handle built from `config`.
@@ -130,28 +130,42 @@ pub fn shared_cluster_handle() -> BootstrapResult<&'static ClusterHandle> {
 pub fn shared_cluster_handle_with(
     config: impl Into<TestBootstrapConfig>,
 ) -> BootstrapResult<&'static ClusterHandle> {
-    shared_cluster_handle_with_origin(ConfigSource::Explicit(Box::new(config.into())))
+    shared_cluster_handle_with_origin(&ConfigSource::Explicit(Box::new(config.into())))
 }
 
 fn shared_cluster_handle_with_origin(
-    requested: ConfigSource,
+    requested: &ConfigSource,
 ) -> BootstrapResult<&'static ClusterHandle> {
     let mutex =
         SHARED_CLUSTER_HANDLE.get_or_init(|| Mutex::new(SharedHandleState::uninitialized()));
     let mut guard = mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    resolve_origin(&mut guard.origin, &requested)?;
+    ensure_compatible(guard.origin.as_ref(), requested)?;
 
+    let result = initialize_shared_handle_once(&mut guard.state, requested);
+    // An initializer that panics unwinds past this point, leaving the origin
+    // unset so a later call can still take over the uninitialized singleton.
+    if guard.origin.is_none() {
+        record_origin(&mut guard.origin, requested);
+    }
+    result
+}
+
+/// Initializes the singleton state from `requested`, at most once.
+fn initialize_shared_handle_once(
+    state: &mut SharedInitState<&'static ClusterHandle, Arc<BootstrapError>>,
+    requested: &ConfigSource,
+) -> BootstrapResult<&'static ClusterHandle> {
     match requested {
         ConfigSource::Ambient => get_or_try_init_shared(
-            &mut guard.state,
+            state,
             initialize_shared_cluster_handle,
             cached_shared_handle_error,
         ),
         ConfigSource::Explicit(config) => get_or_try_init_shared(
-            &mut guard.state,
-            move || initialize_shared_cluster_handle_with(&config),
+            state,
+            || initialize_shared_cluster_handle_with(config),
             cached_shared_handle_error,
         ),
     }
