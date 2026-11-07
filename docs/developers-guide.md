@@ -246,7 +246,7 @@ executable and pointer publication are covered by
 
 ## Lint and formatting toolchain
 
-The repository pins `rust-toolchain.toml` to `nightly-2026-10-30` because the
+The repository pins a dated nightly in `rust-toolchain.toml` because the
 imported `rustfmt.toml` template uses unstable rustfmt options. Use the
 Makefile targets rather than invoking Cargo directly so local checks and CI
 exercise the same nightly formatter and Clippy policy:
@@ -1371,11 +1371,15 @@ holds all three settings.
 
 Exception: Cranelift is not the development-profile backend. The estate adopts
 it only where the full suite passes under it, and that is not shown here. The
-repository pins `nightly-2026-10-30`, and no measurement was taken on it
-(recorded 2026-10-31). The last measurement was on `nightly-2026-04-25`
-(2026-10-02): 13 tests (the `scenario_fixture_*` scenarios in
-`tests/test_cluster_fixture/steps.rs` among them) failed under it while the
-suite passed under LLVM, 799 of 799 in the full run. That is evidence of a past
-result, not of current behaviour, and no deferral date is set. Re-measure the
-whole suite under the backend, with CI's environment, on the next attempt to
-adopt it, and adopt it only if every test passes.
+repository pins the nightly in `rust-toolchain.toml`. A partial re-measurement
+on `nightly-2026-11-06` (2026-11-07) ran the `test_cluster_fixture` binary with
+`--all-features` under Cranelift: 17 of 18 tests passed and
+`scenario_fixture_missing_timezone` panicked, while the same binary passed 18
+of 18 under LLVM. The full suite was not re-run on it. The earlier full
+measurement was on `nightly-2026-04-25` (2026-10-02): 13 tests (the
+`scenario_fixture_*` scenarios in `tests/test_cluster_fixture/steps.rs` among
+them) failed under it while the suite passed under LLVM, 799 of 799 in the full
+run. That is evidence of a past result, not of current behaviour, and no
+deferral date is set. Re-measure the whole suite under the backend, with CI's
+environment, on the next attempt to adopt it, and adopt it only if every test
+passes.
