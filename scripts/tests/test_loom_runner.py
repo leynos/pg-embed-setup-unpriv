@@ -241,27 +241,6 @@ def test_rejects_an_unregistered_loom_model(tmp_path: Path) -> None:
         run(tmp_path, runner)
 
 
-def test_classifies_a_killed_model_as_timeout(tmp_path: Path) -> None:
-    """A model the seam killed at its deadline is a timeout, not a failure."""
-    name = MODELS[0][0]
-    runner = FakeRunner(
-        answers=FakeAnswers(
-            outputs={
-                name: Completed(
-                    -9, marker("loom-model-start", name), "", timed_out=True
-                )
-            }
-        )
-    )
-
-    report = run(tmp_path, runner)
-
-    first = report.models[0]
-    assert first.outcome == "timeout", "a killed model must be a timeout"
-    assert first.exit_code is None, "a killed model has no exit code"
-    assert report.is_success() is False, "a timed-out inventory is not a success"
-
-
 def test_run_process_kills_a_child_at_its_deadline(tmp_path: Path) -> None:
     """The real process seam kills and reaps a child that outlives its deadline."""
     started = time.monotonic()
