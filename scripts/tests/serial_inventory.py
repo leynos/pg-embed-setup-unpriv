@@ -74,6 +74,69 @@ def _is_lock_module(path: Path, root: Path) -> bool:
     )
 
 
+def _own_sources(compiled: cabc.Iterable[Path], root: Path) -> list[Path]:
+    """Return a binary's sources without the lock module's own files.
+
+    Parameters
+    ----------
+    compiled : Iterable[Path]
+        The resolved sources one binary compiles.
+    root : Path
+        The resolved directory holding the integration-test sources.
+
+    Returns
+    -------
+    list[Path]
+        The binary's sources in a stable order. The lock module's files
+        are excluded because its unit tests take the lock, which the
+        group covers by test name rather than by binary membership.
+    """
+    return [
+        source
+        for source in sorted(compiled)
+        if not _is_lock_module(source, root)
+    ]
+
+
+def _orphan_faults(
+    sources: cabc.Mapping[Path, str],
+    attributed: cabc.Set[Path],
+    *,
+    root: Path,
+) -> list[str]:
+    """Report a lock use that no test binary compiles.
+
+    Parameters
+    ----------
+    sources : Mapping[Path, str]
+        The loaded test sources, keyed by resolved path.
+    attributed : Set[Path]
+        Every source some binary compiles.
+    root : Path
+        The resolved directory holding the integration-test sources.
+
+    Returns
+    -------
+    list[str]
+        One fault naming the unattributed sources, or empty when every
+        lock use belongs to a binary.
+    """
+    orphans = sorted(
+        source
+        for source in sources
+        if source not in attributed
+        and not _is_lock_module(source, root)
+        and _LOCK_API.search(sources[source])
+    )
+    if not orphans:
+        return []
+    return [
+        "the scenario lock is taken outside any test binary, so no "
+        "filter term can schedule it: "
+        + ", ".join(str(source) for source in orphans)
+    ]
+
+
 def lock_consuming_binaries(
     sources: cabc.Mapping[Path, str], *, root: Path
 ) -> tuple[frozenset[str], list[str]]:
@@ -94,32 +157,20 @@ def lock_consuming_binaries(
         because no filter term can schedule it.
     """
     binaries = binary_sources(sources, root=root)
-    members: set[str] = set()
-    attributed: set[Path] = set()
-    for name, compiled in binaries.items():
-        attributed.update(compiled)
-        own_sources = [
-            source
-            for source in sorted(compiled)
-            if not _is_lock_module(source, root)
-        ]
-        if any(_LOCK_API.search(sources[source]) for source in own_sources):
-            members.add(name)
-    orphans = sorted(
-        source
-        for source in sources
-        if source not in attributed
-        and not _is_lock_module(source, root)
-        and _LOCK_API.search(sources[source])
-    )
-    faults: list[str] = []
-    if orphans:
-        faults.append(
-            "the scenario lock is taken outside any test binary, so no "
-            "filter term can schedule it: "
-            + ", ".join(str(source) for source in orphans)
+    members = {
+        name
+        for name, compiled in binaries.items()
+        if any(
+            _LOCK_API.search(sources[source])
+            for source in _own_sources(compiled, root)
         )
-    return frozenset(members), faults
+    }
+    attributed = {
+        source for compiled in binaries.values() for source in compiled
+    }
+    return frozenset(members), _orphan_faults(
+        sources, attributed, root=root
+    )
 
 
 def scan_lock_consuming_binaries(
