@@ -13,14 +13,11 @@ use super::{
 /// `RUSTFLAGS` with the standard flags or assigns none and so takes the
 /// configuration's. The list is this repository's own, and a target that stops
 /// being defined fails the contract rather than dropping out of it.
-const DEVELOPMENT_TARGETS: &[&str] = &[
-    "test",
-    "typecheck",
-    "lint",
-    "build",
-    "test-doc",
-    "test-loom",
-];
+///
+/// `test-loom` is absent on purpose: it runs the Python model runner, which
+/// invokes Cargo itself. `scripts/tests/test_loom_contracts.py` holds that
+/// recipe to the same `RUSTFLAGS` policy.
+const DEVELOPMENT_TARGETS: &[&str] = &["test", "typecheck", "lint", "build", "test-doc"];
 /// The tools each development target runs, as recorded when the contract was written: for example
 /// `cargo build`, `cargo clippy`, `cargo nextest run`, `whitaker`. A target that stops running one
 /// of them fails the contract, so a version probe cannot replace `cargo build` and one lint command
@@ -44,10 +41,6 @@ const EXPECTED_TOOLS: &[Tools] = &[
     },
     Tools {
         target: "test-doc",
-        keys: &["cargo test"],
-    },
-    Tools {
-        target: "test-loom",
         keys: &["cargo test"],
     },
 ];

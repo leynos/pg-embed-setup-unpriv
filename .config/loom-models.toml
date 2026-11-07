@@ -1,0 +1,96 @@
+# Inventory of the Loom models that `make test-loom` must execute.
+#
+# The runner selects each model by its full libtest name with `--exact`, so a
+# model that disappears from the compiled test binary fails the run instead of
+# being skipped. Add an entry here when adding a test carrying
+# `#[ignore = "requires Loom model checking"]` under a `loom_tests` module.
+#
+# `spawned_threads` counts the threads the model itself spawns.
+# `context_threads` includes the libtest execution thread, so a model that
+# spawns two workers has three participants. Loom's `max_threads` is a cap,
+# not a promise that every model uses every slot.
+#
+# Exploration bounds (max_threads, max_branches and the preemption bound) live
+# in `src/loom_model.rs` and are reported by the model markers. Only the
+# wall-clock ceiling for one model is recorded here.
+
+[profiles.pr]
+# Wall-clock ceiling for one model under the pull-request profile.
+model_timeout_seconds = 120
+
+[profiles.scheduled]
+# Wall-clock ceiling for one model under the scheduled profile. Repeated runs
+# measured a 308-398 s worst case, so this leaves a margin of at least 3x.
+model_timeout_seconds = 1200
+
+[[models]]
+name = "env::loom_tests::scoped_env_serializes_concurrent_scopes"
+suite = "env"
+spawned_threads = 2
+context_threads = 3
+
+[[models]]
+name = "env::loom_tests::scoped_env_allows_reentrant_scopes_on_one_thread"
+suite = "env"
+spawned_threads = 1
+context_threads = 2
+
+[[models]]
+name = "env::loom_tests::scoped_env_exercises_backup_restore_bookkeeping"
+suite = "env"
+spawned_threads = 0
+context_threads = 1
+
+[[models]]
+name = "env::loom_tests::scoped_env_handles_spawn_while_holding_scope"
+suite = "env"
+spawned_threads = 1
+context_threads = 2
+
+[[models]]
+name = "env::loom_tests::scoped_env_restores_on_panic_unwind"
+suite = "env"
+spawned_threads = 0
+context_threads = 1
+
+[[models]]
+name = "env::loom_tests::scoped_env_handles_asymmetric_scope_lifetimes"
+suite = "env"
+spawned_threads = 2
+context_threads = 3
+
+[[models]]
+name = "env::loom_tests::scoped_env_tracks_per_thread_depth_correctly"
+suite = "env"
+spawned_threads = 2
+context_threads = 3
+
+[[models]]
+name = "cluster::lifecycle_loom_tests::same_template_setup_runs_once_under_race"
+suite = "cluster"
+spawned_threads = 2
+context_threads = 3
+
+[[models]]
+name = "cluster::lifecycle_loom_tests::different_template_setups_do_not_deadlock"
+suite = "cluster"
+spawned_threads = 2
+context_threads = 3
+
+[[models]]
+name = "cluster::shutdown_hook::loom_tests::shutdown_hook_registers_once_under_concurrent_calls"
+suite = "cluster::shutdown_hook"
+spawned_threads = 2
+context_threads = 3
+
+[[models]]
+name = "test_support::shared_singleton_loom_tests::shared_singleton_initializes_once_for_concurrent_callers"
+suite = "test_support"
+spawned_threads = 2
+context_threads = 3
+
+[[models]]
+name = "test_support::shared_singleton_loom_tests::shared_singleton_caches_failed_initialization"
+suite = "test_support"
+spawned_threads = 2
+context_threads = 3
