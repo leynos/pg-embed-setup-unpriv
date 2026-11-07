@@ -108,7 +108,7 @@ jobs:
       # spawns rustc with a command line over the OS limit for this crate
       # (os error 206), so release builds do not use it.
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/setup-rust@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
         with:
           use-sccache: 'false'
       - name: Setup uv
@@ -195,7 +195,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/setup-rust@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
       - name: Download draft release assets
         shell: bash
         env:
@@ -327,7 +327,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/setup-rust@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
       - name: Dry-run published release asset URLs
         run: |
           set -euo pipefail

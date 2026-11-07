@@ -51,14 +51,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/setup-rust@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
         with:
           install-mold: 'true'
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
         with:
           version: "0.6.1"
 
@@ -93,7 +93,7 @@ jobs:
       # source in CI and verified nothing.
       - name: Install Whitaker Dylint suite
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: leynos/shared-actions/.github/actions/install-whitaker@5a99aed78ce68dcebd3052b75c31e6f173162b1e
+        uses: leynos/shared-actions/.github/actions/install-whitaker@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
         with:
           installer-version: ${{ env.WHITAKER_INSTALLER_VERSION }}
       - name: Lint
@@ -147,7 +147,7 @@ jobs:
           # measurement, so it takes neither the parallel frontend nor the mold linker.
           # Assigning RUSTFLAGS displaces every `rustflags` table in .cargo/config.toml.
           RUSTFLAGS: -D warnings
-        uses: leynos/shared-actions/.github/actions/generate-coverage@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/generate-coverage@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
         with:
           output-path: lcov.info
           format: lcov
@@ -220,7 +220,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/setup-rust@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
         with:
           install-mold: 'true'
       - name: Setup uv
@@ -260,7 +260,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/setup-rust@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
         with:
           install-mold: 'true'
       # sccache expands every dependency search path into its rustc command.
@@ -351,7 +351,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
+        uses: leynos/shared-actions/.github/actions/setup-rust@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
         with:
           install-mold: 'true'
       # See the Windows test job: sccache exceeds the command limit with the
