@@ -205,6 +205,22 @@ def _ignore_faults(document: dict[str, typ.Any]) -> list[str]:
     return []
 
 
+def _decode_faults(text: str) -> tuple[dict[str, typ.Any] | None, list[str]]:
+    """Return the decoded document and any fault that prevented decoding."""
+    try:
+        document = json.loads(_jsonc_to_json(text))
+    except json.JSONDecodeError as err:
+        return None, [f"configuration is not valid JSONC: {err}"]
+    match document:
+        case dict():
+            return document, []
+        case _:
+            return None, [
+                "configuration must be a JSON object, "
+                f"got {type(document).__name__}"
+            ]
+
+
 def config_faults(text: str) -> list[str]:
     """Return what is wrong with a configuration's file selection.
 
@@ -216,12 +232,16 @@ def config_faults(text: str) -> list[str]:
     Returns
     -------
     list[str]
-        One message per fault; empty when the top-level ``globs`` array is
-        non-empty, selects every Markdown file, carries no negation that
-        cancels that selection, and no ``ignores`` entry excludes every
-        Markdown file.
+        One message per fault; empty when the document decodes to a JSON
+        object whose top-level ``globs`` array is non-empty, selects every
+        Markdown file, carries no negation that cancels that selection, and
+        no ``ignores`` entry excludes every Markdown file. Malformed JSONC
+        and a document whose top level is not an object are faults, so a
+        caller never has to catch a parser exception.
     """
-    document = json.loads(_jsonc_to_json(text))
+    document, faults = _decode_faults(text)
+    if document is None:
+        return faults
     return _selection_faults(document) or _ignore_faults(document)
 
 

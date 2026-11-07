@@ -33,6 +33,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 	scripts/tests/test_cluster_sources_properties.py \
 	scripts/tests/test_cluster_tier_coverage_contract.py \
 	scripts/tests/test_markdown_gate_contract.py \
+	scripts/tests/test_markdown_gate_e2e.py \
 	scripts/tests/test_msrv_check.py \
 	scripts/tests/test_nextest_filters_contract.py \
 	scripts/tests/test_nextest_filters_properties.py \

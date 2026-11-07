@@ -128,9 +128,10 @@ def mdlint_faults(makefile: str, target: str) -> list[str]:
     -------
     list[str]
         One message per fault; empty when the recipe passes no globs or
-        exclusion arguments. Only ``--fix`` is allowed, on ``fmt``, and the
-        invocation must not carry Make's ``-`` prefix, which ignores the
-        command's exit status.
+        exclusion arguments. Only ``--fix`` is allowed, on ``fmt``, and
+        ``fmt`` must pass it: a recipe that merely runs the linter leaves
+        the formatting fix undone. The invocation must not carry Make's
+        ``-`` prefix, which ignores the command's exit status.
     """
     invocations = [
         line.strip()
@@ -141,6 +142,7 @@ def mdlint_faults(makefile: str, target: str) -> list[str]:
         return [f"{target} does not invoke $(MDLINT)"]
     allowed = ["--fix"] if target == "fmt" else []
     faults: list[str] = []
+    fixes = False
     for line in invocations:
         head, _separator, tail = line.partition("$(MDLINT)")
         prefixes = _make_prefixes(head)
@@ -154,12 +156,16 @@ def mdlint_faults(makefile: str, target: str) -> list[str]:
                 f"{target} ignores a $(MDLINT) failure with the '-' prefix: {line!r}"
             )
             continue
-        extra = [argument for argument in tail.split() if argument not in allowed]
+        arguments = tail.split()
+        fixes = fixes or "--fix" in arguments
+        extra = [argument for argument in arguments if argument not in allowed]
         if extra:
             faults.append(
                 f"{target} passes {extra!r} to $(MDLINT); "
                 "selection must come from the shared configuration"
             )
+    if target == "fmt" and not fixes:
+        faults.append(f"{target} does not pass --fix to $(MDLINT)")
     return faults
 
 
@@ -174,14 +180,24 @@ def mdlint_runner_faults(makefile: str) -> list[str]:
     Returns
     -------
     list[str]
-        One message per fault; empty when ``MDLINT`` references
-        ``$(MARKDOWNLINT_CLI2_VERSION)``. An override may change the runner,
-        but not the version the pinned CI action bundles.
+        One message per fault; empty only when ``MDLINT`` is exactly
+        ``npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)``. The
+        exact form is the point: a looser check accepts a no-op such as
+        ``true $(MARKDOWNLINT_CLI2_VERSION)`` or
+        ``npx --yes echo markdownlint-cli2@...``, each of which mentions
+        the pinned version without running it. A contributor who needs a
+        different runner overrides ``MDLINT`` on the command line rather
+        than editing the default.
     """
     match = re.search(r"^MDLINT\s*\?=\s*(.+)$", makefile, re.MULTILINE)
     if match is None:
         return ["Makefile does not declare MDLINT"]
     runner = match.group(1).split("#", 1)[0].strip()
-    if "$(MARKDOWNLINT_CLI2_VERSION)" not in runner:
-        return [f"MDLINT does not use $(MARKDOWNLINT_CLI2_VERSION): {runner!r}"]
+    expected = [
+        "npx",
+        "--yes",
+        "markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)",
+    ]
+    if runner.split() != expected:
+        return [f"MDLINT must run {' '.join(expected)}: {runner!r}"]
     return []
