@@ -90,8 +90,25 @@ cargo binstall pg-embed-setup-unpriv
    export PG_RUNTIME_DIR="/var/tmp/pg-embedded-setup-it/install"
    export PG_DATA_DIR="/var/tmp/pg-embedded-setup-it/data"
    export PG_SUPERUSER="postgres"
-   export PG_PASSWORD="postgres_pass"
+   : "${PG_PASSWORD:?Set PG_PASSWORD externally to a strong, unique password}"
+   export PG_PASSWORD
+   # If the guard fails, stop here. Do not run step 3 until PG_PASSWORD is set.
    ```
+
+   This walkthrough initializes a fresh cluster and requires a strong, unique
+   `PG_PASSWORD` supplied by the caller, for example from a password manager or
+   a random generator. The guard aborts the command with the message shown when
+   the value is unset or empty, and it does not print the value. If the guard
+   fails, stop before step 3 rather than continuing with the variable unset.
+   Supply the value before running `pg_embedded_setup_unpriv` in step 3.
+
+   For an existing cluster, skip the guard and the `export PG_PASSWORD` line.
+   Run `unset PG_PASSWORD` to reuse the password stored in `<install>/.pgpass`.
+   A `password` supplied by a configuration file also counts as explicit, so
+   remove it as well before relying on the stored password. To use the original
+   password explicitly, read it with `IFS= read -rs PG_PASSWORD`, then run
+   `export PG_PASSWORD`. A value left exported overrides the stored password
+   and can cause authentication to fail.
 
    Without `PG_RUNTIME_DIR` and `PG_DATA_DIR` the helper derives both under
    `/var/tmp/pg-embed-{uid}` on Linux and the BSDs, one tree per user that
