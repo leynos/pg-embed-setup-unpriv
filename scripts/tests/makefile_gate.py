@@ -114,6 +114,63 @@ def _make_prefixes(head: str) -> str:
     return head[:stop]
 
 
+def _invocation_faults(
+    target: str, line: str, allowed: list[str]
+) -> tuple[list[str], bool]:
+    """Return the faults in one invocation and whether it passes ``--fix``.
+
+    Parameters
+    ----------
+    target : str
+        The target the invocation belongs to, used in fault messages.
+    line : str
+        One recipe line, stripped, known to mention ``$(MDLINT)``.
+    allowed : list[str]
+        The arguments the target may pass to ``$(MDLINT)``.
+
+    Returns
+    -------
+    tuple[list[str], bool]
+        The faults in this line, plus whether it passes ``--fix``. A line
+        that mentions the runner without executing it, or prefixes it with
+        Make's ``-``, reports that fault and counts as passing nothing.
+    """
+    head, _separator, tail = line.partition("$(MDLINT)")
+    prefixes = _make_prefixes(head)
+    if head[len(prefixes) :].strip():
+        return [f"{target} mentions $(MDLINT) without running it: {line!r}"], False
+    if "-" in prefixes:
+        return [
+            f"{target} ignores a $(MDLINT) failure with the '-' prefix: {line!r}"
+        ], False
+    arguments = tail.split()
+    extra = [argument for argument in arguments if argument not in allowed]
+    if not extra:
+        return [], "--fix" in arguments
+    return [
+        f"{target} passes {extra!r} to $(MDLINT); "
+        "selection must come from the shared configuration"
+    ], "--fix" in arguments
+
+
+def _invocations(makefile: str, target: str) -> list[str]:
+    """Return the recipe's stripped lines that mention ``$(MDLINT)``."""
+    return [
+        line.strip()
+        for line in recipe_lines(makefile, target)
+        if "$(MDLINT)" in line
+    ]
+
+
+def _fix_faults(
+    target: str, judged: list[tuple[list[str], bool]]
+) -> list[str]:
+    """Return the fault when ``fmt`` never passes ``--fix`` to ``$(MDLINT)``."""
+    if target != "fmt" or any(fixes for _faults, fixes in judged):
+        return []
+    return [f"{target} does not pass --fix to $(MDLINT)"]
+
+
 def mdlint_faults(makefile: str, target: str) -> list[str]:
     """Return what is wrong with a recipe's ``$(MDLINT)`` invocation.
 
@@ -133,40 +190,13 @@ def mdlint_faults(makefile: str, target: str) -> list[str]:
         the formatting fix undone. The invocation must not carry Make's
         ``-`` prefix, which ignores the command's exit status.
     """
-    invocations = [
-        line.strip()
-        for line in recipe_lines(makefile, target)
-        if "$(MDLINT)" in line
-    ]
+    invocations = _invocations(makefile, target)
     if not invocations:
         return [f"{target} does not invoke $(MDLINT)"]
     allowed = ["--fix"] if target == "fmt" else []
-    faults: list[str] = []
-    fixes = False
-    for line in invocations:
-        head, _separator, tail = line.partition("$(MDLINT)")
-        prefixes = _make_prefixes(head)
-        if head[len(prefixes) :].strip():
-            faults.append(
-                f"{target} mentions $(MDLINT) without running it: {line!r}"
-            )
-            continue
-        if "-" in prefixes:
-            faults.append(
-                f"{target} ignores a $(MDLINT) failure with the '-' prefix: {line!r}"
-            )
-            continue
-        arguments = tail.split()
-        fixes = fixes or "--fix" in arguments
-        extra = [argument for argument in arguments if argument not in allowed]
-        if extra:
-            faults.append(
-                f"{target} passes {extra!r} to $(MDLINT); "
-                "selection must come from the shared configuration"
-            )
-    if target == "fmt" and not fixes:
-        faults.append(f"{target} does not pass --fix to $(MDLINT)")
-    return faults
+    judged = [_invocation_faults(target, line, allowed) for line in invocations]
+    faults = [fault for line_faults, _fixes in judged for fault in line_faults]
+    return faults + _fix_faults(target, judged)
 
 
 def mdlint_runner_faults(makefile: str) -> list[str]:
