@@ -27,6 +27,7 @@ from loom_discovery import DiscoveryError  # noqa: E402
 from loom_process import log_name, run_process  # noqa: E402
 
 from loom_runner_fakes import (  # noqa: E402
+    FAKE_EXECUTABLE,
     MODELS,
     Completed,
     FakeAnswers,
@@ -46,7 +47,7 @@ def test_runs_every_model_in_manifest_order_with_exact_arguments(tmp_path: Path)
 
     assert runner.model_calls() == [
         [
-            "/tmp/loom-tests",
+            FAKE_EXECUTABLE,
             name,
             "--exact",
             "--ignored",
@@ -87,7 +88,7 @@ def test_applies_the_profile_overlay_to_every_model(tmp_path: Path) -> None:
     model_environments = [
         environment
         for command, environment, _ in runner.calls
-        if command[0] == "/tmp/loom-tests" and "--list" not in command
+        if command[0] == FAKE_EXECUTABLE and "--list" not in command
     ]
     assert model_environments, "the inventory must run at least one model"
     assert all(
@@ -113,7 +114,7 @@ def test_applies_the_profile_deadline_to_every_model(tmp_path: Path) -> None:
     deadlines = [
         timeout
         for command, _, timeout in runner.calls
-        if command[0] == "/tmp/loom-tests" and "--list" not in command
+        if command[0] == FAKE_EXECUTABLE and "--list" not in command
     ]
     assert deadlines == [60.0, 60.0], (
         "each model gets the profile's per-model ceiling when the budget allows"
@@ -151,7 +152,7 @@ def test_caps_each_model_deadline_to_the_remaining_budget(
     deadlines = [
         timeout
         for command, _, timeout in runner.calls
-        if command[0] == "/tmp/loom-tests" and "--list" not in command
+        if command[0] == FAKE_EXECUTABLE and "--list" not in command
     ]
     assert deadlines[0] == 2.0, "the first model must not exceed the run budget"
     assert deadlines[1] == 0.5, (

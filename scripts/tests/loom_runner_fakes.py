@@ -28,8 +28,14 @@ sys.path.insert(0, str(SCRIPTS))
 import loom_runner  # noqa: E402
 from loom_runner import Completed  # noqa: E402
 
+#: The path the fake build reports for the test binary. Nothing executes it,
+#: and it is deliberately outside `/tmp` so a lint rule cannot read it as a
+#: hard-coded temporary directory.
+FAKE_EXECUTABLE: typ.Final = "/opt/loom-fake/loom-tests"
+
 __all__ = [
     "BUDGETS",
+    "FAKE_EXECUTABLE",
     "MODELS",
     "Completed",
     "FakeAnswers",
@@ -174,7 +180,7 @@ class FakeRunner:
                     "test": True,
                 },
                 "features": self.features,
-                "executable": "/tmp/loom-tests",
+                "executable": FAKE_EXECUTABLE,
             }
             return Completed(
                 self.answers.build_returncode, json.dumps(artefact) + "\n", ""
@@ -191,7 +197,7 @@ class FakeRunner:
         return [
             command
             for command, _, _ in self.calls
-            if command[0] == "/tmp/loom-tests" and "--list" not in command
+            if command[0] == FAKE_EXECUTABLE and "--list" not in command
         ]
 
 
