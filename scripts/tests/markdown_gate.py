@@ -168,23 +168,8 @@ def _excludes_all_markdown(pattern: str) -> bool:
     )
 
 
-def config_faults(text: str) -> list[str]:
-    """Return what is wrong with a configuration's file selection.
-
-    Parameters
-    ----------
-    text : str
-        The JSONC configuration document.
-
-    Returns
-    -------
-    list[str]
-        One message per fault; empty when the top-level ``globs`` array is
-        non-empty, selects every Markdown file, carries no negation that
-        cancels that selection, and no ``ignores`` entry excludes every
-        Markdown file.
-    """
-    document = json.loads(_jsonc_to_json(text))
+def _selection_faults(document: dict[str, typ.Any]) -> list[str]:
+    """Return what is wrong with the top-level ``globs`` selection."""
     globs = document.get("globs")
     match globs:
         case list() if globs:
@@ -202,16 +187,42 @@ def config_faults(text: str) -> list[str]:
     ]
     if cancelling:
         return [f"globs negate the Markdown selection with {cancelling!r}"]
-    ignores = document.get("ignores")
-    if isinstance(ignores, list):
-        excluding = [
-            pattern
-            for pattern in ignores
-            if isinstance(pattern, str) and _excludes_all_markdown(pattern)
-        ]
-        if excluding:
-            return [f"ignores exclude every Markdown file with {excluding!r}"]
     return []
+
+
+def _ignore_faults(document: dict[str, typ.Any]) -> list[str]:
+    """Return what is wrong with the top-level ``ignores`` entries."""
+    ignores = document.get("ignores")
+    if not isinstance(ignores, list):
+        return []
+    excluding = [
+        pattern
+        for pattern in ignores
+        if isinstance(pattern, str) and _excludes_all_markdown(pattern)
+    ]
+    if excluding:
+        return [f"ignores exclude every Markdown file with {excluding!r}"]
+    return []
+
+
+def config_faults(text: str) -> list[str]:
+    """Return what is wrong with a configuration's file selection.
+
+    Parameters
+    ----------
+    text : str
+        The JSONC configuration document.
+
+    Returns
+    -------
+    list[str]
+        One message per fault; empty when the top-level ``globs`` array is
+        non-empty, selects every Markdown file, carries no negation that
+        cancels that selection, and no ``ignores`` entry excludes every
+        Markdown file.
+    """
+    document = json.loads(_jsonc_to_json(text))
+    return _selection_faults(document) or _ignore_faults(document)
 
 
 def _markdownlint_steps(workflow: Workflow) -> list[dict[str, typ.Any]]:
