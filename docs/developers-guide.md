@@ -41,6 +41,22 @@ consumer-facing guidance.
   serializing them would add wall time without preventing contention. Their
   embedded `serial::tests::*` cases still join through the test-name term.
 
+## Fetching dependencies before tests
+
+Several tests start their own `cargo`, trybuild fixtures among them. Cargo
+resolves dependencies while it holds the package-cache lock in `$CARGO_HOME`,
+so a nested `cargo` that resolves cold can wait on another repository's build
+for many minutes. The fix is to fetch once, before any test starts:
+
+- `make test` depends on the `fetch` target, which runs
+  `cargo fetch --locked`. A failed fetch stops the run.
+- Every `ci.yml` job that runs tests, and `coverage-main.yml`, runs
+  `cargo fetch --locked` as an unconditional step before its first test or
+  coverage step, with no `|| true`.
+
+Prepare a direct or offline run with `cargo fetch --locked` first. The estate
+lint rule `nested-cargo-offline-tests` checks both.
+
 ## Feature coverage in CI
 
 The default feature set keeps Diesel optional for consumers, while `make test`
