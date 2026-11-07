@@ -37,6 +37,7 @@ summary.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import time
 import typing as typ
@@ -91,6 +92,26 @@ DEFAULT_OUTPUT_DIR: typ.Final = Path("target/loom-report")
 BUDGET_EXHAUSTED: typ.Final = (
     "the aggregate run budget was exhausted before this model started"
 )
+
+#: The files one run writes at the top level of the report directory.
+REPORT_ARTEFACTS: typ.Final = ("summary.json", "summary.md", "build.log")
+
+
+def _reset_report(output_dir: Path) -> Path:
+    """Clear a previous run's report and return the log directory.
+
+    Discovery can refuse a run before `write_summary` is reached. The
+    workflow uploads the report directory even then, so a stale summary would
+    be published beside a failing job and could still say the last run
+    passed.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for name in REPORT_ARTEFACTS:
+        (output_dir / name).unlink(missing_ok=True)
+    logs = output_dir / "logs"
+    shutil.rmtree(logs, ignore_errors=True)
+    logs.mkdir()
+    return logs
 
 
 def _marker_positions(output: str) -> tuple[int, int] | None:
@@ -297,7 +318,8 @@ def run_loom(
         The model inventory to load.
     output_dir : Path
         The directory that receives `build.log`, the per-model logs and the
-        summaries.
+        summaries. Its previous contents are cleared before anything else, so
+        a refused run cannot leave an earlier summary to be uploaded.
     cargo : str
         The Cargo executable.
     runner : Runner
@@ -317,6 +339,7 @@ def run_loom(
         If the environment, manifest, build or inventory cannot be trusted.
     """
     inherited = dict(os.environ if environment is None else environment)
+    logs = _reset_report(output_dir)
     if rejected := rejected_variables(inherited):
         raise DiscoveryError(
             "refusing to run with Loom limit variables set: " + ", ".join(rejected)
@@ -325,9 +348,6 @@ def run_loom(
     if profile not in manifest.timeouts:
         raise DiscoveryError(f"unknown Loom profile {profile!r}")
     deadline = time.monotonic() + float(manifest.budgets[profile])
-    output_dir.mkdir(parents=True, exist_ok=True)
-    logs = output_dir / "logs"
-    logs.mkdir(exist_ok=True)
 
     build_started = time.monotonic()
     # A hung build would otherwise run past the whole-run budget and be killed

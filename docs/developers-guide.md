@@ -679,7 +679,9 @@ and a profile match before it records `passed`. The other outcomes are `failed`,
 Each run writes `target/loom-report/summary.json` and `summary.md`, with a log
 per model holding its captured output, the commit, tool versions, the Loom
 version, the effective bounds, durations and failure tails. The workflow
-uploads the directory even when the run fails.
+uploads the directory even when the run fails, so the runner clears it before
+anything else: a run refused during discovery cannot leave an earlier summary
+to be published beside the failure.
 
 A `branch_limit` outcome means the model exhausted `max_branches`, often
 because an algorithm needs the processor to make progress. A `timeout` means

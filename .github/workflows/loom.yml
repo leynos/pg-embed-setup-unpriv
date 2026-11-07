@@ -60,6 +60,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+            !target/loom-report
           # The feature configuration is fixed (`loom-tests`), so it is part
           # of the key. The runtime exploration profile is not: both profiles
           # compile the same binary.

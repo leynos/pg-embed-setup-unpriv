@@ -168,6 +168,16 @@ def test_the_cargo_cache_covers_registry_git_and_target() -> None:
     )
 
 
+def test_the_cargo_cache_excludes_the_report() -> None:
+    """A cached report would be uploaded beside a later failing run."""
+    caches = steps_using(loom(), CACHE)
+    cargo = next(step for step in caches if "target" in step["with"]["path"])
+
+    assert "!target/loom-report" in cargo["with"]["path"], (
+        "the report must not be restored from the compile cache"
+    )
+
+
 def test_the_rustup_cache_is_separate_and_keyed_on_the_toolchain() -> None:
     """A toolchain change invalidates only the toolchain cache."""
     caches = steps_using(loom(), CACHE)

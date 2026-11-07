@@ -422,6 +422,47 @@ def test_allows_log_and_location_variables(tmp_path: Path) -> None:
     assert runner.model_calls(), "diagnostic variables must not stop the run"
 
 
+def seed_previous_report(output: Path) -> None:
+    """Write the artefacts a finished run leaves behind."""
+    (output / "logs").mkdir(parents=True)
+    (output / "summary.json").write_text('{"success": true}', encoding="utf-8")
+    (output / "summary.md").write_text("old summary", encoding="utf-8")
+    (output / "build.log").write_text("old build", encoding="utf-8")
+    (output / "logs" / "stale.log").write_text("old log", encoding="utf-8")
+
+
+def test_clears_a_previous_report_before_running(tmp_path: Path) -> None:
+    """An earlier run's artefacts never survive into the new report."""
+    output = tmp_path / "report"
+    seed_previous_report(output)
+    runner = FakeRunner()
+
+    report = run(tmp_path, runner)
+    loom_runner.write_summary(report, output, {})
+
+    document = json.loads((output / "summary.json").read_text())
+    assert document["commit"] == "abc123", "the summary must describe this run"
+    assert not (output / "logs" / "stale.log").exists(), (
+        "a log from an earlier run must not be published with this one"
+    )
+
+
+def test_a_refused_run_leaves_no_previous_summary(tmp_path: Path) -> None:
+    """A run refused before building must not publish an earlier success."""
+    output = tmp_path / "report"
+    seed_previous_report(output)
+
+    with pytest.raises(DiscoveryError, match="LOOM_MAX_BRANCHES"):
+        run(tmp_path, FakeRunner(), environment={"LOOM_MAX_BRANCHES": "1"})
+
+    assert not (output / "summary.json").exists(), (
+        "a refused run must not leave an earlier summary behind"
+    )
+    assert not (output / "logs" / "stale.log").exists(), (
+        "a refused run must clear the earlier run's logs too"
+    )
+
+
 def test_rejects_a_build_without_the_loom_feature(tmp_path: Path) -> None:
     """An artefact built without `loom-tests` is not the inventory's binary."""
     runner = FakeRunner(answers=FakeAnswers(features=()))
