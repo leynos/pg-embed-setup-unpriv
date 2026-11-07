@@ -265,28 +265,6 @@ fn orchestrate_bootstrap(
     })
 }
 
-/// How the cluster will be launched: the worker to run and the shutdown grace period.
-pub(super) struct LaunchPlan {
-    pub(super) worker_binary: Option<camino::Utf8PathBuf>,
-    pub(super) execution_mode: ExecutionMode,
-    pub(super) shutdown_timeout: Duration,
-}
-
-impl LaunchPlan {
-    /// Resolves the worker binary, the execution mode it implies and the shutdown timeout
-    /// from the process environment.
-    pub(super) fn resolve(privileges: ExecutionPrivileges) -> BootstrapResult<Self> {
-        let worker_binary = worker_binary_from_env(privileges)?;
-        let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
-        let shutdown_timeout = shutdown_timeout_from_env()?;
-        Ok(Self {
-            worker_binary,
-            execution_mode,
-            shutdown_timeout,
-        })
-    }
-}
-
 fn install_color_eyre() {
     if let Err(err) = color_eyre::install() {
         tracing::debug!("color_eyre already installed: {err}");

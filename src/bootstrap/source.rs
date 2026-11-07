@@ -16,12 +16,13 @@ use postgresql_embedded::Settings;
 
 use super::{
     BootstrapKind,
-    LaunchPlan,
     env::{
         DEFAULT_SHUTDOWN_TIMEOUT,
         EXPLICIT_WORKER_SOURCE,
         resolve_explicit_worker,
+        shutdown_timeout_from_env,
         validate_explicit_shutdown_timeout,
+        worker_binary_from_env,
     },
     mode::{ExecutionMode, ExecutionPrivileges, determine_execution_mode},
 };
@@ -30,6 +31,45 @@ use crate::{
     TestBootstrapConfig,
     error::{BootstrapError, BootstrapResult},
 };
+
+/// How the cluster will be launched: the worker to run and the shutdown grace period.
+struct LaunchPlan {
+    worker_binary: Option<Utf8PathBuf>,
+    execution_mode: ExecutionMode,
+    shutdown_timeout: Duration,
+}
+
+impl LaunchPlan {
+    /// Resolves the worker binary, the execution mode it implies and the shutdown timeout
+    /// from the process environment.
+    fn resolve(privileges: ExecutionPrivileges) -> BootstrapResult<Self> {
+        let worker_binary = worker_binary_from_env(privileges)?;
+        let execution_mode = determine_execution_mode(
+            privileges,
+            worker_binary.as_ref(),
+            AMBIENT_MISSING_WORKER_HINT,
+        )?;
+        let shutdown_timeout = shutdown_timeout_from_env()?;
+        Ok(Self {
+            worker_binary,
+            execution_mode,
+            shutdown_timeout,
+        })
+    }
+}
+
+/// Error text for the ambient path when root execution has no worker binary.
+const AMBIENT_MISSING_WORKER_HINT: &str =
+    "PG_EMBEDDED_WORKER must be set when running with root privileges";
+
+/// Error text for the explicit path when root execution has no worker binary.
+///
+/// The explicit path never reads `PG_EMBEDDED_WORKER`, so the message names the
+/// inputs that actually apply.
+const EXPLICIT_MISSING_WORKER_HINT: &str = concat!(
+    "explicit configuration must supply a worker binary when running with root ",
+    "privileges; call TestBootstrapConfig::with_worker_binary or put pg_worker on PATH"
+);
 
 /// Where a bootstrap takes its inputs from.
 pub(super) enum BootstrapSource {
@@ -99,7 +139,11 @@ fn resolve_explicit_inputs(
         config.worker_binary().cloned(),
         EXPLICIT_WORKER_SOURCE,
     )?;
-    let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
+    let execution_mode = determine_execution_mode(
+        privileges,
+        worker_binary.as_ref(),
+        EXPLICIT_MISSING_WORKER_HINT,
+    )?;
     let shutdown_timeout = match config.shutdown_timeout() {
         Some(timeout) => validate_explicit_shutdown_timeout(timeout)?,
         None => DEFAULT_SHUTDOWN_TIMEOUT,
