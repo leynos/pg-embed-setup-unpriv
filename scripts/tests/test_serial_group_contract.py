@@ -309,16 +309,49 @@ def test_a_declared_root_that_cannot_be_read_is_reported(
     ), f"the missing root must be reported by name: {faults}"
 
 
+@pytest.mark.skipif(
+    os.name == "nt" or os.geteuid() == 0,
+    reason="file permissions do not deny access to this user",
+)
 def test_a_scanned_file_that_cannot_be_read_is_reported(
     repository: tuple[Path, str],
 ) -> None:
     """An unreadable ``.rs`` entry under ``tests`` is reported, not skipped."""
     tests_directory, manifest = repository
-    (tests_directory / "unreadable.rs").mkdir()
-    _, faults = lock_taking_binaries(manifest, tests_directory)
+    unreadable = tests_directory / "unreadable.rs"
+    unreadable.write_text('#[path = "support/serial.rs"]\n', encoding="utf-8")
+    unreadable.chmod(0)
+    try:
+        _, faults = lock_taking_binaries(manifest, tests_directory)
+    finally:
+        unreadable.chmod(0o644)
     assert any(
         "cannot read" in fault and "unreadable.rs" in fault for fault in faults
     ), f"an unreadable scanned file must be reported: {faults}"
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or os.geteuid() == 0,
+    reason="directory permissions do not deny access to this user",
+)
+def test_a_directory_that_cannot_be_listed_is_reported(
+    repository: tuple[Path, str],
+) -> None:
+    """An unreadable directory is a scan fault, not a silent empty result."""
+    tests_directory, manifest = repository
+    blocked = tests_directory / "blocked"
+    blocked.mkdir()
+    (blocked / "hidden_root.rs").write_text(
+        '#[path = "../support/serial.rs"]\n', encoding="utf-8"
+    )
+    blocked.chmod(0)
+    try:
+        _, faults = lock_taking_binaries(manifest, tests_directory)
+    finally:
+        blocked.chmod(0o755)
+    assert any("cannot list" in fault and "blocked" in fault for fault in faults), (
+        f"an unreadable directory must be reported as a scan fault: {faults}"
+    )
 
 
 def test_the_public_contract_reports_a_missing_root(
@@ -547,7 +580,9 @@ def test_an_exact_filter_names_exactly_its_terms(
         assert faults, "an empty filter names no binary and must be a fault"
         return
     assert faults == [], f"{filter_text!r} must be accepted, got {faults}"
-    assert parsed == frozenset(names)
+    assert parsed == frozenset(names), (
+        f"{filter_text!r} must name {frozenset(names)}, got {parsed}"
+    )
 
 
 @settings(max_examples=50, deadline=None)
@@ -598,7 +633,9 @@ def test_discovery_follows_which_roots_compile_the_module(
                 expected.add(name)
         inventory, faults = lock_taking_binaries("", tests_directory)
     assert faults == [], f"the generated tree must be clean, got {faults}"
-    assert inventory == frozenset(expected)
+    assert inventory == frozenset(expected), (
+        f"the inventory must be {frozenset(expected)}, got {inventory}"
+    )
 
 
 def test_an_inclusion_outside_a_root_is_always_reported(tmp_path: Path) -> None:
@@ -609,7 +646,9 @@ def test_an_inclusion_outside_a_root_is_always_reported(tmp_path: Path) -> None:
         '#[path = "support/serial.rs"]\n', encoding="utf-8"
     )
     inventory, faults = lock_taking_binaries("", tests_directory)
-    assert inventory == frozenset()
+    assert inventory == frozenset(), (
+        f"no root compiles the module, so the inventory must be empty, got {inventory}"
+    )
     assert any("outside a declared test root" in fault for fault in faults), (
         f"the unattributable inclusion must be reported: {faults}"
     )

@@ -20,6 +20,8 @@ type without raising.
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import re
 import tomllib
 import typing as typ
@@ -93,31 +95,48 @@ def _scanned_paths(
 ) -> tuple[list[Path], list[str]]:
     """List matching files under ``directory``, reporting a scan failure.
 
-    Enumeration itself can fail — an unreadable directory, a symlink loop —
-    and a discovery contract that raised there would hide the failure from
-    the caller that reports every other read fault.
+    ``Path.glob`` and ``Path.rglob`` suppress ``OSError`` raised while
+    enumerating on Python 3.13, so an unreadable directory would contribute
+    no matches without any failure being visible. Walking with
+    :func:`os.walk` and its ``onerror`` callback keeps that failure, which
+    matters because a lock-taking binary inside such a directory would
+    otherwise be omitted from the inventory silently.
+
+    The walk descends only as far as the pattern's own separator count when
+    ``recursive`` is false, so ``*.rs`` names the roots directly inside
+    ``tests`` while ``*/main.rs`` names those one level below it.
 
     Parameters
     ----------
     directory : Path
         The directory to search.
     pattern : str
-        The glob pattern to match.
+        The glob pattern, matched against a POSIX relative path.
     recursive : bool
         Whether to search subdirectories as well.
 
     Returns
     -------
     tuple
-        The matching paths in a stable order, and any scan fault.
+        The matching paths in a stable order, and any scan faults.
     """
-    try:
-        matches = (
-            directory.rglob(pattern) if recursive else directory.glob(pattern)
-        )
-        return sorted(matches), []
-    except OSError as error:
-        return [], [f"cannot list {pattern} under {directory}: {error}"]
+    faults: list[str] = []
+
+    def report(error: OSError) -> None:
+        """Record a directory the walk could not list."""
+        faults.append(f"cannot list {pattern} under {directory}: {error}")
+
+    max_depth = None if recursive else pattern.count("/")
+    matches: list[Path] = []
+    for root, directories, files in os.walk(directory, onerror=report):
+        root_path = Path(root)
+        relative_root = root_path.relative_to(directory)
+        if max_depth is not None and len(relative_root.parts) >= max_depth:
+            directories[:] = []
+        for name in files:
+            if fnmatch.fnmatchcase((relative_root / name).as_posix(), pattern):
+                matches.append(root_path / name)
+    return sorted(matches), faults
 
 
 def _serial_includers(
