@@ -22,6 +22,7 @@ See "Test timeouts: four tiers, outermost last" in
 """
 
 import collections.abc as cabc
+import os
 import re
 import typing as typ
 from pathlib import Path
@@ -60,6 +61,36 @@ class SourceLoadError(RuntimeError):
         self.cause = cause
 
 
+def _rust_sources(tests_dir: Path) -> list[Path]:
+    """List every Rust source under ``tests_dir``, reporting a scan failure.
+
+    ``Path.rglob`` suppresses ``OSError`` raised while enumerating on
+    Python 3.13, so an unreadable directory would contribute no sources
+    without any failure being visible. Walking with :func:`os.walk` and
+    its ``onerror`` callback keeps that failure: a binary that takes the
+    lock inside such a directory would otherwise be omitted from every
+    coverage contract silently.
+    """
+    faults: list[OSError] = []
+
+    def report(error: OSError) -> None:
+        """Record a directory the walk could not list."""
+        faults.append(error)
+
+    paths: list[Path] = []
+    for root, _directories, names in os.walk(tests_dir, onerror=report):
+        paths.extend(
+            Path(root) / name for name in sorted(names) if name.endswith(".rs")
+        )
+    if faults:
+        error = faults[0]
+        # The walk reports the directory it could not list, which is the
+        # path a reader needs; the root is only a fallback.
+        failed = Path(error.filename) if error.filename else tests_dir
+        raise SourceLoadError(failed, error)
+    return sorted(paths)
+
+
 def load_test_sources(tests_dir: Path = TESTS_DIR) -> dict[Path, str]:
     """Read every Rust source under the test tree, keyed by resolved path.
 
@@ -86,11 +117,7 @@ def load_test_sources(tests_dir: Path = TESTS_DIR) -> dict[Path, str]:
         decoded as UTF-8.
     """
     sources: dict[Path, str] = {}
-    try:
-        paths = sorted(tests_dir.rglob("*.rs"))
-    except OSError as exc:
-        raise SourceLoadError(tests_dir, exc) from exc
-    for path in paths:
+    for path in _rust_sources(tests_dir):
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
