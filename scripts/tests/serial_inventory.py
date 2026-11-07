@@ -90,6 +90,25 @@ def _read_text(path: Path, label: str) -> tuple[str | None, str | None]:
         return None, f"cannot read {label}: {error}"
 
 
+def _matching_files(
+    root_path: Path, relative_root: Path, names: list[str], pattern: str
+) -> list[Path]:
+    """Return the files in ``names`` whose relative path matches ``pattern``."""
+    return [
+        root_path / name
+        for name in names
+        if fnmatch.fnmatchcase((relative_root / name).as_posix(), pattern)
+    ]
+
+
+def _stop_at_depth(
+    directories: list[str], relative_root: Path, max_depth: int | None
+) -> None:
+    """Stop the walk descending past the depth a non-recursive pattern needs."""
+    if max_depth is not None and len(relative_root.parts) >= max_depth:
+        directories[:] = []
+
+
 def _scanned_paths(
     directory: Path, pattern: str, *, recursive: bool
 ) -> tuple[list[Path], list[str]]:
@@ -131,11 +150,8 @@ def _scanned_paths(
     for root, directories, files in os.walk(directory, onerror=report):
         root_path = Path(root)
         relative_root = root_path.relative_to(directory)
-        if max_depth is not None and len(relative_root.parts) >= max_depth:
-            directories[:] = []
-        for name in files:
-            if fnmatch.fnmatchcase((relative_root / name).as_posix(), pattern):
-                matches.append(root_path / name)
+        _stop_at_depth(directories, relative_root, max_depth)
+        matches.extend(_matching_files(root_path, relative_root, files, pattern))
     return sorted(matches), faults
 
 
