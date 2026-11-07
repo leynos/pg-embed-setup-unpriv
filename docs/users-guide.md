@@ -719,26 +719,30 @@ let temp_db = cluster.temporary_database_from_template("test_db", "migrated_temp
 
 When the data directory already holds a cluster (its `PG_VERSION` marker is
 present) and `PG_PASSWORD` is not set, the bootstrap reads the superuser
-password back from the install tree's password file (`<install>/.pgpass`, which
-`initdb` was given) instead of generating a fresh one, so connections to the
-reused cluster succeed. If that file is missing, unreadable, or empty the
-bootstrap fails and names the data directory and the file: set `PG_PASSWORD` to
-the password that initialized the cluster, or remove the stale cluster. An
-explicit `PG_PASSWORD` always wins.
+password back from the selected cluster's password file, which `initdb` was
+given, instead of generating a fresh one, so connections to the reused cluster
+succeed. For an explicit `PG_DATA_DIR`, and for a setup-only `run()`/CLI
+bootstrap with a derived root, that file is `<install>/.pgpass`. For a
+derived-root test bootstrap it is `<root>/data/<name>.pgpass`. See
+[Password-file locations](#password-file-locations) for the full list. If the
+selected file is missing, unreadable, or empty the bootstrap fails and names
+the data directory and the file: set `PG_PASSWORD` to the password that
+initialized the cluster, or remove the stale cluster. An explicit `PG_PASSWORD`
+always wins.
 
 An explicit password short-circuits the whole check: the password file is not
 read at all, so setting `PG_PASSWORD` is a working escape from a cluster whose
 stored file has been lost.
 
-When the data directory holds no cluster, a password file left in the install
-tree by an earlier, reaped cluster is removed before the new cluster is
-initialized. In releases after 0.6.0 this applies whether or not `PG_PASSWORD`
-is set. `initdb` reads that file, so a stale one used to give the fresh cluster
-the old password while the bootstrap reported a new one, and every process
-after the first in a persistent install root (`PG_EMBED_ROOT`, or the default
-per-user root) failed with `password authentication failed`. Under
-`cargo nextest`, where each test is its own process, that was every test but
-the first. A stale path that cannot be removed fails the bootstrap with
+When the data directory holds no cluster, the selected password file, left by
+an earlier, reaped cluster, is removed before the new cluster is initialized.
+In releases after 0.6.0 this applies whether or not `PG_PASSWORD` is set.
+`initdb` reads that file, so a stale one used to give the fresh cluster the old
+password while the bootstrap reported a new one, and every process after the
+first in a persistent install root (`PG_EMBED_ROOT`, or the default per-user
+root) failed with `password authentication failed`. Under `cargo nextest`,
+where each test is its own process, that was every test but the first. A stale
+path that cannot be removed fails the bootstrap with
 `ClusterPasswordUnreadable` rather than letting `initdb` read it.
 
 With an explicit `PG_DATA_DIR`, the password file belongs to the install tree,
@@ -847,11 +851,13 @@ so existing recorders keep compiling; see the
 ## Per-cluster data directories
 
 **Layout change in releases after 0.6.0.** When the data directory is derived
-from a root, `PG_EMBED_ROOT` or the per-user default, each cluster gets a data
-directory of its own under the root. This lets concurrent processes, such as
-`cargo nextest` running one process per test, each bootstrap a working cluster
-in one root. Up to 0.6.0 they shared one directory, and every process but the
-first failed with `pg_ctl: another server might be running`.
+from a root, `PG_EMBED_ROOT` or the per-user default, a derived-root test
+bootstrap, meaning one through `bootstrap_for_tests()` or a `TestCluster`
+constructor, gives each cluster a data directory of its own under the root.
+This lets concurrent processes, such as `cargo nextest` running one process per
+test, each bootstrap a working cluster in one root. Up to 0.6.0 they shared one
+directory, and every process but the first failed with
+`pg_ctl: another server might be running`.
 
 |                | 0.6.0 and earlier        | Later releases              |
 | -------------- | ------------------------ | --------------------------- |
@@ -859,16 +865,21 @@ first failed with `pg_ctl: another server might be running`.
 | Password file  | `<root>/install/.pgpass` | `<root>/data/<name>.pgpass` |
 | Liveness lock  | none                     | `<root>/data/<name>.lock`   |
 
-_Table: Data layout under a derived root._
+_Table: Data layout under a derived root, for a derived-root test bootstrap._
+
+The "Later releases" column applies to a derived-root test bootstrap only. A
+setup-only `run()`/CLI bootstrap keeps the 0.6.0 arrangement of the first
+column, so its data directory stays at `<root>/data`.
 
 `<name>` is `<pid>-<nanoseconds>-<counter>`, unique to each cluster. The
 install tree, `<root>/install`, is still shared. A cluster left directly in
-`<root>/data` by an earlier release is no longer used, and the bootstrap logs a
-warning naming it; it can be deleted.
+`<root>/data` by an earlier release, or by a setup-only `run()`/CLI bootstrap,
+is not used by a derived-root test bootstrap, and the bootstrap logs a warning
+naming it; it can be deleted once the cluster is no longer needed.
 
 - **Explicit `PG_DATA_DIR` is unchanged.** Setting it keeps a single data
-  directory at that path, with its password file in the install tree, and skips
-  everything below.
+  directory at that path, with its password file at `<install>/.pgpass`, and
+  skips everything below.
 - **Clean-up.** Each process holds a kernel lock on its cluster's `.lock` file
   until it exits. The next bootstrap in the root removes every cluster whose
   lock it can take, which are those whose process has gone, however it ended. A
@@ -914,6 +925,25 @@ warning naming it; it can be deleted.
   and start in parallel; only the brief copy of cached binaries is serialized.
   Clusters that declare extensions retake the lock while the extensions are
   installed, so that step is also serialized.
+
+### Password-file locations
+
+The password file that `initdb` was given, and that the bootstrap reads back on
+reuse, depends on the layout. `<install>` is the install tree, which is
+`<root>/install` under a derived root.
+
+- **Explicit `PG_DATA_DIR`.** The password file is `<install>/.pgpass`.
+- **Setup-only `run()`/CLI bootstrap with a derived root.** The password file is
+  also `<install>/.pgpass`, because the cluster keeps the `<root>/data`
+  directory of 0.6.0.
+- **Derived-root test bootstrap**, through `bootstrap_for_tests()` or a
+  `TestCluster` constructor. The password file is `<root>/data/<name>.pgpass`,
+  beside that cluster's data directory.
+
+`bootstrap_for_tests().environment.pgpass_file` returns the selected path. The
+returned environment includes that path as `PGPASSFILE`; direct callers apply
+the environment themselves, while `TestCluster` applies it for the cluster's
+lifetime.
 
 ADR 005 records the design.
 
@@ -990,10 +1020,12 @@ rules and the failure modes.
   to succeed without manual cleanup. Windows skips POSIX mode changes; choose
   paths whose ACLs are private to the test account when secrets matter.
 - The XDG cache home stays `0755` so team-mates can inspect extracted binaries
-  and logs when debugging CI issues. The runtime directory is clamped to `0700`
-  because it holds the PostgreSQL socket, `postmaster.pid`, and `.pgpass`, so
-  leaking read or execute access would expose credentials or let other users
-  interfere with the helper’s cluster lifecycle.
+  and logs when debugging CI issues. The runtime directory, `<install>/run`, is
+  clamped to `0700` so that owner-only access is enforced and runtime resources
+  get a private location; leaking read or execute access would let other users
+  interfere with the helper’s cluster lifecycle. It is exported as
+  `XDG_RUNTIME_DIR`. The password file does not live there: see
+  [Password-file locations](#password-file-locations).
 
 ## Integrating with root-only test agents
 
@@ -1009,11 +1041,13 @@ still running as `root`, follow these steps:
 - Keep the test process running as `root`; the helper binary demotes itself
   before calling into `postgresql_embedded` so the main process never changes
   UID mid-test.
-- Ensure the `PGPASSFILE` environment variable points to the file created in the
-  runtime directory so subsequent Diesel or libpq connections can authenticate
-  without interactive prompts. The
-  `bootstrap_for_tests().environment.pgpass_file` helper returns the path if
-  the bootstrap ran inside the test process.
+- Ensure the `PGPASSFILE` environment variable points to the selected cluster's
+  password file so subsequent Diesel or libpq connections can authenticate
+  without interactive prompts. For a derived-root test bootstrap that file is
+  `<root>/data/<name>.pgpass`; for an explicit `PG_DATA_DIR` it is
+  `<install>/.pgpass`. See [Password-file locations](#password-file-locations)
+  for the full list. Read the path from
+  `bootstrap_for_tests().environment.pgpass_file` rather than constructing it.
 - Provide `TZDIR=/usr/share/zoneinfo` (or the correct path for your
   distribution) if you are running the CLI. The library helper sets `TZ`
   automatically and, on Unix-like hosts, also seeds `TZDIR` when it discovers a
