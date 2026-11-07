@@ -380,11 +380,14 @@ Makefile text and a target name and return fault messages in the same way.
 tree holding a copy of the repository configuration. It checks that clean
 documents pass, a document under an ignored directory is never linted, and an
 invalid document fails and names itself. It also runs `make markdownlint` with
-the repository's own `MDLINT` definition and recipe and the bare pinned CLI
-that the CI action runs, then compares the set of flagged files rather than a
-count, so the paths cannot select different documents. The tests need Node.js,
-`make` and a reachable package registry; they skip on a development host but
-fail in CI when either tool is unavailable.
+the repository's own `MDLINT` definition, declared prerequisites and recipe,
+and the bare pinned CLI that the CI action runs, then compares the set of
+flagged files. Every selectable document in that tree carries a violation, so
+the flagged set is the selected set and a path cannot drop a document or lint
+an ignored one without changing it. The spelling prerequisite is declared but
+stubbed, because its gate needs the repository's git history and network
+toolchain. The tests need Node.js, `make` and a reachable package registry;
+they skip on a development host but fail in CI when either tool is unavailable.
 
 ## Spelling policy
 

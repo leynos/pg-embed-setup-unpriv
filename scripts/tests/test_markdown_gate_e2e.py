@@ -12,8 +12,9 @@ the behaviour the contract assumes:
 - ``make markdownlint``, the bare pinned CLI the CI action runs, and the CLI
   with an explicit ``**/*.md`` all flag exactly the same files.
 
-The file set, not just the count, is compared, so a run that swaps one
-document for another cannot pass. The tests need Node.js, ``make`` and a
+Every selectable document in the comparison tree carries a violation, so the
+flagged set is the selected set: a path that drops a document, or lints an
+ignored one, changes the set rather than only the count. The tests need Node.js, ``make`` and a
 reachable package registry; when either tool is missing they skip on a
 development host but fail in CI, where the gate must not go quiet.
 """
@@ -28,7 +29,7 @@ import typing as typ
 from pathlib import Path
 
 import pytest
-from makefile_gate import recipe_lines
+from makefile_gate import prerequisites, recipe_lines
 from markdown_gate import makefile_version
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -42,8 +43,9 @@ _VALID = "# Title\n\nA clean paragraph.\n"
 #: A document the default rule set rejects with MD009.
 _INVALID = "# Title\n\nTrailing spaces   \n"
 
-#: The selected documents the violating tree expects to be flagged.
-_FLAGGED = {"alpha.md", "nested/beta.md"}
+#: Every selectable document in the violating tree carries a violation, so
+#: the flagged set is the selected set and a path cannot silently drop one.
+_FLAGGED = {"alpha.md", "deep/gamma.md", "nested/beta.md"}
 
 #: A finding line names the flagged file before its position.
 _FINDING = re.compile(r"^(\S+\.md):\d+:\d+ error ", re.MULTILINE)
@@ -145,31 +147,49 @@ def _configured_tree(tmp_path: Path) -> Path:
 
 
 def _violating_tree(tmp_path: Path) -> Path:
-    """Build a tree with flagged documents inside and outside the selection."""
+    """Build a tree where every selected document carries a violation.
+
+    A document outside the selection carries one too, so a run that ignores
+    the configuration's ``ignores`` is caught as well.
+    """
     tree = _configured_tree(tmp_path)
-    (tree / "clean.md").write_text(_VALID, encoding="utf-8")
     (tree / "alpha.md").write_text(_INVALID, encoding="utf-8")
     nested = tree / "nested"
     nested.mkdir()
     (nested / "beta.md").write_text(_INVALID, encoding="utf-8")
+    deep = tree / "deep"
+    deep.mkdir()
+    (deep / "gamma.md").write_text(_INVALID, encoding="utf-8")
     ignored = tree / IGNORED_DIRECTORY
     ignored.mkdir()
-    (ignored / "gamma.md").write_text(_INVALID, encoding="utf-8")
+    (ignored / "delta.md").write_text(_INVALID, encoding="utf-8")
     return tree
 
 
 def _fixture_makefile() -> str:
-    """Return the repository's MDLINT definitions and lint recipe, verbatim."""
+    """Return the repository's MDLINT definitions and lint target, verbatim.
+
+    The real declaration, its declared prerequisites and the real recipe are
+    reproduced so ``make markdownlint`` traverses the same dependency edge
+    as the repository target. The spelling gate needs the repository's git
+    history and network toolchain, so its recipe is stubbed; its declaration
+    edge is kept, which is what the contract test checks.
+    """
     makefile = _makefile_text()
     runner = re.search(r"^MDLINT\s*\?=\s*(.+)$", makefile, re.MULTILINE)
     recipe = recipe_lines(makefile, "markdownlint")
     assert runner, "the Makefile must declare MDLINT"
     assert recipe, "markdownlint must have a recipe"
+    declaration = " ".join(
+        ["markdownlint:", *prerequisites(makefile, "markdownlint")]
+    )
     definition = runner.group(1).split("#", 1)[0].strip()
     return (
         f"MARKDOWNLINT_CLI2_VERSION ?= {_pinned_version()}\n"
         f"MDLINT ?= {definition}\n"
-        "\nmarkdownlint:\n" + "".join(f"\t{line}\n" for line in recipe)
+        f"\n{declaration}\n"
+        + "".join(f"\t{line}\n" for line in recipe)
+        + "\nspelling:\n\t@:\n"
     )
 
 
