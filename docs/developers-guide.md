@@ -40,6 +40,8 @@ consumer-facing guidance.
   examples. They share no lock or directory with the other scenarios, so
   serializing them would add wall time without preventing contention. Their
   embedded `serial::tests::*` cases still join through the test-name term.
+  `scripts/tests/test_serial_group_contract.py` derives both sets from the
+  sources, so a binary that starts taking the lock cannot be left out.
 
 ## Fetching dependencies before tests
 
@@ -497,9 +499,21 @@ cluster binaries from the test sources, so a binary missing from both manually
 maintained lists is still caught. Timeout-tier membership is separate from
 serial-group membership: a binary whose cluster roots are isolated pays cold
 startup without taking the shared scenario lock.
-`test_nextest_filters_properties.py` uses Hypothesis for filters no file in the
-repository writes, such as a name using every permitted character and a term
-placed anywhere in the disjunction.
+
+`test_serial_group_contract.py` closes the same gap for the lock. It derives
+the binaries that take the cross-process lock from the test sources, following
+`#[path]` declarations into `tests/support`, and requires the group's filter to
+name exactly the registry `test_nextest_tier_contract.py` pins. A binary that
+starts calling `serial_guard` therefore fails `make test-scripts` even though
+nobody edited either list, and so does a lock-taking binary whose filter term
+is dropped. A binary that compiles `tests/support/serial.rs` but keeps its own
+cases isolated stays out of the group, because the lock module's own uses are
+covered by the embedded term rather than by whole-binary membership. The same
+contract refuses a `platform`-restricted serial override, and a group assigned
+ahead of the serial one, which nextest would apply to a matching binary in
+preference to the serial assignment. `test_nextest_filters_properties.py` uses
+Hypothesis for filters no file in the repository writes, such as a name using
+every permitted character and a term placed anywhere in the disjunction.
 
 ## Minimum supported Rust version
 
