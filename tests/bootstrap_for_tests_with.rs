@@ -5,7 +5,7 @@
 //! instead, whilst [`bootstrap_for_tests`] keeps its ambient behaviour.
 #![cfg(unix)]
 
-use std::{ffi::OsString, os::unix::fs::PermissionsExt, time::Duration};
+use std::{ffi::OsString, os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Result, bail, ensure, eyre};
@@ -18,6 +18,7 @@ use pg_embedded_setup_unpriv::{
     TestBootstrapSettings,
     bootstrap_for_tests,
     bootstrap_for_tests_with,
+    test_support,
 };
 use rstest::rstest;
 
@@ -56,6 +57,7 @@ fn bootstrap_with(
     config: impl Into<TestBootstrapConfig>,
     extra: &[(&str, Option<&str>)],
 ) -> BootstrapResult<TestBootstrapSettings> {
+    let worker_config = ensure_test_worker(config.into());
     let mut vars = env::build_env([("PG_EMBED_ROOT", scratch.root.as_str())]);
     for key in [
         "PG_RUNTIME_DIR",
@@ -74,7 +76,7 @@ fn bootstrap_with(
         vars.push((OsString::from(*key), value.map(OsString::from)));
     }
 
-    env::with_scoped_env(vars, || bootstrap_for_tests_with(config))
+    env::with_scoped_env(vars, || bootstrap_for_tests_with(worker_config))
 }
 
 fn explicit_cfg(scratch: &Scratch) -> PgEnvCfg {
@@ -84,8 +86,42 @@ fn explicit_cfg(scratch: &Scratch) -> PgEnvCfg {
     }
 }
 
+/// Resolves the staged test worker as a UTF-8 path, if one is available.
+fn test_worker() -> Option<Utf8PathBuf> {
+    let worker = test_support::worker_binary_for_tests()?;
+    Utf8PathBuf::from_path_buf(PathBuf::from(worker)).ok()
+}
+
+/// Supplies the test worker when the caller did not choose one.
+///
+/// The explicit path ignores `PG_EMBEDDED_WORKER`, so a root run needs the
+/// worker passed through the configuration rather than through the ambient
+/// environment. An explicitly configured worker is always preserved.
+fn ensure_test_worker(config: TestBootstrapConfig) -> TestBootstrapConfig {
+    if config.worker_binary().is_some() {
+        return config;
+    }
+    match test_worker() {
+        Some(worker) => config.with_worker_binary(worker),
+        None => config,
+    }
+}
+
+/// Skips a scenario that cannot run as root without a worker binary.
+fn skip_without_test_worker(test_name: &str) -> bool {
+    if !geteuid().is_root() || test_worker().is_some() {
+        return false;
+    }
+    tracing::warn!("skipping {test_name}: no worker binary is available for a root run");
+    true
+}
+
 #[test]
 fn explicit_configuration_wins_over_conflicting_environment() -> Result<()> {
+    if skip_without_test_worker("explicit configuration precedence") {
+        return Ok(());
+    }
+
     let scratch = scratch()?;
     let cfg = PgEnvCfg {
         superuser: Some("explicit_user".to_owned()),
@@ -133,6 +169,10 @@ fn explicit_configuration_wins_over_conflicting_environment() -> Result<()> {
 
 #[test]
 fn explicit_configuration_ignores_pg_test_backend() -> Result<()> {
+    if skip_without_test_worker("explicit backend selection") {
+        return Ok(());
+    }
+
     let scratch = scratch()?;
     let explicit = bootstrap_with(
         &scratch,
@@ -166,6 +206,10 @@ fn explicit_shutdown_timeout_ignores_ambient_value(
     #[case] explicit: Option<Duration>,
     #[case] expected: Option<Duration>,
 ) -> Result<()> {
+    if skip_without_test_worker("explicit shutdown timeout") {
+        return Ok(());
+    }
+
     let scratch = scratch()?;
     let mut config = TestBootstrapConfig::new(explicit_cfg(&scratch));
     if let Some(timeout) = explicit {
@@ -195,6 +239,10 @@ fn explicit_shutdown_timeout_ignores_ambient_value(
 
 #[test]
 fn explicit_release_url_reaches_settings() -> Result<()> {
+    if skip_without_test_worker("explicit release URL") {
+        return Ok(());
+    }
+
     let scratch = scratch()?;
     let config = TestBootstrapConfig::new(explicit_cfg(&scratch))
         .with_releases_url("https://example.invalid/releases");
@@ -212,6 +260,10 @@ fn explicit_release_url_reaches_settings() -> Result<()> {
 #[case::empty("")]
 #[case::whitespace("   ")]
 fn explicit_release_url_rejects_empty(#[case] url: &str) -> Result<()> {
+    if skip_without_test_worker("empty explicit release URL") {
+        return Ok(());
+    }
+
     let scratch = scratch()?;
     let config = TestBootstrapConfig::new(explicit_cfg(&scratch)).with_releases_url(url);
 
@@ -226,6 +278,10 @@ fn explicit_release_url_rejects_empty(#[case] url: &str) -> Result<()> {
 
 #[test]
 fn explicit_max_connections_below_floor_is_rejected() -> Result<()> {
+    if skip_without_test_worker("explicit max_connections floor") {
+        return Ok(());
+    }
+
     let scratch = scratch()?;
     let cfg = PgEnvCfg {
         max_connections: Some(2),
