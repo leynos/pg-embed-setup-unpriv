@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import tomllib
 import typing as typ
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -251,7 +252,7 @@ def is_loom_path(name: str) -> bool:
 
 
 def validate_inventory(
-    manifest: Manifest, listed: typ.Sequence[str], profile: str
+    manifest: Manifest, listed: Sequence[str], profile: str
 ) -> None:
     """Refuse a run whose inventory and compiled binary disagree.
 

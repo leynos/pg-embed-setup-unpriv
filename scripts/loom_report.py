@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import typing as typ
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 
 #: The outcomes a model can be classified as.
@@ -201,7 +202,7 @@ def parse_marker(line: str) -> dict[str, str] | None:
     return None
 
 
-def settings_from_marker(fields: typ.Mapping[str, str]) -> EffectiveSettings:
+def settings_from_marker(fields: Mapping[str, str]) -> EffectiveSettings:
     """Return the effective settings a marker reported.
 
     Raises

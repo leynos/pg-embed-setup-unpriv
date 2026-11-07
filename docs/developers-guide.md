@@ -646,9 +646,10 @@ shutdown-hook registration.
 The manifest also records a whole-run budget per profile: 1,800 s for `pr` and
 3,300 s for `scheduled`. The budget starts before the build and covers
 discovery and every model, and it sits below the workflow's 3,600 s step
-ceiling. A model that starts when the budget is already spent is recorded as
-`timeout` without running, so the run still writes `summary.json` and
-`summary.md` instead of being cancelled mid-step.
+ceiling. The build's own timeout is the remaining budget, so a hung build is
+killed and still leaves `build.log`. A model that starts when the budget is
+already spent is recorded as `timeout` without running, so the run still writes
+`summary.json` and `summary.md` instead of being cancelled mid-step.
 
 Both profiles cap the participant count at three; the scheduled profile spends
 its larger budget on branches and preemptions. Its preemption bound was chosen
@@ -691,6 +692,8 @@ rerun the whole profile:
 ```sh
 make test-loom LOOM_PROFILE=scheduled
 ```
+
+### Scoped environment modelling
 
 Production and Loom both route `ScopedEnv` environment access through the same
 guard-aware `EnvLockOps` boundary. `lock_env_mutex` acquires the lock guard,

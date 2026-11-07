@@ -14,6 +14,7 @@ import os
 import sys
 import time
 import typing as typ
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,34 @@ def passing_output(name: str, profile: str = "pr") -> str:
     )
 
 
+class FakeClock:
+    """A monotonic clock that only moves when a test advances it."""
+
+    def __init__(self) -> None:
+        """Start at zero."""
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        """Return the current fake time."""
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        """Move the clock forward by `seconds`."""
+        self.now += seconds
+
+
+@dataclass(frozen=True)
+class FakeAnswers:
+    """The canned replies the fake seam returns."""
+
+    features: typ.Sequence[str] = ("loom-tests",)
+    listing: typ.Sequence[str] | None = None
+    outputs: typ.Mapping[str, Completed] = field(default_factory=dict)
+    build_returncode: int = 0
+    #: Fake time each model consumes; the clock advances by this much.
+    delay_seconds: float = 0.0
+
+
 class FakeRunner:
     """A process seam that answers the build, the listing and each model."""
 
@@ -94,19 +123,19 @@ class FakeRunner:
         self,
         models: typ.Sequence[tuple[str, str, int, int]] = MODELS,
         *,
-        features: typ.Sequence[str] = ("loom-tests",),
-        listing: typ.Sequence[str] | None = None,
-        outputs: typ.Mapping[str, Completed] | None = None,
-        build_returncode: int = 0,
-        delay_seconds: float = 0.0,
+        answers: FakeAnswers | None = None,
+        clock: FakeClock | None = None,
     ) -> None:
-        """Record the inventory, the canned answers and the model delay."""
+        """Record the inventory, the canned answers and the clock to advance."""
         self.models = models
-        self.features = list(features)
-        self.listing = list(listing) if listing is not None else [name for name, *_ in models]
-        self.outputs = dict(outputs or {})
-        self.build_returncode = build_returncode
-        self.delay_seconds = delay_seconds
+        self.answers = answers or FakeAnswers()
+        self.clock = clock
+        self.features = list(self.answers.features)
+        listing = self.answers.listing
+        self.listing = (
+            list(listing) if listing is not None else [name for name, *_ in models]
+        )
+        self.outputs = dict(self.answers.outputs)
         self.calls: list[tuple[list[str], dict[str, str], float | None]] = []
 
     def __call__(
@@ -133,11 +162,14 @@ class FakeRunner:
                 "features": self.features,
                 "executable": "/tmp/loom-tests",
             }
-            return Completed(self.build_returncode, json.dumps(artefact) + "\n", "")
+            return Completed(
+                self.answers.build_returncode, json.dumps(artefact) + "\n", ""
+            )
         if "--list" in command:
             return Completed(0, "".join(f"{name}: test\n" for name in self.listing), "")
         name = command[1]
-        time.sleep(self.delay_seconds)
+        if self.clock is not None:
+            self.clock.advance(self.answers.delay_seconds)
         return self.outputs.get(name, Completed(0, passing_output(name), ""))
 
     def model_calls(self) -> list[list[str]]:
@@ -252,9 +284,31 @@ def test_applies_the_profile_deadline_to_every_model(tmp_path: Path) -> None:
     )
 
 
-def test_caps_each_model_deadline_to_the_remaining_budget(tmp_path: Path) -> None:
+def test_bounds_the_build_by_the_remaining_run_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hung build is killed at the run budget, not at the step ceiling."""
+    clock = FakeClock()
+    monkeypatch.setattr(loom_runner, "time", clock)
+    runner = FakeRunner()
+
+    run(tmp_path, runner, budgets={"pr": 90})
+
+    build = next(
+        timeout
+        for command, _, timeout in runner.calls
+        if command[0] == "cargo" and command[1] == "test"
+    )
+    assert build == 90.0, "the build must be capped at the remaining budget"
+
+
+def test_caps_each_model_deadline_to_the_remaining_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A small whole-run budget shortens the deadline of a later model."""
-    runner = FakeRunner(delay_seconds=1.5)
+    clock = FakeClock()
+    monkeypatch.setattr(loom_runner, "time", clock)
+    runner = FakeRunner(answers=FakeAnswers(delay_seconds=1.5), clock=clock)
 
     run(tmp_path, runner, budgets={"pr": 2})
 
@@ -263,15 +317,19 @@ def test_caps_each_model_deadline_to_the_remaining_budget(tmp_path: Path) -> Non
         for command, _, timeout in runner.calls
         if command[0] == "/tmp/loom-tests" and "--list" not in command
     ]
-    assert deadlines[0] <= 2.0, "the first model must not exceed the run budget"
-    assert 0 < deadlines[1] < 1.0, (
+    assert deadlines[0] == 2.0, "the first model must not exceed the run budget"
+    assert deadlines[1] == 0.5, (
         "the second model must be capped to the budget the first one left"
     )
 
 
-def test_stops_starting_models_once_the_run_budget_is_spent(tmp_path: Path) -> None:
+def test_stops_starting_models_once_the_run_budget_is_spent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A spent budget records the rest as timeout and still writes a summary."""
-    runner = FakeRunner(delay_seconds=1.2)
+    clock = FakeClock()
+    monkeypatch.setattr(loom_runner, "time", clock)
+    runner = FakeRunner(answers=FakeAnswers(delay_seconds=1.2), clock=clock)
 
     report = run(tmp_path, runner, budgets={"pr": 1})
     loom_runner.write_summary(report, tmp_path / "report", {})
@@ -364,7 +422,7 @@ def test_allows_log_and_location_variables(tmp_path: Path) -> None:
 
 def test_rejects_a_build_without_the_loom_feature(tmp_path: Path) -> None:
     """An artefact built without `loom-tests` is not the inventory's binary."""
-    runner = FakeRunner(features=())
+    runner = FakeRunner(answers=FakeAnswers(features=()))
 
     with pytest.raises(DiscoveryError, match="loom-tests"):
         run(tmp_path, runner)
@@ -372,7 +430,7 @@ def test_rejects_a_build_without_the_loom_feature(tmp_path: Path) -> None:
 
 def test_rejects_a_missing_expected_model(tmp_path: Path) -> None:
     """A model that disappears from the binary fails instead of being skipped."""
-    runner = FakeRunner(listing=[MODELS[0][0]])
+    runner = FakeRunner(answers=FakeAnswers(listing=[MODELS[0][0]]))
 
     with pytest.raises(DiscoveryError, match="not discoverable"):
         run(tmp_path, runner)
@@ -380,7 +438,11 @@ def test_rejects_a_missing_expected_model(tmp_path: Path) -> None:
 
 def test_rejects_an_unregistered_loom_model(tmp_path: Path) -> None:
     """An ignored Loom test outside the manifest fails the run."""
-    runner = FakeRunner(listing=[name for name, *_ in MODELS] + ["env::loom_tests::extra"])
+    runner = FakeRunner(
+        answers=FakeAnswers(
+            listing=[name for name, *_ in MODELS] + ["env::loom_tests::extra"]
+        )
+    )
 
     with pytest.raises(DiscoveryError, match="not registered"):
         run(tmp_path, runner)
@@ -390,7 +452,13 @@ def test_classifies_a_killed_model_as_timeout(tmp_path: Path) -> None:
     """A model the seam killed at its deadline is a timeout, not a failure."""
     name = MODELS[0][0]
     runner = FakeRunner(
-        outputs={name: Completed(-9, marker("loom-model-start", name), "", timed_out=True)}
+        answers=FakeAnswers(
+            outputs={
+                name: Completed(
+                    -9, marker("loom-model-start", name), "", timed_out=True
+                )
+            }
+        )
     )
 
     report = run(tmp_path, runner)
@@ -418,7 +486,11 @@ def test_run_process_kills_a_child_at_its_deadline(tmp_path: Path) -> None:
 def test_propagates_a_non_zero_exit_as_failed(tmp_path: Path) -> None:
     """A model that exits non-zero is a failure."""
     name = MODELS[0][0]
-    runner = FakeRunner(outputs={name: Completed(101, "assertion failed", "")})
+    runner = FakeRunner(
+        answers=FakeAnswers(
+            outputs={name: Completed(101, "assertion failed", "")}
+        )
+    )
 
     report = run(tmp_path, runner)
 
@@ -432,14 +504,16 @@ def test_classifies_a_branch_limit_separately(tmp_path: Path) -> None:
     """Exhausting the branch budget is its own outcome, not a generic failure."""
     name = MODELS[0][0]
     runner = FakeRunner(
-        outputs={
-            name: Completed(
-                101,
-                "Model exceeded maximum number of branches. This is often caused by "
-                "an algorithm requiring the processor to make progress, e.g. spin locks.",
-                "",
-            )
-        }
+        answers=FakeAnswers(
+            outputs={
+                name: Completed(
+                    101,
+                    "Model exceeded maximum number of branches. This is often caused by "
+                    "an algorithm requiring the processor to make progress, e.g. spin locks.",
+                    "",
+                )
+            }
+        )
     )
 
     report = run(tmp_path, runner)
@@ -452,7 +526,11 @@ def test_classifies_a_branch_limit_separately(tmp_path: Path) -> None:
 def test_classifies_a_profile_mismatch_as_incomplete(tmp_path: Path) -> None:
     """A model that reports another profile did not run the requested bounds."""
     name = MODELS[0][0]
-    runner = FakeRunner(outputs={name: Completed(0, passing_output(name, "scheduled"), "")})
+    runner = FakeRunner(
+        answers=FakeAnswers(
+            outputs={name: Completed(0, passing_output(name, "scheduled"), "")}
+        )
+    )
 
     report = run(tmp_path, runner)
 

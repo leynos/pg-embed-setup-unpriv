@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import subprocess
 import typing as typ
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,15 +60,13 @@ class Completed:
 
 
 #: Signature of the function that runs one child process.
-Runner: typ.TypeAlias = typ.Callable[
-    [list[str], Path, typ.Mapping[str, str], float | None], Completed
-]
+type Runner = Callable[[list[str], Path, Mapping[str, str], float | None], Completed]
 
 
 def run_process(
     command: list[str],
     cwd: Path,
-    environment: typ.Mapping[str, str],
+    environment: Mapping[str, str],
     timeout: float | None = None,
 ) -> Completed:
     """Run `command` in `cwd`, killing and reaping it at `timeout`.
@@ -77,6 +76,7 @@ def run_process(
     >>> run_process(["true"], Path.cwd(), {}).returncode
     0
     """
+    # The argv is composed by this module and never passes through a shell.
     process = subprocess.Popen(  # noqa: S603
         command,
         cwd=cwd,
@@ -94,7 +94,7 @@ def run_process(
     return Completed(process.returncode, stdout, stderr)
 
 
-def rejected_variables(environment: typ.Mapping[str, str]) -> list[str]:
+def rejected_variables(environment: Mapping[str, str]) -> list[str]:
     """Return the Loom limit variables present in `environment`.
 
     Examples
@@ -143,7 +143,7 @@ def model_command(executable: Path, name: str) -> list[str]:
     ]
 
 
-def build_environment(inherited: typ.Mapping[str, str]) -> dict[str, str]:
+def build_environment(inherited: Mapping[str, str]) -> dict[str, str]:
     """Return the build environment, forwarding `RUSTFLAGS` as an overlay.
 
     The Makefile composes the repository's standard flags into `RUSTFLAGS`
@@ -162,7 +162,7 @@ def build_environment(inherited: typ.Mapping[str, str]) -> dict[str, str]:
 
 
 def model_environment(
-    inherited: typ.Mapping[str, str], profile: str
+    inherited: Mapping[str, str], profile: str
 ) -> dict[str, str]:
     """Return the environment one model runs in.
 
@@ -194,7 +194,7 @@ def loom_version(lockfile: str) -> str:
 
 
 def tool_version(
-    runner: Runner, program: str, repo: Path, environment: typ.Mapping[str, str]
+    runner: Runner, program: str, repo: Path, environment: Mapping[str, str]
 ) -> str:
     """Return the first line of `program --version`, or `unknown`."""
     completed = runner([program, "--version"], repo, environment, 60)
@@ -207,12 +207,13 @@ def log_name(name: str) -> str:
     return name.replace("::", "__") + ".log"
 
 
-def commit_under_test(repo: Path, environment: typ.Mapping[str, str]) -> str:
+def commit_under_test(repo: Path, environment: Mapping[str, str]) -> str:
     """Return the commit under test."""
     if sha := environment.get("GITHUB_SHA"):
         return sha
+    # Fixed argv, no shell; `git` resolves through PATH by design.
     completed = subprocess.run(  # noqa: S603
-        ["git", "rev-parse", "HEAD"],
+        ["git", "rev-parse", "HEAD"],  # noqa: S607
         cwd=repo,
         capture_output=True,
         text=True,

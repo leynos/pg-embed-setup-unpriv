@@ -2,7 +2,6 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
-#   "cuprum==0.1.0",
 #   "cyclopts==4.19.0",
 # ]
 # ///
@@ -41,6 +40,7 @@ import os
 import sys
 import time
 import typing as typ
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated
 
@@ -193,7 +193,7 @@ def _run_model(
     ceiling: float,
     deadline: float,
     repo: Path,
-    environment: typ.Mapping[str, str],
+    environment: Mapping[str, str],
     runner: Runner,
     logs: Path,
 ) -> ModelResult:
@@ -242,7 +242,7 @@ def _settings_from_output(output: str) -> EffectiveSettings | None:
     return None
 
 
-def _settings_from_logs(logs: Path, models: typ.Sequence[Model]) -> EffectiveSettings:
+def _settings_from_logs(logs: Path, models: Sequence[Model]) -> EffectiveSettings:
     """Return the settings any model reported, or a sentinel when none did.
 
     A model killed before it printed its start marker leaves the bounds
@@ -264,7 +264,7 @@ def run_loom(
     output_dir: Path,
     cargo: str,
     runner: Runner = run_process,
-    environment: typ.Mapping[str, str] | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> Report:
     """Build, discover, validate and run every model, returning the report.
 
@@ -287,7 +287,14 @@ def run_loom(
     logs.mkdir(exist_ok=True)
 
     build_started = time.monotonic()
-    build = runner(build_command(cargo), repo, build_environment(inherited), None)
+    # A hung build would otherwise run past the whole-run budget and be killed
+    # by the workflow step before `build.log` was written.
+    build = runner(
+        build_command(cargo),
+        repo,
+        build_environment(inherited),
+        max(deadline - build_started, 1.0),
+    )
     build_seconds = time.monotonic() - build_started
     (output_dir / "build.log").write_text(
         build.stdout + build.stderr, encoding="utf-8"
@@ -341,7 +348,7 @@ def run_loom(
     )
 
 
-def write_summary(report: Report, output_dir: Path, environment: typ.Mapping[str, str]) -> None:
+def write_summary(report: Report, output_dir: Path, environment: Mapping[str, str]) -> None:
     """Write `summary.json` and `summary.md`, and append to the job summary."""
     (output_dir / "summary.json").write_text(render_json(report), encoding="utf-8")
     markdown = render_markdown(report)

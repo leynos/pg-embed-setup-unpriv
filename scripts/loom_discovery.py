@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import typing as typ
+from collections.abc import Iterable
 from pathlib import Path
 
 from loom_manifest import (
@@ -85,8 +86,23 @@ def parse_cargo_messages(text: str) -> list[dict[str, typ.Any]]:
     return messages
 
 
+def _lib_test_candidate(
+    message: dict[str, typ.Any], target: str
+) -> tuple[Path, list[str]] | None:
+    """Return the executable and features of one lib test artefact, or `None`."""
+    artefact = message.get("target")
+    if message.get("reason") != "compiler-artifact" or not isinstance(artefact, dict):
+        return None
+    is_lib_test = bool(artefact.get("test")) and "lib" in (artefact.get("kind") or [])
+    executable = message.get("executable")
+    if artefact.get("name") != target or not is_lib_test or not executable:
+        return None
+    features = message.get("features")
+    return Path(executable), features if isinstance(features, list) else []
+
+
 def select_test_executable(
-    messages: typ.Iterable[dict[str, typ.Any]], target: str = TEST_TARGET
+    messages: Iterable[dict[str, typ.Any]], target: str = TEST_TARGET
 ) -> Path:
     """Return the one executable lib test artefact for `target`.
 
@@ -119,24 +135,11 @@ def select_test_executable(
     >>> select_test_executable([message])
     PosixPath('/tmp/loom-tests')
     """
-    candidates: list[tuple[Path, list[str]]] = []
-    for message in messages:
-        if message.get("reason") != "compiler-artifact":
-            continue
-        artefact = message.get("target")
-        if not isinstance(artefact, dict):
-            continue
-        if artefact.get("name") != target:
-            continue
-        if not artefact.get("test") or "lib" not in (artefact.get("kind") or []):
-            continue
-        executable = message.get("executable")
-        if not executable:
-            continue
-        features = message.get("features")
-        candidates.append(
-            (Path(executable), features if isinstance(features, list) else [])
-        )
+    candidates = [
+        candidate
+        for message in messages
+        if (candidate := _lib_test_candidate(message, target)) is not None
+    ]
     if not candidates:
         raise DiscoveryError(
             f"no executable lib test artefact for {target}; "
