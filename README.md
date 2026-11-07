@@ -85,7 +85,7 @@ directories, starting the server, and cleaning up when the test ends.
 - **Explicit configuration**: Build a cluster from a resolved
   `TestBootstrapConfig` with `TestCluster::new_with()` instead of reading the
   process environment; see the Users' Guide section on explicit
-  configuration.[^explicit-config]
+  configuration.[^1]
 - **Template databases**: Clone databases via PostgreSQL's `TEMPLATE`
   mechanism for sub-second test isolation.
 - **Diesel support**: Optional `diesel-support` feature provides
@@ -104,11 +104,11 @@ directories, starting the server, and cleaning up when the test ends.
 If your tests run as `root` (common in containers/CI) and you hit privilege
 errors, ensure the `pg_worker` helper is configured via `PG_EMBEDDED_WORKER`.
 See the Users' Guide section on root-only test agents for the required setup
-and environment variables.[^root-worker]
+and environment variables.[^2]
 
-[^root-worker]: docs/users-guide.md#integrating-with-root-only-test-agents
+[^1]: docs/users-guide.md#explicit-configuration
 
-[^explicit-config]: docs/users-guide.md#explicit-configuration
+[^2]: docs/users-guide.md#integrating-with-root-only-test-agents
 
 ## Learn more
 

@@ -18,6 +18,7 @@ use super::{
     BootstrapKind,
     env::{
         DEFAULT_SHUTDOWN_TIMEOUT,
+        EXPLICIT_WORKER_SOURCE,
         resolve_explicit_worker,
         shutdown_timeout_from_env,
         validate_explicit_shutdown_timeout,
@@ -96,7 +97,11 @@ fn resolve_explicit_inputs(
     if let Some(url) = config.releases_url() {
         settings.releases_url = validate_releases_url(url)?;
     }
-    let worker_binary = resolve_explicit_worker(privileges, config.worker_binary().cloned())?;
+    let worker_binary = resolve_explicit_worker(
+        privileges,
+        config.worker_binary().cloned(),
+        EXPLICIT_WORKER_SOURCE,
+    )?;
     let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
     let shutdown_timeout = match config.shutdown_timeout() {
         Some(timeout) => validate_explicit_shutdown_timeout(timeout)?,
