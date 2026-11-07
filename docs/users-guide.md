@@ -249,7 +249,10 @@ drop(cluster);
 
 Shared clusters created with `test_support::shared_test_cluster()` are
 intentionally leaked for the process lifetime and therefore do not perform
-cleanup on drop.
+cleanup on drop. On Unix and Windows, a best-effort process-exit hook attempts
+to stop the PostgreSQL postmaster and clean directories according to
+`CleanupMode`. The hook never drops individual databases; see
+[Database cleanup strategies](#database-cleanup-strategies).
 
 ### Async API for `#[tokio::test]` contexts
 
@@ -372,30 +375,37 @@ cluster on first access and reuses it across all tests in the same binary,
 eliminating per-test bootstrap overhead.
 
 ```rust,no_run
-use pg_embedded_setup_unpriv::{test_support::shared_test_cluster, TestCluster};
+use pg_embedded_setup_unpriv::{
+    test_support::shared_test_cluster, BootstrapResult, TestCluster,
+};
 use rstest::rstest;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_database_name() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
     let id = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("shared_cluster_test_{}_{id}", std::process::id())
+    format!("shared_db_{}_{timestamp}_{id}", std::process::id())
 }
 
 #[rstest]
-fn uses_shared_cluster(shared_test_cluster: &'static TestCluster) {
+fn uses_shared_cluster(shared_test_cluster: &'static TestCluster) -> BootstrapResult<()> {
     let db_name = unique_database_name();
 
     // Create a per-test database for isolation.
-    shared_test_cluster.create_database(&db_name).unwrap();
+    shared_test_cluster.create_database(db_name.as_str())?;
 
     // Run tests against the database.
     let url = shared_test_cluster.connection().database_url(&db_name);
     assert!(url.contains(&db_name));
 
     // Clean up the per-test database.
-    shared_test_cluster.drop_database(&db_name).unwrap();
+    shared_test_cluster.drop_database(db_name.as_str())?;
+    Ok(())
 }
 ```
 
@@ -544,9 +554,9 @@ cluster.create_database_from_template("test_db_2", "my_template")?;
 ```
 
 Template helpers live on `TestClusterConnection` and are also exposed on
-`TestCluster` for convenience. Use unique database names (for example,
-`format!("test_{}", uuid::Uuid::new_v4())`) to avoid collisions under parallel
-execution.
+`TestCluster` for convenience. Use unique database names. The examples combine
+a process ID, current timestamp, and atomic counter to reduce collisions
+between parallel tests and with databases retained from earlier runs.
 
 The `ensure_template_exists` method provides concurrency-safe template creation
 with per-template locking to prevent race conditions when multiple tests try to
@@ -620,62 +630,80 @@ _Table 3: Performance comparison for test isolation approaches._
 
 ### Database cleanup strategies
 
-When using a shared cluster, databases created during tests persist until
-explicitly dropped or the cluster shuts down. Consider these strategies:
+Databases created directly with `create_database` in a shared cluster remain
+present for the process lifetime unless explicitly dropped; cluster shutdown
+does not drop them individually. This can consume disk space during a run and
+cause name collisions if names are reused. At process exit, the hook stops the
+server and handles directories according to `CleanupMode`; databases in a
+preserved data directory remain on disk. Use unique per-test database names.
+Close clients and drain connection pools before cleanup: `drop_database` fails
+if the database is missing or has active connections. `TemporaryDatabase`
+provides best-effort implicit cleanup when its guard leaves scope.
 
 **Explicit cleanup:** Drop databases after each test to reclaim disk space and
 prevent name collisions:
 
 ```rust,no_run
-use pg_embedded_setup_unpriv::TestCluster;
-
-# fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
-let cluster = TestCluster::new()?;
-let db_name = format!("test_{}", uuid::Uuid::new_v4());
-cluster.create_database_from_template(&db_name, "my_template")?;
-
-// ... run test ...
-
-cluster.drop_database(&db_name)?; // Explicit cleanup
-# Ok(())
-# }
-```
-
-**Cluster teardown cleanup:** Let the shared cluster drop all databases when
-the test binary exits. This is simpler but uses more disk space during the test
-run:
-
-```rust,no_run
 use pg_embedded_setup_unpriv::test_support::shared_cluster;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn unique_database_name() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let id = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("shared_db_{}_{timestamp}_{id}", std::process::id())
+}
 
 # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
 let cluster = shared_cluster()?;
-let db_name = format!("test_{}", uuid::Uuid::new_v4());
-cluster.create_database_from_template(&db_name, "my_template")?;
+let db_name = unique_database_name();
+cluster.create_database(db_name.as_str())?;
 
 // ... run test ...
-// Database dropped automatically when cluster shuts down
+
+// Close clients and drain pools before cleanup.
+cluster.drop_database(db_name.as_str())?; // Explicit cleanup
 # Ok(())
 # }
 ```
 
-**Active connection handling:** Dropping a database with active connections
-fails. Ensure all connections are closed before calling `drop_database`. If
-using connection pools, drain the pool first.
-
 ### Automatic cleanup with TemporaryDatabase
 
-The `TemporaryDatabase` guard provides RAII cleanup semantics. When the guard
-goes out of scope, the database is automatically dropped:
+`TemporaryDatabase` provides automatic per-database cleanup for shared
+clusters. The `temporary_database` and `temporary_database_from_template`
+methods are available on `TestCluster`, `ClusterHandle`, and
+`TestClusterConnection`; they require no feature flag. When a guard goes out of
+scope, it attempts to drop its database. A failed implicit drop logs a warning
+and does not fail the test. The guard does not keep the server alive, and the
+shared server outlives the guard. It does not generate unique names, so each
+test must use a unique name. Close clients and drain connection pools before
+cleanup; use `force_drop()` if sessions remain open.
 
 ```rust,no_run
-use pg_embedded_setup_unpriv::TestCluster;
+use pg_embedded_setup_unpriv::test_support::shared_cluster;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn unique_database_name() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let id = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("shared_db_{}_{timestamp}_{id}", std::process::id())
+}
 
 # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
-let cluster = TestCluster::new()?;
+let cluster = shared_cluster()?;
+let db_name = unique_database_name();
 
-// Create a temporary database with automatic cleanup
-let temp_db = cluster.temporary_database("my_test_db")?;
+// The guard drops this uniquely named database when it leaves scope.
+let temp_db = cluster.temporary_database(db_name.as_str())?;
 
 // Use the database
 let url = temp_db.url();
