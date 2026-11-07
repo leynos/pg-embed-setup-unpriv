@@ -376,12 +376,15 @@ Makefile text and a target name and return fault messages in the same way.
   exactly `npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)`, so a
   no-op that merely mentions the pinned version is reported.
 
-`scripts/tests/test_markdown_gate_e2e.py` runs the pinned CLI itself against a
-temporary tree holding a copy of the repository configuration. It checks that a
-valid document passes, an invalid one fails and names itself, a document under
-an ignored directory is never linted, and a caller-supplied `**/*.md` selects
-the same files as the configuration alone. The test needs Node.js and a
-reachable package registry, and skips when the CLI cannot run.
+`scripts/tests/test_markdown_gate_e2e.py` runs the gate itself in a temporary
+tree holding a copy of the repository configuration. It checks that clean
+documents pass, a document under an ignored directory is never linted, and an
+invalid document fails and names itself. It also runs `make markdownlint` with
+the repository's own `MDLINT` definition and recipe and the bare pinned CLI
+that the CI action runs, then compares the set of flagged files rather than a
+count, so the paths cannot select different documents. The tests need Node.js,
+`make` and a reachable package registry; they skip on a development host but
+fail in CI when either tool is unavailable.
 
 ## Spelling policy
 

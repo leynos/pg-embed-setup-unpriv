@@ -205,8 +205,30 @@ def _ignore_faults(document: dict[str, typ.Any]) -> list[str]:
     return []
 
 
+def _comment_faults(text: str) -> list[str]:
+    """Return a fault when a block comment is opened but never closed.
+
+    An unterminated ``/*`` otherwise swallows the rest of the document, so
+    a complete object followed by an unclosed comment would decode cleanly
+    and look valid.
+    """
+    index = 0
+    while index < len(text):
+        if text[index] == '"':
+            index = _skip_string(text, index)
+            continue
+        if text.startswith("/*", index) and text.find("*/", index + 2) == -1:
+            return ["configuration has an unterminated /* comment"]
+        comment_end = _skip_comment(text, index)
+        index = index + 1 if comment_end is None else max(comment_end, index + 1)
+    return []
+
+
 def _decode_faults(text: str) -> tuple[dict[str, typ.Any] | None, list[str]]:
     """Return the decoded document and any fault that prevented decoding."""
+    faults = _comment_faults(text)
+    if faults:
+        return None, faults
     try:
         document = json.loads(_jsonc_to_json(text))
     except json.JSONDecodeError as err:

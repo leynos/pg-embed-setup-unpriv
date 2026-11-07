@@ -359,16 +359,29 @@ def test_jsonc_trailing_commas_are_accepted(old: str, new: str) -> None:
     )
 
 
+def test_an_unterminated_block_comment_is_reported() -> None:
+    """A complete object before an unclosed comment must not decode cleanly."""
+    faults = config_faults('{"globs": ["**/*.md"]} /* unclosed')
+    assert faults, "an unclosed block comment must be reported"
+    assert "unterminated" in faults[0], faults
+
+
+def test_a_closed_block_comment_after_the_object_is_allowed() -> None:
+    """Only an unclosed comment is a fault; a closed one is ordinary JSONC."""
+    assert config_faults('{"globs": ["**/*.md"]} /* closed */') == []
+
+
 @pytest.mark.parametrize(
     "text",
     [
         '{"globs": ["**/*.md"]',
         '{"globs": ["**/*.md"], "gitignore": yes}',
-        "/* unterminated",
         "",
     ],
-    ids=["unclosed-object", "bare-literal", "unclosed-comment", "empty"],
+    ids=["unclosed-object", "bare-literal", "empty"],
 )
+
+
 def test_malformed_jsonc_is_reported(text: str) -> None:
     """A configuration that does not parse is a fault, not an exception."""
     faults = config_faults(text)
