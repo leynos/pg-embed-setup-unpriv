@@ -471,25 +471,94 @@ cleanup after partial setup, dangerous cleanup path rejection, cleanup-mode
 relationships, and deterministic bootstrap path preparation.
 
 Loom-based checks are opt-in and only compile when the `loom-tests` feature is
-enabled. The Loom tests are marked `#[ignore]`, and `make test` keeps them
-dormant: the nextest run uses `--all-features`, while the follow-up
-`cargo test` run disables default features (enabling `dev-worker` only). CI
-runs the ignored library Loom models explicitly. Run the same suite locally
-with:
+enabled. Every model is marked `#[ignore = "requires Loom model checking"]`,
+and ordinary test runs leave them dormant: the nextest run uses
+`--all-features`, while the follow-up nextest run disables default features
+(enabling `dev-worker` only). The dedicated
+[`Loom` workflow](.github/workflows/loom.yml) runs them explicitly, apart from
+the build-and-test lane, because they need their own compilation, cache and
+wall-clock budget.
+
+### Command and schedule
+
+Run the inventory locally with:
 
 ```sh
-make test-loom
+make test-loom LOOM_PROFILE=pr
 ```
 
-The Loom models cover the schedule-sensitive lifecycle paths: scoped
-environment state, per-template database creation, shared singleton
-initialization, and shutdown-hook registration.
+`LOOM_PROFILE` selects an exploration profile and defaults to `pr`. The
+workflow runs `pr` for pull requests, `scheduled` for the daily `45 17 * * *`
+UTC schedule, and the profile a manual dispatch chooses (defaulting to
+`scheduled`). Set `LOOM_OUTPUT_DIR` to place the report somewhere other than
+`target/loom-report`.
 
-The scheduler budget in `src/env/loom_tests.rs` currently uses
-`max_threads = 3`, `max_branches = 64`, and `preemption_bound = Some(3)`. The
-three bounds jointly constrain the search space so the suite stays tractable.
-Changing any of them requires justification, and may need matching CI timeout
-adjustments.
+### Inventory
+
+`.config/loom-models.toml` names every expected model with its full libtest
+name, suite, spawned-thread count and total participant count including the
+execution thread. The runner builds the library test binary once, reads the
+names it reports for `--list --ignored`, and refuses the run when an expected
+model is missing or an ignored test under a `loom_tests` module is not
+registered. Each model then runs alone with
+`--exact --ignored --nocapture --test-threads=1`, so one model's failure cannot
+mask another's and `--ignored` alone never selects an unrelated ignored test.
+To add a model, add its manifest entry; `scripts/tests/test_loom_contracts.py`
+fails until the source and the manifest agree.
+
+The models cover the schedule-sensitive lifecycle paths: scoped environment
+state, per-template database creation, shared singleton initialization, and
+shutdown-hook registration.
+
+### Profiles and bounds
+
+`src/loom_model.rs` is the only place that builds a `loom::model::Builder`.
+
+| Profile     | `max_threads` | `max_branches` | `preemption_bound` | Per-model ceiling |
+| ----------- | ------------- | -------------- | ------------------ | ----------------- |
+| `pr`        | 3             | 64             | 3                  | 120 s             |
+| `scheduled` | 3             | 65,536         | 10                 | 1,200 s           |
+
+Both profiles cap the participant count at three; the scheduled profile spends
+its larger budget on branches and preemptions. Its preemption bound was chosen
+by measurement: at 10 two local runs took 421 s and 547 s for the whole
+inventory, with worst cases of 308 s and 398 s. Against the 1,200 s per-model
+ceiling and the job's 60-minute step ceiling that leaves a margin of at least
+3x per model and over 6x for the step. Measured runs never exhausted the branch
+budget; it is a ceiling that reports `branch_limit` instead of exploring for
+ever, not a bound the models currently reach. The shared model runner clears
+`max_duration`, `max_permutations` and `checkpoint_file`, and the Python runner
+refuses to start when `LOOM_MAX_BRANCHES`, `LOOM_MAX_PERMUTATIONS`,
+`LOOM_MAX_DURATION`, `LOOM_MAX_PREEMPTIONS`, `LOOM_CHECKPOINT_FILE` or
+`LOOM_CHECKPOINT_INTERVAL` is set, so the profile alone decides the bounds.
+`LOOM_LOG` and `LOOM_LOCATION` remain available as diagnostics.
+
+### What a pass means
+
+A pass means every model explored completely within the stated bounds. It is
+not a proof for schedules outside them. Each model prints a `loom-model-start`
+marker before exploration and a `loom-model-complete` marker only after it
+returns; the runner requires both, one executed passing test, a zero exit code
+and a profile match before it records `passed`. The other outcomes are `failed`,
+`branch_limit`, `timeout` and `incomplete`.
+
+### Triage and reproduction
+
+Each run writes `target/loom-report/summary.json` and `summary.md`, with a log
+per model, the commit, tool versions, the Loom version, the effective bounds,
+durations, failure tails and reproduction commands. The workflow uploads the
+directory even when the run fails.
+
+A `branch_limit` outcome means the model exhausted `max_branches`, often
+because an algorithm needs the processor to make progress. A `timeout` means
+the model exceeded the profile's per-model wall-clock ceiling in the manifest.
+An `incomplete` outcome means the markers, the executed test count or the
+profile disagreed with what the runner expected. Reproduce one model with the
+command its log records, or rerun the whole profile:
+
+```sh
+make test-loom LOOM_PROFILE=scheduled
+```
 
 Production and Loom both route `ScopedEnv` environment access through the same
 guard-aware `EnvLockOps` boundary. `lock_env_mutex` acquires the lock guard,
@@ -592,10 +661,11 @@ but it is not zero, and the contract reads it from the configuration so a
 profile that raised it raises the requirement too.
 
 The job timer starts when the job starts, before the checkout and the toolchain
-setup, and it is still running through the plain `cargo nextest` step and the
-Loom models that follow coverage. So a ceiling merely above the watchdog still
-cancels the job before the watchdog can report an overrun, and a cancellation
-discards the log that would have explained it.
+setup, and it is still running through the plain `cargo nextest` step that
+precedes coverage. So a ceiling merely above the watchdog still cancels the job
+before the watchdog can report an overrun, and a cancellation discards the log
+that would have explained it. Loom runs in its own workflow, so it no longer
+adds to this job's ceiling.
 
 ### What the ceiling is sized against
 
@@ -626,8 +696,9 @@ ceiling is the next whole minute above that sum: 66 rather than 65, and rather
 than the ten minutes of margin that 60 gave. That is a rise from the 15 minutes
 first written here, which the wider sample showed to be below the worst gap
 already observed. On the pull-request lane most of that gap is the suite's own
-`cargo nextest` step and the Loom models, which run outside the coverage step
-and so outside the watchdog.
+`cargo nextest` step. The measured gap also included the Loom models, which ran
+outside the coverage step and so outside the watchdog; they now run in their
+own workflow, so the ceiling keeps that headroom.
 
 None of those runs was genuinely cold. One run is the coldest seen so far, not
 a measurement of the cold case.
