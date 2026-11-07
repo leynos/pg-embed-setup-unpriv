@@ -10,22 +10,29 @@ use crate::{
     error::{BootstrapError, BootstrapResult},
 };
 
-/// Records `requested` as the singleton origin, or rejects a conflicting call.
+/// Rejects `requested` when it may not reuse the singleton's cached result.
 ///
-/// The first call wins. Later calls are accepted only when
-/// [`ConfigSource::permits`] allows them to reuse the cached result.
-pub(super) fn resolve_origin(
-    origin: &mut Option<ConfigSource>,
+/// The check runs before initialization so a conflicting call does not pay for
+/// a bootstrap it will discard. Recording is a separate step because a
+/// panicking initializer leaves no cached result for the origin to describe.
+pub(super) fn ensure_compatible(
+    origin: Option<&ConfigSource>,
     requested: &ConfigSource,
 ) -> BootstrapResult<()> {
     match origin {
-        None => {
-            *origin = Some(requested.clone());
-            Ok(())
-        }
+        None => Ok(()),
         Some(existing) if existing.permits(requested) => Ok(()),
         Some(_) => Err(conflict_error()),
     }
+}
+
+/// Records `requested` as the configuration behind the singleton's result.
+///
+/// Call this only after initialization has produced a result, successful or
+/// failed. A panic unwinds before this point, so a later call is not made to
+/// conflict with a configuration that never initialized anything.
+pub(super) fn record_origin(origin: &mut Option<ConfigSource>, requested: &ConfigSource) {
+    origin.get_or_insert_with(|| requested.clone());
 }
 
 /// Builds the error returned when an explicit caller conflicts with the origin.
@@ -104,8 +111,12 @@ mod tests {
             requested: &ConfigSource,
             init: impl FnOnce() -> Result<u32, (&'static str, &'static str)>,
         ) -> Result<u32, &'static str> {
-            resolve_origin(&mut self.origin, requested).map_err(|_| "conflict")?;
-            get_or_try_init_shared(&mut self.state, init, |cached| *cached)
+            ensure_compatible(self.origin.as_ref(), requested).map_err(|_| "conflict")?;
+            let result = get_or_try_init_shared(&mut self.state, init, |cached| *cached);
+            if self.origin.is_none() {
+                record_origin(&mut self.origin, requested);
+            }
+            result
         }
     }
 
@@ -173,5 +184,26 @@ mod tests {
         } else {
             Ok(7)
         }
+    }
+
+    /// A panicking initializer leaves no result, so no origin is recorded.
+    ///
+    /// Without this, the failed attempt would claim the singleton and a later
+    /// explicit call would be rejected for conflicting with a configuration
+    /// that never produced anything.
+    #[test]
+    fn panicking_initializer_does_not_record_origin() {
+        let mut harness = Harness::new();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            harness.call(&ConfigSource::Ambient, || -> Result<u32, _> {
+                panic!("initializer panicked")
+            })
+        }));
+        assert!(panicked.is_err(), "the initializer panic should propagate");
+
+        let value = harness
+            .call(&explicit(54_321), || Ok(9))
+            .expect("a later explicit call should take over the uninitialized singleton");
+        assert_eq!(value, 9);
     }
 }
