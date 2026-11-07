@@ -67,7 +67,7 @@ jobs:
         run: make check-fmt
       - name: Markdown lint
         if: ${{ matrix.privilege == 'unprivileged' }}
-        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff
+        uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34
         with:
           globs: '**/*.md'
       - name: Setup uv
