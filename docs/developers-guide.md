@@ -333,6 +333,56 @@ When the action commit changes, update its entry in `APPROVED_PAIRINGS` in
 `scripts/tests/markdown_gate.py` and `MARKDOWNLINT_CLI2_VERSION` in the
 `Makefile` together; the contract test fails until both agree.
 
+### Markdown gate helpers
+
+The gate's checks are split into two pure judgement modules and one behavioural
+test, so each judgement can be driven against a mutated fixture before it is
+applied to the real files.
+
+`scripts/tests/markdown_gate.py` judges the workflow and the configuration.
+Every function takes text or a parsed `Workflow` and returns a list of fault
+messages: an empty list means the input satisfies the contract, and each
+message names the offending value.
+
+- `config_faults(text)` takes the JSONC configuration document. It reports
+  malformed JSONC, a top level that is not a JSON object, a `globs` value that
+  is not a non-empty array, a selection that omits `**/*.md`, a negation that
+  cancels the Markdown selection, and an `ignores` entry that removes every
+  Markdown file. It never raises a parser exception.
+- `glob_faults(workflow)` takes the parsed workflow and reports any `globs`
+  input passed to the action step; the step must pass none.
+- `pairing_faults(revision, version)` takes an action commit SHA and a CLI
+  version and reports a revision absent from `APPROVED_PAIRINGS` or a version
+  that disagrees with its approved entry.
+- `pairing_faults_for(workflow, makefile)` applies that pairing to every
+  action step, using the version `makefile_version(makefile)` reads from
+  `MARKDOWNLINT_CLI2_VERSION`.
+- `makefile_version(makefile)` returns the pinned version, or an empty
+  string when the assignment is absent.
+
+`scripts/tests/makefile_gate.py` judges the Makefile. Its functions take the
+Makefile text and a target name and return fault messages in the same way.
+
+- `prerequisites(makefile, target)` returns the names on the target's
+  declaration line; `prerequisite_faults(makefile, target, wanted)` reports
+  each wanted name that is missing.
+- `recipe_lines(makefile, target)` returns the target's recipe with leading
+  tabs removed.
+- `mdlint_faults(makefile, target)` reports a recipe that does not invoke
+  `$(MDLINT)`, mentions it without running it, ignores its failure with Make's
+  `-` prefix, or passes any argument other than `--fix`. `fmt` must pass
+  `--fix`; every other target must pass nothing.
+- `mdlint_runner_faults(makefile)` requires the default `MDLINT` to be
+  exactly `npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)`, so a
+  no-op that merely mentions the pinned version is reported.
+
+`scripts/tests/test_markdown_gate_e2e.py` runs the pinned CLI itself against a
+temporary tree holding a copy of the repository configuration. It checks that a
+valid document passes, an invalid one fails and names itself, a document under
+an ignored directory is never linted, and a caller-supplied `**/*.md` selects
+the same files as the configuration alone. The test needs Node.js and a
+reachable package registry, and skips when the CLI cannot run.
+
 ## Spelling policy
 
 Run `make spelling` to enforce en-GB-oxendict spelling. The target invokes the
