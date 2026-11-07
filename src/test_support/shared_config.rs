@@ -43,6 +43,8 @@ pub(super) fn conflict_error() -> BootstrapError {
 mod tests {
     //! Tests for shared singleton origin and conflict rules.
 
+    use rstest::rstest;
+
     use super::*;
     use crate::{
         PgEnvCfg,
@@ -55,6 +57,32 @@ mod tests {
             port: Some(port),
             ..PgEnvCfg::default()
         })))
+    }
+
+    /// The source a simulated singleton call supplies.
+    #[derive(Clone, Copy)]
+    enum Attempt {
+        Ambient,
+        Explicit(u16),
+    }
+
+    impl Attempt {
+        fn source(self) -> ConfigSource {
+            match self {
+                Self::Ambient => ConfigSource::Ambient,
+                Self::Explicit(port) => explicit(port),
+            }
+        }
+    }
+
+    /// What the second call should observe.
+    enum Expected {
+        /// The cached value is reused.
+        Reused(u32),
+        /// The call is rejected because its configuration differs.
+        Conflict,
+        /// The first call's cached failure is replayed.
+        CachedFailure,
     }
 
     /// Minimal state machine mirroring the singleton's origin and cache rules.
@@ -81,72 +109,69 @@ mod tests {
         }
     }
 
-    #[test]
-    fn equal_explicit_configuration_reuses_cached_success() {
+    #[rstest]
+    #[case::equal_explicit_reuses_success(
+        Attempt::Explicit(54_321),
+        false,
+        Attempt::Explicit(54_321),
+        Expected::Reused(7)
+    )]
+    #[case::different_explicit_conflicts(
+        Attempt::Explicit(54_321),
+        false,
+        Attempt::Explicit(54_322),
+        Expected::Conflict
+    )]
+    #[case::ambient_then_explicit_conflicts(
+        Attempt::Ambient,
+        false,
+        Attempt::Explicit(54_321),
+        Expected::Conflict
+    )]
+    #[case::explicit_then_ambient_reuses(
+        Attempt::Explicit(54_321),
+        false,
+        Attempt::Ambient,
+        Expected::Reused(7)
+    )]
+    #[case::equal_explicit_replays_failure(
+        Attempt::Explicit(54_321),
+        true,
+        Attempt::Explicit(54_321),
+        Expected::CachedFailure
+    )]
+    fn shared_origin_rules_are_enforced(
+        #[case] prime: Attempt,
+        #[case] prime_fails: bool,
+        #[case] second: Attempt,
+        #[case] expected: Expected,
+    ) {
         let mut harness = Harness::new();
-        let first = harness
-            .call(&explicit(54_321), || Ok(7))
-            .expect("first initialization should succeed");
-        let second = harness
-            .call(&explicit(54_321), || panic!("must not reinitialize"))
-            .expect("equal configuration should reuse the cached value");
+        let first = harness.call(&prime.source(), || initial(prime_fails));
+        if prime_fails {
+            assert_eq!(first.expect_err("prime should fail"), "first failure");
+        } else {
+            assert_eq!(first.expect("prime should succeed"), 7);
+        }
 
-        assert_eq!(first, second);
+        let result = harness.call(&second.source(), || panic!("must not reinitialize"));
+        match expected {
+            Expected::Reused(value) => {
+                assert_eq!(result.expect("cached value should be reused"), value);
+            }
+            Expected::Conflict => assert_eq!(result.expect_err("call should conflict"), "conflict"),
+            Expected::CachedFailure => {
+                assert_eq!(result.expect_err("cached failure should replay"), "cached");
+            }
+        }
     }
 
-    #[test]
-    fn different_explicit_configuration_is_rejected() {
-        let mut harness = Harness::new();
-        harness
-            .call(&explicit(54_321), || Ok(7))
-            .expect("first initialization should succeed");
-
-        let err = harness
-            .call(&explicit(54_322), || panic!("must not initialize"))
-            .expect_err("different configuration should conflict");
-
-        assert_eq!(err, "conflict");
-    }
-
-    #[test]
-    fn ambient_first_then_explicit_is_rejected() {
-        let mut harness = Harness::new();
-        harness
-            .call(&ConfigSource::Ambient, || Ok(7))
-            .expect("ambient initialization should succeed");
-
-        let err = harness
-            .call(&explicit(54_321), || panic!("must not initialize"))
-            .expect_err("explicit call after ambient initialization should conflict");
-
-        assert_eq!(err, "conflict");
-    }
-
-    #[test]
-    fn explicit_first_then_ambient_reuses_cached_result() {
-        let mut harness = Harness::new();
-        harness
-            .call(&explicit(54_321), || Ok(7))
-            .expect("explicit initialization should succeed");
-
-        let value = harness
-            .call(&ConfigSource::Ambient, || panic!("must not reinitialize"))
-            .expect("ambient call should reuse the cached value");
-
-        assert_eq!(value, 7);
-    }
-
-    #[test]
-    fn equal_explicit_configuration_reuses_cached_failure() {
-        let mut harness = Harness::new();
-        let first = harness
-            .call(&explicit(54_321), || Err(("cached", "first failure")))
-            .expect_err("first initialization should fail");
-        let second = harness
-            .call(&explicit(54_321), || panic!("must not reinitialize"))
-            .expect_err("equal configuration should replay the cached failure");
-
-        assert_eq!(first, "first failure");
-        assert_eq!(second, "cached");
+    /// Result of the first call: a value, or a cacheable failure.
+    fn initial(fails: bool) -> Result<u32, (&'static str, &'static str)> {
+        if fails {
+            Err(("cached", "first failure"))
+        } else {
+            Ok(7)
+        }
     }
 }
