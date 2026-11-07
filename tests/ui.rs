@@ -12,6 +12,7 @@ fn public_surfaces_compile() {
     tests.pass("tests/ui/pass/observability_surface.rs");
     tests.pass("tests/ui/pass/extensions_compile_target.rs");
     tests.pass("tests/ui/pass/const_connection_accessors.rs");
+    tests.pass("tests/ui/pass/explicit_settings_surface.rs");
 }
 
 #[cfg(windows)]
@@ -69,3 +70,13 @@ mod const_connection_accessors;
 #[test]
 #[cfg(windows)]
 fn const_connection_accessors_smoke_compiles() { const_connection_accessors::verify_surface(); }
+
+#[cfg(windows)]
+#[path = "ui/pass/explicit_settings_surface.rs"]
+mod explicit_settings_surface;
+
+#[test]
+#[cfg(windows)]
+fn explicit_settings_surface_smoke_compiles() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+    explicit_settings_surface::verify_surface()
+}

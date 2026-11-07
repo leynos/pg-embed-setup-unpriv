@@ -31,7 +31,7 @@ const MAX_SHUTDOWN_TIMEOUT_SECS: u64 = 600;
 const SHUTDOWN_TIMEOUT_ENV: &str = "PG_SHUTDOWN_TIMEOUT_SECS";
 
 #[cfg(unix)]
-fn discover_worker_from_path() -> BootstrapResult<Option<Utf8PathBuf>> {
+pub(super) fn discover_worker_from_path() -> BootstrapResult<Option<Utf8PathBuf>> {
     discover_worker_from_path_value(env::var_os("PATH"))
 }
 
@@ -160,6 +160,28 @@ fn validate_shutdown_timeout_secs(seconds: u64, trimmed: &str) -> BootstrapResul
     Ok(Duration::from_secs(seconds))
 }
 
+/// Validates an explicitly supplied shutdown timeout.
+///
+/// Applies the same one-to-600-second bounds as
+/// `PG_SHUTDOWN_TIMEOUT_SECS`, but reports the value as a duration because no
+/// environment variable is involved.
+pub(super) fn validate_explicit_shutdown_timeout(timeout: Duration) -> BootstrapResult<Duration> {
+    if timeout < Duration::from_secs(1) {
+        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
+            "shutdown timeout must be at least 1 second (received {timeout:?})"
+        )));
+    }
+
+    if timeout > Duration::from_secs(MAX_SHUTDOWN_TIMEOUT_SECS) {
+        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
+            "shutdown timeout must be {MAX_SHUTDOWN_TIMEOUT_SECS} seconds or less (received \
+             {timeout:?})"
+        )));
+    }
+
+    Ok(timeout)
+}
+
 pub(super) fn worker_binary_from_env(
     privileges: ExecutionPrivileges,
 ) -> BootstrapResult<Option<Utf8PathBuf>> {
@@ -191,7 +213,36 @@ pub(super) fn worker_binary_from_env(
     Ok(None)
 }
 
-fn validate_worker_path(path: &Utf8PathBuf) -> BootstrapResult<()> {
+/// Resolves the worker binary for an explicit bootstrap.
+///
+/// Mirrors [`worker_binary_from_env`] without reading `PG_EMBEDDED_WORKER`: a
+/// supplied path is validated, and an absent one falls back to `PATH`
+/// discovery. Unprivileged execution ignores the option entirely.
+pub(super) fn resolve_explicit_worker(
+    privileges: ExecutionPrivileges,
+    worker: Option<Utf8PathBuf>,
+) -> BootstrapResult<Option<Utf8PathBuf>> {
+    if privileges != ExecutionPrivileges::Root || !root_privilege_drop_supported() {
+        return Ok(None);
+    }
+
+    if let Some(path) = worker {
+        validate_worker_path(&path)?;
+        return Ok(Some(path));
+    }
+
+    #[cfg(unix)]
+    {
+        if let Some(discovered) = discover_worker_from_path()? {
+            validate_worker_path(&discovered)?;
+            return Ok(Some(discovered));
+        }
+    }
+
+    Ok(None)
+}
+
+pub(super) fn validate_worker_path(path: &Utf8PathBuf) -> BootstrapResult<()> {
     if path.as_str().is_empty() {
         return Err(BootstrapError::from(color_eyre::eyre::eyre!(
             "Worker binary path must not be empty"

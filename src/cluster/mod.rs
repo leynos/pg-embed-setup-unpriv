@@ -107,7 +107,10 @@ use self::{
     startup::{cache_config_from_bootstrap, start_postgres},
 };
 use crate::{
+    TestBootstrapConfig,
+    TestBootstrapSettings,
     bootstrap_for_tests,
+    bootstrap_for_tests_with,
     env::ScopedEnv,
     error::BootstrapResult,
     observability::LOG_TARGET,
@@ -166,6 +169,37 @@ impl TestCluster {
         Ok(Self { handle, guard })
     }
 
+    /// Boots a `PostgreSQL` instance from resolved configuration.
+    ///
+    /// This is the explicit-configuration counterpart to [`new`](Self::new).
+    /// It does not read `PG_TEST_BACKEND`, `PG_EMBEDDED_WORKER` or
+    /// `PG_SHUTDOWN_TIMEOUT_SECS`; see [`TestBootstrapConfig`] for the inputs
+    /// it accepts.
+    ///
+    /// # Errors
+    /// Returns an error if the explicit configuration is invalid or if starting
+    /// the embedded cluster fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pg_embedded_setup_unpriv::{PgEnvCfg, TestBootstrapConfig, TestCluster};
+    ///
+    /// # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+    /// let config = TestBootstrapConfig::new(PgEnvCfg {
+    ///     port: Some(54_321),
+    ///     ..PgEnvCfg::default()
+    /// });
+    /// let cluster = TestCluster::new_with(config)?;
+    /// assert_eq!(cluster.settings().port, 54_321);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new_with(config: impl Into<TestBootstrapConfig>) -> BootstrapResult<Self> {
+        let (handle, guard) = Self::new_split_with(config)?;
+        Ok(Self { handle, guard })
+    }
+
     /// Boots a `PostgreSQL` instance and returns a separate handle and guard.
     ///
     /// This constructor is useful for patterns requiring `Send`, such as shared
@@ -212,12 +246,53 @@ impl TestCluster {
     /// **Warning**: Dropping the guard shuts down the cluster. Do not use the
     /// handle after the guard has been dropped unless the guard was forgotten.
     pub fn new_split() -> BootstrapResult<(ClusterHandle, ClusterGuard)> {
+        Self::new_split_from_bootstrap(bootstrap_for_tests()?)
+    }
+
+    /// Boots a `PostgreSQL` instance from resolved configuration and returns a
+    /// separate handle and guard.
+    ///
+    /// This is the explicit-configuration counterpart to
+    /// [`new_split`](Self::new_split). It does not read `PG_TEST_BACKEND`,
+    /// `PG_EMBEDDED_WORKER` or `PG_SHUTDOWN_TIMEOUT_SECS`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the explicit configuration is invalid or if starting
+    /// the embedded cluster fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pg_embedded_setup_unpriv::{PgEnvCfg, TestBootstrapConfig, TestCluster};
+    ///
+    /// # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+    /// let config = TestBootstrapConfig::new(PgEnvCfg::default());
+    /// let (handle, guard) = TestCluster::new_split_with(config)?;
+    /// assert!(handle.database_exists("postgres")?);
+    /// drop(guard);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new_split_with(
+        config: impl Into<TestBootstrapConfig>,
+    ) -> BootstrapResult<(ClusterHandle, ClusterGuard)> {
+        Self::new_split_from_bootstrap(bootstrap_for_tests_with(config)?)
+    }
+
+    /// Starts a cluster from already-resolved bootstrap settings.
+    ///
+    /// Keeping the post-bootstrap body in one place ensures the ambient and
+    /// explicit constructors share cache resolution, environment application,
+    /// startup error handling and guard ownership.
+    fn new_split_from_bootstrap(
+        initial_bootstrap: TestBootstrapSettings,
+    ) -> BootstrapResult<(ClusterHandle, ClusterGuard)> {
         let span = info_span!(target: LOG_TARGET, "test_cluster");
         // Resolve cache directory BEFORE applying test environment.
         // Otherwise, the test sandbox's XDG_CACHE_HOME would be used.
         let (runtime, env_vars, env_guard, outcome) = {
             let _entered = span.enter();
-            let initial_bootstrap = bootstrap_for_tests()?;
             let cache_config = cache_config_from_bootstrap(&initial_bootstrap);
             let runtime = build_runtime()?;
             let env_vars = initial_bootstrap.environment.to_env();

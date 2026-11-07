@@ -14,7 +14,10 @@ use super::{
     startup::{cache_config_from_bootstrap, start_postgres_async},
 };
 use crate::{
+    TestBootstrapConfig,
+    TestBootstrapSettings,
     bootstrap_for_tests,
+    bootstrap_for_tests_with,
     env::ScopedEnv,
     error::BootstrapResult,
     observability::LOG_TARGET,
@@ -61,6 +64,35 @@ impl TestCluster {
         Ok(Self { handle, guard })
     }
 
+    /// Boots a `PostgreSQL` instance asynchronously from resolved configuration.
+    ///
+    /// This is the explicit-configuration counterpart to
+    /// [`start_async`](Self::start_async). It does not read `PG_TEST_BACKEND`,
+    /// `PG_EMBEDDED_WORKER` or `PG_SHUTDOWN_TIMEOUT_SECS`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the explicit configuration is invalid or if starting
+    /// the embedded cluster fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pg_embedded_setup_unpriv::{PgEnvCfg, TestBootstrapConfig, TestCluster};
+    ///
+    /// #[tokio::test]
+    /// async fn test_with_explicit_config() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+    ///     let config = TestBootstrapConfig::new(PgEnvCfg::default());
+    ///     let cluster = TestCluster::start_async_with(config).await?;
+    ///     cluster.stop_async().await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn start_async_with(config: impl Into<TestBootstrapConfig>) -> BootstrapResult<Self> {
+        let (handle, guard) = Self::start_async_split_with(config).await?;
+        Ok(Self { handle, guard })
+    }
+
     /// Boots a `PostgreSQL` instance asynchronously and returns a separate handle and guard.
     ///
     /// This is the async equivalent of [`new_split()`](Self::new_split).
@@ -76,6 +108,33 @@ impl TestCluster {
     /// Returns an error if the bootstrap configuration cannot be prepared or if
     /// starting the embedded cluster fails.
     pub async fn start_async_split() -> BootstrapResult<(ClusterHandle, ClusterGuard)> {
+        Self::start_async_split_from_bootstrap(bootstrap_for_tests()?).await
+    }
+
+    /// Boots a `PostgreSQL` instance asynchronously from resolved configuration
+    /// and returns a separate handle and guard.
+    ///
+    /// This is the explicit-configuration counterpart to
+    /// [`start_async_split`](Self::start_async_split).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the explicit configuration is invalid or if starting
+    /// the embedded cluster fails.
+    pub async fn start_async_split_with(
+        config: impl Into<TestBootstrapConfig>,
+    ) -> BootstrapResult<(ClusterHandle, ClusterGuard)> {
+        Self::start_async_split_from_bootstrap(bootstrap_for_tests_with(config)?).await
+    }
+
+    /// Starts a cluster from already-resolved bootstrap settings.
+    ///
+    /// Keeping the post-bootstrap body in one place ensures the ambient and
+    /// explicit constructors share cache resolution, environment application,
+    /// startup error handling and guard ownership.
+    async fn start_async_split_from_bootstrap(
+        initial_bootstrap: TestBootstrapSettings,
+    ) -> BootstrapResult<(ClusterHandle, ClusterGuard)> {
         use tracing::Instrument;
 
         let span = info_span!(target: LOG_TARGET, "test_cluster", async_mode = true);
@@ -83,7 +142,6 @@ impl TestCluster {
         // Sync bootstrap preparation (no await needed).
         // Resolve cache directory BEFORE applying test environment.
         // Otherwise, the test sandbox's XDG_CACHE_HOME would be used.
-        let initial_bootstrap = bootstrap_for_tests()?;
         let cache_config = cache_config_from_bootstrap(&initial_bootstrap);
         let env_vars = initial_bootstrap.environment.to_env();
         let env_guard = ScopedEnv::apply(&env_vars);

@@ -304,6 +304,116 @@ running as `root`, the async API still delegates to the worker helper, and
 those operations are executed with `spawn_blocking` so they do not block the
 async executor.
 
+## Explicit configuration
+
+The zero-configuration helpers read `PG_*` variables from the process
+environment. That is convenient for a single test binary, but it makes the
+cluster depend on ambient state: a stray `PG_PORT`, `PG_SUPERUSER`, or
+`PG_TEST_BACKEND` in the shell changes the result, and two test modules cannot
+ask for different settings in the same process.
+
+`TestBootstrapConfig` resolves that state explicitly. Build one from a
+`PgEnvCfg`, optionally add the worker binary, shutdown timeout, and release
+URL, then pass it to the `*_with` constructors:
+
+```rust,no_run
+use std::time::Duration;
+
+use pg_embedded_setup_unpriv::{
+    BootstrapResult,
+    PgEnvCfg,
+    TestBootstrapConfig,
+    TestCluster,
+};
+
+fn explicit_cluster() -> BootstrapResult<()> {
+    let config = TestBootstrapConfig::new(PgEnvCfg {
+        superuser: Some("app".to_owned()),
+        password: Some("app".to_owned()),
+        ..PgEnvCfg::default()
+    })
+    .with_shutdown_timeout(Duration::from_secs(30))
+    .with_releases_url("https://example.invalid/postgresql");
+
+    let cluster = TestCluster::new_with(config)?;
+    drop(cluster);
+    Ok(())
+}
+```
+
+`bootstrap_for_tests_with(config)` is the corresponding bootstrap helper, and
+`TestCluster::new_split_with(config)` returns the handle/guard pair directly.
+Both accept anything convertible into `TestBootstrapConfig`, so a `PgEnvCfg`
+can be passed without wrapping it. With the `async-api` feature,
+`TestCluster::start_async_with(config)` and
+`TestCluster::start_async_split_with(config)` mirror the async constructors.
+
+The explicit path deliberately does not read `PG_TEST_BACKEND`, does not call
+`PgEnvCfg::load()`, and ignores `PG_EMBEDDED_WORKER` and
+`PG_SHUTDOWN_TIMEOUT_SECS`. Every `PgEnvCfg` field set on the supplied value
+wins over the environment; fields left at their defaults keep the built-in
+defaults. Supplying a worker binary validates it exactly as the ambient path
+does when the process runs as `root`, and supplying no worker binary falls back
+to `PATH` discovery. An explicit shutdown timeout must be between one and 600
+seconds; the default is 15 seconds.
+
+Some inputs are still ambient by design. They are read after configuration
+resolution, and none of them can be supplied through `TestBootstrapConfig`:
+
+| Input                         | When it is read                                                    |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `PG_EMBED_DURABLE`            | converting the `PgEnvCfg` into settings for a test bootstrap       |
+| `TZ`, `TZDIR`                 | preparing the cluster environment                                  |
+| `PATH`                        | discovering the worker binary when no explicit worker is supplied  |
+| binary cache fallbacks        | resolving the cache directory when `binary_cache_dir` is unset     |
+| extension cache fallbacks     | resolving the cache directory when `extensions_cache_dir` is unset |
+| `PG_EMBED_ORPHAN_WATCHER`     | starting the cluster                                               |
+| privilege detection           | deciding whether the worker path applies at all                    |
+| `Settings::default()` lookups | home and current-directory fallbacks inside `postgresql_embedded`  |
+
+The prepared environment produced by the bootstrap is still applied to the
+process for the lifetime of the cluster, exactly as with the ambient
+constructors. The difference is in what is read to build that environment, not
+in whether it is installed.
+
+### Shared clusters with explicit configuration
+
+`test_support::shared_cluster_handle_with(config)` initializes the process-wide
+shared cluster from an explicit configuration. The singleton is still shared:
+the first successful or failed initialization decides the result for the whole
+process.
+
+A call made through `shared_cluster_handle()` always reuses the cached result,
+whatever initialized it. A call made through `shared_cluster_handle_with()`
+reuses the cached result only when the singleton was initialized with an equal
+`TestBootstrapConfig`; otherwise it returns a configuration error that names
+the conflict without echoing configuration values. Initialize the shared
+cluster once, or use a separate process, when tests need different explicit
+configurations.
+
+```rust,no_run
+use pg_embedded_setup_unpriv::{
+    PgEnvCfg,
+    TestBootstrapConfig,
+    test_support::shared_cluster_handle_with,
+};
+
+# fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+let config = TestBootstrapConfig::new(PgEnvCfg::default());
+let handle = shared_cluster_handle_with(config)?;
+assert!(handle.database_exists("postgres")?);
+# Ok(())
+# }
+```
+
+### Binary cache and release sources
+
+The binary cache is keyed by the resolved `PostgreSQL` version inside
+`binary_cache_dir`. The release source URL is not part of the key. Two release
+sources that publish the same version therefore share one cache entry, and the
+first download wins. When tests must not share binaries across sources, give
+each source its own `binary_cache_dir` in the explicit `PgEnvCfg`.
+
 ## Observability
 
 Set `RUST_LOG=pg_embed::observability=info` to emit tracing spans that describe

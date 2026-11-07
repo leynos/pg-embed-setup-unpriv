@@ -12,7 +12,7 @@ global-timeout = "1100s"
 filter = "binary(=settings)"
 slow-timeout = { period = "30s", terminate-after = 1, grace-period = "5s" }
 
-# The UI test compiles six trybuild fixtures in a shared generated project.
+# The UI test compiles seven trybuild fixtures in a shared generated project.
 # Nested builds queue behind other users of the shared Cargo cache and compiler
 # pool; allow 15 minutes while retaining a finite timeout for a stalled test.
 # The 1,100-second global timeout leaves time for the other tests to start.

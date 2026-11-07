@@ -2,16 +2,19 @@
 //!
 //! Provides [`bootstrap_for_tests`] so suites can retrieve structured settings and
 //! prepared environment variables without reimplementing bootstrap orchestration.
+mod config;
 mod env;
 mod env_types;
 mod mode;
 mod prepare;
+mod source;
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use color_eyre::eyre::{Context, eyre};
+use color_eyre::eyre::eyre;
+pub use config::TestBootstrapConfig;
 pub use env::{TestBootstrapEnvironment, find_timezone_dir};
 pub use mode::{ExecutionMode, ExecutionPrivileges, detect_execution_privileges};
 pub(crate) use mode::{root_privilege_drop_supported, unsupported_root_privilege_drop_error};
@@ -37,12 +40,10 @@ pub(crate) use prepare::{release_watcher, watch_slot_owner};
 use serde::{Deserialize, Serialize};
 
 use self::{
-    env::{shutdown_timeout_from_env, worker_binary_from_env},
-    mode::determine_execution_mode,
     prepare::{DataLayout, prepare_bootstrap},
+    source::{BootstrapSource, resolve_inputs},
 };
 use crate::{
-    PgEnvCfg,
     error::{BootstrapResult, Result as CrateResult},
     extensions::{ExtensionRequest, InstalledExtension},
 };
@@ -58,7 +59,7 @@ type SetupOnlyLifecycleHook =
 static SETUP_ONLY_LIFECYCLE_HOOK: OnceLock<Mutex<Option<SetupOnlyLifecycleHook>>> = OnceLock::new();
 
 #[derive(Clone, Copy)]
-enum BootstrapKind {
+pub(super) enum BootstrapKind {
     Default,
     Test,
 }
@@ -157,7 +158,7 @@ pub struct TestBootstrapSettings {
 /// Returns an error when bootstrap preparation fails, when the `PostgreSQL`
 /// distribution cannot be downloaded, or when `initdb` fails.
 pub fn run() -> CrateResult<()> {
-    let bootstrap = orchestrate_bootstrap(BootstrapKind::Default)?;
+    let bootstrap = orchestrate_bootstrap(BootstrapKind::Default, BootstrapSource::Ambient)?;
     run_setup_only_lifecycle(bootstrap)
 }
 
@@ -185,38 +186,80 @@ pub fn run() -> CrateResult<()> {
 /// Returns an error when bootstrap preparation fails or when subprocess orchestration
 /// cannot be configured.
 pub fn bootstrap_for_tests() -> BootstrapResult<TestBootstrapSettings> {
-    orchestrate_bootstrap(BootstrapKind::Test)
+    orchestrate_bootstrap(BootstrapKind::Test, BootstrapSource::Ambient)
 }
 
-fn orchestrate_bootstrap(kind: BootstrapKind) -> BootstrapResult<TestBootstrapSettings> {
+/// Bootstraps `PostgreSQL` for integration tests from resolved configuration.
+///
+/// Unlike [`bootstrap_for_tests`], this constructor does not read
+/// `PG_TEST_BACKEND`, `PG_EMBEDDED_WORKER` or `PG_SHUTDOWN_TIMEOUT_SECS`.
+/// Configuration values come from the supplied [`TestBootstrapConfig`], and
+/// absent explicit controls use the built-in defaults or `PATH` discovery.
+///
+/// Passing `PgEnvCfg::load()?` is equivalent to [`bootstrap_for_tests`] for
+/// every `PgEnvCfg` field, but it still skips the ambient backend selection,
+/// worker-binary, and shutdown-timeout reads. Use
+/// [`TestBootstrapConfig::with_worker_binary`] and
+/// [`TestBootstrapConfig::with_shutdown_timeout`] to supply those explicitly.
+///
+/// The prepared environment is still applied by
+/// [`TestCluster`](crate::TestCluster) when it starts the server, so callers
+/// that only inspect the returned settings should apply
+/// [`TestBootstrapSettings::environment`] themselves.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pg_embedded_setup_unpriv::{PgEnvCfg, TestBootstrapConfig, bootstrap_for_tests_with};
+///
+/// # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+/// let config = TestBootstrapConfig::new(PgEnvCfg {
+///     port: Some(54_321),
+///     ..PgEnvCfg::default()
+/// });
+/// let bootstrap = bootstrap_for_tests_with(config)?;
+/// assert_eq!(bootstrap.settings.port, 54_321);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+/// Returns an error when the explicit configuration is invalid or when
+/// bootstrap preparation fails.
+pub fn bootstrap_for_tests_with(
+    config: impl Into<TestBootstrapConfig>,
+) -> BootstrapResult<TestBootstrapSettings> {
+    orchestrate_bootstrap(
+        BootstrapKind::Test,
+        BootstrapSource::Explicit(Box::new(config.into())),
+    )
+}
+
+fn orchestrate_bootstrap(
+    kind: BootstrapKind,
+    source: BootstrapSource,
+) -> BootstrapResult<TestBootstrapSettings> {
     install_color_eyre();
-    if matches!(kind, BootstrapKind::Test) {
+    if matches!(kind, BootstrapKind::Test) && matches!(&source, BootstrapSource::Ambient) {
         validate_backend_selection()?;
     }
 
     let privileges = detect_execution_privileges();
-    let cfg = PgEnvCfg::load().context("failed to load configuration via OrthoConfig")?;
-    let settings = match kind {
-        BootstrapKind::Default => cfg.to_settings()?,
-        BootstrapKind::Test => cfg.to_settings_for_tests()?,
-    };
-    let worker_binary = worker_binary_from_env(privileges)?;
-    let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
-    let shutdown_timeout = shutdown_timeout_from_env()?;
-    let extensions = ExtensionRequest::from_config(&cfg)?;
-    let prepared = prepare_bootstrap(privileges, settings, &cfg, kind.data_layout())?;
+    let inputs = resolve_inputs(kind, source, privileges)?;
+    let extensions = ExtensionRequest::from_config(&inputs.cfg)?;
+    let prepared = prepare_bootstrap(privileges, inputs.settings, &inputs.cfg, kind.data_layout())?;
 
     Ok(TestBootstrapSettings {
         privileges,
-        execution_mode,
+        execution_mode: inputs.execution_mode,
         settings: prepared.settings,
         environment: prepared.environment,
-        worker_binary,
+        worker_binary: inputs.worker_binary,
         setup_timeout: DEFAULT_SETUP_TIMEOUT,
         start_timeout: DEFAULT_START_TIMEOUT,
-        shutdown_timeout,
+        shutdown_timeout: inputs.shutdown_timeout,
         cleanup_mode: CleanupMode::default(),
-        binary_cache_dir: cfg.binary_cache_dir,
+        binary_cache_dir: inputs.cfg.binary_cache_dir,
         extensions,
         installed_extensions: Vec::new(),
     })

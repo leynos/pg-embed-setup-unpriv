@@ -82,6 +82,10 @@ directories, starting the server, and cleaning up when the test ends.
   `shared_test_cluster`) for declarative test setup.
 - **Async support**: Use `TestCluster::start_async()` in `#[tokio::test]`
   contexts (requires the `async-api` feature).
+- **Explicit configuration**: Build a cluster from a resolved
+  `TestBootstrapConfig` with `TestCluster::new_with()` instead of reading the
+  process environment; see the Users' Guide section on explicit
+  configuration.[^explicit-config]
 - **Template databases**: Clone databases via PostgreSQL's `TEMPLATE`
   mechanism for sub-second test isolation.
 - **Diesel support**: Optional `diesel-support` feature provides
@@ -103,6 +107,8 @@ See the Users' Guide section on root-only test agents for the required setup
 and environment variables.[^root-worker]
 
 [^root-worker]: docs/users-guide.md#integrating-with-root-only-test-agents
+
+[^explicit-config]: docs/users-guide.md#explicit-configuration
 
 ## Learn more
 
