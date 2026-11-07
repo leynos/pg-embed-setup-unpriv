@@ -1,17 +1,18 @@
 """Reading the test sources and the modules each binary compiles in.
 
-``test_cluster_tier_coverage_contract.py`` needs the set of integration
-binaries that spawn children and reference a cluster-bootstrap API. The
-answer has to come from the sources rather than from another list,
-because a value pinned in a manually maintained list cannot notice a
-binary nobody listed.
+Two coverage contracts need an answer from the sources rather than from
+another list, because a value pinned in a manually maintained list cannot
+notice a binary nobody listed. ``test_cluster_tier_coverage_contract.py``
+needs the binaries that spawn children and reference a cluster-bootstrap
+API, and ``test_serial_group_contract.py`` needs the binaries that take
+the cross-process scenario lock.
 
-This module owns the reading. ``load_test_sources`` does every filesystem
-call and reports a failure as ``SourceLoadError``; ``binary_sources``
-resolves each binary's crate root and the modules it compiles in;
-``spawning_cluster_binaries`` is then a pure classification of the text
-that resolution yields. Keeping the split explicit means a scanner can be
-tested against a constructed tree without touching the disk.
+This module owns the reading both contracts share. ``load_test_sources``
+does every filesystem call and reports a failure as ``SourceLoadError``;
+``binary_sources`` resolves each binary's crate root and the modules it
+compiles in; ``spawning_cluster_binaries`` is a pure classification of the
+text that resolution yields. Keeping the split explicit means a scanner
+can be tested against a constructed tree without touching the disk.
 
 The classification is lexical, so a reference in a comment counts. A
 false positive is a prompt to review the binary rather than a defect in
