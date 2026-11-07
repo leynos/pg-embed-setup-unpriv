@@ -165,8 +165,11 @@ fn resolve_worker_path(
     Some(worker)
 }
 
-// Re-export shared singleton functions from submodule.
-pub use super::shared_singleton::{shared_cluster, shared_cluster_handle};
+// Re-export shared singleton functions from submodules.
+pub use super::{
+    shared_legacy::shared_cluster,
+    shared_singleton::{shared_cluster_handle, shared_cluster_handle_with},
+};
 
 // ============================================================================
 // Fixture functions

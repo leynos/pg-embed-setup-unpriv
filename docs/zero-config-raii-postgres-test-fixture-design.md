@@ -111,6 +111,29 @@ and the library decides whether to invoke the privileged path or not.
 (Compile-time detection is less practical for root vs non-root, so a runtime
 check of UID is simplest and robust.)
 
+### Implementation update: ambient and explicit configuration sources
+
+Bootstrap now resolves its inputs from one of two sources before the privilege
+branch runs:
+
+- **Ambient** (`run()`, `bootstrap_for_tests()`, `TestCluster::new()`,
+  `TestCluster::new_split()`, `shared_cluster_handle()`): validates
+  `PG_TEST_BACKEND`, loads `PgEnvCfg::load()`, then reads `PG_EMBEDDED_WORKER`
+  and `PG_SHUTDOWN_TIMEOUT_SECS`. This preserves the original
+  zero-configuration behaviour and error precedence.
+- **Explicit** (`bootstrap_for_tests_with()`, `TestCluster::new_with()`,
+  `TestCluster::new_split_with()`, `shared_cluster_handle_with()`): takes a
+  `TestBootstrapConfig` built from a `PgEnvCfg` plus optional worker binary,
+  shutdown timeout, and release URL. It skips `PG_TEST_BACKEND`,
+  `PgEnvCfg::load()`, `PG_EMBEDDED_WORKER`, and `PG_SHUTDOWN_TIMEOUT_SECS`.
+
+Both sources converge on the same `ResolvedInputs` value, so privilege
+detection, directory preparation, environment construction, and the worker
+branch are shared. Inputs that remain ambient after resolution (time zone
+preparation, `PATH` worker discovery, cache-directory fallbacks, the orphan
+watcher, and `postgresql_embedded`'s own home/current-directory lookups) are
+documented in the Users' Guide.
+
 ## RAII `TestCluster` implementation
 
 The design introduces a `TestCluster` RAII struct that encapsulates an embedded

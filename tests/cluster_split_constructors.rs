@@ -9,7 +9,7 @@ use std::{thread, time::Duration};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Result, ensure, eyre};
-use pg_embedded_setup_unpriv::TestCluster;
+use pg_embedded_setup_unpriv::{PgEnvCfg, TestBootstrapConfig, TestCluster};
 use rstest::rstest;
 
 #[path = "support/cap_fs_bootstrap.rs"]
@@ -91,6 +91,84 @@ fn run_split_lifecycle_test() -> std::result::Result<Utf8PathBuf, color_eyre::Re
     );
 
     // Drop guard to trigger shutdown
+    drop(guard);
+    Ok(data_dir)
+}
+
+// ============================================================================
+// new_split_with() tests
+// ============================================================================
+
+/// Builds an explicit configuration that points at the sandbox directories.
+///
+/// The explicit path must not read `PG_RUNTIME_DIR` or `PG_DATA_DIR`, so the
+/// sandbox paths are supplied directly instead of through the environment.
+fn explicit_config(sandbox: &TestSandbox) -> TestBootstrapConfig {
+    TestBootstrapConfig::new(PgEnvCfg {
+        runtime_dir: Some(sandbox.install_dir().to_owned()),
+        data_dir: Some(sandbox.data_dir().to_owned()),
+        superuser: Some("postgres".to_owned()),
+        password: Some("postgres".to_owned()),
+        ..PgEnvCfg::default()
+    })
+}
+
+/// Tests that `new_split_with()` creates a working handle/guard pair from
+/// resolved configuration.
+///
+/// Verifies the same lifecycle guarantees as `new_split()`, plus that the
+/// explicit configuration is honoured and the environment is restored after
+/// the guard drops.
+#[rstest]
+fn new_split_with_creates_working_handle_and_guard(
+    serial_guard: ScenarioSerialGuard,
+) -> Result<()> {
+    let sandbox = TestSandbox::new("split-with-constructor").context("create test sandbox")?;
+    sandbox.reset()?;
+
+    let config = explicit_config(&sandbox);
+    let env_before = EnvSnapshot::capture();
+    let result = sandbox.with_env(sandbox.env_without_timezone(), || {
+        run_split_with_lifecycle_test(config)
+    });
+
+    if should_skip_on_error(&result) {
+        return Ok(());
+    }
+    let data_dir = result?;
+
+    // Verify environment restored
+    let env_after = EnvSnapshot::capture();
+    ensure!(
+        env_before == env_after,
+        "environment should be restored after guard drops"
+    );
+
+    // Verify cluster stopped
+    wait_for_postmaster_shutdown(&data_dir)?;
+    drop(serial_guard);
+    Ok(())
+}
+
+fn run_split_with_lifecycle_test(
+    config: TestBootstrapConfig,
+) -> std::result::Result<Utf8PathBuf, color_eyre::Report> {
+    let (handle, guard) = TestCluster::new_split_with(config).map_err(color_eyre::Report::from)?;
+
+    let data_dir = Utf8PathBuf::from_path_buf(handle.settings().data_dir.clone())
+        .map_err(|_| eyre!("data_dir is not valid UTF-8"))?;
+
+    ensure!(
+        data_dir.join("postmaster.pid").exists(),
+        "postmaster.pid should exist while cluster runs"
+    );
+    ensure!(
+        handle
+            .database_exists("postgres")
+            .map_err(color_eyre::Report::from)?,
+        "postgres database should exist"
+    );
+
     drop(guard);
     Ok(data_dir)
 }
@@ -217,6 +295,63 @@ async fn run_async_split_lifecycle_test() -> std::result::Result<(), color_eyre:
     // Wait for cleanup inside async context so the spawned cleanup task can complete.
     // The guard's Drop spawns a fire-and-forget task; we must stay in the async context
     // long enough for it to run before the runtime is dropped.
+    wait_for_postmaster_shutdown_async(&data_dir).await?;
+
+    Ok(())
+}
+
+/// Tests that `start_async_split_with()` creates a working handle/guard pair
+/// from resolved configuration.
+#[cfg(feature = "async-api")]
+#[rstest]
+fn start_async_split_with_creates_working_handle_and_guard(
+    serial_guard: ScenarioSerialGuard,
+) -> Result<()> {
+    let sandbox = TestSandbox::new("async-split-with").context("create test sandbox")?;
+    sandbox.reset()?;
+
+    let config = explicit_config(&sandbox);
+    let env_before = EnvSnapshot::capture();
+    let result = sandbox.with_env(sandbox.env_without_timezone(), || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| eyre!("failed to build runtime: {e}"))?
+            .block_on(run_async_split_with_lifecycle_test(config))
+    });
+
+    if should_skip_on_error(&result) {
+        return Ok(());
+    }
+    result?;
+
+    let env_after = EnvSnapshot::capture();
+    ensure!(
+        env_before == env_after,
+        "environment should be restored after guard drops"
+    );
+
+    drop(serial_guard);
+    Ok(())
+}
+
+#[cfg(feature = "async-api")]
+async fn run_async_split_with_lifecycle_test(
+    config: TestBootstrapConfig,
+) -> std::result::Result<(), color_eyre::Report> {
+    let (handle, guard) = TestCluster::start_async_split_with(config)
+        .await
+        .map_err(color_eyre::Report::from)?;
+
+    let data_dir = Utf8PathBuf::from_path_buf(handle.settings().data_dir.clone())
+        .map_err(|_| eyre!("data_dir is not valid UTF-8"))?;
+
+    ensure!(
+        data_dir.join("postmaster.pid").exists(),
+        "postmaster.pid should exist while cluster runs"
+    );
+
+    drop(guard);
     wait_for_postmaster_shutdown_async(&data_dir).await?;
 
     Ok(())

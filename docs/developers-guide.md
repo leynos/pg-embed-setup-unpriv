@@ -6,6 +6,33 @@ complements the user guide and omits consumer-facing usage details.
 Consumer integrations should start with `docs/users-guide.md` for
 consumer-facing guidance.
 
+## Bootstrap configuration sources
+
+`src/bootstrap/mod.rs` resolves every bootstrap through one of two sources
+before the privilege branch runs:
+
+- `BootstrapSource::Ambient` is used by `run()`, `bootstrap_for_tests()`, and
+  the ambient cluster constructors. It validates `PG_TEST_BACKEND`, calls
+  `PgEnvCfg::load()`, and then reads `PG_EMBEDDED_WORKER` and
+  `PG_SHUTDOWN_TIMEOUT_SECS` in that order. Keep that order: it preserves the
+  error precedence callers already observe.
+- `BootstrapSource::Explicit(TestBootstrapConfig)` is used by
+  `bootstrap_for_tests_with()` and the `*_with` cluster constructors. It takes
+  the supplied `PgEnvCfg` and optional worker binary, shutdown timeout, and
+  release URL, and deliberately skips the ambient reads above.
+
+Both sources produce a `ResolvedInputs` value, and the rest of the flow
+(privilege detection, `prepare_bootstrap`, settings construction) is shared.
+When adding a new input, decide which source owns it and document any ambient
+read that remains. `TestBootstrapConfig` lives in `src/bootstrap/config.rs`; its
+`Debug` implementation redacts the password.
+
+The shared singleton records its initialization origin in
+`src/test_support/shared_config.rs`. Ambient callers always reuse the cached
+result; explicit callers reuse it only when the recorded configuration is
+equal, and otherwise receive a conflict error that does not echo configuration
+values.
+
 ## Test coverage notes
 
 - Unit and behavioural tests assert that `postmaster.pid` disappears after
