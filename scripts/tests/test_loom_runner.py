@@ -9,12 +9,9 @@ every outcome without compiling anything.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
-import typing as typ
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -28,180 +25,17 @@ sys.path.insert(0, str(SCRIPTS))
 import loom_runner  # noqa: E402
 from loom_discovery import DiscoveryError  # noqa: E402
 from loom_process import log_name, run_process  # noqa: E402
-from loom_runner import Completed  # noqa: E402
 
-MODELS = (
-    ("env::loom_tests::first", "env", 2, 3),
-    ("cluster::lifecycle_loom_tests::second", "cluster", 2, 3),
+from loom_runner_fakes import (  # noqa: E402
+    MODELS,
+    Completed,
+    FakeAnswers,
+    FakeClock,
+    FakeRunner,
+    marker,
+    passing_output,
+    run,
 )
-
-#: Whole-run budgets large enough to leave the per-model ceilings in charge.
-BUDGETS = {"pr": 300, "scheduled": 600}
-
-
-def write_manifest(
-    root: Path,
-    models: typ.Sequence[tuple[str, str, int, int]] = MODELS,
-    budgets: typ.Mapping[str, int] | None = None,
-) -> Path:
-    """Write a manifest with `models` and `budgets` and return its path."""
-    chosen = {**BUDGETS, **(budgets or {})}
-    entries = "".join(
-        f'[[models]]\nname = "{name}"\nsuite = "{suite}"\n'
-        f"spawned_threads = {spawned}\ncontext_threads = {context}\n\n"
-        for name, suite, spawned, context in models
-    )
-    path = root / "loom-models.toml"
-    path.write_text(
-        "[profiles.pr]\n"
-        f"model_timeout_seconds = 30\nrun_budget_seconds = {chosen['pr']}\n\n"
-        "[profiles.scheduled]\n"
-        f"model_timeout_seconds = 60\nrun_budget_seconds = {chosen['scheduled']}\n\n"
-        + entries
-    )
-    return path
-
-
-def marker(kind: str, name: str, profile: str = "pr") -> str:
-    """Return a marker line for `name`."""
-    return (
-        f"{kind} profile={profile} max_threads=3 max_branches=64 "
-        f"preemption_bound=3 max_duration=none max_permutations=none "
-        f"checkpoint=none test={name}"
-    )
-
-
-def passing_output(name: str, profile: str = "pr") -> str:
-    """Return the output of a model that ran to completion and passed.
-
-    The markers interleave with libtest's progress line because the runner
-    passes `--nocapture`, so the `ok` that completes the line arrives after
-    the markers.
-    """
-    return "\n".join(
-        [
-            "running 1 test",
-            f"test {name} ... {marker('loom-model-start', name, profile)}",
-            marker("loom-model-complete", name, profile),
-            "ok",
-            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 624 filtered out",
-            "",
-        ]
-    )
-
-
-class FakeClock:
-    """A monotonic clock that only moves when a test advances it."""
-
-    def __init__(self) -> None:
-        """Start at zero."""
-        self.now = 0.0
-
-    def monotonic(self) -> float:
-        """Return the current fake time."""
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        """Move the clock forward by `seconds`."""
-        self.now += seconds
-
-
-@dataclass(frozen=True)
-class FakeAnswers:
-    """The canned replies the fake seam returns."""
-
-    features: typ.Sequence[str] = ("loom-tests",)
-    listing: typ.Sequence[str] | None = None
-    outputs: typ.Mapping[str, Completed] = field(default_factory=dict)
-    build_returncode: int = 0
-    #: Fake time each model consumes; the clock advances by this much.
-    delay_seconds: float = 0.0
-
-
-class FakeRunner:
-    """A process seam that answers the build, the listing and each model."""
-
-    def __init__(
-        self,
-        models: typ.Sequence[tuple[str, str, int, int]] = MODELS,
-        *,
-        answers: FakeAnswers | None = None,
-        clock: FakeClock | None = None,
-    ) -> None:
-        """Record the inventory, the canned answers and the clock to advance."""
-        self.models = models
-        self.answers = answers or FakeAnswers()
-        self.clock = clock
-        self.features = list(self.answers.features)
-        listing = self.answers.listing
-        self.listing = (
-            list(listing) if listing is not None else [name for name, *_ in models]
-        )
-        self.outputs = dict(self.answers.outputs)
-        self.calls: list[tuple[list[str], dict[str, str], float | None]] = []
-
-    def __call__(
-        self,
-        command: list[str],
-        cwd: Path,
-        environment: typ.Mapping[str, str],
-        timeout: float | None = None,
-    ) -> Completed:
-        """Answer one command and record it."""
-        self.calls.append((list(command), dict(environment), timeout))
-        if command[0] == "cargo" and command[1] == "--version":
-            return Completed(0, "cargo 1.0.0\n", "")
-        if command[0] == "rustc":
-            return Completed(0, "rustc 1.0.0\n", "")
-        if command[0] == "cargo":
-            artefact = {
-                "reason": "compiler-artifact",
-                "target": {
-                    "name": "pg_embedded_setup_unpriv",
-                    "kind": ["lib"],
-                    "test": True,
-                },
-                "features": self.features,
-                "executable": "/tmp/loom-tests",
-            }
-            return Completed(
-                self.answers.build_returncode, json.dumps(artefact) + "\n", ""
-            )
-        if "--list" in command:
-            return Completed(0, "".join(f"{name}: test\n" for name in self.listing), "")
-        name = command[1]
-        if self.clock is not None:
-            self.clock.advance(self.answers.delay_seconds)
-        return self.outputs.get(name, Completed(0, passing_output(name), ""))
-
-    def model_calls(self) -> list[list[str]]:
-        """Return the commands that ran a model, not the listing."""
-        return [
-            command
-            for command, _, _ in self.calls
-            if command[0] == "/tmp/loom-tests" and "--list" not in command
-        ]
-
-
-def run(
-    tmp_path: Path,
-    runner: FakeRunner,
-    *,
-    profile: str = "pr",
-    environment: typ.Mapping[str, str] | None = None,
-    budgets: typ.Mapping[str, int] | None = None,
-) -> typ.Any:
-    """Run the inventory in `tmp_path` and return the report."""
-    (tmp_path / "Cargo.lock").write_text('[[package]]\nname = "loom"\nversion = "0.7.2"\n')
-    return loom_runner.run_loom(
-        tmp_path,
-        profile,
-        write_manifest(tmp_path, budgets=budgets),
-        tmp_path / "report",
-        "cargo",
-        runner,
-        {"GITHUB_SHA": "abc123", **(environment or {})},
-    )
 
 
 def test_runs_every_model_in_manifest_order_with_exact_arguments(tmp_path: Path) -> None:
@@ -349,49 +183,6 @@ def test_stops_starting_models_once_the_run_budget_is_spent(
     )
 
 
-def test_writes_complete_summary_and_logs(tmp_path: Path) -> None:
-    """The report names the commit, profile, bounds, tools and every model."""
-    runner = FakeRunner()
-
-    report = run(tmp_path, runner)
-    loom_runner.write_summary(report, tmp_path / "report", {})
-
-    document = json.loads((tmp_path / "report" / "summary.json").read_text())
-    assert document["commit"] == "abc123", "the summary must name the commit"
-    assert document["profile"] == "pr", "the summary must name the profile"
-    assert document["settings"]["max_branches"] == 64, (
-        "the summary must state the effective bounds"
-    )
-    assert document["tool_versions"]["loom"] == "0.7.2", "the summary must name Loom"
-    assert document["counts"]["passed"] == 2, "both models must be counted as passed"
-    assert document["success"] is True, "a passing inventory is a success"
-    assert [model["name"] for model in document["models"]] == [
-        name for name, *_ in MODELS
-    ], "the summary must list every model in execution order"
-    assert (tmp_path / "report" / "logs" / "env__loom_tests__first.log").exists(), (
-        "each model must leave a log"
-    )
-    markdown = (tmp_path / "report" / "summary.md").read_text()
-    assert "explored completely within the stated bounds" in markdown, (
-        "the Markdown summary must state the bounds"
-    )
-
-
-def test_appends_to_the_job_summary_when_set(tmp_path: Path) -> None:
-    """The Markdown summary reaches `GITHUB_STEP_SUMMARY` when it is set."""
-    runner = FakeRunner()
-    report = run(tmp_path, runner)
-    step_summary = tmp_path / "step-summary.md"
-
-    loom_runner.write_summary(
-        report, tmp_path / "report", {"GITHUB_STEP_SUMMARY": str(step_summary)}
-    )
-
-    assert "## Loom model checking" in step_summary.read_text(), (
-        "the job summary must receive the Markdown report"
-    )
-
-
 @pytest.mark.parametrize(
     "variable",
     [
@@ -420,47 +211,6 @@ def test_allows_log_and_location_variables(tmp_path: Path) -> None:
     run(tmp_path, runner, environment={"LOOM_LOG": "1", "LOOM_LOCATION": "1"})
 
     assert runner.model_calls(), "diagnostic variables must not stop the run"
-
-
-def seed_previous_report(output: Path) -> None:
-    """Write the artefacts a finished run leaves behind."""
-    (output / "logs").mkdir(parents=True)
-    (output / "summary.json").write_text('{"success": true}', encoding="utf-8")
-    (output / "summary.md").write_text("old summary", encoding="utf-8")
-    (output / "build.log").write_text("old build", encoding="utf-8")
-    (output / "logs" / "stale.log").write_text("old log", encoding="utf-8")
-
-
-def test_clears_a_previous_report_before_running(tmp_path: Path) -> None:
-    """An earlier run's artefacts never survive into the new report."""
-    output = tmp_path / "report"
-    seed_previous_report(output)
-    runner = FakeRunner()
-
-    report = run(tmp_path, runner)
-    loom_runner.write_summary(report, output, {})
-
-    document = json.loads((output / "summary.json").read_text())
-    assert document["commit"] == "abc123", "the summary must describe this run"
-    assert not (output / "logs" / "stale.log").exists(), (
-        "a log from an earlier run must not be published with this one"
-    )
-
-
-def test_a_refused_run_leaves_no_previous_summary(tmp_path: Path) -> None:
-    """A run refused before building must not publish an earlier success."""
-    output = tmp_path / "report"
-    seed_previous_report(output)
-
-    with pytest.raises(DiscoveryError, match="LOOM_MAX_BRANCHES"):
-        run(tmp_path, FakeRunner(), environment={"LOOM_MAX_BRANCHES": "1"})
-
-    assert not (output / "summary.json").exists(), (
-        "a refused run must not leave an earlier summary behind"
-    )
-    assert not (output / "logs" / "stale.log").exists(), (
-        "a refused run must clear the earlier run's logs too"
-    )
 
 
 def test_rejects_a_build_without_the_loom_feature(tmp_path: Path) -> None:
@@ -526,74 +276,79 @@ def test_run_process_kills_a_child_at_its_deadline(tmp_path: Path) -> None:
     assert elapsed < 5, "the deadline must not wait for the child"
 
 
-def test_propagates_a_non_zero_exit_as_failed(tmp_path: Path) -> None:
-    """A model that exits non-zero is a failure."""
-    name = MODELS[0][0]
-    runner = FakeRunner(
-        answers=FakeAnswers(
-            outputs={name: Completed(101, "assertion failed", "")}
-        )
-    )
-
-    report = run(tmp_path, runner)
-
-    assert report.models[0].outcome == "failed", "a non-zero exit is a failure"
-    assert "assertion failed" in report.models[0].failure_tail, (
-        "the failure tail must show why the model failed"
-    )
-
-
-def test_classifies_a_branch_limit_separately(tmp_path: Path) -> None:
-    """Exhausting the branch budget is its own outcome, not a generic failure."""
+@pytest.mark.parametrize(
+    ("output", "exit_code", "timed_out", "expected"),
+    [
+        pytest.param(
+            marker("loom-model-start", MODELS[0][0]),
+            -9,
+            True,
+            "timeout",
+            id="timeout",
+        ),
+        pytest.param("assertion failed", 101, False, "failed", id="failed"),
+        pytest.param(
+            loom_runner.BRANCH_LIMIT_TEXT, 101, False, "branch_limit", id="branch-limit"
+        ),
+        pytest.param(
+            passing_output(MODELS[0][0], "scheduled"),
+            0,
+            False,
+            "incomplete",
+            id="profile-mismatch",
+        ),
+    ],
+)
+def test_classifies_each_outcome_once(
+    tmp_path: Path,
+    output: str,
+    exit_code: int,
+    timed_out: bool,
+    expected: str,
+) -> None:
+    """Every outcome is decided by its own rule, in priority order."""
     name = MODELS[0][0]
     runner = FakeRunner(
         answers=FakeAnswers(
             outputs={
-                name: Completed(
-                    101,
-                    "Model exceeded maximum number of branches. This is often caused by "
-                    "an algorithm requiring the processor to make progress, e.g. spin locks.",
-                    "",
-                )
+                name: Completed(exit_code, output, "", timed_out=timed_out),
             }
         )
     )
 
     report = run(tmp_path, runner)
 
-    assert report.models[0].outcome == "branch_limit", (
-        "an exhausted branch budget is its own outcome"
+    assert report.models[0].outcome == expected, (
+        f"a {expected} model must be classified as {expected}"
     )
 
 
-def test_classifies_a_profile_mismatch_as_incomplete(tmp_path: Path) -> None:
-    """A model that reports another profile did not run the requested bounds."""
+def test_a_killed_model_reports_no_exit_code(tmp_path: Path) -> None:
+    """A killed model has no exit code and cannot make the run a success."""
     name = MODELS[0][0]
     runner = FakeRunner(
         answers=FakeAnswers(
-            outputs={name: Completed(0, passing_output(name, "scheduled"), "")}
+            outputs={
+                name: Completed(-9, marker("loom-model-start", name), "", timed_out=True)
+            }
         )
     )
 
     report = run(tmp_path, runner)
 
-    assert report.models[0].outcome == "incomplete", (
-        "a model reporting another profile did not run the requested bounds"
+    assert report.models[0].exit_code is None, "a killed model has no exit code"
+    assert report.is_success() is False, "a timed-out inventory is not a success"
+
+
+def test_a_failures_tail_shows_why_it_failed(tmp_path: Path) -> None:
+    """The failure tail carries the output that explains the failure."""
+    name = MODELS[0][0]
+    runner = FakeRunner(
+        answers=FakeAnswers(outputs={name: Completed(101, "assertion failed", "")})
     )
 
+    report = run(tmp_path, runner)
 
-def test_main_fails_when_no_model_was_executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An empty report is a failure, never a vacuous pass."""
-    empty = loom_runner.Report(
-        commit="abc",
-        profile="pr",
-        settings=loom_runner.EffectiveSettings(3, 64, 3, "none", "none", "none"),
-        tool_versions={},
-        build_seconds=0.0,
-        models=(),
-        reproduction="make test-loom",
+    assert "assertion failed" in report.models[0].failure_tail, (
+        "the failure tail must show why the model failed"
     )
-    monkeypatch.setattr(loom_runner, "run_loom", lambda *args, **kwargs: empty)
-    monkeypatch.setattr(loom_runner, "write_summary", lambda *args, **kwargs: None)
-
-    assert loom_runner.main(profile="pr") == 1, "an empty report must fail the run"

@@ -36,6 +36,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 	scripts/tests/test_cluster_tier_coverage_contract.py \
 	scripts/tests/test_loom_contracts.py \
 	scripts/tests/test_loom_runner.py \
+	scripts/tests/test_loom_runner_report.py \
 	scripts/tests/test_loom_workflow_contract.py \
 	scripts/tests/test_markdown_gate_contract.py \
 	scripts/tests/test_markdown_gate_e2e.py \
@@ -60,6 +61,7 @@ SCRIPT_PY_DOCTESTS := scripts/loom_discovery.py \
 	scripts/loom_report.py \
 	scripts/loom_runner.py \
 	scripts/msrv_check.py \
+	scripts/tests/loom_runner_fakes.py \
 	scripts/tests/nextest_filters.py \
 	scripts/tests/runner_placement.py \
 	scripts/tests/rustc_wrapper.py \

@@ -274,11 +274,19 @@ def _run_model(
 
 
 def _settings_from_output(output: str) -> EffectiveSettings | None:
-    """Return the settings the first start marker reported, if any."""
+    """Return the settings the first start marker reported, if any.
+
+    A truncated or foreign marker is skipped rather than raising: the report
+    must still be written after every model has run.
+    """
     for line in output.splitlines():
         fields = parse_marker(line)
-        if fields is not None and fields["kind"] == "start":
+        if fields is None or fields["kind"] != "start":
+            continue
+        try:
             return settings_from_marker(fields)
+        except (KeyError, ValueError):
+            continue
     return None
 
 
