@@ -63,6 +63,9 @@ jobs:
         uses: leynos/shared-actions/.github/actions/setup-rust@e693d81d176d2305e2b736a0be0f9038085dec7f
         with:
           install-mold: 'true'
+      - name: Fetch dependencies
+        # Tests start their own cargo offline; fetch once so none resolves cold.
+        run: cargo fetch --locked
       - name: Generate coverage
         env:
           # One of the two exclusions from the build standard: a coverage build is a

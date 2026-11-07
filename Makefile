@@ -1,4 +1,4 @@
-.PHONY: help all clean test test-doc test-loom test-scripts msrv build release \
+.PHONY: help all clean fetch test test-doc test-loom test-scripts msrv build release \
 	release-archive lint lint-clippy lint-whitaker fmt \
 	check-fmt markdownlint nixie spelling typecheck test-workflow-contracts
 
@@ -115,7 +115,10 @@ clean: ## Remove build artefacts
 	$(CARGO) clean
 	rm -rf "$(DIST_DIR)" .uv-cache .uv-tools
 
-test: test-doc ## Run tests with warnings treated as errors
+fetch: ## Download the locked dependencies once, so nested cargo runs offline
+	$(CARGO) fetch --locked
+
+test: fetch test-doc ## Run tests with warnings treated as errors
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) nextest run --all-targets --all-features $(BUILD_JOBS)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) nextest run --tests --workspace --no-default-features --features dev-worker $(BUILD_JOBS)
 

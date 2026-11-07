@@ -119,6 +119,9 @@ jobs:
       - name: Validate Mermaid diagrams
         if: ${{ matrix.privilege == 'unprivileged' }}
         run: make nixie
+      - name: Fetch dependencies
+        # Tests start their own cargo offline; fetch once so none resolves cold.
+        run: cargo fetch --locked
       - name: Install cargo-nextest
         run: cargo binstall -y cargo-nextest@0.9.122
       - name: Test with all features (unprivileged)
@@ -271,6 +274,10 @@ jobs:
         with:
           path: ${{ env.PG_BINARY_CACHE_DIR }}
           key: pg-embedded-postgresql-${{ env.PG_VERSION_REQ }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Fetch dependencies
+        shell: bash
+        # Tests start their own cargo offline; fetch once so none resolves cold.
+        run: cargo fetch --locked
       - name: Install cargo-nextest
         shell: bash
         run: cargo binstall -y cargo-nextest@0.9.122
