@@ -10,7 +10,9 @@ every outcome without compiling anything.
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 import typing as typ
 from pathlib import Path
 
@@ -22,6 +24,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import loom_runner  # noqa: E402
 from loom_discovery import DiscoveryError  # noqa: E402
+from loom_process import log_name, run_process  # noqa: E402
 from loom_runner import Completed  # noqa: E402
 
 MODELS = (
@@ -29,9 +32,17 @@ MODELS = (
     ("cluster::lifecycle_loom_tests::second", "cluster", 2, 3),
 )
 
+#: Whole-run budgets large enough to leave the per-model ceilings in charge.
+BUDGETS = {"pr": 300, "scheduled": 600}
 
-def write_manifest(root: Path, models: typ.Sequence[tuple[str, str, int, int]] = MODELS) -> Path:
-    """Write a manifest with `models` and return its path."""
+
+def write_manifest(
+    root: Path,
+    models: typ.Sequence[tuple[str, str, int, int]] = MODELS,
+    budgets: typ.Mapping[str, int] | None = None,
+) -> Path:
+    """Write a manifest with `models` and `budgets` and return its path."""
+    chosen = {**BUDGETS, **(budgets or {})}
     entries = "".join(
         f'[[models]]\nname = "{name}"\nsuite = "{suite}"\n'
         f"spawned_threads = {spawned}\ncontext_threads = {context}\n\n"
@@ -39,8 +50,11 @@ def write_manifest(root: Path, models: typ.Sequence[tuple[str, str, int, int]] =
     )
     path = root / "loom-models.toml"
     path.write_text(
-        "[profiles.pr]\nmodel_timeout_seconds = 30\n\n"
-        "[profiles.scheduled]\nmodel_timeout_seconds = 60\n\n" + entries
+        "[profiles.pr]\n"
+        f"model_timeout_seconds = 30\nrun_budget_seconds = {chosen['pr']}\n\n"
+        "[profiles.scheduled]\n"
+        f"model_timeout_seconds = 60\nrun_budget_seconds = {chosen['scheduled']}\n\n"
+        + entries
     )
     return path
 
@@ -84,13 +98,15 @@ class FakeRunner:
         listing: typ.Sequence[str] | None = None,
         outputs: typ.Mapping[str, Completed] | None = None,
         build_returncode: int = 0,
+        delay_seconds: float = 0.0,
     ) -> None:
-        """Record the inventory and the canned answers."""
+        """Record the inventory, the canned answers and the model delay."""
         self.models = models
         self.features = list(features)
         self.listing = list(listing) if listing is not None else [name for name, *_ in models]
         self.outputs = dict(outputs or {})
         self.build_returncode = build_returncode
+        self.delay_seconds = delay_seconds
         self.calls: list[tuple[list[str], dict[str, str], float | None]] = []
 
     def __call__(
@@ -121,6 +137,7 @@ class FakeRunner:
         if "--list" in command:
             return Completed(0, "".join(f"{name}: test\n" for name in self.listing), "")
         name = command[1]
+        time.sleep(self.delay_seconds)
         return self.outputs.get(name, Completed(0, passing_output(name), ""))
 
     def model_calls(self) -> list[list[str]]:
@@ -138,13 +155,14 @@ def run(
     *,
     profile: str = "pr",
     environment: typ.Mapping[str, str] | None = None,
+    budgets: typ.Mapping[str, int] | None = None,
 ) -> typ.Any:
     """Run the inventory in `tmp_path` and return the report."""
     (tmp_path / "Cargo.lock").write_text('[[package]]\nname = "loom"\nversion = "0.7.2"\n')
     return loom_runner.run_loom(
         tmp_path,
         profile,
-        write_manifest(tmp_path),
+        write_manifest(tmp_path, budgets=budgets),
         tmp_path / "report",
         "cargo",
         runner,
@@ -168,7 +186,7 @@ def test_runs_every_model_in_manifest_order_with_exact_arguments(tmp_path: Path)
             "--test-threads=1",
         ]
         for name, *_ in MODELS
-    ]
+    ], "every model must run once, alone, by exact name"
 
 
 def test_builds_once_without_running_tests(tmp_path: Path) -> None:
@@ -189,7 +207,7 @@ def test_builds_once_without_running_tests(tmp_path: Path) -> None:
             "--no-run",
             "--message-format=json",
         ]
-    ]
+    ], "the binary must be built exactly once, with --no-run"
 
 
 def test_applies_the_profile_overlay_to_every_model(tmp_path: Path) -> None:
@@ -203,17 +221,19 @@ def test_applies_the_profile_overlay_to_every_model(tmp_path: Path) -> None:
         for command, environment, _ in runner.calls
         if command[0] == "/tmp/loom-tests" and "--list" not in command
     ]
-    assert model_environments
+    assert model_environments, "the inventory must run at least one model"
     assert all(
         environment["PG_EMBED_LOOM_PROFILE"] == "scheduled"
         for environment in model_environments
-    )
+    ), "every model must see the selected profile"
     build_environment = next(
         environment
         for command, environment, _ in runner.calls
         if command[0] == "cargo" and command[1] == "test"
     )
-    assert build_environment["RUSTFLAGS"] == "-Zthreads=8"
+    assert build_environment["RUSTFLAGS"] == "-Zthreads=8", (
+        "the build must inherit the caller's RUSTFLAGS"
+    )
 
 
 def test_applies_the_profile_deadline_to_every_model(tmp_path: Path) -> None:
@@ -227,7 +247,46 @@ def test_applies_the_profile_deadline_to_every_model(tmp_path: Path) -> None:
         for command, _, timeout in runner.calls
         if command[0] == "/tmp/loom-tests" and "--list" not in command
     ]
-    assert deadlines == [60.0, 60.0]
+    assert deadlines == [60.0, 60.0], (
+        "each model gets the profile's per-model ceiling when the budget allows"
+    )
+
+
+def test_caps_each_model_deadline_to_the_remaining_budget(tmp_path: Path) -> None:
+    """A small whole-run budget shortens the deadline of a later model."""
+    runner = FakeRunner(delay_seconds=1.5)
+
+    run(tmp_path, runner, budgets={"pr": 2})
+
+    deadlines = [
+        timeout
+        for command, _, timeout in runner.calls
+        if command[0] == "/tmp/loom-tests" and "--list" not in command
+    ]
+    assert deadlines[0] <= 2.0, "the first model must not exceed the run budget"
+    assert 0 < deadlines[1] < 1.0, (
+        "the second model must be capped to the budget the first one left"
+    )
+
+
+def test_stops_starting_models_once_the_run_budget_is_spent(tmp_path: Path) -> None:
+    """A spent budget records the rest as timeout and still writes a summary."""
+    runner = FakeRunner(delay_seconds=1.2)
+
+    report = run(tmp_path, runner, budgets={"pr": 1})
+    loom_runner.write_summary(report, tmp_path / "report", {})
+
+    assert len(runner.model_calls()) == 1, "no model may start after the budget"
+    second = report.models[1]
+    assert second.outcome == "timeout", "a model the budget never reached is a timeout"
+    assert second.exit_code is None, "the model was never run"
+    skipped_log = tmp_path / "report" / "logs" / log_name(MODELS[1][0])
+    assert skipped_log.read_text().strip() == loom_runner.BUDGET_EXHAUSTED, (
+        "the skipped model's log must explain the budget"
+    )
+    assert (tmp_path / "report" / "summary.json").exists(), (
+        "the summary must be written even when the budget is spent"
+    )
 
 
 def test_writes_complete_summary_and_logs(tmp_path: Path) -> None:
@@ -238,16 +297,24 @@ def test_writes_complete_summary_and_logs(tmp_path: Path) -> None:
     loom_runner.write_summary(report, tmp_path / "report", {})
 
     document = json.loads((tmp_path / "report" / "summary.json").read_text())
-    assert document["commit"] == "abc123"
-    assert document["profile"] == "pr"
-    assert document["settings"]["max_branches"] == 64
-    assert document["tool_versions"]["loom"] == "0.7.2"
-    assert document["counts"]["passed"] == 2
-    assert document["success"] is True
-    assert [model["name"] for model in document["models"]] == [name for name, *_ in MODELS]
-    assert (tmp_path / "report" / "logs" / "env__loom_tests__first.log").exists()
+    assert document["commit"] == "abc123", "the summary must name the commit"
+    assert document["profile"] == "pr", "the summary must name the profile"
+    assert document["settings"]["max_branches"] == 64, (
+        "the summary must state the effective bounds"
+    )
+    assert document["tool_versions"]["loom"] == "0.7.2", "the summary must name Loom"
+    assert document["counts"]["passed"] == 2, "both models must be counted as passed"
+    assert document["success"] is True, "a passing inventory is a success"
+    assert [model["name"] for model in document["models"]] == [
+        name for name, *_ in MODELS
+    ], "the summary must list every model in execution order"
+    assert (tmp_path / "report" / "logs" / "env__loom_tests__first.log").exists(), (
+        "each model must leave a log"
+    )
     markdown = (tmp_path / "report" / "summary.md").read_text()
-    assert "explored completely within the stated bounds" in markdown
+    assert "explored completely within the stated bounds" in markdown, (
+        "the Markdown summary must state the bounds"
+    )
 
 
 def test_appends_to_the_job_summary_when_set(tmp_path: Path) -> None:
@@ -260,7 +327,9 @@ def test_appends_to_the_job_summary_when_set(tmp_path: Path) -> None:
         report, tmp_path / "report", {"GITHUB_STEP_SUMMARY": str(step_summary)}
     )
 
-    assert "## Loom model checking" in step_summary.read_text()
+    assert "## Loom model checking" in step_summary.read_text(), (
+        "the job summary must receive the Markdown report"
+    )
 
 
 @pytest.mark.parametrize(
@@ -281,7 +350,7 @@ def test_rejects_limit_variables_before_building(tmp_path: Path, variable: str) 
     with pytest.raises(DiscoveryError, match=variable):
         run(tmp_path, runner, environment={variable: "1"})
 
-    assert runner.calls == []
+    assert runner.calls == [], "nothing may be built or run after the refusal"
 
 
 def test_allows_log_and_location_variables(tmp_path: Path) -> None:
@@ -290,7 +359,7 @@ def test_allows_log_and_location_variables(tmp_path: Path) -> None:
 
     run(tmp_path, runner, environment={"LOOM_LOG": "1", "LOOM_LOCATION": "1"})
 
-    assert runner.model_calls()
+    assert runner.model_calls(), "diagnostic variables must not stop the run"
 
 
 def test_rejects_a_build_without_the_loom_feature(tmp_path: Path) -> None:
@@ -317,8 +386,8 @@ def test_rejects_an_unregistered_loom_model(tmp_path: Path) -> None:
         run(tmp_path, runner)
 
 
-def test_records_a_timeout_and_reaps_the_child(tmp_path: Path) -> None:
-    """A model killed at its deadline is a timeout, not a pass or a failure."""
+def test_classifies_a_killed_model_as_timeout(tmp_path: Path) -> None:
+    """A model the seam killed at its deadline is a timeout, not a failure."""
     name = MODELS[0][0]
     runner = FakeRunner(
         outputs={name: Completed(-9, marker("loom-model-start", name), "", timed_out=True)}
@@ -327,9 +396,23 @@ def test_records_a_timeout_and_reaps_the_child(tmp_path: Path) -> None:
     report = run(tmp_path, runner)
 
     first = report.models[0]
-    assert first.outcome == "timeout"
-    assert first.exit_code is None
-    assert report.is_success() is False
+    assert first.outcome == "timeout", "a killed model must be a timeout"
+    assert first.exit_code is None, "a killed model has no exit code"
+    assert report.is_success() is False, "a timed-out inventory is not a success"
+
+
+def test_run_process_kills_a_child_at_its_deadline(tmp_path: Path) -> None:
+    """The real process seam kills and reaps a child that outlives its deadline."""
+    started = time.monotonic()
+
+    completed = run_process(["sleep", "30"], tmp_path, dict(os.environ), 0.2)
+
+    elapsed = time.monotonic() - started
+    assert completed.timed_out is True, "the deadline must be reported"
+    assert completed.returncode is not None and completed.returncode < 0, (
+        "the child must be killed by a signal"
+    )
+    assert elapsed < 5, "the deadline must not wait for the child"
 
 
 def test_propagates_a_non_zero_exit_as_failed(tmp_path: Path) -> None:
@@ -339,8 +422,10 @@ def test_propagates_a_non_zero_exit_as_failed(tmp_path: Path) -> None:
 
     report = run(tmp_path, runner)
 
-    assert report.models[0].outcome == "failed"
-    assert "assertion failed" in report.models[0].failure_tail
+    assert report.models[0].outcome == "failed", "a non-zero exit is a failure"
+    assert "assertion failed" in report.models[0].failure_tail, (
+        "the failure tail must show why the model failed"
+    )
 
 
 def test_classifies_a_branch_limit_separately(tmp_path: Path) -> None:
@@ -359,7 +444,9 @@ def test_classifies_a_branch_limit_separately(tmp_path: Path) -> None:
 
     report = run(tmp_path, runner)
 
-    assert report.models[0].outcome == "branch_limit"
+    assert report.models[0].outcome == "branch_limit", (
+        "an exhausted branch budget is its own outcome"
+    )
 
 
 def test_classifies_a_profile_mismatch_as_incomplete(tmp_path: Path) -> None:
@@ -369,7 +456,9 @@ def test_classifies_a_profile_mismatch_as_incomplete(tmp_path: Path) -> None:
 
     report = run(tmp_path, runner)
 
-    assert report.models[0].outcome == "incomplete"
+    assert report.models[0].outcome == "incomplete", (
+        "a model reporting another profile did not run the requested bounds"
+    )
 
 
 def test_main_fails_when_no_model_was_executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -386,4 +475,4 @@ def test_main_fails_when_no_model_was_executed(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(loom_runner, "run_loom", lambda *args, **kwargs: empty)
     monkeypatch.setattr(loom_runner, "write_summary", lambda *args, **kwargs: None)
 
-    assert loom_runner.main(profile="pr") == 1
+    assert loom_runner.main(profile="pr") == 1, "an empty report must fail the run"

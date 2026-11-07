@@ -597,9 +597,9 @@ enabled. Every model is marked `#[ignore = "requires Loom model checking"]`,
 and ordinary test runs leave them dormant: the nextest run uses
 `--all-features`, while the follow-up nextest run disables default features
 (enabling `dev-worker` only). The dedicated
-[`Loom` workflow](.github/workflows/loom.yml) runs them explicitly, apart from
-the build-and-test lane, because they need their own compilation, cache and
-wall-clock budget.
+[`Loom` workflow](../.github/workflows/loom.yml) runs them explicitly, apart
+from the build-and-test lane, because they need their own compilation, cache
+and wall-clock budget.
 
 ### Command and schedule
 
@@ -641,6 +641,15 @@ shutdown-hook registration.
 | `pr`        | 3             | 64             | 3                  | 120 s             |
 | `scheduled` | 3             | 65,536         | 10                 | 1,200 s           |
 
+*Table: exploration bounds and per-model ceiling for each Loom profile.*
+
+The manifest also records a whole-run budget per profile: 1,800 s for `pr` and
+3,300 s for `scheduled`. The budget starts before the build and covers
+discovery and every model, and it sits below the workflow's 3,600 s step
+ceiling. A model that starts when the budget is already spent is recorded as
+`timeout` without running, so the run still writes `summary.json` and
+`summary.md` instead of being cancelled mid-step.
+
 Both profiles cap the participant count at three; the scheduled profile spends
 its larger budget on branches and preemptions. Its preemption bound was chosen
 by measurement: at 10 two local runs took 421 s and 547 s for the whole
@@ -673,10 +682,11 @@ directory even when the run fails.
 
 A `branch_limit` outcome means the model exhausted `max_branches`, often
 because an algorithm needs the processor to make progress. A `timeout` means
-the model exceeded the profile's per-model wall-clock ceiling in the manifest.
-An `incomplete` outcome means the markers, the executed test count or the
-profile disagreed with what the runner expected. Reproduce one model with the
-command its log records, or rerun the whole profile:
+the model exceeded the profile's per-model wall-clock ceiling, or that the
+whole-run budget was already spent when its turn came. An `incomplete` outcome
+means the markers, the executed test count or the profile disagreed with what
+the runner expected. Reproduce one model with the command its log records, or
+rerun the whole profile:
 
 ```sh
 make test-loom LOOM_PROFILE=scheduled

@@ -12,16 +12,29 @@
 #
 # Exploration bounds (max_threads, max_branches and the preemption bound) live
 # in `src/loom_model.rs` and are reported by the model markers. Only the
-# wall-clock ceiling for one model is recorded here.
+# wall-clock limits are recorded here.
+#
+# `model_timeout_seconds` bounds one model. `run_budget_seconds` bounds the
+# whole run: the build, discovery and every model together. When the budget
+# runs out, the remaining models are recorded as `timeout` without starting,
+# so the run still writes its summary before the workflow step ceiling
+# cancels it.
 
 [profiles.pr]
 # Wall-clock ceiling for one model under the pull-request profile.
 model_timeout_seconds = 120
+# 1,800 s leaves room for a 150 s build plus all twelve models at their
+# individual ceiling, while staying well inside the workflow's 3,600 s step.
+run_budget_seconds = 1800
 
 [profiles.scheduled]
 # Wall-clock ceiling for one model under the scheduled profile. Repeated runs
 # measured a 308-398 s worst case, so this leaves a margin of at least 3x.
 model_timeout_seconds = 1200
+# 3,300 s sits 300 s below the workflow's 3,600 s step ceiling, so a run in
+# which several models degrade together is cut off by this budget and still
+# writes its summary rather than being cancelled by the step.
+run_budget_seconds = 3300
 
 [[models]]
 name = "env::loom_tests::scoped_env_serializes_concurrent_scopes"

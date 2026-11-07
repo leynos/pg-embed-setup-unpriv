@@ -193,8 +193,8 @@ def parse_marker(line: str) -> dict[str, str] | None:
         if word not in (START_MARKER, COMPLETE_MARKER):
             continue
         fields = {"kind": "start" if word == START_MARKER else "complete"}
-        for field in words[index + 1 :]:
-            key, separator, value = field.partition("=")
+        for token in words[index + 1 :]:
+            key, separator, value = token.partition("=")
             if separator:
                 fields[key] = value
         return fields

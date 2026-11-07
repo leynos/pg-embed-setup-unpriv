@@ -9,8 +9,8 @@ enough to read in one sitting.
 Examples
 --------
 >>> parse_manifest(
-...     "[profiles.pr]\\nmodel_timeout_seconds = 10\\n"
-...     "[profiles.scheduled]\\nmodel_timeout_seconds = 20\\n"
+...     "[profiles.pr]\\nmodel_timeout_seconds = 10\\nrun_budget_seconds = 100\\n"
+...     "[profiles.scheduled]\\nmodel_timeout_seconds = 20\\nrun_budget_seconds = 200\\n"
 ...     '[[models]]\\nname = "env::loom_tests::one"\\nsuite = "env"\\n'
 ...     "spawned_threads = 0\\ncontext_threads = 1\\n"
 ... ).timeouts["pr"]
@@ -56,7 +56,7 @@ class Model:
 
 @dataclass(frozen=True)
 class Manifest:
-    """The validated model inventory and its per-profile wall-clock ceilings.
+    """The validated inventory and its per-profile wall-clock limits.
 
     Attributes
     ----------
@@ -64,10 +64,15 @@ class Manifest:
         The expected models, in execution order.
     timeouts : dict[str, int]
         Profile name to per-model timeout in seconds.
+    budgets : dict[str, int]
+        Profile name to the whole-run budget in seconds, covering the build,
+        discovery and every model, so the run still writes its summary when
+        several models degrade at once.
     """
 
     models: tuple[Model, ...]
     timeouts: dict[str, int]
+    budgets: dict[str, int]
 
 
 def _positive_int(value: object, description: str) -> int:
@@ -152,15 +157,17 @@ def parse_manifest(text: str, source: str = "loom-models.toml") -> Manifest:
     ------
     DiscoveryError
         If the document is not TOML, declares no models, repeats a model, or
-        omits a profile timeout.
+        omits a profile timeout or run budget.
 
     Examples
     --------
     >>> document = '''
     ... [profiles.pr]
     ... model_timeout_seconds = 10
+    ... run_budget_seconds = 100
     ... [profiles.scheduled]
     ... model_timeout_seconds = 20
+    ... run_budget_seconds = 200
     ... [[models]]
     ... name = "env::loom_tests::one"
     ... suite = "env"
@@ -170,6 +177,8 @@ def parse_manifest(text: str, source: str = "loom-models.toml") -> Manifest:
     >>> manifest = parse_manifest(document)
     >>> manifest.timeouts
     {'pr': 10, 'scheduled': 20}
+    >>> manifest.budgets
+    {'pr': 100, 'scheduled': 200}
     >>> manifest.models[0].name
     'env::loom_tests::one'
     """
@@ -181,6 +190,7 @@ def parse_manifest(text: str, source: str = "loom-models.toml") -> Manifest:
     if not isinstance(profiles, dict):
         raise DiscoveryError(f"{source} declares no [profiles] table")
     timeouts: dict[str, int] = {}
+    budgets: dict[str, int] = {}
     for profile in PROFILES:
         table = profiles.get(profile)
         if not isinstance(table, dict):
@@ -189,6 +199,10 @@ def parse_manifest(text: str, source: str = "loom-models.toml") -> Manifest:
             table.get("model_timeout_seconds"),
             f"{source} [profiles.{profile}] model_timeout_seconds",
         )
+        budgets[profile] = _positive_int(
+            table.get("run_budget_seconds"),
+            f"{source} [profiles.{profile}] run_budget_seconds",
+        )
     entries = document.get("models")
     if not isinstance(entries, list) or not entries:
         raise DiscoveryError(f"{source} declares no [[models]] entries")
@@ -196,7 +210,7 @@ def parse_manifest(text: str, source: str = "loom-models.toml") -> Manifest:
     names = [model.name for model in models]
     if len(set(names)) != len(names):
         raise DiscoveryError(f"{source} declares a model more than once")
-    return Manifest(models, timeouts)
+    return Manifest(models, timeouts, budgets)
 
 
 def load_manifest(path: Path) -> Manifest:
@@ -261,8 +275,10 @@ def validate_inventory(
     >>> manifest = parse_manifest('''
     ... [profiles.pr]
     ... model_timeout_seconds = 10
+    ... run_budget_seconds = 100
     ... [profiles.scheduled]
     ... model_timeout_seconds = 20
+    ... run_budget_seconds = 200
     ... [[models]]
     ... name = "env::loom_tests::one"
     ... suite = "env"

@@ -85,15 +85,22 @@ def test_the_manifest_names_every_ignored_loom_model() -> None:
     found = {name for source in loom_sources() for name in ignored_models(source)}
 
     assert found, "no ignored Loom models were found in the source"
-    assert declared == found
+    assert declared == found, (
+        "the manifest and the ignored Loom models must name the same models"
+    )
 
 
 def test_the_manifest_declares_both_profiles() -> None:
-    """Both profiles carry a positive per-model timeout."""
+    """Both profiles carry a positive per-model timeout and whole-run budget."""
     document = tomllib.loads(MANIFEST.read_text(encoding="utf-8"))
 
     for profile in ("pr", "scheduled"):
-        assert document["profiles"][profile]["model_timeout_seconds"] > 0
+        assert document["profiles"][profile]["model_timeout_seconds"] > 0, (
+            f"the {profile} profile needs a positive model timeout"
+        )
+        assert document["profiles"][profile]["run_budget_seconds"] > 0, (
+            f"the {profile} profile needs a positive run budget"
+        )
 
 
 def test_the_shared_runner_is_the_only_builder_site() -> None:
@@ -104,7 +111,9 @@ def test_the_shared_runner_is_the_only_builder_site() -> None:
         if "loom::model::Builder::new()" in path.read_text(encoding="utf-8")
     ]
 
-    assert sites == [LOOM_MODEL]
+    assert sites == [LOOM_MODEL], (
+        "every Loom builder must come from the shared model runner"
+    )
 
 
 def loom_recipe() -> list[str]:
@@ -125,15 +134,23 @@ def test_the_makefile_runs_the_runner_without_a_bare_ignored_filter() -> None:
     """`make test-loom` selects models through the manifest, not `-- --ignored`."""
     recipe = "\n".join(loom_recipe())
 
-    assert "run --script scripts/loom_runner.py" in recipe
-    assert "LOOM_PROFILE" in recipe
-    assert "LOOM_OUTPUT_DIR" in recipe
-    assert "-- --ignored" not in recipe
+    assert "run --script scripts/loom_runner.py" in recipe, (
+        "the recipe must go through the runner"
+    )
+    assert "LOOM_PROFILE" in recipe, "the recipe must forward the profile"
+    assert "LOOM_OUTPUT_DIR" in recipe, "the recipe must forward the report directory"
+    assert "-- --ignored" not in recipe, (
+        "the recipe must not fall back to a bare ignored filter"
+    )
 
 
 def test_the_makefile_preserves_the_composed_rustflags() -> None:
     """The runner inherits the standard flags the other recipes compose."""
     recipe = loom_recipe()
 
-    assert recipe[0].startswith('\tRUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }')
-    assert "$(STANDARD_RUSTFLAGS)" in recipe[0]
+    assert recipe[0].startswith('\tRUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }'), (
+        "the recipe must compose the caller's RUSTFLAGS"
+    )
+    assert "$(STANDARD_RUSTFLAGS)" in recipe[0], (
+        "the recipe must apply the standard Rust flags"
+    )

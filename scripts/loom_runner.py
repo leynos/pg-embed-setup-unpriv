@@ -13,7 +13,9 @@ reads the ignored test names it reports, checks them against
 `.config/loom-models.toml`, and then runs each model on its own with an exact
 name filter and a wall-clock deadline. Every model is classified exactly once
 as `passed`, `failed`, `branch_limit`, `timeout` or `incomplete`, and the run
-fails unless every expected model passed.
+fails unless every expected model passed. A per-profile aggregate budget caps
+the whole run below the workflow step ceiling, so even a pathological profile
+still writes its summary.
 
 A pass means the model explored completely within the stated bounds. It is not
 a proof for schedules outside those bounds.
@@ -84,6 +86,11 @@ from loom_report import (
 
 #: The default report directory, uploaded by the workflow.
 DEFAULT_OUTPUT_DIR: typ.Final = Path("target/loom-report")
+
+#: Written as the log and failure tail of a model the run budget never reached.
+BUDGET_EXHAUSTED: typ.Final = (
+    "the aggregate run budget was exhausted before this model started"
+)
 
 
 def _marker_positions(output: str) -> tuple[int, int] | None:
@@ -163,24 +170,52 @@ def classify(
     return "passed"
 
 
+def _budget_exhausted(model: Model, log: str, logs: Path) -> ModelResult:
+    """Record a model the aggregate budget did not leave time to run."""
+    (logs / log).write_text(BUDGET_EXHAUSTED + "\n", encoding="utf-8")
+    return ModelResult(
+        name=model.name,
+        suite=model.suite,
+        spawned_threads=model.spawned_threads,
+        context_threads=model.context_threads,
+        outcome="timeout",
+        duration_seconds=0.0,
+        exit_code=None,
+        log=f"logs/{log}",
+        failure_tail=BUDGET_EXHAUSTED,
+    )
+
+
 def _run_model(
     model: Model,
     executable: Path,
     profile: str,
-    timeout: float,
+    ceiling: float,
+    deadline: float,
     repo: Path,
     environment: typ.Mapping[str, str],
     runner: Runner,
     logs: Path,
 ) -> ModelResult:
-    """Run one model, write its log, and classify it."""
+    """Run one model within the profile's per-model and whole-run limits.
+
+    The per-model ceiling bounds a single model; the aggregate deadline bounds
+    the run, so a pathological profile still reaches `write_summary` before the
+    workflow step ceiling cancels it.
+    """
+    log = log_name(model.name)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return _budget_exhausted(model, log, logs)
     started = time.monotonic()
     completed = runner(
-        model_command(executable, model.name), repo, environment, timeout
+        model_command(executable, model.name),
+        repo,
+        environment,
+        min(remaining, ceiling),
     )
     duration = time.monotonic() - started
     output = completed.stdout + completed.stderr
-    log = log_name(model.name)
     (logs / log).write_text(output, encoding="utf-8")
     outcome = classify(
         output, completed.returncode, completed.timed_out, model.name, profile
@@ -246,6 +281,7 @@ def run_loom(
     manifest: Manifest = load_manifest(manifest_path)
     if profile not in manifest.timeouts:
         raise DiscoveryError(f"unknown Loom profile {profile!r}")
+    deadline = time.monotonic() + float(manifest.budgets[profile])
     output_dir.mkdir(parents=True, exist_ok=True)
     logs = output_dir / "logs"
     logs.mkdir(exist_ok=True)
@@ -270,13 +306,14 @@ def run_loom(
     validate_inventory(manifest, parse_listing(listing.stdout), profile)
 
     model_environment_ = model_environment(inherited, profile)
-    timeout = float(manifest.timeouts[profile])
+    ceiling = float(manifest.timeouts[profile])
     results = tuple(
         _run_model(
             model,
             executable,
             profile,
-            timeout,
+            ceiling,
+            deadline,
             repo,
             model_environment_,
             runner,
