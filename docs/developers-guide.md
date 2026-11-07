@@ -329,6 +329,82 @@ suite-version input, and [shared-actions#454][shared-actions-suite-pin] asks
 [whitaker-suite-pin]: https://github.com/leynos/whitaker/issues/402
 [shared-actions-suite-pin]: https://github.com/leynos/shared-actions/issues/454
 
+### Markdown lint toolchain
+
+`make markdownlint` lints the Markdown with `markdownlint-cli2` after enforcing
+en-GB-oxendict spelling. File selection, rule configuration and ignores live
+only in `.markdownlint-cli2.jsonc`. The CI action step and the Makefile pass no
+positional globs, because the CLI appends configuration globs to command-line
+globs, so a caller glob would widen the set rather than replace it.
+
+The local CLI runs through `npx` and is pinned by `MARKDOWNLINT_CLI2_VERSION`
+in the `Makefile` (currently `0.23.2`), which must equal the version bundled by
+the pinned `DavidAnson/markdownlint-cli2-action` commit in `ci.yml`. Node.js 22
+or later is required. Override `MDLINT` only to run the same pinned version
+through a different runner. `scripts/tests/test_markdown_gate_contract.py`
+checks the pairing, the glob-free invocations, the shared selection and
+membership of `make all`.
+
+When the action commit changes, update its entry in `APPROVED_PAIRINGS` in
+`scripts/tests/markdown_gate.py` and `MARKDOWNLINT_CLI2_VERSION` in the
+`Makefile` together; the contract test fails until both agree.
+
+### Markdown gate helpers
+
+The gate's checks are split into two pure judgement modules and one behavioural
+test, so each judgement can be driven against a mutated fixture before it is
+applied to the real files.
+
+`scripts/tests/markdown_gate.py` judges the workflow and the configuration.
+Every function takes text or a parsed `Workflow` and returns a list of fault
+messages: an empty list means the input satisfies the contract, and each
+message names the offending value.
+
+- `config_faults(text)` takes the JSONC configuration document. It reports
+  malformed JSONC, a top level that is not a JSON object, a `globs` value that
+  is not a non-empty array, a selection that omits `**/*.md`, a negation that
+  cancels the Markdown selection, and an `ignores` entry that removes every
+  Markdown file. It never raises a parser exception.
+- `glob_faults(workflow)` takes the parsed workflow and reports any `globs`
+  input passed to the action step; the step must pass none.
+- `pairing_faults(revision, version)` takes an action commit SHA and a CLI
+  version and reports a revision absent from `APPROVED_PAIRINGS` or a version
+  that disagrees with its approved entry.
+- `pairing_faults_for(workflow, makefile)` applies that pairing to every
+  action step, using the version `makefile_version(makefile)` reads from
+  `MARKDOWNLINT_CLI2_VERSION`.
+- `makefile_version(makefile)` returns the pinned version, or an empty
+  string when the assignment is absent.
+
+`scripts/tests/makefile_gate.py` judges the Makefile. Its functions take the
+Makefile text and a target name and return fault messages in the same way.
+
+- `prerequisites(makefile, target)` returns the names on the target's
+  declaration line; `prerequisite_faults(makefile, target, wanted)` reports
+  each wanted name that is missing.
+- `recipe_lines(makefile, target)` returns the target's recipe with leading
+  tabs removed.
+- `mdlint_faults(makefile, target)` reports a recipe that does not invoke
+  `$(MDLINT)`, mentions it without running it, ignores its failure with Make's
+  `-` prefix, or passes any argument other than `--fix`. `fmt` must pass
+  `--fix`; every other target must pass nothing.
+- `mdlint_runner_faults(makefile)` requires the default `MDLINT` to be
+  exactly `npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)`, so a
+  no-op that merely mentions the pinned version is reported.
+
+`scripts/tests/test_markdown_gate_e2e.py` runs the gate itself in a temporary
+tree holding a copy of the repository configuration. It checks that clean
+documents pass, a document under an ignored directory is never linted, and an
+invalid document fails and names itself. It also runs `make markdownlint` with
+the repository's own `MDLINT` definition, declared prerequisites and recipe,
+and the bare pinned CLI that the CI action runs, then compares the set of
+flagged files. Every selectable document in that tree carries a violation, so
+the flagged set is the selected set and a path cannot drop a document or lint
+an ignored one without changing it. The spelling prerequisite is declared but
+stubbed, because its gate needs the repository's git history and network
+toolchain. The tests need Node.js, `make` and a reachable package registry;
+they skip on a development host but fail in CI when either tool is unavailable.
+
 ## Spelling policy
 
 Run `make spelling` to enforce en-GB-oxendict spelling. The target invokes the
@@ -355,6 +431,8 @@ mistakes.
 `make nixie` validates the repository's Mermaid diagrams. CI installs Nixie
 1.1.0 and caches Merman CLI 0.7.0, compiling Merman with an isolated Rust
 1.95.0 toolchain so the product's pinned nightly toolchain remains unchanged.
+Local Make does not provision Nixie, Merman or that toolchain, so `make all`
+omits `nixie`; run it by hand after changing a Mermaid diagram.
 
 ## Release process
 

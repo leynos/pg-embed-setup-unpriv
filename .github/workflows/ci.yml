@@ -67,9 +67,13 @@ jobs:
         run: make check-fmt
       - name: Markdown lint
         if: ${{ matrix.privilege == 'unprivileged' }}
+        # Glob-free, so the action and `make markdownlint` both read the
+        # selection from `.markdownlint-cli2.jsonc`. This commit bundles
+        # markdownlint-cli2 0.23.2; keep `MARKDOWNLINT_CLI2_VERSION` in the
+        # Makefile on that version.
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff
         with:
-          globs: '**/*.md'
+          globs: ''
       - name: Setup uv
         if: ${{ matrix.privilege == 'unprivileged' }}
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e

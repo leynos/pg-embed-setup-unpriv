@@ -32,6 +32,8 @@ PYYAML_VERSION ?= 6.0.3
 SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 	scripts/tests/test_cluster_sources_properties.py \
 	scripts/tests/test_cluster_tier_coverage_contract.py \
+	scripts/tests/test_markdown_gate_contract.py \
+	scripts/tests/test_markdown_gate_e2e.py \
 	scripts/tests/test_msrv_check.py \
 	scripts/tests/test_nextest_filters_contract.py \
 	scripts/tests/test_nextest_filters_properties.py \
@@ -76,7 +78,11 @@ VERSION_GUARD := $(error VERSION is empty; set [package].version in Cargo.toml o
 endif
 CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
-MDLINT ?= markdownlint-cli2
+# The local CLI must stay on the version bundled by the pinned
+# DavidAnson/markdownlint-cli2-action commit in `.github/workflows/ci.yml`.
+# `scripts/tests/test_markdown_gate_contract.py` holds the pairing.
+MARKDOWNLINT_CLI2_VERSION ?= 0.23.2
+MDLINT ?= npx --yes markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)
 # `make fmt` and `make check-fmt` call mdtablefix directly. `--git` selects the
 # Markdown files Git tracks and `--include-untracked` adds the untracked files
 # Git does not ignore, so a new document is formatted before it is staged.
@@ -109,7 +115,10 @@ build: ## Build debug binary
 release: ## Build release binaries
 	RUSTFLAGS="$${RUSTFLAGS-}" $(CARGO) build $(BUILD_JOBS) --release $(foreach bin,$(RELEASE_BINARIES),--bin $(bin))
 
-all: check-fmt lint test test-scripts spelling test-workflow-contracts ## Perform all commit gate checks
+# `nixie` and `test-loom` are deliberately outside the local gate. Nixie and
+# Merman are not provisioned by local Make, and Loom is opt-in and bounded at
+# ten minutes in CI. `AGENTS.md` states when each must be run by hand.
+all: check-fmt markdownlint lint test test-scripts spelling test-workflow-contracts ## Perform local commit gates except nixie and test-loom (see AGENTS.md)
 
 clean: ## Remove build artefacts
 	$(CARGO) clean
@@ -184,14 +193,14 @@ typecheck: ## Typecheck the workspace
 fmt: ## Format Rust and Markdown sources
 	$(CARGO) fmt --all
 	$(MDTABLEFIX) --in-place $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
-	$(MDLINT) --fix "**/*.md"
+	$(MDLINT) --fix
 
 check-fmt: ## Verify formatting
 	$(CARGO) fmt --all -- --check
 	$(MDTABLEFIX) --check $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 
 markdownlint: spelling ## Lint Markdown files and enforce spelling
-	$(MDLINT) "**/*.md" "#.uv-cache" "#.uv-tools"
+	$(MDLINT)
 
 spelling: ## Enforce en-GB-oxendict spelling
 	$(TYPOS_CONFIG_BUILDER) gate --repository .
