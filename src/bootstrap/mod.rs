@@ -38,10 +38,11 @@ pub use prepare::{
 #[cfg(target_os = "linux")]
 pub(crate) use prepare::{release_watcher, watch_slot_owner};
 use serde::{Deserialize, Serialize};
+pub(crate) use source::ConfigSource;
 
 use self::{
     prepare::{DataLayout, prepare_bootstrap},
-    source::{BootstrapSource, resolve_inputs},
+    source::resolve_inputs,
 };
 use crate::{
     error::{BootstrapResult, Result as CrateResult},
@@ -158,7 +159,7 @@ pub struct TestBootstrapSettings {
 /// Returns an error when bootstrap preparation fails, when the `PostgreSQL`
 /// distribution cannot be downloaded, or when `initdb` fails.
 pub fn run() -> CrateResult<()> {
-    let bootstrap = orchestrate_bootstrap(BootstrapKind::Default, BootstrapSource::Ambient)?;
+    let bootstrap = orchestrate_bootstrap(BootstrapKind::Default, ConfigSource::Ambient)?;
     run_setup_only_lifecycle(bootstrap)
 }
 
@@ -186,7 +187,7 @@ pub fn run() -> CrateResult<()> {
 /// Returns an error when bootstrap preparation fails or when subprocess orchestration
 /// cannot be configured.
 pub fn bootstrap_for_tests() -> BootstrapResult<TestBootstrapSettings> {
-    orchestrate_bootstrap(BootstrapKind::Test, BootstrapSource::Ambient)
+    orchestrate_bootstrap(BootstrapKind::Test, ConfigSource::Ambient)
 }
 
 /// Bootstraps `PostgreSQL` for integration tests from resolved configuration.
@@ -231,16 +232,16 @@ pub fn bootstrap_for_tests_with(
 ) -> BootstrapResult<TestBootstrapSettings> {
     orchestrate_bootstrap(
         BootstrapKind::Test,
-        BootstrapSource::Explicit(Box::new(config.into())),
+        ConfigSource::Explicit(Box::new(config.into())),
     )
 }
 
 fn orchestrate_bootstrap(
     kind: BootstrapKind,
-    source: BootstrapSource,
+    source: ConfigSource,
 ) -> BootstrapResult<TestBootstrapSettings> {
     install_color_eyre();
-    if matches!(kind, BootstrapKind::Test) && matches!(&source, BootstrapSource::Ambient) {
+    if matches!(kind, BootstrapKind::Test) && matches!(&source, ConfigSource::Ambient) {
         validate_backend_selection()?;
     }
 
