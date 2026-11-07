@@ -106,9 +106,11 @@ errors, ensure the `pg_worker` helper is configured via `PG_EMBEDDED_WORKER`.
 See the Users' Guide section on root-only test agents for the required setup
 and environment variables.[^2]
 
-[^1]: docs/users-guide.md#explicit-configuration
+[^1]: [Users' Guide: explicit
+    configuration](docs/users-guide.md#explicit-configuration)
 
-[^2]: docs/users-guide.md#integrating-with-root-only-test-agents
+[^2]: [Users' Guide: integrating with root-only test
+    agents](docs/users-guide.md#integrating-with-root-only-test-agents)
 
 ## Learn more
 
