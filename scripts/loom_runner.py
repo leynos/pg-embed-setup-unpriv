@@ -146,6 +146,25 @@ def classify(
 ) -> str:
     """Return the single outcome for one model run.
 
+    Parameters
+    ----------
+    output : str
+        The captured standard output and standard error of the model.
+    exit_code : int
+        The process exit code, negative when a signal ended it.
+    timed_out : bool
+        Whether the deadline killed the model.
+    name : str
+        The model's full libtest name, which the markers must repeat.
+    profile : str
+        The profile the runner asked for, which the markers must repeat.
+
+    Returns
+    -------
+    str
+        One of `timeout`, `branch_limit`, `failed`, `incomplete` or `passed`,
+        decided in that priority order.
+
     Examples
     --------
     >>> classify("", 0, True, "a::b", "pr")
@@ -268,6 +287,30 @@ def run_loom(
 ) -> Report:
     """Build, discover, validate and run every model, returning the report.
 
+    Parameters
+    ----------
+    repo : Path
+        The repository root, used as the working directory of every child.
+    profile : str
+        The exploration profile, `pr` or `scheduled`.
+    manifest_path : Path
+        The model inventory to load.
+    output_dir : Path
+        The directory that receives `build.log`, the per-model logs and the
+        summaries.
+    cargo : str
+        The Cargo executable.
+    runner : Runner
+        The process seam; the tests replace it with a fake.
+    environment : Mapping[str, str] | None
+        The inherited environment, or `None` to use `os.environ`.
+
+    Returns
+    -------
+    Report
+        One result per expected model, in execution order, with the settings,
+        tool versions and commit the run observed.
+
     Raises
     ------
     DiscoveryError
@@ -349,7 +392,23 @@ def run_loom(
 
 
 def write_summary(report: Report, output_dir: Path, environment: Mapping[str, str]) -> None:
-    """Write `summary.json` and `summary.md`, and append to the job summary."""
+    """Write `summary.json` and `summary.md`, and append to the job summary.
+
+    Parameters
+    ----------
+    report : Report
+        The finished run to render.
+    output_dir : Path
+        The directory that receives both summaries.
+    environment : Mapping[str, str]
+        The environment whose `GITHUB_STEP_SUMMARY`, when set, receives the
+        Markdown summary as well.
+
+    Returns
+    -------
+    None
+        The summaries are written as a side effect.
+    """
     (output_dir / "summary.json").write_text(render_json(report), encoding="utf-8")
     markdown = render_markdown(report)
     (output_dir / "summary.md").write_text(markdown, encoding="utf-8")
@@ -382,6 +441,23 @@ def main(
     cargo: _CargoArg = "cargo",
 ) -> int:
     """Run the Loom inventory and return the process exit code.
+
+    Parameters
+    ----------
+    profile : str
+        The exploration profile to run.
+    manifest : Path
+        The model inventory to load.
+    output_dir : Path
+        The directory that receives logs and summaries.
+    cargo : str
+        The Cargo executable.
+
+    Returns
+    -------
+    int
+        `0` when every expected model passed, `1` when none ran or one did
+        not pass, and `2` when discovery refused the run.
 
     Examples
     --------

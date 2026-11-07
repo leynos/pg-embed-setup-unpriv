@@ -23,6 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+# The scripts are not a package: they are importable only after the path
+# insertion above, so these imports cannot precede it.
 import loom_runner  # noqa: E402
 from loom_discovery import DiscoveryError  # noqa: E402
 from loom_process import log_name, run_process  # noqa: E402

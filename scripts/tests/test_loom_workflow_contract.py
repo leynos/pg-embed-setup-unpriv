@@ -9,6 +9,7 @@ into the build lane or drops the report fails here.
 
 from __future__ import annotations
 
+import tomllib
 import typing as typ
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from workflow_reader import Workflow, load_workflows
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOOM_PATH = REPO_ROOT / ".github" / "workflows" / "loom.yml"
 CI_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+MANIFEST = REPO_ROOT / ".config" / "loom-models.toml"
 
 CHECKOUT = "actions/checkout@"
 CACHE = "actions/cache@"
@@ -101,6 +103,20 @@ def test_one_literal_hosted_job_with_a_ceiling_above_its_step() -> None:
     run = step_named(loom(), "Run Loom models")
     assert job["timeout-minutes"] > run["timeout-minutes"], (
         "the job must outlive its run step so the upload still happens"
+    )
+
+
+@pytest.mark.parametrize("profile", ["pr", "scheduled"])
+def test_each_run_budget_sits_below_the_run_step_ceiling(profile: str) -> None:
+    """The runner must write its summary before the step is cancelled."""
+    document = tomllib.loads(MANIFEST.read_text(encoding="utf-8"))
+    ceiling = step_named(loom(), "Run Loom models")["timeout-minutes"] * 60
+
+    budget = document["profiles"][profile]["run_budget_seconds"]
+
+    assert budget < ceiling, (
+        f"the {profile} run budget must sit below the step ceiling, "
+        "or the summary would never be written"
     )
 
 

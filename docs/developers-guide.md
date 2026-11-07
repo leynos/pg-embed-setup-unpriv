@@ -677,20 +677,31 @@ and a profile match before it records `passed`. The other outcomes are `failed`,
 ### Triage and reproduction
 
 Each run writes `target/loom-report/summary.json` and `summary.md`, with a log
-per model, the commit, tool versions, the Loom version, the effective bounds,
-durations, failure tails and reproduction commands. The workflow uploads the
-directory even when the run fails.
+per model holding its captured output, the commit, tool versions, the Loom
+version, the effective bounds, durations and failure tails. The workflow
+uploads the directory even when the run fails.
 
 A `branch_limit` outcome means the model exhausted `max_branches`, often
 because an algorithm needs the processor to make progress. A `timeout` means
 the model exceeded the profile's per-model wall-clock ceiling, or that the
 whole-run budget was already spent when its turn came. An `incomplete` outcome
 means the markers, the executed test count or the profile disagreed with what
-the runner expected. Reproduce one model with the command its log records, or
-rerun the whole profile:
+the runner expected. Rerun the whole profile with the command in the
+`Reproduce` section of `summary.md`, which is also the one `summary.json`
+records:
 
 ```sh
 make test-loom LOOM_PROFILE=scheduled
+```
+
+To rerun one model, build the binary and run it with the model's exact name and
+the profile it ran under:
+
+```sh
+cargo test --locked --features loom-tests --lib --no-run
+PG_EMBED_LOOM_PROFILE=pr target/debug/deps/pg_embedded_setup_unpriv-<hash> \
+  env::loom_tests::scoped_env_serializes_concurrent_scopes \
+  --exact --ignored --nocapture --test-threads=1
 ```
 
 ### Scoped environment modelling
