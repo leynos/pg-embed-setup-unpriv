@@ -106,6 +106,11 @@ pub(super) struct PreparedBootstrap {
     pub(super) environment: TestBootstrapEnvironment,
 }
 
+/// Prepares a bootstrap as the invoking user.
+///
+/// A persistent layout clears upstream's `temporary` flag so the cluster
+/// outlives the setup-only handle, matching the root path. A per-cluster test
+/// layout keeps the flag, because that cluster dies with its test process.
 fn bootstrap_unprivileged(
     mut settings: Settings,
     cfg: &PgEnvCfg,

@@ -6,16 +6,29 @@
 //! `docs/users-guide.md` and run it, so a later edit cannot silently drop the
 //! guard, the export, or the trace-safe sentinel check. A child process
 //! confirms that the documented export actually hands the password on, which
-//! an inherited environment variable alone would not prove.
+//! an inherited environment variable alone would not prove. A further test
+//! feeds the documented silent read a password containing spaces and
+//! backslashes and checks it reaches a child unchanged, so a weakened read
+//! cannot silently mangle a password.
 //!
 //! The snippet is Bash, so the tests run only on Unix hosts.
 
 #![cfg(unix)]
 
-use std::process::{Command, Output};
+use std::{
+    io::Write as _,
+    process::{Command, Output, Stdio},
+};
 
 const USER_GUIDE: &str = include_str!("../docs/users-guide.md");
 const GUARD_MARKER: &str = "[ -z \"${PG_PASSWORD:+set}\" ]";
+/// The documented password-entry line, which the guide must keep verbatim.
+///
+/// `IFS= read -rs` is what preserves surrounding whitespace and backslashes
+/// while suppressing terminal echo. The fence is located by this exact line, so
+/// a weakened form such as `read PG_PASSWORD` fails the lookup rather than
+/// passing a weaker contract.
+const READ_MARKER: &str = "IFS= read -rs PG_PASSWORD";
 /// The diagnostic Bash emits for the documented `:?` expansion.
 ///
 /// Bash prefixes a `${PG_PASSWORD:?word}` failure with the variable name and a
@@ -25,6 +38,9 @@ const GUARD_MARKER: &str = "[ -z \"${PG_PASSWORD:+set}\" ]";
 const MISSING_MESSAGE: &str =
     "PG_PASSWORD: Set PG_PASSWORD externally to a strong, unique password";
 const SECRET: &str = "quick-start-secret";
+
+/// A password with the characters a careless read would alter.
+const TRICKY_SECRET: &str = "  spaced secret \\ with backslashes  ";
 
 /// A child process that reports whether it inherited the documented password.
 ///
@@ -51,6 +67,21 @@ fn configuration_block() -> String {
         .to_owned()
 }
 
+/// Extracts the documented password-entry fence.
+///
+/// The guide keeps that fence separate from the configuration fence so an
+/// existing cluster can skip it; locating it by `READ_MARKER` keeps the test
+/// honest when the prose around it changes.
+fn read_block() -> String {
+    USER_GUIDE
+        .split("```bash\n")
+        .skip(1)
+        .filter_map(|chunk| chunk.split("```").next())
+        .find(|block| block.contains(READ_MARKER))
+        .expect("the guide contains the password read in a bash fence")
+        .to_owned()
+}
+
 /// Runs `script` with `PG_PASSWORD` either set to `password` or removed.
 fn run(script: &str, password: Option<&str>) -> Output {
     let mut command = Command::new("bash");
@@ -74,6 +105,32 @@ fn run_before_export(script: &str) -> Output {
     command.env("EXPECTED_PASSWORD", SECRET);
     command.env_remove("PG_PASSWORD");
     command.output().expect("failed to invoke bash")
+}
+
+/// Runs `script` with `stdin` fed to it as terminal input would be.
+///
+/// Nothing is exposed through the environment except the expected value, so
+/// the only source of `PG_PASSWORD` is the documented read under test.
+fn run_with_stdin(script: &str, stdin: &str) -> Output {
+    let mut child = Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .env("EXPECTED_PASSWORD", stdin)
+        .env_remove("PG_PASSWORD")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn bash");
+    child
+        .stdin
+        .take()
+        .expect("bash stdin is piped")
+        .write_all(format!("{stdin}\n").as_bytes())
+        .expect("failed to write bash stdin");
+    child
+        .wait_with_output()
+        .expect("failed to collect bash output")
 }
 
 #[test]
@@ -120,6 +177,40 @@ fn documented_export_hands_the_password_to_a_child_process() {
     assert!(
         !stdout.contains(SECRET) && !stderr.contains(SECRET),
         "the configuration block printed the password",
+    );
+}
+
+/// Proves the documented read hands the password on byte for byte.
+///
+/// The read fence runs first, so `PG_PASSWORD` comes only from `stdin`. The
+/// configuration fence then exports it, and the child reports whether the
+/// value it inherited still matches. Surrounding whitespace or a backslash
+/// would be altered by a plain `read`, so `CHILD-NOMATCH` catches a weakened
+/// read. The captured streams must not contain the password either, which
+/// rules out the entry step printing what it read.
+#[test]
+fn documented_read_preserves_the_password_verbatim() {
+    let script = format!(
+        "{}\n{}\n{}",
+        read_block(),
+        configuration_block(),
+        CHILD_CHECK,
+    );
+    let output = run_with_stdin(&script, TRICKY_SECRET);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "the documented read and guard failed:\n{stderr}",
+    );
+    assert!(
+        stdout.contains("CHILD-MATCH") && !stdout.contains("CHILD-NOMATCH"),
+        "the documented read changed the password before a child saw it:\n{stdout}",
+    );
+    assert!(
+        !stdout.contains(TRICKY_SECRET) && !stderr.contains(TRICKY_SECRET),
+        "the password entry printed the password:\n{stdout}\n{stderr}",
     );
 }
 
