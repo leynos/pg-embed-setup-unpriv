@@ -44,6 +44,7 @@ SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 	scripts/tests/test_runner_placement.py \
 	scripts/tests/test_rustc_wrapper_contract.py \
 	scripts/tests/test_serial_group_contract.py \
+	scripts/tests/test_serial_inventory_properties.py \
 	scripts/tests/test_workflow_reader.py \
 	scripts/tests/test_timeout_exactness_contract.py \
 	scripts/tests/test_timeout_ordering_contract.py \
