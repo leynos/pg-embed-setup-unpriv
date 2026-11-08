@@ -279,7 +279,12 @@ intentionally leaked for the process lifetime and therefore do not perform
 cleanup on drop. On Unix and Windows, a best-effort process-exit hook attempts
 to stop the PostgreSQL postmaster and clean directories according to
 `CleanupMode`. The hook never drops individual databases; see
-[Database cleanup strategies](#database-cleanup-strategies).
+[Database cleanup strategies](#database-cleanup-strategies). The hook tracks
+only the first cluster registered for shutdown. Use one process-lifetime shared
+cluster per process: do not mix `shared_cluster_handle()` and
+`shared_test_cluster()`, or register another cluster with
+`ClusterHandle::register_shutdown_on_exit()`. Any later cluster will not be
+stopped or have its data directory cleaned by this hook.
 
 ### Async API for `#[tokio::test]` contexts
 
@@ -697,6 +702,11 @@ cluster.drop_database(db_name.as_str())?; // Explicit cleanup
 # Ok(())
 # }
 ```
+
+This explicit cleanup runs only if execution reaches `drop_database`. If the
+test returns early or panics after creating the database, it remains in the
+shared cluster. Use `TemporaryDatabase` when a cleanup attempt is needed on
+scope exit; its implicit drop is best-effort and logs a warning on failure.
 
 ### Automatic cleanup with TemporaryDatabase
 
