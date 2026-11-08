@@ -9,15 +9,18 @@
 //! an inherited environment variable alone would not prove. A further test
 //! feeds the documented silent read a password containing spaces and
 //! backslashes and checks it reaches a child unchanged, so a weakened read
-//! cannot silently mangle a password.
+//! cannot silently mangle a password. On Linux, a pseudo-terminal run also
+//! checks echo suppression, with a control that removes `-s`.
 //!
 //! The snippet is Bash, so the tests run only on Unix hosts.
 
 #![cfg(unix)]
 
 use std::{
-    io::Write as _,
+    io::{Read, Write as _},
     process::{Command, Output, Stdio},
+    thread,
+    time::Duration,
 };
 
 const USER_GUIDE: &str = include_str!("../docs/users-guide.md");
@@ -180,6 +183,62 @@ fn run_with_stdin(script: &Script, stdin: Secret) -> Output {
         .expect("failed to collect bash output")
 }
 
+/// The marker the pseudo-terminal block prints once the shell is running
+/// (the terminal's `ONLCR` translation makes the newline `\r\n`).
+#[cfg(target_os = "linux")]
+const READY: &[u8] = b"READY\r\n";
+
+/// Runs `script` on a pseudo-terminal and types `typed` into the documented read.
+///
+/// `script(1)` supplies the terminal whose line discipline echoes input unless
+/// `-s` turns echo off. The block prints [`READY`] before the read fence; waiting
+/// for that and pausing keeps typed input from echoing during shell start-up.
+#[cfg(target_os = "linux")]
+fn run_in_pty(script: &Script, typed: Secret) -> Output {
+    let mut child = Command::new("script")
+        .args(["-q", "-e", "-c", script.text(), "/dev/null"])
+        .env("EXPECTED_PASSWORD", typed.value())
+        .env_remove("PG_PASSWORD")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to invoke script(1)");
+
+    let mut stdin = child.stdin.take().expect("script stdin is piped");
+    let mut stdout = child.stdout.take().expect("script stdout is piped");
+    let mut captured = Vec::new();
+    let mut chunk = [0u8; 128];
+    while !captured.windows(READY.len()).any(|window| window == READY) {
+        let read = stdout
+            .read(&mut chunk)
+            .expect("failed to read the pseudo-terminal");
+        assert!(read > 0, "the documented block never signalled READY");
+        captured.extend_from_slice(chunk.get(..read).expect("read is within the chunk"));
+    }
+    thread::sleep(Duration::from_millis(200));
+    writeln!(stdin, "{}", typed.value()).expect("failed to type the password");
+    drop(stdin);
+    stdout
+        .read_to_end(&mut captured)
+        .expect("failed to read the pseudo-terminal");
+
+    let mut stderr = Vec::new();
+    child
+        .stderr
+        .take()
+        .expect("script stderr is piped")
+        .read_to_end(&mut stderr)
+        .expect("failed to read script stderr");
+    let status = child.wait().expect("failed to wait for script(1)");
+
+    Output {
+        status,
+        stdout: captured,
+        stderr,
+    }
+}
+
 /// Asserts that a handoff handed `secret` on without printing it.
 ///
 /// `what` names the scenario, so a failure says which documented path broke.
@@ -265,6 +324,58 @@ fn documented_export_hands_the_password_to_a_child_process() {
 fn documented_read_preserves_the_password_verbatim() {
     let output = run_with_stdin(&read_script(), TRICKY_SECRET);
     assert_handoff(&output, TRICKY_SECRET, Context("the documented read"));
+}
+
+/// Proves the documented silent read does not echo the password on a terminal.
+///
+/// A reader types at a terminal, so this runs the read under `script(1)` with
+/// echo on until `read -s` turns it off, and asserts the whole transcript is
+/// free of the password.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_documented_read_suppresses_terminal_echo() {
+    let script = Script(format!(
+        "printf 'READY\\n'\n{}\n{}\n{}",
+        read_block().text(),
+        configuration_block().text(),
+        CHILD_CHECK,
+    ));
+    let output = run_in_pty(&script, TRICKY_SECRET);
+    assert_handoff(&output, TRICKY_SECRET, Context("the pseudo-terminal read"));
+}
+
+/// Shows the echo assertion detects a read without the silent flag.
+///
+/// The positive test would also pass if no typed input reached the transcript,
+/// so removing `-s` must make the password visible. `IFS=` remains, isolating
+/// echo from the whitespace defect the piped read test covers.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_read_without_the_silent_flag_echoes_the_password() {
+    let silent = read_block();
+    let noisy = Script(silent.text().replace("read -rs", "read -r"));
+    assert_ne!(
+        noisy.text(),
+        silent.text(),
+        "the documented read must keep -rs for this control to mean anything",
+    );
+    let script = Script(format!(
+        "printf 'READY\\n'\n{}\n{}\n{}",
+        noisy.text(),
+        configuration_block().text(),
+        CHILD_CHECK,
+    ));
+    let output = run_in_pty(&script, TRICKY_SECRET);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains(TRICKY_SECRET.value()),
+        "a read without -s was not echoed:\n{stdout}",
+    );
+    assert!(
+        stdout.contains("CHILD-MATCH"),
+        "IFS= should still preserve the value without -s:\n{stdout}",
+    );
 }
 
 /// Proves the guard and export stay trace-safe under `set -x`.
