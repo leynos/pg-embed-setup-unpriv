@@ -31,7 +31,9 @@ _ISOLATED = "fn f(_g: serial::ScenarioLocalGuard) {}\n"
 #: module, and whether that module takes the lock.
 _Plan = tuple[str, bool, bool, bool]
 
-_GENERATED = settings(max_examples=25)
+#: Each example writes a tree and scans it, which the default 200 ms deadline
+#: does not allow for on a loaded runner. A slow example is not a defect.
+_GENERATED = settings(max_examples=25, deadline=None)
 
 _NAMES = st.lists(
     st.from_regex(r"[a-z][a-z0-9_]{0,8}", fullmatch=True),
