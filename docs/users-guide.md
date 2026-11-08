@@ -30,9 +30,10 @@ tool and integrate it into automated test flows.
 - macOS runs the unprivileged path; root executions are expected to fail fast
   because privilege dropping is not supported on that target.
 - Windows always behaves as unprivileged, so the helper runs in-process and
-  ignores root-only scenarios. Windows directory creation uses the current
-  account's access control lists (ACLs); the Unix `0700`/`0755` privacy modes
-  are not applied there.
+  ignores root-only scenarios. New directories normally inherit inheritable ACL
+  entries from their parent; if none apply, Windows uses the creator token's
+  default DACL. The helper does not set or change ACLs, and Unix `0700`/`0755`
+  privacy modes are not applied there.
 - Windows on ARM is not a supported target because the upstream PostgreSQL
   binary archive does not provide `aarch64-pc-windows-msvc` binaries.
 
@@ -188,8 +189,9 @@ cargo binstall pg-embed-setup-unpriv
    the installation directory and its `cache` child, and `0700` to its `run`
    child and the data directory. On Unix, both supported privilege flows
    reapply these modes. On Windows, Unix modes are skipped, and the helper does
-   not set or change ACLs; new directories inherit the current account's
-   default ACLs. The helper reuses an existing data directory when it contains
+   not set or change ACLs. New directories normally inherit inheritable ACL
+   entries from their parent; if none apply, Windows uses the creator token's
+   default DACL. The helper reuses an existing data directory when it contains
    a completed cluster; otherwise, it recovers an invalid directory if needed
    and initializes the cluster with the provided credentials via `initdb`. The
    PostgreSQL server is **not** started — the installation is left ready for
@@ -1034,21 +1036,29 @@ while root runs set it to `nobody` with mode `0755`. Per-cluster slot
 directories follow the data-directory row. With the persistent layout,
 `<root>/data` is itself the data directory and has mode `0700` in both flows.
 
-Only the root-to-`nobody` path reassigns directory ownership. It reassigns
-ownership of installation descendants on every run without changing their
-modes. It also reassigns ownership of data descendants for default-derived data
-paths. For an explicit `PG_DATA_DIR`, the root-to-`nobody` path changes
-ownership and mode on the directory named by that setting, without recursively
-changing ownership or modes below it. Before using an existing explicit data
-directory in a root-to-`nobody` run, ensure its descendants already allow
-`nobody` to access the files PostgreSQL needs. Otherwise, setup or lifecycle
-operations can fail.
+Only the root-to-`nobody` path reassigns directory ownership. Its installation
+walk reassigns ownership of installation descendants on every run but does not
+change their modes. Separate setup calls reapply mode `0755` to the
+installation and `cache` directories, mode `0700` to `run`, and mode `0600` to
+an existing `PGPASSFILE`, such as `<install>/.pgpass`. The root path also
+reassigns ownership of data descendants for default-derived data paths.
+
+For an explicit `PG_DATA_DIR`, the data-directory setup changes ownership and
+mode only on the directory named by that setting; it does not itself walk its
+descendants. If the explicit directory is within `PG_RUNTIME_DIR`, the
+installation ownership walk also reassigns ownership of it and its descendants.
+That walk does not change modes; the separate mode updates above still apply.
+For an explicit data directory outside the installation tree, descendants keep
+their existing owners and modes and must already allow `nobody` to access the
+files PostgreSQL needs. Otherwise, setup or lifecycle operations can fail.
 
 Windows always uses the non-root flow. The helper applies no Unix modes and
-does not set or change ACLs. New directories inherit the current account's
-default ACLs, and existing ACLs remain unchanged. Use private directories or
-explicit ACLs when the data or generated `.pgpass` file contains sensitive
-information.
+does not set or change ACLs. New directories normally inherit inheritable ACL
+entries from their parent; if none apply, Windows uses the creator token's
+default DACL. Existing ACLs remain unchanged. See
+[Microsoft's DACL rules](https://learn.microsoft.com/en-us/windows/win32/secauthz/dacl-for-a-new-object)
+for details. Use private directories or explicit ACLs when the data or
+generated `.pgpass` file contains sensitive information.
 
 On unsupported Unix targets such as macOS, root execution fails fast with a
 "privilege drop is not supported on this target" error rather than attempting
@@ -1168,10 +1178,11 @@ the warm step.
 - **Windows on ARM**: `aarch64-pc-windows-msvc` is not published or tested
   because upstream PostgreSQL binaries are not available for that target.
 - **Windows directory privacy**: Unix `0700`/`0755` modes are skipped, and the
-  helper does not set or change ACLs. New directories inherit the current
-  account's default ACLs. Use private directories or explicit ACLs when the
-  generated `.pgpass` file and data directory must be hidden from other local
-  accounts.
+  helper does not set or change ACLs. New directories normally inherit
+  inheritable ACL entries from their parent; if none apply, Windows uses the
+  creator token's default DACL. Use private directories or explicit ACLs when
+  the generated `.pgpass` file and data directory must be hidden from other
+  local accounts.
 - **CLI arguments in tests**: `PgEnvCfg::load()` ignores `std::env::args` during
   library use so Cargo test filters (for example,
   `bootstrap_privileges::bootstrap_as_root`) do not trip the underlying Clap
