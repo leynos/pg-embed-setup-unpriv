@@ -66,6 +66,62 @@ def _plans(draw: st.DrawFn) -> list[_Plan]:
     ]
 
 
+def _source_text(takes_lock: bool) -> str:
+    """Return the body of a source that does or does not take the lock."""
+    return _LOCKING if takes_lock else _ISOLATED
+
+
+def _write_support(tests_directory: Path, name: str, takes_lock: bool) -> str:
+    """Write one binary's support module and return its declaration.
+
+    Parameters
+    ----------
+    tests_directory : Path
+        The directory to write the sources into.
+    name : str
+        The binary the support module belongs to.
+    takes_lock : bool
+        Whether the support module takes the lock.
+
+    Returns
+    -------
+    str
+        The lines that include the module, as ``#[path]`` is what makes the
+        attribution interesting.
+    """
+    support = tests_directory / "support" / f"{name}_support.rs"
+    support.parent.mkdir(parents=True, exist_ok=True)
+    support.write_text(_source_text(takes_lock), encoding="utf-8")
+    return f'#[path = "support/{name}_support.rs"]\nmod {name}_support;\n'
+
+
+def _write_binary(tests_directory: Path, plan: _Plan) -> None:
+    """Write the crate root one plan describes.
+
+    Parameters
+    ----------
+    tests_directory : Path
+        The directory to write the sources into.
+    plan : tuple
+        The plan for this binary.
+    """
+    name, takes_lock, includes_support, support_takes_lock = plan
+    declaration = (
+        _write_support(tests_directory, name, support_takes_lock)
+        if includes_support
+        else ""
+    )
+    (tests_directory / f"{name}.rs").write_text(
+        declaration + _source_text(takes_lock), encoding="utf-8"
+    )
+
+
+def _takes_the_lock(plan: _Plan) -> bool:
+    """Return whether a plan makes its binary a lock consumer."""
+    _, takes_lock, includes_support, support_takes_lock = plan
+    return takes_lock or (includes_support and support_takes_lock)
+
+
 def _write_tree(tests_directory: Path, plans: list[_Plan]) -> frozenset[str]:
     """Write the planned sources and return the expected members.
 
@@ -84,27 +140,9 @@ def _write_tree(tests_directory: Path, plans: list[_Plan]) -> frozenset[str]:
     frozenset of str
         The binaries that take the lock under the plan.
     """
-    expected: set[str] = set()
-    for name, takes_lock, includes_support, support_takes_lock in plans:
-        declaration = ""
-        if includes_support:
-            support = tests_directory / "support" / f"{name}_support.rs"
-            support.parent.mkdir(parents=True, exist_ok=True)
-            support.write_text(
-                _LOCKING if support_takes_lock else _ISOLATED,
-                encoding="utf-8",
-            )
-            declaration = (
-                f'#[path = "support/{name}_support.rs"]\n'
-                f"mod {name}_support;\n"
-            )
-        (tests_directory / f"{name}.rs").write_text(
-            declaration + (_LOCKING if takes_lock else _ISOLATED),
-            encoding="utf-8",
-        )
-        if takes_lock or (includes_support and support_takes_lock):
-            expected.add(name)
-    return frozenset(expected)
+    for plan in plans:
+        _write_binary(tests_directory, plan)
+    return frozenset(plan[0] for plan in plans if _takes_the_lock(plan))
 
 
 @_GENERATED
