@@ -170,10 +170,18 @@ WHITAKER_CLEAN_ENV = env -u CARGO_ENCODED_RUSTFLAGS \
 	-u CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS -u CFLAGS -u LDFLAGS \
 	RUSTFLAGS=
 
+# --lib whitaker_suite: the rolling release now stages a standalone
+# `string_continuation_style` library beside the aggregate suite that already
+# registers that lint, and the pinned installer (0.2.11) cannot prune it.
+# `--all` would load both and rustc aborts with "duplicate specification of
+# lint" before any source compiles (leynos/whitaker#565). Suite-only selection
+# covers the same lints; revert to `--all` once installer 0.2.12 is pinned.
+# --fail-on-no-libraries keeps a missing suite from passing as a clean lint.
+#
 # --ignore-rust-version: the Whitaker Dylint driver toolchain predates the
 # rust-version of some dependencies; the repo toolchain still enforces MSRV.
 lint-whitaker: ## Run the Whitaker Dylint suite with clean driver inputs and warnings denied
-	$(WHITAKER_CLEAN_ENV) DYLINT_RUSTFLAGS="-D warnings" $(WHITAKER) --all -- --all-targets --all-features --ignore-rust-version
+	$(WHITAKER_CLEAN_ENV) DYLINT_RUSTFLAGS="-D warnings" $(WHITAKER) --lib whitaker_suite --fail-on-no-libraries -- --all-targets --all-features --ignore-rust-version
 
 typecheck: ## Typecheck the workspace
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) check --workspace --all-targets --all-features $(BUILD_JOBS)

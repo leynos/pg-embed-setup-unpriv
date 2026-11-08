@@ -250,11 +250,15 @@ make lint
 1. `interrogate --fail-under 100 .` — Python docstring coverage at 100%.
 2. `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS` set to deny warnings.
 3. `cargo clippy --all-targets --all-features -- -D warnings`.
-4. `$(WHITAKER) --all -- --all-targets --all-features`, the Whitaker Dylint
-   suite, with `RUSTFLAGS="-D warnings"` denying lint warnings. Key lints
-   include `module_max_lines` (a 400-line cap per module) and
-   `no_expect_outside_tests` (bans `.expect()`/`.unwrap()` outside test-only
-   code).
+4. `$(WHITAKER) --lib whitaker_suite -- --all-targets --all-features`, the
+   Whitaker Dylint suite, with `RUSTFLAGS="-D warnings"` denying lint warnings.
+   The route selects the aggregate suite rather than `--all` because the
+   rolling release also stages a standalone `string_continuation_style` library
+   that the suite already registers; loading both aborts rustc with a duplicate
+   lint (`leynos/whitaker#565`), and the pinned installer cannot prune the
+   extra library. Key lints include `module_max_lines` (a 400-line cap per
+   module) and `no_expect_outside_tests` (bans `.expect()`/`.unwrap()` outside
+   test-only code).
 
 Attribute macros are gone by the time a Dylint lint sees HIR, so
 `no_expect_outside_tests` cannot recognize a `#[serial]`-wrapped `#[test]`
@@ -1259,7 +1263,10 @@ encoded flags, backend, target and linker settings through
 `WHITAKER_CLEAN_ENV`, assigns `RUSTFLAGS` empty (an unset variable would let
 Cargo fall back to the flags in `.cargo/config.toml`, and the Concordat rule
 reads an explicit empty assignment as the isolation boundary), and passes the
-warning policy through `DYLINT_RUSTFLAGS`. It selects no LLVM backend.
+warning policy through `DYLINT_RUSTFLAGS`. It selects no LLVM backend, and it
+loads only the aggregate `whitaker_suite` library: the rolling release stages a
+standalone `string_continuation_style` library beside the suite that registers
+the same lint, and `--all` would load both (see `leynos/whitaker#565`).
 `tests/build_standard_contract.rs` reads `make -n lint-whitaker` on a Linux and
 a macOS host for exactly that. In CI, the root job's direct `cargo build`
 assigns the standard's flags in its step environment, because `setup-rust`
