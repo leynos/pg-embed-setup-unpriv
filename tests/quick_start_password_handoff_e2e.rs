@@ -19,7 +19,10 @@
 
 #![cfg(all(unix, feature = "diesel-support"))]
 
-use std::process::Command;
+use std::{
+    ffi::{OsStr, OsString},
+    process::Command,
+};
 
 use camino::Utf8Path;
 use color_eyre::eyre::{Report, Result, ensure, eyre};
@@ -52,6 +55,9 @@ const SECRET: &str = "quick-start-handoff-secret";
 /// A password the documented export never supplied.
 const WRONG_SECRET: &str = "not-the-documented-password";
 
+/// An ambient password the scenario must neither use nor disturb.
+const AMBIENT_SECRET: &str = "ambient-password-outside-the-scope";
+
 /// The guard marker that identifies the documented configuration fence.
 const GUARD_MARKER: &str = "[ -z \"${PG_PASSWORD:+set}\" ]";
 
@@ -74,7 +80,7 @@ fn documented_handoff_authenticates_a_live_cluster(
 ) -> Result<()> {
     let sandbox = TestSandbox::new("quick-start-handoff-e2e")?;
     sandbox.reset()?;
-    let outcome = sandbox.with_env(handoff_env(&sandbox), || run_scenario(&sandbox));
+    let outcome = run_with_ambient_password(&sandbox);
     drop(serial_guard);
     match outcome {
         Ok(()) => Ok(()),
@@ -84,6 +90,33 @@ fn documented_handoff_authenticates_a_live_cluster(
         }
         Err(Failure::Failed(report)) => Err(report),
     }
+}
+
+/// Runs the scenario with a conflicting password already in the environment.
+///
+/// `handoff_env` unsets `PG_PASSWORD` instead of leaving it untouched, so the
+/// bootstrap must adopt the password the helper stored, not an ambient value.
+/// The outer scope proves the documented block's environment changes are
+/// undone afterwards, so a caller's password survives the test.
+fn run_with_ambient_password(sandbox: &TestSandbox) -> std::result::Result<(), Failure> {
+    let before = std::env::var_os("PG_PASSWORD");
+    let (outcome, restored) = env::with_scoped_env(
+        [(
+            OsString::from("PG_PASSWORD"),
+            Some(OsString::from(AMBIENT_SECRET)),
+        )],
+        || {
+            let outcome = sandbox.with_env(handoff_env(sandbox), || run_scenario(sandbox));
+            (outcome, std::env::var_os("PG_PASSWORD"))
+        },
+    );
+    let retains_ambient = restored.as_deref() == Some(OsStr::new(AMBIENT_SECRET));
+    if !retains_ambient || std::env::var_os("PG_PASSWORD") != before {
+        return Err(Failure::Failed(eyre!(
+            "the scoped environment did not restore the ambient password"
+        )));
+    }
+    outcome
 }
 
 /// Runs the aborting cases and then the authenticating case.
@@ -201,13 +234,20 @@ fn connection_url(settings: &postgresql_embedded::Settings, password: &str) -> S
 ///
 /// The shared timezone-free base matches the other cluster suites: the helper
 /// resolves the host's time zone data itself. The base also seeds a known
-/// password for other suites, so it is removed here: only the documented
-/// export may hand a password to the helper.
+/// password for other suites, so that entry becomes an unset: only the
+/// documented export may hand a password to the helper, and dropping the key
+/// would leave an ambient value in force.
 fn handoff_env(sandbox: &TestSandbox) -> ScopedEnvVars {
     sandbox
         .env_without_timezone()
         .into_iter()
-        .filter(|(key, _)| key != "PG_PASSWORD")
+        .map(|(key, value)| {
+            if key == "PG_PASSWORD" {
+                (key, None)
+            } else {
+                (key, value)
+            }
+        })
         .collect()
 }
 
