@@ -65,8 +65,13 @@ def _is_lock_module(path: Path, root: Path) -> bool:
     Returns
     -------
     bool
-        True for the module file and every file in its directory.
+        True for the module file and every file in its directory, and
+        False for a path outside ``root``. A source reached through a
+        symlink that leaves the test tree resolves outside ``root``, and
+        an unanswerable question is not a reason to stop the scan.
     """
+    if not path.is_relative_to(root):
+        return False
     relative = path.relative_to(root)
     return (
         relative == _LOCK_MODULE
@@ -173,6 +178,24 @@ def lock_consuming_binaries(
     )
 
 
+def _unresolvable_fault(tests_dir: Path, error: OSError | RuntimeError) -> str:
+    """Report a test directory whose path cannot be resolved.
+
+    Parameters
+    ----------
+    tests_dir : Path
+        The directory the caller asked to scan.
+    error : OSError or RuntimeError
+        The failure :meth:`Path.resolve` raised.
+
+    Returns
+    -------
+    str
+        One fault naming the directory and the cause.
+    """
+    return f"cannot resolve the test directory {tests_dir}: {error}"
+
+
 def scan_lock_consuming_binaries(
     tests_dir: Path = TESTS_DIR,
 ) -> tuple[frozenset[str], list[str]]:
@@ -196,7 +219,14 @@ def scan_lock_consuming_binaries(
     >>> isinstance(members, frozenset), faults
     (True, [])
     """
-    root = tests_dir.resolve()
+    try:
+        # Non-strict resolution is deliberate: a missing directory still
+        # reaches the loader, which reports it against the path a reader
+        # can act on. Only a resolution that cannot complete at all, such
+        # as a symlink loop, is reported here.
+        root = tests_dir.resolve()
+    except (OSError, RuntimeError) as error:
+        return frozenset(), [_unresolvable_fault(tests_dir, error)]
     try:
         sources = load_test_sources(root)
     except SourceLoadError as error:
