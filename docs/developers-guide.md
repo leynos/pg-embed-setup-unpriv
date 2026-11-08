@@ -266,9 +266,14 @@ make lint
 1. `interrogate --fail-under 100 .` — Python docstring coverage at 100%.
 2. `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS` set to deny warnings.
 3. `cargo clippy --all-targets --all-features -- -D warnings`.
-4. `$(WHITAKER) --all -- --all-targets --all-features`, the Whitaker Dylint
-   suite, with `RUSTFLAGS="-D warnings"` denying lint warnings. Key lints
-   include `module_max_lines` (a 400-line cap per module) and
+4. `$(WHITAKER) --lib whitaker_suite -- --all-targets --all-features`, the
+   Whitaker Dylint suite, with `DYLINT_RUSTFLAGS="-D warnings"` denying lint
+   warnings (the driver's own `RUSTFLAGS` are cleared first). The route selects
+   the aggregate suite rather than `--all` because the rolling release also
+   stages a standalone `string_continuation_style` library that the suite
+   already registers; loading both aborts rustc with a duplicate lint
+   (`leynos/whitaker#565`), and the pinned installer cannot prune the extra
+   library. Key lints include `module_max_lines` (a 400-line cap per module) and
    `no_expect_outside_tests` (bans `.expect()`/`.unwrap()` outside test-only
    code).
 
@@ -1268,7 +1273,11 @@ ADR 005 records the design; this section covers the code.
   copy of `sleep` named `postgres`.
 - `DataLayout` (in `src/bootstrap/prepare/layout.rs`) says whether a derived
   data directory becomes a slot: `PerCluster` for test bootstraps, `Persistent`
-  for the setup-only `run`. `has_live_peers` and `ClaimGuard` (in
+  for the setup-only `run`. A `Persistent` bootstrap also clears
+  `Settings::temporary` in both preparation paths, so the handle that ran
+  `initdb` does not delete the cluster when it drops: `run` leaves it for the
+  process that comes next, and the root path needs the same because each worker
+  subprocess drops after its operation. `has_live_peers` and `ClaimGuard` (in
   `cluster_slot/mod.rs`) let `plan_cleanup` in `src/cluster/cleanup.rs` demote
   `CleanupMode::Full` to data-only while another slot in the root holds its
   lock. The plan holds the claim guard across the probe and the removal, and
@@ -1349,7 +1358,10 @@ encoded flags, backend, target and linker settings through
 `WHITAKER_CLEAN_ENV`, assigns `RUSTFLAGS` empty (an unset variable would let
 Cargo fall back to the flags in `.cargo/config.toml`, and the Concordat rule
 reads an explicit empty assignment as the isolation boundary), and passes the
-warning policy through `DYLINT_RUSTFLAGS`. It selects no LLVM backend.
+warning policy through `DYLINT_RUSTFLAGS`. It selects no LLVM backend, and it
+loads only the aggregate `whitaker_suite` library: the rolling release stages a
+standalone `string_continuation_style` library beside the suite that registers
+the same lint, and `--all` would load both (see `leynos/whitaker#565`).
 `tests/build_standard_contract.rs` reads `make -n lint-whitaker` on a Linux and
 a macOS host for exactly that. In CI, the root job's direct `cargo build`
 assigns the standard's flags in its step environment, because `setup-rust`

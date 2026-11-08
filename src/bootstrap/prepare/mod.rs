@@ -106,11 +106,24 @@ pub(super) struct PreparedBootstrap {
     pub(super) environment: TestBootstrapEnvironment,
 }
 
+/// Prepares a bootstrap as the invoking user.
+///
+/// A persistent layout clears upstream's `temporary` flag so the cluster
+/// outlives the setup-only handle, matching the root path. A per-cluster test
+/// layout keeps the flag, because that cluster dies with its test process.
 fn bootstrap_unprivileged(
     mut settings: Settings,
     cfg: &PgEnvCfg,
     layout: DataLayout,
 ) -> BootstrapResult<PreparedBootstrap> {
+    // The setup-only `run` initializes a cluster for a later process, so its
+    // in-process handle must not take the data directory with it when it is
+    // dropped. The root path keeps it for the same reason: each worker
+    // subprocess drops once its operation finishes. A test bootstrap keeps
+    // upstream's temporary flag, because its cluster dies with its process.
+    if layout == DataLayout::Persistent {
+        settings.temporary = false;
+    }
     let mut paths = resolve_settings_paths_for_current_user(&mut settings, cfg)?;
     claim_derived_slot(&mut settings, &mut paths, layout)?;
     reuse_existing_password(

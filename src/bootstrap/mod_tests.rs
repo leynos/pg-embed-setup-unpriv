@@ -60,6 +60,10 @@ fn orchestrate_bootstrap_respects_env_overrides(run_test_paths: Result<Option<Ru
     assert_paths!(&settings, &paths.runtime_path, &paths.data_path);
     assert_identity(&settings, "bootstrap_test", "bootstrap_test_pw");
     assert_environment(&settings, &paths.runtime_path);
+    assert!(
+        !settings.settings.temporary,
+        "a persistent bootstrap must keep its cluster after its handle drops",
+    );
 }
 
 /// Holds temporary directories for `run()` tests.
@@ -150,6 +154,10 @@ fn run_delegates_to_setup_only_lifecycle(run_test_paths: Result<Option<RunTestPa
         .expect("setup-only lifecycle hook should capture bootstrap settings");
     assert_paths!(observed, &paths.runtime_path, &paths.data_path);
     assert_identity(observed, "bootstrap_run", "bootstrap_run_pw");
+    assert!(
+        !observed.settings.temporary,
+        "run() must leave its initialised cluster in place",
+    );
 }
 
 /// Holds temporary directories and their UTF-8 paths for bootstrap tests.

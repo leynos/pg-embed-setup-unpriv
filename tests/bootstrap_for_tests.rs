@@ -6,6 +6,7 @@ use std::{cell::RefCell, ffi::OsStr};
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Report, Result, ensure, eyre};
 use pg_embedded_setup_unpriv::{
+    ExecutionPrivileges,
     TestBootstrapSettings,
     bootstrap_for_tests,
     detect_execution_privileges,
@@ -215,7 +216,15 @@ fn then_returns_settings(world: &BootstrapWorldFixture) -> Result<()> {
         settings.environment.pgpass_file == world_ref.sandbox.install_dir().join(".pgpass"),
         "expected pgpass location to reside under install dir"
     );
+    // Only the unprivileged path can leave a test bootstrap temporary: its
+    // cluster dies with the test process that created it. The root path
+    // clears the flag for every layout, because each worker subprocess drops
+    // its handle after finishing its operation.
     let expected_privileges = detect_execution_privileges();
+    ensure!(
+        settings.settings.temporary == (expected_privileges == ExecutionPrivileges::Unprivileged),
+        "a test bootstrap must be temporary exactly on the unprivileged path"
+    );
     ensure!(
         settings.privileges == expected_privileges,
         "expected {:?} execution",
