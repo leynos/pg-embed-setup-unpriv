@@ -275,6 +275,7 @@ fn run_handoff(
     sandbox: &TestSandbox,
     password_setup: &str,
 ) -> std::result::Result<std::process::Output, Failure> {
+    let documented_block = documented_block()?;
     let script = format!(
         concat!(
             "AMBIENT_VERSION_REQ=${{PG_VERSION_REQ-}}\n",
@@ -288,12 +289,17 @@ fn run_handoff(
             "export PG_RUNTIME_DIR=${{SANDBOX_RUNTIME_DIR}}\n",
             "export PG_DATA_DIR=${{SANDBOX_DATA_DIR}}\n",
             "export PG_SUPERUSER=${{SANDBOX_SUPERUSER}}\n",
-            "${{HELPER_BIN}}\n",
+            "\"${{HELPER_BIN}}\"\n",
         ),
-        password_setup,
-        documented_block(),
+        password_setup, documented_block,
     );
 
+    // No runtime value is interpolated into `script`: `password_setup` is a
+    // fixed literal from the caller and `documented_block` comes from
+    // `include_str!`. Everything else arrives through `.env` and is expanded
+    // by the shell as data, so there is no injection path here. Keep it that
+    // way by passing future values as environment variables, not as script
+    // text.
     Command::new("bash")
         .arg("-c")
         .arg(script)
@@ -308,14 +314,22 @@ fn run_handoff(
 }
 
 /// Extracts the documented configuration fence that contains the guard.
-fn documented_block() -> String {
+///
+/// A missing fence is a documentation defect the test must report, not a panic
+/// inside an extraction helper, so the diagnostic names both the source file
+/// and the marker it looked for.
+fn documented_block() -> std::result::Result<String, Failure> {
     include_str!("../docs/users-guide.md")
         .split("```bash\n")
         .skip(1)
         .filter_map(|chunk| chunk.split("```").next())
         .find(|block| block.contains(GUARD_MARKER))
-        .expect("the guide contains the password guard in a bash fence")
-        .to_owned()
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            Failure::Failed(eyre!(
+                "docs/users-guide.md has no bash fence containing the guard {GUARD_MARKER}"
+            ))
+        })
 }
 
 /// Classifies a bootstrap error as an environment skip or a real failure.

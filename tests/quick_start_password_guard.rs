@@ -16,6 +16,12 @@ use std::process::{Command, Output};
 
 const USER_GUIDE: &str = include_str!("../docs/users-guide.md");
 const GUARD_MARKER: &str = "[ -z \"${PG_PASSWORD:+set}\" ]";
+/// The diagnostic Bash emits for the documented `:?` expansion.
+///
+/// Bash prefixes a `${PG_PASSWORD:?word}` failure with the variable name and a
+/// colon, so the expected text begins `PG_PASSWORD: `. The format is stable
+/// across supported shells; a mismatch here means either the guard text or
+/// that shell convention changed, not that the test is flaky.
 const MISSING_MESSAGE: &str =
     "PG_PASSWORD: Set PG_PASSWORD externally to a strong, unique password";
 const SECRET: &str = "quick-start-secret";

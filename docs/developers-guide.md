@@ -251,14 +251,15 @@ make lint
 2. `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS` set to deny warnings.
 3. `cargo clippy --all-targets --all-features -- -D warnings`.
 4. `$(WHITAKER) --lib whitaker_suite -- --all-targets --all-features`, the
-   Whitaker Dylint suite, with `RUSTFLAGS="-D warnings"` denying lint warnings.
-   The route selects the aggregate suite rather than `--all` because the
-   rolling release also stages a standalone `string_continuation_style` library
-   that the suite already registers; loading both aborts rustc with a duplicate
-   lint (`leynos/whitaker#565`), and the pinned installer cannot prune the
-   extra library. Key lints include `module_max_lines` (a 400-line cap per
-   module) and `no_expect_outside_tests` (bans `.expect()`/`.unwrap()` outside
-   test-only code).
+   Whitaker Dylint suite, with `DYLINT_RUSTFLAGS="-D warnings"` denying lint
+   warnings (the driver's own `RUSTFLAGS` are cleared first). The route selects
+   the aggregate suite rather than `--all` because the rolling release also
+   stages a standalone `string_continuation_style` library that the suite
+   already registers; loading both aborts rustc with a duplicate lint
+   (`leynos/whitaker#565`), and the pinned installer cannot prune the extra
+   library. Key lints include `module_max_lines` (a 400-line cap per module) and
+   `no_expect_outside_tests` (bans `.expect()`/`.unwrap()` outside test-only
+   code).
 
 Attribute macros are gone by the time a Dylint lint sees HIR, so
 `no_expect_outside_tests` cannot recognize a `#[serial]`-wrapped `#[test]`
