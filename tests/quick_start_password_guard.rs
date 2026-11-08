@@ -210,6 +210,13 @@ fn assert_streams_hide(output: &Output, secret: Secret, context: Context) {
     );
 }
 
+/// Proves the documented guard refuses a missing or empty password.
+///
+/// Both the unset and empty cases must exit non-zero, name the variable in
+/// the diagnostic, and stop before the rest of the block runs. An empty
+/// value is distinct from an unset one in Bash, so the guard's `:+` test has
+/// to reject it too; a guard that accepted it would hand an empty password
+/// to `initdb`.
 #[test]
 fn missing_or_empty_password_fails_and_aborts() {
     let script = Script(format!(
@@ -234,6 +241,12 @@ fn missing_or_empty_password_fails_and_aborts() {
     }
 }
 
+/// Proves the documented export hands the password to a child process.
+///
+/// The parent shell creates `PG_PASSWORD` without exporting it, so the
+/// documented `export PG_PASSWORD` line is the only reason the child can see
+/// the value. An environment variable the test sets itself would prove
+/// nothing about that line.
 #[test]
 fn documented_export_hands_the_password_to_a_child_process() {
     let output = run_before_export(&export_script());
@@ -254,6 +267,12 @@ fn documented_read_preserves_the_password_verbatim() {
     assert_handoff(&output, TRICKY_SECRET, Context("the documented read"));
 }
 
+/// Proves the guard and export stay trace-safe under `set -x`.
+///
+/// A reader who traces the documented block must still not see the password:
+/// the sentinel test expands `PG_PASSWORD` only through `${PG_PASSWORD:+set}`,
+/// so the trace shows `-z set` rather than the value. The assertion on that
+/// trace text keeps the test from passing because tracing failed to run.
 #[test]
 fn tracing_does_not_expose_the_password() {
     let script = Script(format!("set -x\n{}", configuration_block().text()));
