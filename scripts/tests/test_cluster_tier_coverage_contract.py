@@ -82,6 +82,7 @@ def test_the_scan_names_the_known_parent_child_cluster_binaries() -> None:
             "durability_defaults",
             "fresh_cluster_per_process",
             "per_cluster_directories",
+            "quick_start_password_handoff_e2e",
             "shared_cluster_retry",
             "shutdown_hook_lifecycle",
             "start_ramp",
