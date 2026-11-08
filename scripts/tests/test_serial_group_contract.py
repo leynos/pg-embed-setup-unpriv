@@ -125,16 +125,22 @@ def test_the_discovered_set_matches_the_reference_tree(tmp_path: Path) -> None:
         ('\ntest-group = "serial"\n', "\n", "exactly one"),
         ('test-group = "serial"', 'test-group = "other"', "exactly one"),
         (
-            'slow-timeout = { period = "300s", terminate-after = 1, '
-            'grace-period = "5s" }',
-            'slow-timeout = { period = "300s", terminate-after = 1, '
-            'grace-period = "5s" }\ntest-group = "tier"',
+            (
+                'slow-timeout = { period = "300s", terminate-after = 1, '
+                'grace-period = "5s" }'
+            ),
+            (
+                'slow-timeout = { period = "300s", terminate-after = 1, '
+                'grace-period = "5s" }\ntest-group = "tier"'
+            ),
             "before the serial one",
         ),
         (
             '[[profile.default.overrides]]\nfilter = """',
-            '[[profile.default.overrides]]\n'
-            'platform = "x86_64-unknown-linux-gnu"\nfilter = """',
+            (
+                '[[profile.default.overrides]]\n'
+                'platform = "x86_64-unknown-linux-gnu"\nfilter = """'
+            ),
             "platform",
         ),
         (
@@ -222,6 +228,65 @@ def test_a_lock_use_no_binary_compiles_is_reported(tmp_path: Path) -> None:
     )
     assert any("orphan" in fault for fault in faults), (
         f"a lock use no binary compiles must be reported: {faults}"
+    )
+
+
+def test_an_unreadable_tree_is_a_fault_not_an_exception(tmp_path: Path) -> None:
+    """A tree that cannot be read is reported through the fault channel."""
+    faults = serial_group_faults(
+        _GOOD_CONFIG,
+        frozenset({"cluster_alpha", "cluster_beta"}),
+        tmp_path / "missing",
+    )
+    assert any("missing" in fault for fault in faults), (
+        f"an unreadable tree must be reported: {faults}"
+    )
+
+
+def test_a_directory_that_cannot_be_resolved_is_a_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resolution failure is a fault, not an exception from the scan."""
+
+    def unresolvable(self: Path, *args: object, **kwargs: object) -> Path:
+        """Stand in for a resolution the filesystem refuses."""
+        raise RuntimeError("symlink loop")
+
+    monkeypatch.setattr(Path, "resolve", unresolvable)
+    faults = serial_group_faults(
+        _GOOD_CONFIG, frozenset({"cluster_alpha", "cluster_beta"}), tmp_path
+    )
+    assert any("cannot resolve" in fault for fault in faults), (
+        f"a resolution failure must be reported: {faults}"
+    )
+
+
+def test_the_serial_override_must_carry_a_string_filter(tmp_path: Path) -> None:
+    """A missing filter is reported as such, not as a syntax fault."""
+    config = """[test-groups]
+serial = { max-threads = 1 }
+
+[[profile.default.overrides]]
+test-group = "serial"
+"""
+    faults = serial_group_faults(
+        config, frozenset({"cluster_alpha", "cluster_beta"}), _write_repository(tmp_path)
+    )
+    assert any("string filter" in fault for fault in faults), (
+        f"a missing filter must be named as such: {faults}"
+    )
+
+
+def test_a_source_outside_the_tree_does_not_stop_the_scan(tmp_path: Path) -> None:
+    """A symlink leaving the test tree is a fault, not a crash."""
+    tests_directory = _write_repository(tmp_path)
+    outside = tmp_path / "outside.rs"
+    outside.write_text("fn f(_g: serial::ScenarioSerialGuard) {}\n", encoding="utf-8")
+    (tests_directory / "linked.rs").symlink_to(outside)
+    discovered, faults = scan_lock_consuming_binaries(tests_directory)
+    assert isinstance(discovered, frozenset)
+    assert any("outside" in fault for fault in faults), (
+        f"an unattributable lock use must be reported: {faults}"
     )
 
 

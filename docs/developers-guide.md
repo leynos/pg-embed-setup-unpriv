@@ -506,8 +506,8 @@ the binaries that take the cross-process lock from the test sources, following
 name exactly the registry `test_nextest_tier_contract.py` pins. A binary that
 starts calling `serial_guard` therefore fails `make test-scripts` even though
 nobody edited either list, and so does a lock-taking binary whose filter term
-is dropped. A binary that compiles `tests/support/serial.rs` but keeps its own
-cases isolated stays out of the group, because the lock module's own uses are
+is dropped. A binary that compiles `tests/support/serial.rs` but keeps its
+cases isolated stays out of the group because the lock module's uses are
 covered by the embedded term rather than by whole-binary membership. The same
 contract refuses a `platform`-restricted serial override, and a group assigned
 ahead of the serial one, which nextest would apply to a matching binary in

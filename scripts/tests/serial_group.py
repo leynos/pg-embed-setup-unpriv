@@ -86,8 +86,10 @@ def _one_serial_override(
     if len(overrides) == 1:
         return overrides[0], []
     return None, [
-        "profile.default must have exactly one override assigning "
-        f'test-group = "{SERIAL_GROUP}", found {len(overrides)}'
+        (
+            "profile.default must have exactly one override assigning "
+            f'test-group = "{SERIAL_GROUP}", found {len(overrides)}'
+        )
     ]
 
 
@@ -123,8 +125,10 @@ def _competing_group_faults(config: dict[str, object]) -> list[str]:
             return []
         filters = ", ".join(repr(entry.get("filter")) for entry in earlier)
         return [
-            "no override may assign a test group before the serial one, "
-            f"found {len(earlier)}: {filters}"
+            (
+                "no override may assign a test group before the serial one, "
+                f"found {len(earlier)}: {filters}"
+            )
         ]
     return []
 
@@ -146,8 +150,10 @@ def _platform_faults(override: dict[str, object]) -> list[str]:
     if platform is None:
         return []
     return [
-        "the serial override must not restrict itself to a platform, "
-        f"found platform = {platform!r}"
+        (
+            "the serial override must not restrict itself to a platform, "
+            f"found platform = {platform!r}"
+        )
     ]
 
 
@@ -174,10 +180,44 @@ def _difference_faults(
     missing = sorted(expected - actual)
     extra = sorted(actual - expected)
     if missing:
-        faults.append(f"{label} is missing {', '.join(missing)}")
+        faults.append(f"{label} must name {', '.join(missing)}")
     if extra:
-        faults.append(f"{label} names unexpected binaries {', '.join(extra)}")
+        faults.append(f"{label} must not name {', '.join(extra)}")
     return faults
+
+
+def _filter_names(
+    override: dict[str, object],
+) -> tuple[frozenset[str], list[str]]:
+    """Return the binaries the serial override's filter names.
+
+    A missing or non-string ``filter`` is reported in its own terms
+    rather than coerced, because ``str(None)`` would reach the parser as
+    the text ``None`` and report a syntax fault that hides the real
+    problem.
+
+    Parameters
+    ----------
+    override : dict of str to object
+        The override assigning the serial group.
+
+    Returns
+    -------
+    tuple
+        The binary names the filter selects, and the faults.
+    """
+    filter_text = override.get("filter")
+    if not isinstance(filter_text, str):
+        return frozenset(), [
+            (
+                "the serial override must carry a string filter, "
+                f"found {filter_text!r}"
+            )
+        ]
+    try:
+        return serial_group_binaries(filter_text), []
+    except NextestConfigurationError as error:
+        return frozenset(), [str(error)]
 
 
 def serial_group_faults(
@@ -214,10 +254,8 @@ def serial_group_faults(
     filter_names: frozenset[str] = frozenset()
     if override is not None:
         faults.extend(_platform_faults(override))
-        try:
-            filter_names = serial_group_binaries(str(override.get("filter")))
-        except NextestConfigurationError as error:
-            faults.append(str(error))
+        filter_names, filter_faults = _filter_names(override)
+        faults.extend(filter_faults)
     discovered, discovery_faults = scan_lock_consuming_binaries(tests_directory)
     faults.extend(discovery_faults)
     faults.extend(_difference_faults("the serial filter", filter_names, expected))
