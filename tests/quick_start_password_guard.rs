@@ -16,11 +16,11 @@
 
 #![cfg(unix)]
 
+#[cfg(target_os = "linux")]
+use std::{io::Read, thread, time::Duration};
 use std::{
-    io::{Read, Write as _},
+    io::Write as _,
     process::{Command, Output, Stdio},
-    thread,
-    time::Duration,
 };
 
 const USER_GUIDE: &str = include_str!("../docs/users-guide.md");
