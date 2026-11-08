@@ -4,7 +4,9 @@
 //! copying the configuration block, and the block refuses an unset or empty
 //! value without echoing it. These tests extract that block from
 //! `docs/users-guide.md` and run it, so a later edit cannot silently drop the
-//! guard, the export, or the trace-safe sentinel check.
+//! guard, the export, or the trace-safe sentinel check. A child process
+//! confirms that the documented export actually hands the password on, which
+//! an inherited environment variable alone would not prove.
 //!
 //! The snippet is Bash, so the tests run only on Unix hosts.
 
@@ -17,6 +19,16 @@ const GUARD_MARKER: &str = "[ -z \"${PG_PASSWORD:+set}\" ]";
 const MISSING_MESSAGE: &str =
     "PG_PASSWORD: Set PG_PASSWORD externally to a strong, unique password";
 const SECRET: &str = "quick-start-secret";
+
+/// A child process that reports whether it inherited the documented password.
+///
+/// The child compares the inherited value with the expected one instead of
+/// printing it, so the test cannot pass by losing the secret to its own
+/// captured output.
+const CHILD_CHECK: &str = concat!(
+    "bash -c 'if [ \"${PG_PASSWORD:-}\" = \"${EXPECTED_PASSWORD:-}\" ]; then ",
+    "printf \"CHILD-MATCH\\n\"; else printf \"CHILD-NOMATCH\\n\"; fi'"
+);
 
 /// Extracts the configuration fence that contains the password guard.
 ///
@@ -44,6 +56,20 @@ fn run(script: &str, password: Option<&str>) -> Output {
     command.output().expect("failed to invoke bash")
 }
 
+/// Runs `script` as a shell that has not yet exported `PG_PASSWORD`.
+///
+/// `EXPECTED_PASSWORD` carries the secret so the script can create an
+/// unexported `PG_PASSWORD`, exactly as `read -rs PG_PASSWORD` does in the
+/// guide. That makes the documented `export PG_PASSWORD` line the only reason
+/// a child process can see the value.
+fn run_before_export(script: &str) -> Output {
+    let mut command = Command::new("bash");
+    command.arg("-c").arg(script);
+    command.env("EXPECTED_PASSWORD", SECRET);
+    command.env_remove("PG_PASSWORD");
+    command.output().expect("failed to invoke bash")
+}
+
 #[test]
 fn missing_or_empty_password_fails_and_aborts() {
     let script = format!("{}\nprintf 'REACHED-END\\n'", configuration_block());
@@ -66,14 +92,24 @@ fn missing_or_empty_password_fails_and_aborts() {
 }
 
 #[test]
-fn supplied_password_is_exported_without_being_printed() {
-    let output = run(&configuration_block(), Some(SECRET));
+fn documented_export_hands_the_password_to_a_child_process() {
+    let script = format!(
+        "PG_PASSWORD=${{EXPECTED_PASSWORD}}\n{}\n{}",
+        configuration_block(),
+        CHILD_CHECK,
+    );
+
+    let output = run_before_export(&script);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
         output.status.success(),
         "the guard rejected a supplied password:\n{stderr}",
+    );
+    assert!(
+        stdout.contains("CHILD-MATCH") && !stdout.contains("CHILD-NOMATCH"),
+        "the documented export did not hand the password to a child process:\n{stdout}",
     );
     assert!(
         !stdout.contains(SECRET) && !stderr.contains(SECRET),
