@@ -215,6 +215,10 @@ fn then_returns_settings(world: &BootstrapWorldFixture) -> Result<()> {
         settings.environment.pgpass_file == world_ref.sandbox.install_dir().join(".pgpass"),
         "expected pgpass location to reside under install dir"
     );
+    ensure!(
+        settings.settings.temporary,
+        "a test bootstrap must let its handle remove its slot on drop"
+    );
     let expected_privileges = detect_execution_privileges();
     ensure!(
         settings.privileges == expected_privileges,

@@ -1174,7 +1174,11 @@ ADR 005 records the design; this section covers the code.
   copy of `sleep` named `postgres`.
 - `DataLayout` (in `src/bootstrap/prepare/layout.rs`) says whether a derived
   data directory becomes a slot: `PerCluster` for test bootstraps, `Persistent`
-  for the setup-only `run`. `has_live_peers` and `ClaimGuard` (in
+  for the setup-only `run`. A `Persistent` bootstrap also clears
+  `Settings::temporary` in both preparation paths, so the handle that ran
+  `initdb` does not delete the cluster when it drops: `run` leaves it for the
+  process that comes next, and the root path needs the same because each worker
+  subprocess drops after its operation. `has_live_peers` and `ClaimGuard` (in
   `cluster_slot/mod.rs`) let `plan_cleanup` in `src/cluster/cleanup.rs` demote
   `CleanupMode::Full` to data-only while another slot in the root holds its
   lock. The plan holds the claim guard across the probe and the removal, and
