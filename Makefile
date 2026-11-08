@@ -94,7 +94,10 @@ MDTABLEFIX_RULES = --wrap --renumber --breaks --ellipsis --fences
 WHITAKER ?= whitaker
 NIXIE ?= nixie
 INTERROGATE ?= interrogate
-INTERROGATE_EXCLUDES := --exclude .uv-cache --exclude .uv-tools
+# `target` is build output. Cluster tests unpack `PostgreSQL` bundles there
+# that ship their own `Python` standard library, and those files are neither
+# ours to document nor present in a clean CI checkout.
+INTERROGATE_EXCLUDES := --exclude .uv-cache --exclude .uv-tools --exclude target
 PY_DOCSTRING_COVERAGE ?= 100
 
 # The development build standard (concordat rule `rust-build-defaults`):

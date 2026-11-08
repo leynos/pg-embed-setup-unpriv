@@ -20,6 +20,8 @@ mod panic;
 #[cfg(any(doc, test, feature = "cluster-unit-tests", feature = "dev-worker"))]
 mod partial_data_dir;
 mod scoped_env;
+mod shared_config;
+mod shared_legacy;
 mod shared_singleton;
 mod shared_singleton_core;
 #[cfg(all(test, feature = "loom-tests"))]
@@ -40,6 +42,7 @@ pub use fixtures::{
     ensure_worker_env,
     shared_cluster,
     shared_cluster_handle,
+    shared_cluster_handle_with,
     test_runtime,
 };
 #[cfg(not(doc))]

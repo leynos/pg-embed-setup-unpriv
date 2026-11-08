@@ -47,6 +47,11 @@ path = "tests/bootstrap_for_tests.rs"
 required-features = ["cluster-unit-tests"]
 
 [[test]]
+name = "bootstrap_for_tests_with"
+path = "tests/bootstrap_for_tests_with.rs"
+required-features = ["cluster-unit-tests"]
+
+[[test]]
 name = "bootstrap_privileges"
 path = "tests/bootstrap_privileges.rs"
 required-features = ["cluster-unit-tests"]

@@ -1,0 +1,191 @@
+//! Legacy shared `TestCluster` singleton.
+//!
+//! Retained for backward compatibility with tests that depend on the
+//! `TestCluster` type. New code should prefer
+//! [`shared_cluster_handle`](super::shared_singleton::shared_cluster_handle),
+//! which returns a `Send + Sync` handle.
+
+use std::sync::{Arc, Mutex, OnceLock};
+
+use super::{
+    bootstrap_retry::{RetryPolicy, retry_transient},
+    fixtures::ensure_worker_env,
+    shared_singleton::{
+        cached_shared_handle_error,
+        log_shared_cluster_error,
+        log_shared_cluster_event,
+        register_shutdown_hook_or_fail,
+    },
+    shared_singleton_core::{SharedInitState, get_or_try_init_shared},
+};
+use crate::{BootstrapError, BootstrapResult, TestCluster};
+
+/// Global state for the legacy shared cluster singleton.
+///
+/// Uses `OnceLock<Mutex<...>>` to support fallible initialization whilst
+/// maintaining thread-safe singleton semantics.
+static SHARED_CLUSTER: OnceLock<Mutex<SharedClusterState>> = OnceLock::new();
+
+type SharedClusterState = SharedInitState<SharedClusterPtr, Arc<BootstrapError>>;
+
+/// Wrapper around raw pointer to `TestCluster` that implements `Send + Sync`.
+///
+/// Required because `TestCluster` is `!Send` (contains `ScopedEnv` with
+/// `PhantomData<Rc<()>>`). The pointer is safe to share across threads because:
+/// 1. The cluster is only initialized once and never moved.
+/// 2. All access goes through immutable references.
+/// 3. The cluster's public API is thread-safe (database operations use independent connections).
+#[derive(Clone, Copy)]
+struct SharedClusterPtr(*const TestCluster);
+
+// SAFETY: SharedClusterPtr upholds the following invariants:
+// 1. The pointer targets a `Box::leak`ed allocation that outlives all references.
+// 2. No mutable access occurs through this pointer; all usage is via `&TestCluster`.
+// 3. `TestCluster` methods internally handle synchronization (each database operation creates an
+//    independent connection).
+unsafe impl Send for SharedClusterPtr {}
+unsafe impl Sync for SharedClusterPtr {}
+
+/// Returns a reference to the shared test cluster.
+///
+/// The cluster is initialized lazily on first access using [`OnceLock`] for
+/// thread-safe singleton semantics. Subsequent calls return the same cluster
+/// instance, eliminating per-test bootstrap overhead.
+///
+/// # Recommendation
+///
+/// Prefer [`shared_cluster_handle`](super::shared_singleton::shared_cluster_handle)
+/// for new code. It returns a `Send + Sync`
+/// handle suitable for rstest fixtures with timeouts and other thread-safe
+/// contexts. This function is retained for backward compatibility with
+/// existing tests that depend on the `TestCluster` type.
+///
+/// # Errors
+///
+/// Returns a [`BootstrapError`] if the cluster cannot be started. A transient
+/// failure (a download or extraction I/O error, a lifecycle timeout, or an
+/// extension archive that could not be fetched) is retried up to three
+/// attempts in all, one then two seconds apart, and reports the attempt count
+/// if it persists. Any other failure is returned at once. Once
+/// initialization fails, subsequent calls return an error with the same
+/// [`BootstrapErrorKind`](crate::error::BootstrapErrorKind) and a message
+/// indicating the previous failure.
+///
+/// # Thread Safety
+///
+/// This function is safe to call from multiple threads concurrently. The first
+/// caller to reach the initialization path will bootstrap the cluster while
+/// other callers wait. All callers receive the same cluster reference.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pg_embedded_setup_unpriv::test_support::shared_cluster;
+///
+/// # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+/// let cluster = shared_cluster()?;
+/// assert!(cluster.database_exists("postgres")?);
+///
+/// // Second call returns the same instance
+/// let cluster2 = shared_cluster()?;
+/// assert!(std::ptr::eq(cluster, cluster2));
+/// # Ok(())
+/// # }
+/// ```
+pub fn shared_cluster() -> BootstrapResult<&'static TestCluster> {
+    let mutex = SHARED_CLUSTER.get_or_init(|| Mutex::new(SharedClusterState::Uninitialized));
+    let mut guard = mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let ptr = get_or_try_init_shared(
+        &mut guard,
+        initialize_shared_cluster,
+        cached_shared_handle_error,
+    )?;
+
+    // SAFETY: The pointer was created from Box::leak and is valid forever.
+    Ok(unsafe { &*ptr.0 })
+}
+
+fn initialize_shared_cluster() -> Result<SharedClusterPtr, (Arc<BootstrapError>, BootstrapError)> {
+    let worker_guard = ensure_worker_env();
+    match retry_transient(
+        RetryPolicy::SHARED_CLUSTER,
+        TestCluster::new,
+        std::thread::sleep,
+    ) {
+        Ok(new_cluster) => {
+            log_shared_cluster_event("shared cluster initialized");
+            leak_shared_cluster_after_shutdown_hook(
+                new_cluster.with_worker_guard(worker_guard),
+                |cluster| cluster.handle.register_shutdown_on_exit(),
+            )
+            .map(SharedClusterPtr)
+        }
+        Err(err) => {
+            log_shared_cluster_error(&err, "shared cluster initialization failed");
+            let stored = Arc::new(BootstrapError::new(
+                err.kind(),
+                color_eyre::eyre::eyre!("bootstrap failed: {:?}", err),
+            ));
+            Err((stored, err))
+        }
+    }
+}
+
+fn leak_shared_cluster_after_shutdown_hook<Cluster, Register>(
+    cluster: Cluster,
+    register_shutdown_hook: Register,
+) -> Result<*const Cluster, (Arc<BootstrapError>, BootstrapError)>
+where
+    Register: FnOnce(&Cluster) -> BootstrapResult<()>,
+{
+    register_shutdown_hook_or_fail(
+        &cluster,
+        register_shutdown_hook,
+        "shared cluster shutdown hook registration failed; dropping cluster",
+    )?;
+
+    let leaked = Box::leak(Box::new(cluster));
+    log_shared_cluster_event("shared cluster shutdown hook registered; leaking cluster");
+    Ok(std::ptr::from_ref(leaked))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for the legacy singleton's shutdown-hook failure handling.
+
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use super::*;
+
+    struct DropProbe(Arc<AtomicBool>);
+
+    impl Drop for DropProbe {
+        fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); }
+    }
+
+    #[test]
+    fn registration_failure_drops_guard_instead_of_leaking_shared_cluster() {
+        let was_dropped = Arc::new(AtomicBool::new(false));
+        let cluster = DropProbe(Arc::clone(&was_dropped));
+
+        let result = leak_shared_cluster_after_shutdown_hook(cluster, |_| {
+            Err(BootstrapError::from(color_eyre::eyre::eyre!(
+                "injected shutdown hook failure"
+            )))
+        });
+
+        assert!(
+            result.is_err(),
+            "shared-cluster initialization should fail when shutdown hook registration fails"
+        );
+        assert!(
+            was_dropped.load(Ordering::SeqCst),
+            "cluster must drop when shutdown hook registration fails"
+        );
+    }
+}

@@ -31,7 +31,7 @@ const MAX_SHUTDOWN_TIMEOUT_SECS: u64 = 600;
 const SHUTDOWN_TIMEOUT_ENV: &str = "PG_SHUTDOWN_TIMEOUT_SECS";
 
 #[cfg(unix)]
-fn discover_worker_from_path() -> BootstrapResult<Option<Utf8PathBuf>> {
+pub(super) fn discover_worker_from_path() -> BootstrapResult<Option<Utf8PathBuf>> {
     discover_worker_from_path_value(env::var_os("PATH"))
 }
 
@@ -160,6 +160,41 @@ fn validate_shutdown_timeout_secs(seconds: u64, trimmed: &str) -> BootstrapResul
     Ok(Duration::from_secs(seconds))
 }
 
+/// Validates an explicitly supplied shutdown timeout.
+///
+/// Applies the same one-to-600-second bounds as
+/// `PG_SHUTDOWN_TIMEOUT_SECS`, but reports the value as a duration because no
+/// environment variable is involved.
+pub(super) fn validate_explicit_shutdown_timeout(timeout: Duration) -> BootstrapResult<Duration> {
+    if timeout < Duration::from_secs(1) {
+        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
+            "shutdown timeout must be at least 1 second (received {timeout:?})"
+        )));
+    }
+
+    if timeout > Duration::from_secs(MAX_SHUTDOWN_TIMEOUT_SECS) {
+        return Err(BootstrapError::from(color_eyre::eyre::eyre!(
+            "shutdown timeout must be {MAX_SHUTDOWN_TIMEOUT_SECS} seconds or less (received \
+             {timeout:?})"
+        )));
+    }
+
+    Ok(timeout)
+}
+
+/// Label for a worker path read from `PG_EMBEDDED_WORKER`.
+const WORKER_ENV_SOURCE: &str = "PG_EMBEDDED_WORKER";
+/// Label for a worker path supplied through configuration.
+pub(super) const EXPLICIT_WORKER_SOURCE: &str = "the explicit worker binary";
+/// Label for a worker path found by searching `PATH`.
+#[cfg(unix)]
+const DISCOVERED_WORKER_SOURCE: &str = "the worker binary discovered on PATH";
+
+/// Resolves the worker binary from `PG_EMBEDDED_WORKER`.
+///
+/// The variable is read only for privileged execution, so a non-UTF-8 value
+/// stays invisible to unprivileged runs. Validation and `PATH` discovery are
+/// shared with [`resolve_explicit_worker`] to keep both paths in step.
 pub(super) fn worker_binary_from_env(
     privileges: ExecutionPrivileges,
 ) -> BootstrapResult<Option<Utf8PathBuf>> {
@@ -167,31 +202,54 @@ pub(super) fn worker_binary_from_env(
         return Ok(None);
     }
 
-    if let Some(raw) = env::var_os("PG_EMBEDDED_WORKER") {
-        let path = Utf8PathBuf::from_path_buf(PathBuf::from(&raw)).map_err(|_| {
-            let invalid_value = raw.to_string_lossy().to_string();
-            BootstrapError::from(color_eyre::eyre::eyre!(
-                "PG_EMBEDDED_WORKER contains a non-UTF-8 value: {invalid_value:?}. Provide a \
-                 UTF-8 encoded absolute path to the worker binary."
-            ))
-        })?;
+    let supplied = env::var_os(WORKER_ENV_SOURCE)
+        .map(|raw| {
+            Utf8PathBuf::from_path_buf(PathBuf::from(&raw)).map_err(|_| {
+                let invalid_value = raw.to_string_lossy().to_string();
+                BootstrapError::from(color_eyre::eyre::eyre!(
+                    "PG_EMBEDDED_WORKER contains a non-UTF-8 value: {invalid_value:?}. Provide a \
+                     UTF-8 encoded absolute path to the worker binary."
+                ))
+            })
+        })
+        .transpose()?;
 
-        validate_worker_path(&path)?;
+    resolve_explicit_worker(privileges, supplied, WORKER_ENV_SOURCE)
+}
+
+/// Resolves the worker binary for an explicit bootstrap.
+///
+/// Mirrors [`worker_binary_from_env`] without reading `PG_EMBEDDED_WORKER`: a
+/// supplied path is validated, and an absent one falls back to `PATH`
+/// discovery. Validation errors name `supplied_source` so the caller is not
+/// pointed at an environment variable the explicit path never reads.
+/// Unprivileged execution ignores the option entirely.
+pub(super) fn resolve_explicit_worker(
+    privileges: ExecutionPrivileges,
+    worker: Option<Utf8PathBuf>,
+    supplied_source: &str,
+) -> BootstrapResult<Option<Utf8PathBuf>> {
+    if privileges != ExecutionPrivileges::Root || !root_privilege_drop_supported() {
+        return Ok(None);
+    }
+
+    if let Some(path) = worker {
+        validate_worker_path(&path, supplied_source)?;
         return Ok(Some(path));
     }
 
     #[cfg(unix)]
     {
-        if let Some(worker) = discover_worker_from_path()? {
-            validate_worker_path(&worker)?;
-            return Ok(Some(worker));
+        if let Some(discovered) = discover_worker_from_path()? {
+            validate_worker_path(&discovered, DISCOVERED_WORKER_SOURCE)?;
+            return Ok(Some(discovered));
         }
     }
 
     Ok(None)
 }
 
-fn validate_worker_path(path: &Utf8PathBuf) -> BootstrapResult<()> {
+pub(super) fn validate_worker_path(path: &Utf8PathBuf, source: &str) -> BootstrapResult<()> {
     if path.as_str().is_empty() {
         return Err(BootstrapError::from(color_eyre::eyre::eyre!(
             "Worker binary path must not be empty"
@@ -203,20 +261,20 @@ fn validate_worker_path(path: &Utf8PathBuf) -> BootstrapResult<()> {
         )));
     }
 
-    validate_worker_binary(path)?;
+    validate_worker_binary(path, source)?;
     Ok(())
 }
 
-fn validate_worker_binary(path: &Utf8PathBuf) -> BootstrapResult<()> {
+fn validate_worker_binary(path: &Utf8PathBuf, source: &str) -> BootstrapResult<()> {
     let (dir, relative) =
-        ambient_dir_and_path(path).map_err(|err| worker_binary_error(path, err))?;
+        ambient_dir_and_path(path).map_err(|err| worker_binary_error(path, source, err))?;
     let metadata = dir
         .metadata(relative.as_std_path())
-        .map_err(|err| worker_binary_error(path, Report::new(err)))?;
+        .map_err(|err| worker_binary_error(path, source, Report::new(err)))?;
 
     if !metadata.is_file() {
         return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-            "PG_EMBEDDED_WORKER must reference a regular file: {path}"
+            "{source} must reference a regular file: {path}"
         )));
     }
 
@@ -224,7 +282,7 @@ fn validate_worker_binary(path: &Utf8PathBuf) -> BootstrapResult<()> {
     {
         if metadata.permissions().mode() & 0o111 == 0 {
             return Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                "PG_EMBEDDED_WORKER must be executable: {path}"
+                "{source} must be executable: {path}"
             )));
         }
     }
@@ -232,9 +290,9 @@ fn validate_worker_binary(path: &Utf8PathBuf) -> BootstrapResult<()> {
     Ok(())
 }
 
-fn worker_binary_error(path: &Utf8Path, err: Report) -> BootstrapError {
+fn worker_binary_error(path: &Utf8Path, source: &str, err: Report) -> BootstrapError {
     let is_not_found = error_chain_has_not_found(&err);
-    let context = format!("failed to access PG_EMBEDDED_WORKER at {path}: {err}");
+    let context = format!("failed to access {source} at {path}: {err}");
     let report = err.wrap_err(context);
 
     if is_not_found {

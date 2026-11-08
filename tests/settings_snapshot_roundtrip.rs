@@ -77,6 +77,23 @@ fn settings_snapshot_roundtrip_preserves_all_fields() -> Result<()> {
 }
 
 #[test]
+fn settings_snapshot_json_roundtrip_preserves_release_url() -> Result<()> {
+    let settings = sample_settings()?;
+    let snapshot = SettingsSnapshot::try_from(&settings)?;
+
+    let encoded = serde_json::to_string(&snapshot)?;
+    let decoded: SettingsSnapshot = serde_json::from_str(&encoded)?;
+    let restored = decoded.into_settings()?;
+
+    ensure!(
+        restored.releases_url == settings.releases_url,
+        "releases_url did not survive JSON round-trip: {}",
+        restored.releases_url
+    );
+    Ok(())
+}
+
+#[test]
 fn worker_payload_debug_redacts_sensitive_values() -> Result<()> {
     let settings = sample_settings()?;
     let environment = vec![
