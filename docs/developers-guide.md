@@ -510,10 +510,10 @@ is dropped. A binary that compiles `tests/support/serial.rs` but keeps its
 cases isolated stays out of the group because the lock module's uses are
 covered by the embedded term rather than by whole-binary membership. The same
 contract refuses a `platform`-restricted serial override, and a group assigned
-ahead of the serial one, which nextest would apply to a matching binary in
-preference to the serial assignment. `test_nextest_filters_properties.py` uses
-Hypothesis for filters no file in the repository writes, such as a name using
-every permitted character and a term placed anywhere in the disjunction.
+ahead of the serial one, which nextest would apply to a matching binary instead
+of the serial assignment. `test_nextest_filters_properties.py` uses Hypothesis
+for filters no file in the repository writes, such as a name using every
+permitted character and a term placed anywhere in the disjunction.
 
 ## Minimum supported Rust version
 

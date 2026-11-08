@@ -12,6 +12,7 @@ See "Test timeouts: four tiers, outermost last" in
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -113,8 +114,8 @@ def test_the_discovered_set_matches_the_reference_tree(tmp_path: Path) -> None:
     ("old", "new", "keyword"),
     [
         (
-            "  binary(=cluster_alpha)\n",
-            "",
+            "  binary(=cluster_alpha)\n  | binary(=cluster_beta)",
+            "  binary(=cluster_beta)",
             "cluster_alpha",
         ),
         (
@@ -183,6 +184,20 @@ def test_a_mutation_is_a_fault(
     assert faults, f"replacing {old!r} with {new!r} must be reported"
     assert any(keyword in fault for fault in faults), (
         f"faults must mention {keyword!r}: {faults}"
+    )
+
+
+def test_a_missing_binary_is_a_fault(tmp_path: Path) -> None:
+    """A valid filter that omits a lock consumer reports that binary."""
+    old = "  binary(=cluster_alpha)\n  | binary(=cluster_beta)"
+    assert old in _GOOD_CONFIG, "the mutation target must exist"
+    faults = serial_group_faults(
+        _GOOD_CONFIG.replace(old, "  binary(=cluster_beta)"),
+        frozenset({"cluster_alpha", "cluster_beta"}),
+        _write_repository(tmp_path),
+    )
+    assert faults == ["the serial filter must name cluster_alpha"], (
+        f"the missing binary, not a syntax error, must be reported: {faults}"
     )
 
 
@@ -277,6 +292,9 @@ test-group = "serial"
     )
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="creating a symlink needs a privilege on Windows"
+)
 def test_a_source_outside_the_tree_does_not_stop_the_scan(tmp_path: Path) -> None:
     """A symlink leaving the test tree is a fault, not a crash."""
     tests_directory = _write_repository(tmp_path)
