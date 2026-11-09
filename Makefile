@@ -94,7 +94,20 @@ MDTABLEFIX_RULES = --wrap --renumber --breaks --ellipsis --fences
 WHITAKER ?= whitaker
 NIXIE ?= nixie
 INTERROGATE ?= interrogate
-INTERROGATE_EXCLUDES := --exclude .uv-cache --exclude .uv-tools
+# Cargo target directories hold build output the repository does not own, and
+# this gate scans the whole tree. Interrogate 1.7.0 resolves each `--exclude` to
+# an absolute path and skips a file when its path matches "<exclude>*" under
+# fnmatch, where `*` also crosses `/`, so a pattern must end in `/*` (a bare
+# `target` would also skip `target_utils.py`). `target/*` prunes the root
+# directory and `*/target/*` a nested crate's. `CARGO_TARGET_DIR` and
+# `CARGO_BUILD_TARGET_DIR` are excluded too, with fnmatch metacharacters in
+# their values escaped. Owned Python under a directory literally named `target`
+# would be skipped, so the lint recipe fails if Git tracks any.
+fnmatch_escape = $(subst ?,[?],$(subst *,[*],$(subst [,[[],$(1))))
+INTERROGATE_EXCLUDES := --exclude .uv-cache --exclude .uv-tools \
+	--exclude 'target/*' --exclude '*/target/*' \
+	$(if $(CARGO_TARGET_DIR),--exclude '$(call fnmatch_escape,$(CARGO_TARGET_DIR))/*') \
+	$(if $(CARGO_BUILD_TARGET_DIR),--exclude '$(call fnmatch_escape,$(CARGO_BUILD_TARGET_DIR))/*')
 PY_DOCSTRING_COVERAGE ?= 100
 
 # The development build standard (concordat rule `rust-build-defaults`):
@@ -161,6 +174,11 @@ release-archive: ## Package release binaries for cargo-binstall
 lint: lint-clippy lint-whitaker ## Run Clippy and the Whitaker Dylint suite with warnings denied
 
 lint-clippy: ## Run docstring coverage, rustdoc and Clippy with warnings denied
+	@owned="$$(git ls-files -- ':(glob)target/**/*.py' ':(glob)**/target/**/*.py' 2>/dev/null)"; \
+	  if [ -n "$$owned" ]; then \
+	    printf '%s\n' "interrogate: tracked Python under a target/ directory is excluded from the gate; move it:" "$$owned" >&2; \
+	    exit 1; \
+	  fi
 	$(INTERROGATE) --fail-under $(PY_DOCSTRING_COVERAGE) $(INTERROGATE_EXCLUDES) .
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) doc --workspace --no-deps $(BUILD_JOBS)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) clippy $(CLIPPY_FLAGS)
