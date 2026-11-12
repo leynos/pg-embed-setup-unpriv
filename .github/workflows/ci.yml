@@ -71,7 +71,7 @@ jobs:
         # selection from `.markdownlint-cli2.jsonc`. This commit bundles
         # markdownlint-cli2 0.23.2; keep `MARKDOWNLINT_CLI2_VERSION` in the
         # Makefile on that version.
-        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff
+        uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34
         with:
           globs: ''
       - name: Setup uv
