@@ -202,10 +202,11 @@ WHITAKER_CLEAN_ENV = env -u CARGO_ENCODED_RUSTFLAGS \
 
 # --lib whitaker_suite: the rolling release now stages a standalone
 # `string_continuation_style` library beside the aggregate suite that already
-# registers that lint, and the pinned installer (0.2.11) cannot prune it.
+# registers that lint, and installer 0.2.11 could not prune it.
 # `--all` would load both and rustc aborts with "duplicate specification of
 # lint" before any source compiles (leynos/whitaker#565). Suite-only selection
-# covers the same lints; revert to `--all` once installer 0.2.12 is pinned.
+# covers the same lints; installer 0.2.12 (now pinned) prunes by staged file
+# name, so `--all` can be restored in a follow-up once it is shown to work.
 # --fail-on-no-libraries keeps a missing suite from passing as a clean lint.
 #
 # --ignore-rust-version: the Whitaker Dylint driver toolchain predates the
