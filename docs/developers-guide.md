@@ -295,28 +295,19 @@ docstring-coverage policy.
 The Whitaker suite itself is installed by the shared `install-whitaker` action,
 pinned to a commit SHA, which resolves a checksum-verified release archive for
 the installer version named by `WHITAKER_INSTALLER_VERSION`, currently
-`0.2.11`, which builds the Dylint driver from a verified Clippy snapshot
+`0.2.12`, which builds the Dylint driver from a verified Clippy snapshot
 (earlier versions clone Clippy's deleted `master` branch and fail on a cold
-build). The action is pinned to shared-actions
-`5a99aed78ce68dcebd3052b75c31e6f173162b1e`, the revision the Dependabot
-shared-actions group bumps every workflow to.
+build). The action is pinned to a full commit SHA of shared-actions, which the
+Dependabot shared-actions group bumps.
 
-That revision satisfies the concordat QG-002 rule, and so does every other
-commit that leaves the `install-whitaker` directory's Git tree id equal to the
-reviewed root `6dea5677` (#522). The rule's `compliant_install_whitaker_refs`
-list is derived, not handwritten: it holds the roots plus every later
-first-parent commit that leaves the directory unchanged.
-`tests/whitaker_install_pin.rs` keeps a verbatim copy in
-`APPROVED_ACTION_REVISIONS` and checks the workflow's pin for membership rather
-than equality. That matters because a single hard-coded SHA assertion passes
-for exactly one upstream commit and turns red on the next approved bump, which
-is precisely how this suite failed on the shared-actions update. Three guards
-keep the copy honest: it must hold exactly 83 entries, every entry must be a
-full lowercase SHA, and no entry may repeat. A parameterized negative case
-proves an off-list SHA and a truncated SHA are both refused. Refresh the copy
-from `platform-standards/canon/lint-rules/whitaker-provisioning/rule.yaml` in
-`leynos/concordat` when upstream approves a revision; the current copy matches
-concordat `f46a4848ad5e62cfd170360074cddc3a792f3ea7` (PR #324).
+Which revisions satisfy the concordat QG-002 rule is the rule's decision: its
+`compliant_install_whitaker_refs` list is derived from reviewed roots, not
+handwritten. `tests/whitaker_install_pin.rs` therefore checks the shape of the
+workflow's pin (a full lowercase SHA on the shared action, one `uses` entry)
+rather than a value or a copy of the rule's list. A value assertion passes for
+exactly one upstream commit and turns red on the next approved bump, and a
+copied list has to be refreshed by hand each time. Parameterized negative cases
+prove a truncated SHA, a branch name and an uppercase SHA are all refused.
 
 The previous inline step fell back to
 `cargo install --locked whitaker-installer`, building the tool from source in

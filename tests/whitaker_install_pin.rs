@@ -6,13 +6,13 @@
 //! release archive, and keep the installer version explicit so a change to it
 //! arrives as a reviewed diff rather than silently.
 //!
-//! The action pin is checked against a local copy of the revisions the
-//! concordat QG-002 rule accepts, not against one hard-coded SHA. A single SHA
-//! assertion passed for exactly one upstream commit and then had to be edited
-//! by hand for every later approved bump, which is what made this suite red on
-//! a Dependabot update. Membership keeps the reviewed gate — the list only
-//! changes when the rule does, and the list's own guards make an edited entry
-//! visible — while letting an approved revision through.
+//! The action pin is checked for its shape, a full lowercase commit SHA, and
+//! not against one hard-coded SHA or a copy of the revisions the concordat
+//! QG-002 rule accepts. A value check passed for exactly one upstream commit,
+//! and a copied list had to be refreshed by hand for every approved bump, which
+//! made this suite red on Dependabot updates. Which revisions are acceptable is
+//! the rule's decision, made where the rule lives; this suite holds the
+//! workflow to an immutable, well-formed pin on the shared action.
 //!
 //! Assertions about the action are made against the extracted install step, not
 //! against the whole file, so an unrelated step or a comment cannot satisfy
@@ -25,25 +25,6 @@ const INSTALLER_VERSION_INPUT: &str = "installer-version: ${{ env.WHITAKER_INSTA
 const SHA_LENGTH: usize = 40;
 /// The oldest installer the shared action accepts; it refuses anything lower.
 const MINIMUM_INSTALLER_VERSION: [u32; 3] = [0, 2, 9];
-/// How many revisions the copied list must hold.
-///
-/// An exact count is the guard against a truncated or partly applied list: the
-/// membership check below would otherwise pass while silently refusing every
-/// legitimate bump, or accept one the upstream rule does not.
-const APPROVED_REVISION_COUNT: usize = 83;
-
-/// The shared-actions revisions the concordat QG-002 rule accepts.
-///
-/// Copied from `leynos/concordat` commit
-/// `f46a4848ad5e62cfd170360074cddc3a792f3ea7` (PR #324), file
-/// `platform-standards/canon/lint-rules/whitaker-provisioning/rule.yaml`, the
-/// `compliant_install_whitaker_refs` default. That list is derived, never
-/// edited by hand: upstream generates it from `install_whitaker_roots`, the
-/// shared-actions commits whose `install-whitaker` directory has been
-/// reviewed, and includes every later commit that leaves the directory's Git
-/// tree id unchanged. Copy it verbatim, in the same order, when it is
-/// refreshed, so a diff against upstream stays readable.
-const APPROVED_ACTION_REVISIONS: &str = include_str!("fixtures/approved_whitaker_revisions.txt");
 
 /// Return the number of leading spaces on `line`.
 fn indent_of(line: &str) -> usize { line.len() - line.trim_start().len() }
@@ -76,17 +57,12 @@ impl Workflow<'_> {
         }
     }
 
-    /// Validate the extracted action pin against the QG-002 list.
+    /// Validate the shape of the extracted action pin.
     fn validate_pin(&self) -> Result<(), String> {
         let revision = self.whitaker_step().revision()?;
         if !Revision(&revision).is_full_lowercase_sha() {
             return Err(format!(
                 "install-whitaker must use a full lowercase SHA: {revision:?}"
-            ));
-        }
-        if !Revision(&revision).is_approved() {
-            return Err(format!(
-                "install-whitaker revision {revision:?} is not approved by QG-002"
             ));
         }
         Ok(())
@@ -160,24 +136,17 @@ fn installs_whitaker_through_cargo(command: &str) -> bool {
         && command.contains("whitaker-installer")
 }
 
-/// A candidate action revision, checked for both syntax and approval.
+/// A candidate action revision, checked for its syntax.
 struct Revision<'a>(&'a str);
 
 impl Revision<'_> {
-    /// Require the lowercase SHA form used by the upstream approved list.
+    /// Require the lowercase SHA form, as Git prints it.
     fn is_full_lowercase_sha(&self) -> bool {
         self.0.len() == SHA_LENGTH
             && self
                 .0
                 .chars()
                 .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-    }
-
-    /// Check exact membership in the copied QG-002 list.
-    fn is_approved(&self) -> bool {
-        APPROVED_ACTION_REVISIONS
-            .lines()
-            .any(|approved| approved == self.0)
     }
 }
 
@@ -200,16 +169,15 @@ fn the_install_step_pins_the_shared_action_to_an_approved_commit_sha() {
 }
 
 #[test]
-fn an_unapproved_workflow_pin_fails_validation() {
-    let approved = Workflow { text: CI_WORKFLOW }
+fn a_malformed_workflow_pin_fails_validation() {
+    let current = Workflow { text: CI_WORKFLOW }
         .whitaker_step()
         .revision()
         .expect("valid uses entry");
-    let unapproved = "0".repeat(SHA_LENGTH);
-    assert!(Revision(&unapproved).is_full_lowercase_sha());
-    assert!(!Revision(&unapproved).is_approved());
-    let old_pin = format!("uses: {INSTALL_WHITAKER_ACTION}{approved}");
-    let new_pin = format!("uses: {INSTALL_WHITAKER_ACTION}{unapproved}");
+    let branch = "main";
+    assert!(!Revision(branch).is_full_lowercase_sha());
+    let old_pin = format!("uses: {INSTALL_WHITAKER_ACTION}{current}");
+    let new_pin = format!("uses: {INSTALL_WHITAKER_ACTION}{branch}");
     assert_eq!(
         CI_WORKFLOW.matches(&old_pin).count(),
         1,
@@ -218,84 +186,31 @@ fn an_unapproved_workflow_pin_fails_validation() {
     let mutated = CI_WORKFLOW.replacen(&old_pin, &new_pin, 1);
     let error = Workflow { text: &mutated }
         .validate_pin()
-        .expect_err("an unapproved pin must fail");
+        .expect_err("a branch pin must fail");
     assert!(
-        error.contains("not approved by QG-002"),
+        error.contains("full lowercase SHA"),
         "unexpected error: {error}"
     );
 }
 
-#[test]
-fn the_approved_list_holds_the_expected_number_of_revisions() {
-    assert_eq!(
-        APPROVED_ACTION_REVISIONS.lines().count(),
-        APPROVED_REVISION_COUNT,
-        "the copied list must hold exactly {APPROVED_REVISION_COUNT} revisions",
-    );
-}
-
-/// Every copied entry must be a well-formed SHA.
+/// A candidate the pin guard must refuse.
 ///
-/// The guarantee has to hold for every entry, not a sample: a single
-/// mistyped character in a copied revision would otherwise pass review and
-/// silently stop matching the pin it was meant to approve. The index in the
-/// message still names the offending entry, so a failure needs no bespoke
-/// per-case assertion.
-#[test]
-fn the_approved_list_holds_only_full_lowercase_shas() {
-    for (index, revision) in APPROVED_ACTION_REVISIONS.lines().enumerate() {
-        assert!(
-            Revision(revision).is_full_lowercase_sha(),
-            "entry {index} of the approved list is not a full lowercase SHA: {revision:?}",
-        );
-    }
-}
-
-#[test]
-fn the_approved_list_holds_no_duplicates() {
-    let mut seen = std::collections::BTreeSet::new();
-    let duplicates: Vec<&str> = APPROVED_ACTION_REVISIONS
-        .lines()
-        .filter(|revision| !seen.insert(*revision))
-        .collect();
-
-    assert!(
-        duplicates.is_empty(),
-        "the approved list repeats revisions: {duplicates:?}",
-    );
-}
-
-/// A candidate the pin guard must refuse, and why.
-///
-/// The two header checks are deliberately split: a well-formed SHA that is
-/// simply not on the list proves membership is doing work, and a malformed one
-/// proves the format check does too. Without both, a guard that only compared
-/// lengths, or only checked membership, would still pass the suite.
+/// A truncated SHA and a branch name are both mutable or ambiguous references;
+/// each must fail the format check on its own.
 #[rstest::rstest]
-#[case::well_formed_but_unlisted("0".repeat(SHA_LENGTH), "an off-list SHA")]
-#[case::truncated_sha("6dea567", "a truncated SHA whose prefix is listed")]
-fn an_unapproved_revision_is_rejected(#[case] candidate: String, #[case] what: &str) {
-    let is_well_formed = Revision(&candidate).is_full_lowercase_sha();
-    let is_approved = Revision(&candidate).is_approved();
-
+#[case::truncated_sha("6dea567", "a truncated SHA")]
+#[case::branch_name("main", "a branch name")]
+fn a_malformed_revision_is_rejected(#[case] candidate: &str, #[case] what: &str) {
     assert!(
-        !is_approved,
-        "{what} must not pass as approved, found {candidate:?}",
-    );
-    // The first case is well formed on purpose, so it isolates membership; the
-    // second is not, so it isolates the format check. Assert the intended shape
-    // so a fixture that drifts from its purpose cannot weaken the suite.
-    let should_be_well_formed = candidate.len() == SHA_LENGTH;
-    assert_eq!(
-        is_well_formed, should_be_well_formed,
-        "{what} does not have the shape this case is meant to test: {candidate:?}",
+        !Revision(candidate).is_full_lowercase_sha(),
+        "{what} must not pass as a pin, found {candidate:?}",
     );
 }
 
 /// Uppercase hex must be refused even though Git accepts it.
 ///
-/// The copied list and the upstream rule are lowercase, so a case-insensitive
-/// format check would let a hand-edited entry "match" a list it does not equal.
+/// The rule lists lowercase revisions, so a case-insensitive format check would
+/// let a pin through that the rule's exact comparison would then refuse.
 #[test]
 fn an_uppercase_sha_is_rejected() {
     let uppercase = "6DEA5677A84FEC60CA51B07202570E3AF12FFDB4";
