@@ -50,12 +50,15 @@ class SourceLoadError(RuntimeError):
     """Raised when a test source cannot be read from disk.
 
     Reading is the loader's job; classifying text is the scanner's. The
-    loader reports a filesystem or decoding failure as this one domain
-    error rather than letting ``OSError`` or ``UnicodeError`` escape from
-    a query that promises to return a set of names.
+    loader reports a filesystem, resolution or decoding failure as this
+    one domain error rather than letting ``OSError``, ``RuntimeError`` or
+    ``UnicodeError`` escape from a query that promises to return a set of
+    names.
     """
 
-    def __init__(self, path: Path, cause: OSError | UnicodeError) -> None:
+    def __init__(
+        self, path: Path, cause: OSError | UnicodeError | RuntimeError
+    ) -> None:
         """Report the failing path and the underlying error."""
         super().__init__(f"cannot read test source {path}: {cause}")
         self.path = path
@@ -114,16 +117,20 @@ def load_test_sources(tests_dir: Path = TESTS_DIR) -> dict[Path, str]:
     Raises
     ------
     SourceLoadError
-        If the tree cannot be listed, or a file cannot be read or
-        decoded as UTF-8.
+        If the tree cannot be listed, a file cannot be read or decoded as
+        UTF-8, or a source path cannot be resolved.
     """
     sources: dict[Path, str] = {}
     for path in _rust_sources(tests_dir):
         try:
             text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
+            # Resolution belongs inside the same guard: a symlink loop or a
+            # vanished path raises here, after the directory walk succeeded,
+            # and a caller promised a fault must not receive a raw error.
+            resolved = path.resolve()
+        except (OSError, UnicodeError, RuntimeError) as exc:
             raise SourceLoadError(path, exc) from exc
-        sources[path.resolve()] = text
+        sources[resolved] = text
     return sources
 
 

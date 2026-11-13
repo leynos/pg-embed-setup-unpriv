@@ -276,6 +276,29 @@ def test_a_directory_that_cannot_be_resolved_is_a_fault(
     )
 
 
+def test_a_source_that_cannot_be_resolved_is_a_named_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source-path failure after root resolution names the source."""
+    tests_directory = _write_repository(tmp_path)
+    root = tests_directory.resolve()
+    real_resolve = Path.resolve
+
+    def unresolvable(self: Path, *args: object, **kwargs: object) -> Path:
+        """Fail only for one source, so the root still resolves."""
+        if self.name == "cluster_beta.rs":
+            raise RuntimeError("symlink loop")
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", unresolvable)
+    faults = serial_group_faults(
+        _GOOD_CONFIG, frozenset({"cluster_alpha", "cluster_beta"}), root
+    )
+    assert any(
+        "cluster_beta.rs" in fault and "symlink loop" in fault for fault in faults
+    ), f"a source-path failure must name the source and cause: {faults}"
+
+
 def test_the_serial_override_must_carry_a_string_filter(tmp_path: Path) -> None:
     """A missing filter is reported as such, not as a syntax fault."""
     config = """[test-groups]
