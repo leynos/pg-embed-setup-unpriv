@@ -665,12 +665,13 @@ _Table 3: Performance comparison for test isolation approaches._
 Databases created directly with `create_database` in a shared cluster remain
 present for the process lifetime unless explicitly dropped; cluster shutdown
 does not drop them individually. This can consume disk space during a run and
-cause name collisions if names are reused. At process exit, the hook stops the
-server and handles directories according to `CleanupMode`; databases in a
-preserved data directory remain on disk. Use unique per-test database names.
-Close clients and drain connection pools before cleanup: `drop_database` fails
-if the database is missing or has active connections. `TemporaryDatabase`
-provides best-effort implicit cleanup when its guard leaves scope.
+cause name collisions if names are reused. At process exit, the hook attempts
+to stop the first registered cluster and handles directories according to
+`CleanupMode`; databases in a preserved data directory remain on disk. Use
+unique per-test database names. Close clients and drain connection pools before
+cleanup: `drop_database` fails if the database is missing or has active
+connections. `TemporaryDatabase` provides best-effort implicit cleanup when its
+guard leaves scope.
 
 **Explicit cleanup:** Drop databases after each test to reclaim disk space and
 prevent name collisions:
