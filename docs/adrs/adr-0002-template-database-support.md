@@ -552,6 +552,6 @@ This proposal aligns with the project's core design principles:
 
 - Zero-config fixture design:
   `docs/zero-config-raii-postgres-test-fixture-design.md`.
-- Backend abstraction proposal: `docs/adr-001-pglite-oxide-backend.md`.
+- Backend abstraction proposal: `docs/adrs/adr-0001-pglite-oxide-backend.md`.
 - PostgreSQL `CREATE DATABASE` documentation:
   <https://www.postgresql.org/docs/current/sql-createdatabase.html>.

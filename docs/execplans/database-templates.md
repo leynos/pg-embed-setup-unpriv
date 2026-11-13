@@ -7,7 +7,7 @@ bootstrapping fresh clusters for each test.
 
 **Related documents:**
 
-- ADR: `docs/adr-002-template-database-support.md`
+- ADR: `docs/adrs/adr-0002-template-database-support.md`
 - Design: `docs/zero-config-raii-postgres-test-fixture-design.md`
 
 ## 1. Core database lifecycle API
