@@ -1000,21 +1000,26 @@ naming it; it can be deleted once the cluster is no longer needed.
 
 The password file that `initdb` was given, and that the bootstrap reads back on
 reuse, depends on the layout. `<install>` is the resolved install tree. Under a
-derived root it is `<root>/install`, unless `PG_RUNTIME_DIR` selects another
-installation directory. On macOS and Windows, when `PG_EMBED_ROOT` is unset,
-`<install>` is the upstream default install tree unless `PG_RUNTIME_DIR` is
-set. For example, `PG_EMBED_ROOT=/r` and `PG_RUNTIME_DIR=/custom` give the
-setup-only password file `/custom/.pgpass`.
+derived root it is `<root>/install`, unless `PG_RUNTIME_DIR` or the
+configuration file's `runtime_dir` selects another installation directory. On
+macOS and Windows, when neither `PG_EMBED_ROOT` nor the configuration file's
+`embed_root` is set, `<install>` is the upstream default install tree unless
+`PG_RUNTIME_DIR` or `runtime_dir` is set. For example, `PG_EMBED_ROOT=/r` and
+`PG_RUNTIME_DIR=/custom` give the setup-only password file `/custom/.pgpass`.
 
-- **Explicit `PG_DATA_DIR`.** The password file is `<install>/.pgpass`.
+- **Explicit `PG_DATA_DIR` or configuration `data_dir`.** The password file is
+  `<install>/.pgpass`.
 - **Setup-only `run()`/CLI bootstrap with a derived root.** The password file is
   also `<install>/.pgpass`, because the cluster keeps the `<root>/data`
   directory of 0.6.0.
 - **Derived-root test bootstrap**, through `bootstrap_for_tests()` or a
   `TestCluster` constructor. The password file is `<root>/data/<name>.pgpass`,
   beside that cluster's data directory.
-- **macOS and Windows test bootstrap without `PG_EMBED_ROOT` or `PG_DATA_DIR`.**
-  The bootstrap keeps the upstream default paths and uses `<install>/.pgpass`.
+- **macOS and Windows test bootstrap with the default data directory.** When
+  neither the environment nor the configuration file sets `embed_root` or
+  `data_dir`, the bootstrap keeps the upstream default data directory and uses
+  `<install>/.pgpass`. `PG_RUNTIME_DIR` or `runtime_dir` can still select the
+  install tree.
 
 `bootstrap_for_tests()` returns the selected path in `environment.pgpass_file`.
 The environment from that same result includes the path as `PGPASSFILE`; direct
@@ -1027,6 +1032,11 @@ format. Although a test bootstrap exports its path as `PGPASSFILE`, libpq
 cannot use this file to supply a password. Use a separate libpq-format passfile
 or a connection URL containing credentials. For a `TestCluster`,
 `cluster.connection().database_url(database)` returns such a URL.
+
+`database_url()` inserts the password without URI percent-encoding. If a
+password contains a sequence such as `%20`, libpq decodes it and the URL no
+longer supplies the original password. For those passwords, use a connection
+string without embedded credentials and a separate libpq-format password file.
 
 ADR 005 records the design.
 
