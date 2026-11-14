@@ -524,7 +524,11 @@ nextest schedules with the pinned consumers plus every binary that compiles
 builds every test target first, so this target is outside `make test-scripts`
 and outside `make all`: it assigns the same `RUSTFLAGS` as `make test` so the
 build is reused, and CI runs it directly after its test step. Without
-`cargo-nextest` installed the module skips, and the skip names that reason.
+`cargo-nextest` installed the module skips, and the skip names that reason. The
+listing parser lives in `nextest_serial_group.py`, which carries no tests of
+its own: `make test-scripts` collects the doctests of the modules it lists and
+also runs a listed test module's tests, so keeping the parser in a helper lets
+the doctest gate exercise it without building the workspace.
 
 ## Minimum supported Rust version
 

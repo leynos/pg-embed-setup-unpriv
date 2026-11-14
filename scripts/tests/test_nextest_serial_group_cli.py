@@ -17,6 +17,9 @@ compare against.
 so this module is deliberately not part of ``make test-scripts``, which runs
 before CI fetches dependencies. ``make test-serial-group`` assigns the same
 ``RUSTFLAGS`` as ``make test`` so the build is reused rather than repeated.
+The listing parser is :mod:`nextest_serial_group` for the same reason: the
+``make test-scripts`` doctest gate runs a listed test module's tests as well
+as its examples, and a doctest must not build the workspace.
 
 See "Test timeouts: four tiers, outermost last" in
 ``docs/developers-guide.md``.
@@ -24,29 +27,19 @@ See "Test timeouts: four tiers, outermost last" in
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import typing as typ
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from cluster_sources import TESTS_DIR, binary_sources, load_test_sources
+from nextest_serial_group import Group, parse_groups
 from test_nextest_tier_contract import SERIAL_BINARIES
 
 #: The repository whose configuration nextest resolves.
 REPOSITORY_ROOT: typ.Final[Path] = Path(__file__).resolve().parents[2]
-
-#: A group's heading, carrying the limit that makes nextest queue a test
-#: before its per-test ``slow-timeout`` clock starts.
-_GROUP_HEADING = re.compile(
-    r"^group: (?P<name>\S+) \(max threads = (?P<threads>\d+)\)$"
-)
-
-#: A binary's heading inside a group, printed as ``<package>::<binary>:``.
-_BINARY_HEADING = re.compile(r"^ {6}(?P<package>[^:\s]+)::(?P<binary>[^:\s]+):$")
 
 #: Resolving the groups requires a built workspace. A cold build on a shared
 #: host outlasts the default, and a queued build is not a failed one.
@@ -67,62 +60,13 @@ _SHOW_GROUPS = (
 )
 
 
-@dataclass(frozen=True)
-class _Group:
-    """One test group as nextest resolved it."""
-
-    max_threads: int
-    binaries: frozenset[str]
-
-
-def parse_groups(listing: str) -> dict[str, _Group]:
-    """Return each group nextest reports, with the binaries it schedules.
-
-    Parameters
-    ----------
-    listing : str
-        ``cargo nextest show-config test-groups`` output, without colour.
-
-    Returns
-    -------
-    dict[str, _Group]
-        Each group's thread limit and the binaries listed beneath it.
-
-    Examples
-    --------
-    >>> parse_groups(
-    ...     "group: serial (max threads = 1)\\n"
-    ...     "      probe::alpha:\\n"
-    ...     "          alpha\\n"
-    ... )["serial"].binaries
-    frozenset({'alpha'})
-    """
-    limits: dict[str, int] = {}
-    binaries: dict[str, set[str]] = {}
-    current: str | None = None
-    for line in listing.splitlines():
-        heading = _GROUP_HEADING.match(line)
-        if heading:
-            current = heading.group("name")
-            limits[current] = int(heading.group("threads"))
-            binaries.setdefault(current, set())
-            continue
-        entry = _BINARY_HEADING.match(line)
-        if entry is not None and current is not None:
-            binaries[current].add(entry.group("binary"))
-    return {
-        name: _Group(limits[name], frozenset(found))
-        for name, found in binaries.items()
-    }
-
-
 @pytest.fixture(scope="module")
-def groups() -> dict[str, _Group]:
+def groups() -> dict[str, Group]:
     """Resolve the groups once by running nextest, or skip without it.
 
     Returns
     -------
-    dict[str, _Group]
+    dict[str, Group]
         The groups nextest schedules from the repository's configuration.
 
     Raises
@@ -165,7 +109,7 @@ def _binaries_compiling_the_lock_module() -> frozenset[str]:
 
 
 def test_nextest_schedules_every_lock_consumer_in_the_serial_group(
-    groups: dict[str, _Group],
+    groups: dict[str, Group],
 ) -> None:
     """nextest's resolver agrees with the sources the contract reads.
 

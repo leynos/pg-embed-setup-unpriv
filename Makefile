@@ -54,10 +54,10 @@ SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 # Modules whose examples are collected as doctests alongside the suites.
 SCRIPT_PY_DOCTESTS := scripts/msrv_check.py \
 	scripts/tests/nextest_filters.py \
+	scripts/tests/nextest_serial_group.py \
 	scripts/tests/serial_inventory.py \
 	scripts/tests/runner_placement.py \
 	scripts/tests/rustc_wrapper.py \
-	scripts/tests/test_nextest_serial_group_cli.py \
 	scripts/tests/workflow_reader.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \
