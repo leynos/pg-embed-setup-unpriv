@@ -203,6 +203,16 @@ fn create_dir_with_mode(path: &Utf8PathBuf, mode: u32) -> Result<()> {
         .with_context(|| format!("set permissions {mode:o} for {path}"))
 }
 
+/// Return whether a root run must locate a worker binary itself.
+fn root_run_needs_a_discovered_worker() -> bool {
+    geteuid().is_root() && std::env::var_os("PG_EMBEDDED_WORKER").is_none()
+}
+
+/// Return whether `ensure_worker_env` would panic for want of a worker.
+fn root_run_lacks_a_worker() -> bool {
+    root_run_needs_a_discovered_worker() && worker_binary_for_tests().is_none()
+}
+
 /// Start the fixture's cluster, returning the failure message instead of
 /// panicking.
 ///
@@ -214,10 +224,7 @@ pub(super) fn try_test_cluster() -> std::result::Result<TestCluster, String> {
     // `ensure_worker_env` panics with `SKIP-TEST-CLUSTER` when a root run has
     // no worker binary to find. Check that condition first and return it as
     // data, so the helper never panics where the fixture would have skipped.
-    if geteuid().is_root()
-        && std::env::var_os("PG_EMBEDDED_WORKER").is_none()
-        && worker_binary_for_tests().is_none()
-    {
+    if root_run_lacks_a_worker() {
         return Err(
             "SKIP-TEST-CLUSTER: PG_EMBEDDED_WORKER is not set and pg_worker binary was not found"
                 .to_owned(),
