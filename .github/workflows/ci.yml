@@ -145,8 +145,13 @@ jobs:
         # `show-config` compiles every test target before it can resolve the
         # filters. Running it directly after the test step, with the same
         # RUSTFLAGS and plain rustc, reuses that build instead of repeating it.
+        # `RUSTFLAGS` is assigned empty rather than left unset: the assignment
+        # replaces any value the job exports, so the recipe composes exactly
+        # the test step's flags instead of appending a second `-D warnings`,
+        # and the recipe supplies `-Zthreads=8` and the mold linker itself.
         env:
           RUSTC_WRAPPER: ""
+          RUSTFLAGS: ""
         run: make test-serial-group
       - name: Run Loom model tests (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
