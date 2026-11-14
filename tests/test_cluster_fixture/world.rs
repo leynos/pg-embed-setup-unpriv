@@ -4,7 +4,8 @@ use std::{cell::RefCell, ffi::OsString, fs};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Result, eyre};
-use pg_embedded_setup_unpriv::test_support::ensure_worker_env;
+use nix::unistd::geteuid;
+use pg_embedded_setup_unpriv::test_support::{ensure_worker_env, worker_binary_for_tests};
 use rstest::fixture;
 
 use super::{
@@ -210,6 +211,18 @@ fn create_dir_with_mode(path: &Utf8PathBuf, mode: u32) -> Result<()> {
 /// tests inspect the failure as data, with no `catch_unwind`; the fixture's
 /// own panic is covered by `should_panic` in the library's unit tests.
 pub(super) fn try_test_cluster() -> std::result::Result<TestCluster, String> {
+    // `ensure_worker_env` panics with `SKIP-TEST-CLUSTER` when a root run has
+    // no worker binary to find. Check that condition first and return it as
+    // data, so the helper never panics where the fixture would have skipped.
+    if geteuid().is_root()
+        && std::env::var_os("PG_EMBEDDED_WORKER").is_none()
+        && worker_binary_for_tests().is_none()
+    {
+        return Err(
+            "SKIP-TEST-CLUSTER: PG_EMBEDDED_WORKER is not set and pg_worker binary was not found"
+                .to_owned(),
+        );
+    }
     let worker_guard = ensure_worker_env();
     TestCluster::new()
         .map(|cluster| cluster.with_worker_guard(worker_guard))
