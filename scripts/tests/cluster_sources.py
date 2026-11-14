@@ -10,8 +10,9 @@ the cross-process scenario lock.
 This module owns the reading both contracts share. ``load_test_sources``
 does every filesystem call and reports a failure as ``SourceLoadError``;
 ``binary_sources`` resolves each binary's crate root and the modules it
-compiles in; ``spawning_cluster_binaries`` is a pure classification of the
-text that resolution yields. Keeping the split explicit means a scanner
+compiles in; ``module_sources`` resolves one module file's own namespace;
+``spawning_cluster_binaries`` is a pure classification of the text that
+resolution yields. Keeping the split explicit means a scanner
 can be tested against a constructed tree without touching the disk.
 
 The classification is lexical, so a reference in a comment counts. A
@@ -303,6 +304,52 @@ def binary_sources(
         )
         for name, path in sorted(_source_files(sources, root))
     }
+
+
+def module_sources(
+    sources: cabc.Mapping[Path, str], *, path: Path
+) -> frozenset[Path]:
+    """Return the files a module file compiles in, including itself.
+
+    A module file resolves a plain ``mod`` declaration in a directory
+    named after itself, which is what separates ``support/serial.rs``
+    from a crate root: its children are the files Cargo names under the
+    ``serial`` module rather than under the binary. Reachability is the
+    question here, because the files a module compiles are the namespace
+    its tests are named under.
+
+    Parameters
+    ----------
+    sources : Mapping[Path, str]
+        The loaded test sources, keyed by resolved path.
+    path : Path
+        A module file the loader has already read, such as
+        ``tests/support/serial.rs``.
+
+    Returns
+    -------
+    frozenset[Path]
+        ``path`` and, transitively, every file it declares. A ``path``
+        the loader did not read compiles nothing, so the result is empty
+        rather than a ``KeyError``: the caller is asking which namespace
+        exists, and a missing module has none.
+
+    Examples
+    --------
+    >>> sources = {
+    ...     Path("support/serial.rs"): "mod cases;\\n",
+    ...     Path("support/serial/cases.rs"): "",
+    ... }
+    >>> sorted(p.as_posix() for p in module_sources(
+    ...     sources, path=Path("support/serial.rs")
+    ... ))
+    ['support/serial.rs', 'support/serial/cases.rs']
+    """
+    if path not in sources:
+        return frozenset()
+    return frozenset(
+        _compiled_sources(path, {}, is_crate_root=False, sources=sources)
+    )
 
 
 def spawning_cluster_binaries(

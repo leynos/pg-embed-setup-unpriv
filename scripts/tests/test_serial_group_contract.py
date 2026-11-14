@@ -27,12 +27,15 @@ from timeout_budgets import NEXTEST_CONFIG
 #:
 #: ``cluster_alpha`` reaches the lock only through a support module, so the
 #: attribution the reader performs is exercised rather than assumed.
-#: ``isolated_gamma`` takes only the in-process guard, and ``late_delta``
-#: compiles the lock module but keeps its own cases isolated, which is the
-#: over-approximation this contract replaces. ``lock_dir_theta`` compiles a
-#: file from the lock module's own directory, whose uses the group covers by
-#: test name, and ``support/serial/uncompiled.rs`` is a lock use in that
-#: directory that no binary compiles. Neither may join or fault.
+#: ``isolated_gamma`` takes only the in-process guard. ``late_delta`` compiles
+#: the lock module, which brings in ``support/serial/inner.rs``, but keeps its
+#: own cases isolated: both files are named under ``serial::``, so the
+#: embedded term covers them and the binary stays out. ``lock_dir_theta`` also
+#: compiles a file from that directory, but declares it at its own crate root,
+#: so the file's tests are named ``cases::`` rather than ``serial::cases::``
+#: and the binary is a member. The directory does not decide the exemption;
+#: the namespace does. ``support/serial/uncompiled.rs`` is a lock use in that
+#: directory that no binary compiles, so it is neither joined nor reported.
 _SOURCES: dict[str, str] = {
     "cluster_alpha.rs": '#[path = "support/locks.rs"]\nmod locks;\n',
     "cluster_beta.rs": "fn f(_guard: serial::ScenarioSerialGuard) {}\n",
@@ -50,12 +53,18 @@ _SOURCES: dict[str, str] = {
         "fn f(_g: serial::ScenarioLocalGuard) {}\n"
     ),
     "support/locks.rs": "fn held() { let _guard = serial_guard(); }\n",
-    "support/serial.rs": "pub fn serial_guard() {}\n",
+    "support/serial.rs": "pub fn serial_guard() {}\nmod inner;\n",
+    "support/serial/inner.rs": "fn held() { let _guard = serial_guard(); }\n",
     "support/serial/cases.rs": "fn held() { let _guard = serial_guard(); }\n",
     "support/serial/uncompiled.rs": (
         "fn f(_g: serial::ScenarioSerialGuard) {}\n"
     ),
 }
+
+#: The binaries the reference tree and configuration agree on.
+_REFERENCE_INVENTORY: frozenset[str] = frozenset(
+    {"cluster_alpha", "cluster_beta", "lock_dir_theta"}
+)
 
 _GOOD_CONFIG = """[profile.default]
 slow-timeout = { period = "180s", terminate-after = 1, grace-period = "5s" }
@@ -72,6 +81,7 @@ serial = { max-threads = 1 }
 filter = \"\"\"
   binary(=cluster_alpha)
   | binary(=cluster_beta)
+  | binary(=lock_dir_theta)
   | kind(test) & test(/^serial::/)
 \"\"\"
 test-group = "serial"
@@ -103,17 +113,25 @@ def test_the_reference_shape_has_no_fault(tmp_path: Path) -> None:
     """The reference configuration and tree agree with the pinned inventory."""
     tests_directory = _write_repository(tmp_path)
     faults = serial_group_faults(
-        _GOOD_CONFIG, frozenset({"cluster_alpha", "cluster_beta"}), tests_directory
+        _GOOD_CONFIG, _REFERENCE_INVENTORY, tests_directory
     )
     assert faults == [], f"the reference repository must be fault-free, got {faults}"
 
 
 def test_the_discovered_set_matches_the_reference_tree(tmp_path: Path) -> None:
-    """A local guard, or compiling the module alone, does not take the lock."""
+    """Each route to the lock attributes, and each non-route stays out.
+
+    ``cluster_alpha`` takes the lock through a support module, ``cluster_beta``
+    in its own crate root, and ``lock_dir_theta`` through a lock-directory file
+    it declares itself, whose tests are named under the binary rather than
+    under ``serial::``. ``isolated_gamma`` takes only the local guard and
+    ``late_delta`` compiles only the lock module's own namespace, so neither
+    is a member.
+    """
     tests_directory = _write_repository(tmp_path)
     discovered, faults = scan_lock_consuming_binaries(tests_directory)
     assert faults == [], f"the reference tree must be fault-free, got {faults}"
-    assert discovered == frozenset({"cluster_alpha", "cluster_beta"}), (
+    assert discovered == _REFERENCE_INVENTORY, (
         f"only the binaries that take the lock must be discovered, got {discovered}"
     )
 
@@ -147,7 +165,7 @@ def test_a_support_only_binary_missing_from_the_filter_is_a_fault(
     _add_support_only_binary(tests_directory)
     faults = serial_group_faults(
         _GOOD_CONFIG,
-        frozenset({"cluster_alpha", "cluster_beta", "solo"}),
+        _REFERENCE_INVENTORY | {"solo"},
         tests_directory,
     )
     assert any("solo" in fault for fault in faults), (
@@ -223,7 +241,7 @@ def test_a_mutation_is_a_fault(
     tests_directory = _write_repository(tmp_path)
     faults = serial_group_faults(
         _GOOD_CONFIG.replace(old, new),
-        frozenset({"cluster_alpha", "cluster_beta"}),
+        _REFERENCE_INVENTORY,
         tests_directory,
     )
     assert faults, f"replacing {old!r} with {new!r} must be reported"
@@ -238,7 +256,7 @@ def test_a_missing_binary_is_a_fault(tmp_path: Path) -> None:
     assert old in _GOOD_CONFIG, "the mutation target must exist"
     faults = serial_group_faults(
         _GOOD_CONFIG.replace(old, "  binary(=cluster_beta)"),
-        frozenset({"cluster_alpha", "cluster_beta"}),
+        _REFERENCE_INVENTORY,
         _write_repository(tmp_path),
     )
     assert faults == ["the serial filter must name cluster_alpha"], (
@@ -253,7 +271,7 @@ def test_a_binary_that_starts_taking_the_lock_is_reported(tmp_path: Path) -> Non
         "use serial::serial_guard;\n", encoding="utf-8"
     )
     faults = serial_group_faults(
-        _GOOD_CONFIG, frozenset({"cluster_alpha", "cluster_beta"}), tests_directory
+        _GOOD_CONFIG, _REFERENCE_INVENTORY, tests_directory
     )
     assert any("late_epsilon" in fault for fault in faults), (
         f"a new lock consumer must be reported: {faults}"
@@ -270,7 +288,7 @@ def test_a_directory_target_is_discovered(tmp_path: Path) -> None:
         "fn f(_guard: serial::ScenarioSerialGuard) {}\n", encoding="utf-8"
     )
     faults = serial_group_faults(
-        _GOOD_CONFIG, frozenset({"cluster_alpha", "cluster_beta"}), tests_directory
+        _GOOD_CONFIG, _REFERENCE_INVENTORY, tests_directory
     )
     assert any("late_zeta" in fault for fault in faults), (
         f"a directory-backed target must be discovered: {faults}"
@@ -284,7 +302,7 @@ def test_a_lock_use_no_binary_compiles_is_reported(tmp_path: Path) -> None:
         "fn f() { let _guard = serial_guard(); }\n", encoding="utf-8"
     )
     faults = serial_group_faults(
-        _GOOD_CONFIG, frozenset({"cluster_alpha", "cluster_beta"}), tests_directory
+        _GOOD_CONFIG, _REFERENCE_INVENTORY, tests_directory
     )
     assert any("orphan" in fault for fault in faults), (
         f"a lock use no binary compiles must be reported: {faults}"
@@ -295,7 +313,7 @@ def test_an_unreadable_tree_is_a_fault_not_an_exception(tmp_path: Path) -> None:
     """A tree that cannot be read is reported through the fault channel."""
     faults = serial_group_faults(
         _GOOD_CONFIG,
-        frozenset({"cluster_alpha", "cluster_beta"}),
+        _REFERENCE_INVENTORY,
         tmp_path / "missing",
     )
     assert any("missing" in fault for fault in faults), (
@@ -321,7 +339,7 @@ def test_an_unlistable_directory_is_one_named_fault(tmp_path: Path) -> None:
         discovered, faults = scan_lock_consuming_binaries(tests_directory)
         group_faults = serial_group_faults(
             _GOOD_CONFIG,
-            frozenset({"cluster_alpha", "cluster_beta"}),
+            _REFERENCE_INVENTORY,
             tests_directory,
         )
     finally:
@@ -345,7 +363,7 @@ def test_a_directory_that_cannot_be_resolved_is_a_fault(
 
     monkeypatch.setattr(Path, "resolve", unresolvable)
     faults = serial_group_faults(
-        _GOOD_CONFIG, frozenset({"cluster_alpha", "cluster_beta"}), tmp_path
+        _GOOD_CONFIG, _REFERENCE_INVENTORY, tmp_path
     )
     assert any("cannot resolve" in fault for fault in faults), (
         f"a resolution failure must be reported: {faults}"
@@ -368,7 +386,7 @@ def test_a_source_that_cannot_be_resolved_is_a_named_fault(
 
     monkeypatch.setattr(Path, "resolve", unresolvable)
     faults = serial_group_faults(
-        _GOOD_CONFIG, frozenset({"cluster_alpha", "cluster_beta"}), root
+        _GOOD_CONFIG, _REFERENCE_INVENTORY, root
     )
     assert any(
         "cluster_beta.rs" in fault and "symlink loop" in fault for fault in faults
@@ -384,7 +402,7 @@ serial = { max-threads = 1 }
 test-group = "serial"
 """
     faults = serial_group_faults(
-        config, frozenset({"cluster_alpha", "cluster_beta"}), _write_repository(tmp_path)
+        config, _REFERENCE_INVENTORY, _write_repository(tmp_path)
     )
     assert any("string filter" in fault for fault in faults), (
         f"a missing filter must be named as such: {faults}"

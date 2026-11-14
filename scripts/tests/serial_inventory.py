@@ -10,11 +10,17 @@ nobody listed.
 
 The module's own unit tests take the same lock, but the group covers them
 with its embedded ``serial::tests::*`` term instead of whole-binary
-membership. The module's files are therefore excluded here: counting their
-``serial_guard`` uses would make every binary that compiles the module a
-member, including the ones whose scenarios are isolated behind
-``local_serial_guard``. That over-approximation is what this contract
-replaces.
+membership. The files compiled under the module's own name are therefore
+excluded here: counting their ``serial_guard`` uses would make every binary
+that compiles the module a member, including the ones whose scenarios are
+isolated behind ``local_serial_guard``. That over-approximation is what this
+contract replaces. Membership exclusion follows the namespace the module
+compiles rather than its directory, because a file that merely lives in
+``support/serial/`` but is declared by a binary's crate root is named under
+that binary and belongs to it. An orphan fault asks the other question,
+whether a lock use belongs to the lock module at all, so it keeps the
+directory rule: a file there that no binary compiles has no tests for any
+term to schedule.
 
 Reading deliberately reuses :mod:`cluster_sources`, whose ``binary_sources``
 resolves a crate root and the modules it declares, including a ``#[path]``
@@ -38,6 +44,7 @@ from cluster_sources import (
     SourceLoadError,
     binary_sources,
     load_test_sources,
+    module_sources,
 )
 
 #: The API that takes the cross-process lock. ``local_serial_guard`` and
@@ -49,11 +56,77 @@ _LOCK_API: typ.Final[re.Pattern[str]] = re.compile(
 
 #: The scenario-lock module, whose own uses the group's embedded term covers.
 _LOCK_MODULE: typ.Final[Path] = Path("support") / "serial.rs"
-_LOCK_MODULE_DIRECTORY: typ.Final[Path] = Path("support") / "serial"
 
 
-def _is_lock_module(path: Path, root: Path) -> bool:
-    """Return whether ``path`` belongs to the scenario-lock module itself.
+def _serial_namespace(
+    sources: cabc.Mapping[Path, str], root: Path
+) -> frozenset[Path]:
+    """Return the files compiled under the lock module's own name.
+
+    The group's embedded ``serial::`` term schedules a test by the name it
+    compiles under, so it covers the lock module and every file the lock
+    module declares: a child of ``support/serial.rs`` is named
+    ``serial::<child>``. A file that merely lives in ``support/serial/``
+    but is declared by a binary's crate root compiles under that binary's
+    namespace instead, so its tests are not covered by the term and its
+    lock uses stay attributable to the binary. Reachability decides the
+    exemption, not the directory.
+
+    Parameters
+    ----------
+    sources : Mapping[Path, str]
+        The loaded test sources, keyed by resolved path.
+    root : Path
+        The resolved directory holding the integration-test sources.
+
+    Returns
+    -------
+    frozenset[Path]
+        The lock module and the files it declares, or empty when the
+        loader did not read the lock module.
+    """
+    return module_sources(sources, path=root / _LOCK_MODULE)
+
+
+def _own_sources(
+    compiled: cabc.Iterable[Path], namespace: cabc.Container[Path]
+) -> list[Path]:
+    """Return a binary's sources outside the lock module's namespace.
+
+    Parameters
+    ----------
+    compiled : Iterable[Path]
+        The resolved sources one binary compiles.
+    namespace : Container[Path]
+        The files compiled under the lock module's own name.
+
+    Returns
+    -------
+    list[Path]
+        The binary's sources in a stable order. A file in the lock
+        module's namespace is excluded because its tests take the lock
+        under ``serial::`` names, which the group covers by test name
+        rather than by binary membership. A lock use in the same
+        directory that the crate root declares itself is kept, because
+        its tests are named under the binary instead.
+    """
+    return [
+        source
+        for source in sorted(compiled)
+        if source not in namespace
+    ]
+
+
+def _in_lock_area(path: Path, root: Path) -> bool:
+    """Return whether ``path`` lies in the lock module's own area.
+
+    This answers a different question from :func:`_serial_namespace`: an
+    orphan fault asks whether a lock use belongs to the lock module at
+    all, while membership asks which tests a binary compiles. A file in
+    this area that no binary compiles has no tests for any term to
+    schedule, so it is not reported; a file the crate root declares
+    itself is still a member, because its tests are named under the
+    binary.
 
     Parameters
     ----------
@@ -73,34 +146,8 @@ def _is_lock_module(path: Path, root: Path) -> bool:
     if not path.is_relative_to(root):
         return False
     relative = path.relative_to(root)
-    return (
-        relative == _LOCK_MODULE
-        or _LOCK_MODULE_DIRECTORY in relative.parents
-    )
-
-
-def _own_sources(compiled: cabc.Iterable[Path], root: Path) -> list[Path]:
-    """Return a binary's sources without the lock module's own files.
-
-    Parameters
-    ----------
-    compiled : Iterable[Path]
-        The resolved sources one binary compiles.
-    root : Path
-        The resolved directory holding the integration-test sources.
-
-    Returns
-    -------
-    list[Path]
-        The binary's sources in a stable order. The lock module's files
-        are excluded because its unit tests take the lock, which the
-        group covers by test name rather than by binary membership.
-    """
-    return [
-        source
-        for source in sorted(compiled)
-        if not _is_lock_module(source, root)
-    ]
+    lock_directory = _LOCK_MODULE.parent / _LOCK_MODULE.stem
+    return relative == _LOCK_MODULE or lock_directory in relative.parents
 
 
 def _orphan_faults(
@@ -124,13 +171,15 @@ def _orphan_faults(
     -------
     list[str]
         One fault naming the unattributed sources, or empty when every
-        lock use belongs to a binary.
+        lock use belongs to a binary. A file in the lock module's own
+        area is not reported, because it has no tests to schedule and the
+        module's tests are covered by name rather than by a filter term.
     """
     orphans = sorted(
         source
         for source in sources
         if source not in attributed
-        and not _is_lock_module(source, root)
+        and not _in_lock_area(source, root)
         and _LOCK_API.search(sources[source])
     )
     if not orphans:
@@ -162,12 +211,13 @@ def lock_consuming_binaries(
         because no filter term can schedule it.
     """
     binaries = binary_sources(sources, root=root)
+    namespace = _serial_namespace(sources, root)
     members = {
         name
         for name, compiled in binaries.items()
         if any(
             _LOCK_API.search(sources[source])
-            for source in _own_sources(compiled, root)
+            for source in _own_sources(compiled, namespace)
         )
     }
     attributed = {
