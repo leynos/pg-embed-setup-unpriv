@@ -223,10 +223,8 @@ fn thread_state_recovers_from_invalid_index() {
 
     assert_eq!(env::var_os(&key), Some(OsString::from("value")));
 
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        state.exit_scope(index + 1);
-    }));
-    assert!(result.is_ok(), "invalid scope exit should not panic");
+    // A panic here fails the test by itself, so no unwind probe is needed.
+    state.exit_scope(index + 1);
 
     assert_eq!(env::var_os(&key), original);
     assert_eq!(state.depth(), 0);
@@ -242,21 +240,18 @@ fn thread_state_recovers_from_invalid_index() {
     setup_guards: setup_single_guard,
     corrupt_state: apply_invalid_scope_exit,
     drop_guards: drop_guards_in_order,
-    drop_message: "dropping guard after corruption should not panic",
 })]
 #[case::invalid_index_nested(CorruptionCase {
     test_name: "INVALID_INDEX_NESTED",
     setup_guards: setup_nested_guards,
     corrupt_state: apply_invalid_scope_exit,
     drop_guards: drop_guards_in_order,
-    drop_message: "dropping guards after invalid scope exit should not panic",
 })]
 #[case::out_of_order_drop(CorruptionCase {
     test_name: "OUT_OF_ORDER_DROP",
     setup_guards: setup_nested_guards,
     corrupt_state: no_corruption,
     drop_guards: drop_guards_out_of_order,
-    drop_message: "dropping outer guard out of order should not panic",
 })]
 #[serial]
 fn scoped_env_recovers_from_corrupt_exit(#[case] case: CorruptionCase) {
@@ -270,10 +265,7 @@ fn scoped_env_recovers_from_corrupt_exit(#[case] case: CorruptionCase) {
             assert_thread_state_reset();
         }
 
-        let drop_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            (case.drop_guards)(guards);
-        }));
-        assert!(drop_result.is_ok(), "{}", case.drop_message);
+        (case.drop_guards)(guards);
         assert_eq!(env::var_os(key), original);
         assert_thread_state_reset();
         assert_env_lock_released();

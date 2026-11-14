@@ -3,7 +3,6 @@
 use std::{
     ffi::OsString,
     fs,
-    panic::{AssertUnwindSafe, catch_unwind},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -349,15 +348,9 @@ fn setup_postgres_only_inside_runtime_returns_recoverable_error(
     // The async wrapper exists only so runtime.block_on can execute the
     // synchronous setup_postgres_only inside an active Tokio runtime and verify
     // nested runtime creation returns an error instead of panicking.
-    let outcome = catch_unwind(AssertUnwindSafe(|| {
-        runtime.block_on(async { setup_postgres_only(bootstrap) })
-    }));
-
-    ensure!(
-        outcome.is_ok(),
-        "setup_postgres_only should not panic inside an existing runtime"
-    );
-    let setup_result = outcome.expect("nested-runtime outcome should be captured");
+    // A panic inside the runtime fails the test by itself, so no unwind probe
+    // is needed to prove the call returns an error instead.
+    let setup_result = runtime.block_on(async { setup_postgres_only(bootstrap) });
     ensure!(
         setup_result.is_err(),
         "expected a recoverable setup error for invalid installation path"

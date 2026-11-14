@@ -1,10 +1,10 @@
 //! Test cluster fixture utilities for managing test worlds.
 
-use std::{any::Any, cell::RefCell, ffi::OsString, fs};
+use std::{cell::RefCell, ffi::OsString, fs};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Result, eyre};
-use pg_embedded_setup_unpriv::test_support::panic_payload_to_string;
+use pg_embedded_setup_unpriv::test_support::ensure_worker_env;
 use rstest::fixture;
 
 use super::{
@@ -70,8 +70,7 @@ impl FixtureWorld {
         self.skip_reason = None;
     }
 
-    pub(super) fn record_failure(&mut self, payload: Box<dyn Any + Send>) {
-        let message = panic_payload_to_string(payload);
+    pub(super) fn record_failure(&mut self, message: String) {
         self.cluster = None;
         if let Some(reason) = cluster_skip_message(&message, None) {
             self.mark_skip(reason);
@@ -203,8 +202,23 @@ fn create_dir_with_mode(path: &Utf8PathBuf, mode: u32) -> Result<()> {
         .with_context(|| format!("set permissions {mode:o} for {path}"))
 }
 
-pub(super) fn handle_fixture_panic(payload: Box<dyn Any + Send>) -> Result<()> {
-    let message = panic_payload_to_string(payload);
+/// Start the fixture's cluster, returning the failure message instead of
+/// panicking.
+///
+/// This mirrors `test_support::test_cluster`, whose failure path panics with
+/// `SKIP-TEST-CLUSTER`. Calling the fallible constructor directly lets the
+/// tests inspect the failure as data, with no `catch_unwind`; the fixture's
+/// own panic is covered by `should_panic` in the library's unit tests.
+pub(super) fn try_test_cluster() -> std::result::Result<TestCluster, String> {
+    let worker_guard = ensure_worker_env();
+    TestCluster::new()
+        .map(|cluster| cluster.with_worker_guard(worker_guard))
+        .map_err(|err| {
+            format!("SKIP-TEST-CLUSTER: test_cluster fixture failed to start PostgreSQL: {err:?}")
+        })
+}
+
+pub(super) fn handle_fixture_failure(message: String) -> Result<()> {
     cluster_skip_message(&message, None).map_or_else(
         || Err(eyre!(message)),
         |reason| {

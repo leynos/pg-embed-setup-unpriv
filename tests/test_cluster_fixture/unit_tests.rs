@@ -1,7 +1,7 @@
 //! Test utilities and unit checks for cluster fixtures.
 
 use color_eyre::eyre::{Context, Result, ensure};
-use pg_embedded_setup_unpriv::{TestCluster, test_support::test_cluster};
+use pg_embedded_setup_unpriv::TestCluster;
 use rstest::rstest;
 
 use super::{
@@ -26,10 +26,11 @@ where
     sandbox
         .reset()
         .context("reset rstest fixture sandbox before applying env")?;
-    let result = sandbox.with_env(sandbox.env_without_timezone(), || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(test_cluster))
-    });
-    result.map_or_else(super::world::handle_fixture_panic, test)
+    let result = sandbox.with_env(
+        sandbox.env_without_timezone(),
+        super::world::try_test_cluster,
+    );
+    result.map_or_else(super::world::handle_fixture_failure, test)
 }
 
 #[expect(
@@ -114,13 +115,14 @@ pub(super) fn fixture_teardown_resource_cleanup(_serial_guard: ScenarioSerialGua
         .reset()
         .context("reset sandbox before teardown coverage")?;
     let sandbox_root = sandbox_root_path(&sandbox)?;
-    let result = sandbox.with_env(sandbox.env_without_timezone(), || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(test_cluster))
-    });
+    let result = sandbox.with_env(
+        sandbox.env_without_timezone(),
+        super::world::try_test_cluster,
+    );
     let cluster = match result {
         Ok(cluster) => cluster,
-        Err(payload) => {
-            super::world::handle_fixture_panic(payload)?;
+        Err(message) => {
+            super::world::handle_fixture_failure(message)?;
             return Ok(());
         }
     };
