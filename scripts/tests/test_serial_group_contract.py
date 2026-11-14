@@ -25,17 +25,16 @@ from timeout_budgets import NEXTEST_CONFIG
 
 #: The reference tree's sources, keyed by path relative to ``tests``.
 #:
-#: ``cluster_alpha`` reaches the lock through a support module, so the
+#: ``cluster_alpha`` reaches the lock only through a support module, so the
 #: attribution the reader performs is exercised rather than assumed.
 #: ``isolated_gamma`` takes only the in-process guard, and ``late_delta``
 #: compiles the lock module but keeps its own cases isolated, which is the
-#: over-approximation this contract replaces.
+#: over-approximation this contract replaces. ``lock_dir_theta`` compiles a
+#: file from the lock module's own directory, whose uses the group covers by
+#: test name, and ``support/serial/uncompiled.rs`` is a lock use in that
+#: directory that no binary compiles. Neither may join or fault.
 _SOURCES: dict[str, str] = {
-    "cluster_alpha.rs": (
-        '#[path = "support/locks.rs"]\n'
-        "mod locks;\n"
-        "use serial::{ScenarioSerialGuard, serial_guard};\n"
-    ),
+    "cluster_alpha.rs": '#[path = "support/locks.rs"]\nmod locks;\n',
     "cluster_beta.rs": "fn f(_guard: serial::ScenarioSerialGuard) {}\n",
     "isolated_gamma.rs": (
         "use serial::{ScenarioLocalGuard, local_serial_guard};\n"
@@ -45,8 +44,17 @@ _SOURCES: dict[str, str] = {
         "mod serial;\n"
         "fn f(_guard: serial::ScenarioLocalGuard) {}\n"
     ),
+    "lock_dir_theta.rs": (
+        '#[path = "support/serial/cases.rs"]\n'
+        "mod cases;\n"
+        "fn f(_g: serial::ScenarioLocalGuard) {}\n"
+    ),
     "support/locks.rs": "fn held() { let _guard = serial_guard(); }\n",
     "support/serial.rs": "pub fn serial_guard() {}\n",
+    "support/serial/cases.rs": "fn held() { let _guard = serial_guard(); }\n",
+    "support/serial/uncompiled.rs": (
+        "fn f(_g: serial::ScenarioSerialGuard) {}\n"
+    ),
 }
 
 _GOOD_CONFIG = """[profile.default]
@@ -107,6 +115,43 @@ def test_the_discovered_set_matches_the_reference_tree(tmp_path: Path) -> None:
     assert faults == [], f"the reference tree must be fault-free, got {faults}"
     assert discovered == frozenset({"cluster_alpha", "cluster_beta"}), (
         f"only the binaries that take the lock must be discovered, got {discovered}"
+    )
+
+
+def _add_support_only_binary(tests_directory: Path) -> None:
+    """Add a binary whose only lock use is in an included support module."""
+    (tests_directory / "support" / "only_lock.rs").write_text(
+        "fn f(_g: serial::ScenarioSerialGuard) {}\n", encoding="utf-8"
+    )
+    (tests_directory / "solo.rs").write_text(
+        '#[path = "support/only_lock.rs"]\nmod only_lock;\n', encoding="utf-8"
+    )
+
+
+def test_a_support_only_binary_is_discovered(tmp_path: Path) -> None:
+    """A lock use reached only through a support module is attributed."""
+    tests_directory = _write_repository(tmp_path)
+    _add_support_only_binary(tests_directory)
+    discovered, faults = scan_lock_consuming_binaries(tests_directory)
+    assert faults == [], f"the support module belongs to solo: {faults}"
+    assert "solo" in discovered, (
+        f"a support-only lock use must attribute to its binary: {sorted(discovered)}"
+    )
+
+
+def test_a_support_only_binary_missing_from_the_filter_is_a_fault(
+    tmp_path: Path,
+) -> None:
+    """The same binary is reported when the filter omits it."""
+    tests_directory = _write_repository(tmp_path)
+    _add_support_only_binary(tests_directory)
+    faults = serial_group_faults(
+        _GOOD_CONFIG,
+        frozenset({"cluster_alpha", "cluster_beta", "solo"}),
+        tests_directory,
+    )
+    assert any("solo" in fault for fault in faults), (
+        f"the omitted support-only binary must be named: {faults}"
     )
 
 
@@ -255,6 +300,37 @@ def test_an_unreadable_tree_is_a_fault_not_an_exception(tmp_path: Path) -> None:
     )
     assert any("missing" in fault for fault in faults), (
         f"an unreadable tree must be reported: {faults}"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="mode denial is not enforced on Windows")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root can list a directory whose mode denies everyone",
+)
+def test_an_unlistable_directory_is_one_named_fault(tmp_path: Path) -> None:
+    """A directory the walk cannot list is a fault, not an exception."""
+    tests_directory = _write_repository(tmp_path)
+    blocked = tests_directory / "blocked"
+    blocked.mkdir()
+    (blocked / "hidden.rs").write_text(
+        "fn f(_g: serial::ScenarioSerialGuard) {}\n", encoding="utf-8"
+    )
+    blocked.chmod(0)
+    try:
+        discovered, faults = scan_lock_consuming_binaries(tests_directory)
+        group_faults = serial_group_faults(
+            _GOOD_CONFIG,
+            frozenset({"cluster_alpha", "cluster_beta"}),
+            tests_directory,
+        )
+    finally:
+        blocked.chmod(0o755)
+    assert isinstance(discovered, frozenset)
+    assert len(faults) == 1, f"one fault must name the directory: {faults}"
+    assert "blocked" in faults[0], f"the directory must be named: {faults}"
+    assert any("blocked" in fault for fault in group_faults), (
+        f"the group contract must carry the same fault: {group_faults}"
     )
 
 
