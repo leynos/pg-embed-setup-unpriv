@@ -1395,6 +1395,8 @@ that still need unwinding are genuine: `lifecycle_template`'s panic cleanup,
 `src/env/tests`, the Loom unwind model in `src/env/loom_tests`, the
 `resume_unwind` helpers, and the non-Unix lock tests in
 `tests/support/serial/non_unix_tests.rs`, which do not build on Linux. The
-suite has not been re-measured under Cranelift since the conversion. Re-measure
-the whole suite under the backend, with CI's environment, on the next attempt
-to adopt it, and adopt it only if every test passes.
+`test_cluster_fixture` binary now passes 18 of 18 under Cranelift on
+`nightly-2026-11-06` (2026-11-14; it was 17 of 18 before), but the rest of the
+suite has not been re-measured since the conversion. Re-measure the whole suite
+under the backend, with CI's environment, on the next attempt to adopt it, and
+adopt it only if every test passes.
