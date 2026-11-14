@@ -51,10 +51,12 @@ Published `cargo binstall` targets:
 | Windows          | `x86_64-pc-windows-msvc`                                |
 
 Windows on ARM is not published because the upstream PostgreSQL binary archive
-does not provide `aarch64-pc-windows-msvc` binaries. On Windows, the helper
-creates directories with the current account's default access control lists
-(ACLs); the POSIX `0700`/`0755` file-mode privacy clamps used on Unix are
-skipped because Windows does not expose those modes.
+does not provide `aarch64-pc-windows-msvc` binaries. On Windows, new
+directories normally inherit inheritable ACL entries from their parent; if none
+apply, Windows uses the creator token's default DACL. The helper does not set
+or change ACLs, and the POSIX `0700`/`0755` file-mode privacy clamps used on
+Unix are skipped because Windows does not expose those modes. See
+[Microsoft's DACL rules](https://learn.microsoft.com/en-us/windows/win32/secauthz/dacl-for-a-new-object).
 
 ### Basic usage
 
