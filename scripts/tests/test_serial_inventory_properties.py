@@ -7,6 +7,10 @@ shared ``#[path]`` module, a binary that includes the lock module but keeps
 its own cases isolated, a binary that takes the lock itself, and a use no
 binary compiles all have to keep their own answer.
 
+Files under the lock module's own directory, ``support/serial``, are covered
+by the group's embedded test-name term. A binary that compiles one is not a
+member, and an uncompiled one is not an orphan fault.
+
 See "Test timeouts: four tiers, outermost last" in
 ``docs/developers-guide.md``.
 """
@@ -29,8 +33,8 @@ _LOCKING = "fn f(_g: serial::ScenarioSerialGuard) {}\n"
 #: Text that takes only the in-process guard.
 _ISOLATED = "fn f(_g: serial::ScenarioLocalGuard) {}\n"
 
-#: The real scenario-lock module's file name under ``support``.
-_LOCK_MODULE = "serial"
+#: The scenario-lock module, without its extension, as a ``#[path]``.
+_LOCK_MODULE = "support/serial"
 
 #: A support module no binary compiles.
 _ORPHAN = "orphan"
@@ -53,10 +57,17 @@ _MODULE_NAMES = st.lists(
     unique=True,
 )
 
+#: Generated files in the lock module's directory, which it owns by name.
+_CASE_NAMES = st.lists(
+    st.from_regex(r"case_[a-z0-9_]{0,5}", fullmatch=True),
+    max_size=2,
+    unique=True,
+)
+
 
 @dataclass(frozen=True)
 class _Binary:
-    """One binary: its name, its own lock use, and the modules it includes."""
+    """One binary: its name, its own lock use, and the files it includes."""
 
     name: str
     takes_lock: bool
@@ -65,10 +76,11 @@ class _Binary:
 
 @dataclass(frozen=True)
 class _Tree:
-    """The generated tree: its binaries, its modules and its orphan."""
+    """The generated tree: binaries, modules, lock-directory files, orphan."""
 
     binaries: tuple[_Binary, ...]
     modules: tuple[tuple[str, bool], ...]
+    serial_files: tuple[tuple[str, bool], ...]
     orphan_takes_lock: bool
 
 
@@ -85,23 +97,27 @@ def _trees(draw: st.DrawFn) -> _Tree:
     -------
     _Tree
         Binaries with unique names, support modules shared between them,
-        and an orphan that no binary compiles.
+        files in the lock module's directory, and an orphan nobody
+        compiles.
     """
     module_names = draw(_MODULE_NAMES)
     modules = tuple((name, draw(st.booleans())) for name in module_names)
+    case_names = draw(_CASE_NAMES)
+    serial_files = tuple((name, draw(st.booleans())) for name in case_names)
+    paths = [f"support/{name}" for name in module_names] + [
+        f"support/serial/{name}" for name in case_names
+    ]
     binaries = []
     for index, name in enumerate(draw(_NAMES)):
         includes = (
-            draw(st.frozensets(st.sampled_from(module_names)))
-            if module_names
-            else frozenset()
+            draw(st.frozensets(st.sampled_from(paths))) if paths else frozenset()
         )
         if index == 0:
             # The first binary always compiles the lock module, so every
             # example exercises its exclusion from whole-binary membership.
             includes = includes | {_LOCK_MODULE}
         binaries.append(_Binary(name, draw(st.booleans()), includes))
-    return _Tree(tuple(binaries), modules, draw(st.booleans()))
+    return _Tree(tuple(binaries), modules, serial_files, draw(st.booleans()))
 
 
 def _source_text(takes_lock: bool) -> str:
@@ -116,15 +132,27 @@ def _write_module(tests_directory: Path, name: str, takes_lock: bool) -> None:
     module.write_text(_source_text(takes_lock), encoding="utf-8")
 
 
-def _declaration(name: str) -> str:
-    """Return the ``#[path]`` declaration that compiles a support module."""
-    return f'#[path = "support/{name}.rs"]\nmod {name};\n'
+def _write_serial_file(
+    tests_directory: Path, name: str, takes_lock: bool
+) -> None:
+    """Write one file in the lock module's own directory."""
+    directory = tests_directory / "support" / "serial"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{name}.rs").write_text(
+        _source_text(takes_lock), encoding="utf-8"
+    )
+
+
+def _declaration(path: str) -> str:
+    """Return the ``#[path]`` declaration that compiles a support file."""
+    name = path.rsplit("/", 1)[-1]
+    return f'#[path = "{path}.rs"]\nmod {name};\n'
 
 
 def _write_binary(tests_directory: Path, binary: _Binary) -> None:
     """Write the crate root one binary describes."""
     declarations = "".join(
-        _declaration(name) for name in sorted(binary.includes)
+        _declaration(path) for path in sorted(binary.includes)
     )
     (tests_directory / f"{binary.name}.rs").write_text(
         declarations + _source_text(binary.takes_lock), encoding="utf-8"
@@ -137,26 +165,32 @@ def _write_tree(tests_directory: Path, tree: _Tree) -> None:
     The lock module always takes the lock, and the orphan takes it when the
     plan says so; no binary compiles the orphan.
     """
-    _write_module(tests_directory, _LOCK_MODULE, True)
+    _write_module(tests_directory, _LOCK_MODULE.rsplit("/", 1)[-1], True)
     for name, takes_lock in tree.modules:
         _write_module(tests_directory, name, takes_lock)
+    for name, takes_lock in tree.serial_files:
+        _write_serial_file(tests_directory, name, takes_lock)
     _write_module(tests_directory, _ORPHAN, tree.orphan_takes_lock)
     for binary in tree.binaries:
         _write_binary(tests_directory, binary)
 
 
-def _locking_modules(tree: _Tree) -> frozenset[str]:
-    """Return the generated modules whose text takes the lock."""
-    return frozenset(name for name, takes_lock in tree.modules if takes_lock)
+def _locking_paths(tree: _Tree) -> frozenset[str]:
+    """Return the generated modules, outside the lock directory, that lock."""
+    return frozenset(
+        f"support/{name}"
+        for name, takes_lock in tree.modules
+        if takes_lock
+    )
 
 
 def _expected_members(tree: _Tree) -> frozenset[str]:
     """Return the binaries whose own text, outside the lock module, locks.
 
-    The lock module's own uses are covered by the group's embedded term, so
-    a binary that only compiles it is not a member.
+    The lock module and its directory are covered by the group's embedded
+    term, so a binary that only compiles those files is not a member.
     """
-    locking = _locking_modules(tree)
+    locking = _locking_paths(tree)
     return frozenset(
         binary.name
         for binary in tree.binaries
@@ -169,18 +203,19 @@ def _expected_orphans(tree: _Tree) -> frozenset[str]:
 
     A generated module may be included by no binary, which is an orphan for
     the same reason the designated one is; the expectation is computed from
-    the plan rather than from the reader.
+    the plan rather than from the reader. Files in the lock module's
+    directory are never orphans, because the embedded term covers them.
     """
     included = frozenset().union(
         *(binary.includes for binary in tree.binaries)
     )
     unused = {
-        name
+        f"support/{name}"
         for name, takes_lock in tree.modules
-        if takes_lock and name not in included
+        if takes_lock and f"support/{name}" not in included
     }
     if tree.orphan_takes_lock:
-        unused.add(_ORPHAN)
+        unused.add(f"support/{_ORPHAN}")
     return frozenset(unused)
 
 
@@ -196,9 +231,9 @@ def _assert_faults(tree: _Tree, faults: list[str]) -> None:
     assert faults[0].count("support/") == len(expected), (
         f"only the orphaned modules may be reported: {faults}"
     )
-    for name in expected:
-        assert f"support/{name}.rs" in faults[0], (
-            f"the orphan {name} must be named: {faults}"
+    for path in expected:
+        assert f"{path}.rs" in faults[0], (
+            f"the orphan {path} must be named: {faults}"
         )
 
 
