@@ -140,6 +140,18 @@ jobs:
         run: >-
           RUSTFLAGS="-D warnings -Zthreads=8 -Clink-arg=-fuse-ld=mold"
           cargo nextest run --all-targets --all-features
+      - name: Check the nextest serial group
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        # `show-config` compiles every test target before it can resolve the
+        # filters, and Cargo fingerprints the exact RUSTFLAGS string, so this
+        # step restates the sequence the test step built with. The assignment
+        # replaces the `-D warnings` Setup Rust exports rather than appending
+        # to it, and `make test-serial-group` passes a caller's RUSTFLAGS
+        # through unchanged, so no flag is repeated.
+        env:
+          RUSTC_WRAPPER: ""
+          RUSTFLAGS: "-D warnings -Zthreads=8 -Clink-arg=-fuse-ld=mold"
+        run: make test-serial-group
       - name: Run Loom model tests (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
         timeout-minutes: 10

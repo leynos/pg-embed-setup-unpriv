@@ -63,7 +63,7 @@
   - Adheres to formatting standards tested using a formatting validator.
 - **Commit gate:** Run `make all` before committing. It runs `check-fmt`,
   `markdownlint`, `lint`, `test`, `test-scripts`, `spelling` and
-  `test-workflow-contracts`; `markdownlint` depends on `spelling`. Two gates
+  `test-workflow-contracts`; `markdownlint` depends on `spelling`. Three gates
   that CI runs are deliberately excluded from the local target:
   - `make nixie` needs Nixie 1.1.0 and Merman 0.7.0, and Merman compiles under
     a separate Rust 1.95.0 toolchain. Local Make does not provision either, so
@@ -72,6 +72,11 @@
     feature. The models are `#[ignore]`d, so `make test` leaves them dormant,
     and CI bounds the run at ten minutes. Run `make test-loom` after changing
     Loom-modelled code or its scheduler bounds.
+  - `make test-serial-group` asks nextest which tests the `serial` group
+    schedules, which requires every test target to be built. It runs under the
+    same `RUSTFLAGS` as `make test` — a caller's assignment verbatim, or the
+    same composed sequence — so run it after `make test` to reuse that build,
+    and after changing the serial filter.
 - **Committing:**
   - Only changes that meet all the quality gates above should be committed.
   - Write clear, descriptive commit messages summarizing the change, following

@@ -1,40 +1,30 @@
-"""Reading the test sources that start child processes.
+"""Reading the test sources and the modules each binary compiles in.
 
-``test_cluster_tier_coverage_contract.py`` needs the set of integration
-binaries that spawn children and reference a cluster-bootstrap API. The
-answer has to come from the sources rather than from another list,
-because a value pinned in a manually maintained list cannot notice a
-binary nobody listed.
+Coverage contracts need an answer from the sources rather than from another
+list, because a value pinned in a manually maintained list cannot notice a
+binary nobody listed. ``test_serial_group_contract.py`` needs the binaries
+that take the cross-process scenario lock, and the tier contracts need the
+files each binary compiles in.
 
-This module owns both halves of that reading. ``load_test_sources`` does
-every filesystem call and reports a failure as ``SourceLoadError``;
-``spawning_cluster_binaries`` is then a pure classification of the text
-it is given; ``scan_spawning_cluster_binaries`` is the entry point that
-does both. Keeping the split explicit means the scanner can be tested
-against a constructed tree without touching the disk.
-
-The scan is lexical, so a reference in a comment counts. A false
-positive is a prompt to review the binary rather than a defect in the
-reader.
+This module owns that reading. ``load_test_sources`` does every filesystem
+call and reports a failure as ``SourceLoadError``; ``binary_sources``
+resolves each binary's crate root and the modules it compiles in;
+``module_sources`` resolves one module file's own namespace. Keeping the
+split explicit means a classifier can be tested against a constructed tree
+without touching the disk. The cluster-tier classifier itself lives in
+:mod:`cluster_tier_inventory`.
 
 See "Test timeouts: four tiers, outermost last" in
 ``docs/developers-guide.md``.
 """
 
 import collections.abc as cabc
+import os
 import re
 import typing as typ
 from pathlib import Path
 
 TESTS_DIR: typ.Final[Path] = Path(__file__).resolve().parents[2] / "tests"
-
-#: A reference to an API that bootstraps a real PostgreSQL cluster.
-_CLUSTER_API = re.compile(
-    r"shared_cluster_handle|bootstrap_for_tests|TestCluster|test_cluster::"
-)
-
-#: A reference to spawning another process from a test.
-_CHILD_PROCESS = re.compile(r"current_exe\(|spawn_child\(|Command::new\(")
 
 #: A module declaration a test binary compiles in, with or without a
 #: `#[path]` attribute that overrides where its file lives.
@@ -48,16 +38,49 @@ class SourceLoadError(RuntimeError):
     """Raised when a test source cannot be read from disk.
 
     Reading is the loader's job; classifying text is the scanner's. The
-    loader reports a filesystem or decoding failure as this one domain
-    error rather than letting ``OSError`` or ``UnicodeError`` escape from
-    a query that promises to return a set of names.
+    loader reports a filesystem, resolution or decoding failure as this
+    one domain error rather than letting ``OSError``, ``RuntimeError`` or
+    ``UnicodeError`` escape from a query that promises to return a set of
+    names.
     """
 
-    def __init__(self, path: Path, cause: OSError | UnicodeError) -> None:
+    def __init__(
+        self, path: Path, cause: OSError | UnicodeError | RuntimeError
+    ) -> None:
         """Report the failing path and the underlying error."""
         super().__init__(f"cannot read test source {path}: {cause}")
         self.path = path
         self.cause = cause
+
+
+def _rust_sources(tests_dir: Path) -> list[Path]:
+    """List every Rust source under ``tests_dir``, reporting a scan failure.
+
+    ``Path.rglob`` suppresses ``OSError`` raised while enumerating on
+    Python 3.13, so an unreadable directory would contribute no sources
+    without any failure being visible. Walking with :func:`os.walk` and
+    its ``onerror`` callback keeps that failure: a binary that takes the
+    lock inside such a directory would otherwise be omitted from every
+    coverage contract silently.
+    """
+    faults: list[OSError] = []
+
+    def report(error: OSError) -> None:
+        """Record a directory the walk could not list."""
+        faults.append(error)
+
+    paths: list[Path] = []
+    for root, _directories, names in os.walk(tests_dir, onerror=report):
+        paths.extend(
+            Path(root) / name for name in sorted(names) if name.endswith(".rs")
+        )
+    if faults:
+        error = faults[0]
+        # The walk reports the directory it could not list, which is the
+        # path a reader needs; the root is only a fallback.
+        failed = Path(error.filename) if error.filename else tests_dir
+        raise SourceLoadError(failed, error)
+    return sorted(paths)
 
 
 def load_test_sources(tests_dir: Path = TESTS_DIR) -> dict[Path, str]:
@@ -82,20 +105,20 @@ def load_test_sources(tests_dir: Path = TESTS_DIR) -> dict[Path, str]:
     Raises
     ------
     SourceLoadError
-        If the tree cannot be listed, or a file cannot be read or
-        decoded as UTF-8.
+        If the tree cannot be listed, a file cannot be read or decoded as
+        UTF-8, or a source path cannot be resolved.
     """
     sources: dict[Path, str] = {}
-    try:
-        paths = sorted(tests_dir.rglob("*.rs"))
-    except OSError as exc:
-        raise SourceLoadError(tests_dir, exc) from exc
-    for path in paths:
+    for path in _rust_sources(tests_dir):
         try:
             text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
+            # Resolution belongs inside the same guard: a symlink loop or a
+            # vanished path raises here, after the directory walk succeeded,
+            # and a caller promised a fault must not receive a raw error.
+            resolved = path.resolve()
+        except (OSError, UnicodeError, RuntimeError) as exc:
             raise SourceLoadError(path, exc) from exc
-        sources[path.resolve()] = text
+        sources[resolved] = text
     return sources
 
 
@@ -114,12 +137,16 @@ def _source_files(
     Returns
     -------
     Iterator[tuple[str, Path]]
-        Top-level ``tests/*.rs`` binaries, plus the directory-backed
-        ``test_cluster_fixture`` target when it is present.
+        Top-level ``tests/*.rs`` binaries, the ``tests/<name>/main.rs``
+        directories Cargo finds on its own, and the directory-backed
+        ``test_cluster_fixture`` target the manifest declares with a
+        ``mod.rs`` root.
     """
     for path in sorted(sources):
         if path.parent == root:
             yield path.stem, path
+        elif path.parent.parent == root and path.name == "main.rs":
+            yield path.parent.name, path
     fixture = root / "test_cluster_fixture" / "mod.rs"
     if fixture in sources:
         yield "test_cluster_fixture", fixture
@@ -235,15 +262,15 @@ def _compiled_sources(
     return seen
 
 
-def spawning_cluster_binaries(
+def binary_sources(
     sources: cabc.Mapping[Path, str], *, root: Path
-) -> frozenset[str]:
-    """Return binaries that spawn children and reference a cluster API.
+) -> dict[str, frozenset[Path]]:
+    """Return each test binary's name mapped to the files it compiles in.
 
-    A pure classification of text the loader has already read. The
-    markers are searched across every file the binary compiles in, not
-    only its crate root: a parent can put the child-process spawn in one
-    module and the cluster bootstrap in another.
+    A binary's own crate root and every module it declares, transitively,
+    form one unit of classification. A source outside that relation is
+    compiled by no binary, which is how a coverage contract notices a
+    declaration it cannot attribute.
 
     Parameters
     ----------
@@ -254,43 +281,60 @@ def spawning_cluster_binaries(
 
     Returns
     -------
-    frozenset[str]
-        Test binary names matching both lexical markers.
+    dict[str, frozenset[Path]]
+        One entry per binary, in a stable order, each holding the
+        resolved paths of its crate root and included modules.
     """
-    found = set()
-    for name, path in _source_files(sources, root):
-        compiled = _compiled_sources(
-            path, {}, is_crate_root=True, sources=sources
+    return {
+        name: frozenset(
+            _compiled_sources(path, {}, is_crate_root=True, sources=sources)
         )
-        text = "\n".join(compiled[source] for source in sorted(compiled))
-        if _CHILD_PROCESS.search(text) and _CLUSTER_API.search(text):
-            found.add(name)
-    return frozenset(found)
+        for name, path in sorted(_source_files(sources, root))
+    }
 
 
-def scan_spawning_cluster_binaries(
-    tests_dir: Path = TESTS_DIR,
-) -> frozenset[str]:
-    """Load the test tree and return the child-spawning cluster binaries.
+def module_sources(
+    sources: cabc.Mapping[Path, str], *, path: Path
+) -> frozenset[Path]:
+    """Return the files a module file compiles in, including itself.
 
-    This is the entry point that performs both steps: it resolves the
-    root, loads every source, and hands the result to the pure
-    classifier.
+    A module file resolves a plain ``mod`` declaration in a directory
+    named after itself, which is what separates ``support/serial.rs``
+    from a crate root: its children are the files Cargo names under the
+    ``serial`` module rather than under the binary. Reachability is the
+    question here, because the files a module compiles are the namespace
+    its tests are named under.
 
     Parameters
     ----------
-    tests_dir : Path
-        The directory holding the integration-test sources.
+    sources : Mapping[Path, str]
+        The loaded test sources, keyed by resolved path.
+    path : Path
+        A module file the loader has already read, such as
+        ``tests/support/serial.rs``.
 
     Returns
     -------
-    frozenset[str]
-        Test binary names matching both lexical markers.
+    frozenset[Path]
+        ``path`` and, transitively, every file it declares. A ``path``
+        the loader did not read compiles nothing, so the result is empty
+        rather than a ``KeyError``: the caller is asking which namespace
+        exists, and a missing module has none.
 
-    Raises
-    ------
-    SourceLoadError
-        If the tree cannot be read.
+    Examples
+    --------
+    >>> sources = {
+    ...     Path("support/serial.rs"): "mod cases;\\n",
+    ...     Path("support/serial/cases.rs"): "",
+    ... }
+    >>> sorted(p.as_posix() for p in module_sources(
+    ...     sources, path=Path("support/serial.rs")
+    ... ))
+    ['support/serial.rs', 'support/serial/cases.rs']
     """
-    root = tests_dir.resolve()
-    return spawning_cluster_binaries(load_test_sources(root), root=root)
+    if path not in sources:
+        return frozenset()
+    return frozenset(
+        _compiled_sources(path, {}, is_crate_root=False, sources=sources)
+    )
+

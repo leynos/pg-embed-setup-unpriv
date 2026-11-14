@@ -40,6 +40,8 @@ consumer-facing guidance.
   examples. They share no lock or directory with the other scenarios, so
   serializing them would add wall time without preventing contention. Their
   embedded `serial::tests::*` cases still join through the test-name term.
+  `scripts/tests/test_serial_group_contract.py` derives both sets from the
+  sources, so a binary that starts taking the lock cannot be left out.
 
 ## Fetching dependencies before tests
 
@@ -497,9 +499,44 @@ cluster binaries from the test sources, so a binary missing from both manually
 maintained lists is still caught. Timeout-tier membership is separate from
 serial-group membership: a binary whose cluster roots are isolated pays cold
 startup without taking the shared scenario lock.
-`test_nextest_filters_properties.py` uses Hypothesis for filters no file in the
-repository writes, such as a name using every permitted character and a term
-placed anywhere in the disjunction.
+
+`test_serial_group_contract.py` closes the same gap for the lock. It derives
+the binaries that take the cross-process lock from the test sources, following
+`#[path]` declarations into `tests/support`, and requires the group's filter to
+name exactly the registry `test_nextest_tier_contract.py` pins. A binary that
+starts calling `serial_guard` therefore fails `make test-scripts` even though
+nobody edited either list, and so does a lock-taking binary whose filter term
+is dropped. A binary that compiles `tests/support/serial.rs` but keeps its
+cases isolated stays out of the group because the lock module's uses are
+covered by the embedded term rather than by whole-binary membership. That
+exemption follows the namespace the module compiles, not its directory: a file
+the lock module declares is named `serial::<name>`, while a file in
+`tests/support/serial/` that a crate root declares itself is named under that
+binary, so its lock use makes the binary a member. The same contract refuses a
+`platform`-restricted serial override, and a group assigned ahead of the serial
+one, which nextest would apply to a matching binary instead of the serial
+assignment. `test_serial_group_faults_contract.py` drives every fault the
+checker can report, and the tree both modules judge comes from
+`serial_group_reference.py`. `test_nextest_filters_properties.py` uses
+Hypothesis for filters no file in the repository writes, such as a name using
+every permitted character and a term placed anywhere in the disjunction.
+
+`make test-serial-group` checks the configuration against nextest's own
+interpretation of it. `test_nextest_serial_group_cli.py` runs
+`cargo nextest show-config test-groups --all-targets --all-features`, requires
+the `serial` group to report `max threads = 1`, and compares the binaries
+nextest schedules with the pinned consumers plus every binary that compiles
+`tests/support/serial.rs` through the embedded term. Resolving the groups
+builds every test target first, so this target is outside `make test-scripts`
+and outside `make all`: it runs under the same `RUSTFLAGS` as the build it
+reads — a caller's assignment verbatim, or the sequence `make test` composes
+when none is set — so the build is reused, and CI runs it directly after its
+test step under exactly that step's flags. Without `cargo-nextest` installed
+the module skips, and the skip names that reason. The listing parser lives in
+`nextest_serial_group.py`, which carries no tests of its own:
+`make test-scripts` collects the doctests of the modules it lists and also runs
+a listed test module's tests, so keeping the parser in a helper lets the
+doctest gate exercise it without building the workspace.
 
 ## Minimum supported Rust version
 
