@@ -1,23 +1,18 @@
 """Reading the test sources and the modules each binary compiles in.
 
-Two coverage contracts need an answer from the sources rather than from
-another list, because a value pinned in a manually maintained list cannot
-notice a binary nobody listed. ``test_cluster_tier_coverage_contract.py``
-needs the binaries that spawn children and reference a cluster-bootstrap
-API, and ``test_serial_group_contract.py`` needs the binaries that take
-the cross-process scenario lock.
+Coverage contracts need an answer from the sources rather than from another
+list, because a value pinned in a manually maintained list cannot notice a
+binary nobody listed. ``test_serial_group_contract.py`` needs the binaries
+that take the cross-process scenario lock, and the tier contracts need the
+files each binary compiles in.
 
-This module owns the reading both contracts share. ``load_test_sources``
-does every filesystem call and reports a failure as ``SourceLoadError``;
-``binary_sources`` resolves each binary's crate root and the modules it
-compiles in; ``module_sources`` resolves one module file's own namespace;
-``spawning_cluster_binaries`` is a pure classification of the text that
-resolution yields. Keeping the split explicit means a scanner
-can be tested against a constructed tree without touching the disk.
-
-The classification is lexical, so a reference in a comment counts. A
-false positive is a prompt to review the binary rather than a defect in
-the reader.
+This module owns that reading. ``load_test_sources`` does every filesystem
+call and reports a failure as ``SourceLoadError``; ``binary_sources``
+resolves each binary's crate root and the modules it compiles in;
+``module_sources`` resolves one module file's own namespace. Keeping the
+split explicit means a classifier can be tested against a constructed tree
+without touching the disk. The cluster-tier classifier itself lives in
+:mod:`cluster_tier_inventory`.
 
 See "Test timeouts: four tiers, outermost last" in
 ``docs/developers-guide.md``.
@@ -30,14 +25,6 @@ import typing as typ
 from pathlib import Path
 
 TESTS_DIR: typ.Final[Path] = Path(__file__).resolve().parents[2] / "tests"
-
-#: A reference to an API that bootstraps a real PostgreSQL cluster.
-_CLUSTER_API = re.compile(
-    r"shared_cluster_handle|bootstrap_for_tests|TestCluster|test_cluster::"
-)
-
-#: A reference to spawning another process from a test.
-_CHILD_PROCESS = re.compile(r"current_exe\(|spawn_child\(|Command::new\(")
 
 #: A module declaration a test binary compiles in, with or without a
 #: `#[path]` attribute that overrides where its file lives.
@@ -351,60 +338,3 @@ def module_sources(
         _compiled_sources(path, {}, is_crate_root=False, sources=sources)
     )
 
-
-def spawning_cluster_binaries(
-    sources: cabc.Mapping[Path, str], *, root: Path
-) -> frozenset[str]:
-    """Return binaries that spawn children and reference a cluster API.
-
-    A pure classification of text the loader has already read. The
-    markers are searched across every file the binary compiles in, not
-    only its crate root: a parent can put the child-process spawn in one
-    module and the cluster bootstrap in another.
-
-    Parameters
-    ----------
-    sources : Mapping[Path, str]
-        The loaded test sources, keyed by resolved path.
-    root : Path
-        The resolved directory holding the integration-test sources.
-
-    Returns
-    -------
-    frozenset[str]
-        Test binary names matching both lexical markers.
-    """
-    found = set()
-    for name, compiled in binary_sources(sources, root=root).items():
-        text = "\n".join(sources[source] for source in sorted(compiled))
-        if _CHILD_PROCESS.search(text) and _CLUSTER_API.search(text):
-            found.add(name)
-    return frozenset(found)
-
-
-def scan_spawning_cluster_binaries(
-    tests_dir: Path = TESTS_DIR,
-) -> frozenset[str]:
-    """Load the test tree and return the child-spawning cluster binaries.
-
-    This is the entry point that performs both steps: it resolves the
-    root, loads every source, and hands the result to the pure
-    classifier.
-
-    Parameters
-    ----------
-    tests_dir : Path
-        The directory holding the integration-test sources.
-
-    Returns
-    -------
-    frozenset[str]
-        Test binary names matching both lexical markers.
-
-    Raises
-    ------
-    SourceLoadError
-        If the tree cannot be read.
-    """
-    root = tests_dir.resolve()
-    return spawning_cluster_binaries(load_test_sources(root), root=root)

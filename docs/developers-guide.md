@@ -515,9 +515,11 @@ the lock module declares is named `serial::<name>`, while a file in
 binary, so its lock use makes the binary a member. The same contract refuses a
 `platform`-restricted serial override, and a group assigned ahead of the serial
 one, which nextest would apply to a matching binary instead of the serial
-assignment. `test_nextest_filters_properties.py` uses Hypothesis for filters no
-file in the repository writes, such as a name using every permitted character
-and a term placed anywhere in the disjunction.
+assignment. `test_serial_group_faults_contract.py` drives every fault the
+checker can report, and the tree both modules judge comes from
+`serial_group_reference.py`. `test_nextest_filters_properties.py` uses
+Hypothesis for filters no file in the repository writes, such as a name using
+every permitted character and a term placed anywhere in the disjunction.
 
 `make test-serial-group` checks the configuration against nextest's own
 interpretation of it. `test_nextest_serial_group_cli.py` runs

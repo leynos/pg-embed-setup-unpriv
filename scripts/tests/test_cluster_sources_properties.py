@@ -24,7 +24,7 @@ import dataclasses
 import typing as typ
 from pathlib import Path
 
-from cluster_sources import spawning_cluster_binaries
+from cluster_tier_inventory import spawning_cluster_binaries
 from hypothesis import given
 from hypothesis import strategies as st
 
