@@ -230,27 +230,31 @@ pub(super) fn worker_is_missing(
 /// own wrapper is no longer exercised by these tests: the library's unit tests
 /// cover the missing-worker panic (`resolve_worker_path`) and
 /// `SKIP-TEST-CLUSTER` handling, but not the constructor-error mapping, which
-/// this helper repeats.
+/// this helper repeats in `startup_failure_message`, tested on its own.
 pub(super) fn try_test_cluster() -> std::result::Result<TestCluster, String> {
     // `ensure_worker_env` panics with `SKIP-TEST-CLUSTER` when a root run has
     // no worker binary to find. Check that condition first and return it as
-    // data, so the helper never panics where the fixture would have skipped.
+    // an error message instead of panicking.
     if worker_is_missing(
         geteuid().is_root(),
         std::env::var_os("PG_EMBEDDED_WORKER").is_some(),
         || worker_binary_for_tests().is_some(),
     ) {
-        return Err(
-            "SKIP-TEST-CLUSTER: PG_EMBEDDED_WORKER is not set and pg_worker binary was not found"
-                .to_owned(),
-        );
+        return Err(MISSING_WORKER_MESSAGE.to_owned());
     }
     let worker_guard = ensure_worker_env();
     TestCluster::new()
         .map(|cluster| cluster.with_worker_guard(worker_guard))
-        .map_err(|err| {
-            format!("SKIP-TEST-CLUSTER: test_cluster fixture failed to start PostgreSQL: {err:?}")
-        })
+        .map_err(|err| startup_failure_message(&err))
+}
+
+/// The message the fixture panics with when a root run has no worker.
+pub(super) const MISSING_WORKER_MESSAGE: &str =
+    "SKIP-TEST-CLUSTER: PG_EMBEDDED_WORKER is not set and pg_worker binary was not found";
+
+/// The message the fixture panics with when PostgreSQL fails to start.
+pub(super) fn startup_failure_message(err: &impl std::fmt::Debug) -> String {
+    format!("SKIP-TEST-CLUSTER: test_cluster fixture failed to start PostgreSQL: {err:?}")
 }
 
 pub(super) fn handle_fixture_failure(message: String) -> Result<()> {

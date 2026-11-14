@@ -139,6 +139,20 @@ pub(super) fn fixture_teardown_resource_cleanup(_serial_guard: ScenarioSerialGua
     Ok(())
 }
 
+/// The returned failure messages match the fixture's panic messages, which is
+/// what lets the scenarios assert on them as they did on the panic payload.
+#[rstest]
+fn failure_messages_match_the_fixtures_panic_messages() {
+    assert_eq!(
+        super::world::startup_failure_message(&"boom"),
+        "SKIP-TEST-CLUSTER: test_cluster fixture failed to start PostgreSQL: \"boom\"",
+    );
+    assert_eq!(
+        super::world::MISSING_WORKER_MESSAGE,
+        "SKIP-TEST-CLUSTER: PG_EMBEDDED_WORKER is not set and pg_worker binary was not found",
+    );
+}
+
 /// The missing-worker condition is the one `ensure_worker_env` panics on, and
 /// the worker lookup, which stages the binary, only runs when it is needed.
 #[rstest]
