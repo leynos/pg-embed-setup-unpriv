@@ -1029,14 +1029,19 @@ callers retain the result and apply its environment themselves, while
 The password file contains raw superuser password text for `initdb --pwfile`;
 it is not in libpq's `hostname:port:database:username:password` passfile
 format. Although a test bootstrap exports its path as `PGPASSFILE`, libpq
-cannot use this file to supply a password. Use a separate libpq-format passfile
-or a connection URL containing credentials. For a `TestCluster`,
-`cluster.connection().database_url(database)` returns such a URL.
+cannot use that file to supply a password. Use a separate libpq-format passfile
+and select it with the `passfile` connection parameter, which overrides
+`PGPASSFILE`. For example,
+`postgresql://user@localhost:5432/database?passfile=/path/to/libpq.pgpass`
+selects that file. See [libpq docs][libpq-connect]. For a `TestCluster`,
+`cluster.connection().database_url(database)` returns a URL containing
+credentials.
 
 `database_url()` inserts the password without URI percent-encoding. If a
 password contains a sequence such as `%20`, libpq decodes it and the URL no
 longer supplies the original password. For those passwords, use a connection
-string without embedded credentials and a separate libpq-format password file.
+string without embedded credentials and a separate libpq-format password file
+selected with `passfile` as shown above.
 
 ADR 005 records the design.
 
@@ -1281,3 +1286,5 @@ The decision is recorded in [ADR 006](adrs/adr-0006-rust-build-standard.md).
 The contract tests that guard these defaults run `make -n`, so a direct
 `cargo test` needs GNU make on the `PATH`. The tests fail when `make` is
 missing instead of skipping, so a missing tool cannot read as a pass.
+
+[libpq-connect]: https://www.postgresql.org/docs/current/libpq-connect.html
