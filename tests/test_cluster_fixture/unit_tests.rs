@@ -1,7 +1,7 @@
 //! Test utilities and unit checks for cluster fixtures.
 
 use color_eyre::eyre::{Context, Result, ensure};
-use pg_embedded_setup_unpriv::{TestCluster, test_support::test_cluster};
+use pg_embedded_setup_unpriv::TestCluster;
 use rstest::rstest;
 
 use super::{
@@ -26,10 +26,11 @@ where
     sandbox
         .reset()
         .context("reset rstest fixture sandbox before applying env")?;
-    let result = sandbox.with_env(sandbox.env_without_timezone(), || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(test_cluster))
-    });
-    result.map_or_else(super::world::handle_fixture_panic, test)
+    let result = sandbox.with_env(
+        sandbox.env_without_timezone(),
+        super::world::try_test_cluster,
+    );
+    result.map_or_else(super::world::handle_fixture_failure, test)
 }
 
 #[expect(
@@ -114,13 +115,14 @@ pub(super) fn fixture_teardown_resource_cleanup(_serial_guard: ScenarioSerialGua
         .reset()
         .context("reset sandbox before teardown coverage")?;
     let sandbox_root = sandbox_root_path(&sandbox)?;
-    let result = sandbox.with_env(sandbox.env_without_timezone(), || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(test_cluster))
-    });
+    let result = sandbox.with_env(
+        sandbox.env_without_timezone(),
+        super::world::try_test_cluster,
+    );
     let cluster = match result {
         Ok(cluster) => cluster,
-        Err(payload) => {
-            super::world::handle_fixture_panic(payload)?;
+        Err(message) => {
+            super::world::handle_fixture_failure(message)?;
             return Ok(());
         }
     };
@@ -135,4 +137,43 @@ pub(super) fn fixture_teardown_resource_cleanup(_serial_guard: ScenarioSerialGua
         "sandbox root should be removed once the guard drops",
     );
     Ok(())
+}
+
+/// The returned failure messages match the fixture's panic messages, which is
+/// what lets the scenarios assert on them as they did on the panic payload.
+#[rstest]
+fn failure_messages_match_the_fixtures_panic_messages() {
+    assert_eq!(
+        super::world::startup_failure_message(&"boom"),
+        "SKIP-TEST-CLUSTER: test_cluster fixture failed to start PostgreSQL: \"boom\"",
+    );
+    assert_eq!(
+        super::world::MISSING_WORKER_MESSAGE,
+        "SKIP-TEST-CLUSTER: PG_EMBEDDED_WORKER is not set and pg_worker binary was not found",
+    );
+}
+
+/// The missing-worker condition is the one `ensure_worker_env` panics on, and
+/// the worker lookup, which stages the binary, only runs when it is needed.
+#[rstest]
+#[case::root_without_worker(true, false, false, true)]
+#[case::root_with_discoverable_worker(true, false, true, false)]
+#[case::root_with_configured_worker(true, true, false, false)]
+#[case::unprivileged(false, false, false, false)]
+fn worker_is_missing_only_for_a_root_run_that_finds_none(
+    #[case] is_root: bool,
+    #[case] worker_configured: bool,
+    #[case] worker_found: bool,
+    #[case] expected: bool,
+) {
+    let lookup_runs = is_root && !worker_configured;
+    let lookup_ran = std::cell::Cell::new(false);
+
+    let missing = super::world::worker_is_missing(is_root, worker_configured, || {
+        lookup_ran.set(true);
+        worker_found
+    });
+
+    assert_eq!(missing, expected, "missing-worker decision");
+    assert_eq!(lookup_ran.get(), lookup_runs, "lookup only when needed");
 }

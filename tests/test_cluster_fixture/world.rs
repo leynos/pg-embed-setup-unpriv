@@ -1,10 +1,11 @@
 //! Test cluster fixture utilities for managing test worlds.
 
-use std::{any::Any, cell::RefCell, ffi::OsString, fs};
+use std::{cell::RefCell, ffi::OsString, fs};
 
 use camino::Utf8PathBuf;
 use color_eyre::eyre::{Context, Result, eyre};
-use pg_embedded_setup_unpriv::test_support::panic_payload_to_string;
+use nix::unistd::geteuid;
+use pg_embedded_setup_unpriv::test_support::{ensure_worker_env, worker_binary_for_tests};
 use rstest::fixture;
 
 use super::{
@@ -70,8 +71,7 @@ impl FixtureWorld {
         self.skip_reason = None;
     }
 
-    pub(super) fn record_failure(&mut self, payload: Box<dyn Any + Send>) {
-        let message = panic_payload_to_string(payload);
+    pub(super) fn record_failure(&mut self, message: String) {
         self.cluster = None;
         if let Some(reason) = cluster_skip_message(&message, None) {
             self.mark_skip(reason);
@@ -203,8 +203,61 @@ fn create_dir_with_mode(path: &Utf8PathBuf, mode: u32) -> Result<()> {
         .with_context(|| format!("set permissions {mode:o} for {path}"))
 }
 
-pub(super) fn handle_fixture_panic(payload: Box<dyn Any + Send>) -> Result<()> {
-    let message = panic_payload_to_string(payload);
+/// Return whether a run must locate a worker binary itself: only a root run
+/// with no configured worker does.
+const fn needs_discovered_worker(is_root: bool, worker_configured: bool) -> bool {
+    is_root && !worker_configured
+}
+
+/// Return whether `ensure_worker_env` would panic for want of a worker.
+///
+/// `find_worker` is only called when discovery is needed, as in the fixture,
+/// because looking for a worker stages the binary as a side effect.
+pub(super) fn worker_is_missing(
+    is_root: bool,
+    worker_configured: bool,
+    find_worker: impl FnOnce() -> bool,
+) -> bool {
+    needs_discovered_worker(is_root, worker_configured) && !find_worker()
+}
+
+/// Start the fixture's cluster, returning the failure message instead of
+/// panicking.
+///
+/// This mirrors `test_support::test_cluster`, whose failure path panics with
+/// `SKIP-TEST-CLUSTER`. Calling the fallible constructor directly lets the
+/// tests inspect the failure as data, with no `catch_unwind`. The fixture's
+/// own wrapper is no longer exercised by these tests: the library's unit tests
+/// cover the missing-worker panic (`resolve_worker_path`) and
+/// `SKIP-TEST-CLUSTER` handling, but not the constructor-error mapping, which
+/// this helper repeats in `startup_failure_message`, tested on its own.
+pub(super) fn try_test_cluster() -> std::result::Result<TestCluster, String> {
+    // `ensure_worker_env` panics with `SKIP-TEST-CLUSTER` when a root run has
+    // no worker binary to find. Check that condition first and return it as
+    // an error message instead of panicking.
+    if worker_is_missing(
+        geteuid().is_root(),
+        std::env::var_os("PG_EMBEDDED_WORKER").is_some(),
+        || worker_binary_for_tests().is_some(),
+    ) {
+        return Err(MISSING_WORKER_MESSAGE.to_owned());
+    }
+    let worker_guard = ensure_worker_env();
+    TestCluster::new()
+        .map(|cluster| cluster.with_worker_guard(worker_guard))
+        .map_err(|err| startup_failure_message(&err))
+}
+
+/// The message the fixture panics with when a root run has no worker.
+pub(super) const MISSING_WORKER_MESSAGE: &str =
+    "SKIP-TEST-CLUSTER: PG_EMBEDDED_WORKER is not set and pg_worker binary was not found";
+
+/// The message the fixture panics with when PostgreSQL fails to start.
+pub(super) fn startup_failure_message(err: &impl std::fmt::Debug) -> String {
+    format!("SKIP-TEST-CLUSTER: test_cluster fixture failed to start PostgreSQL: {err:?}")
+}
+
+pub(super) fn handle_fixture_failure(message: String) -> Result<()> {
     cluster_skip_message(&message, None).map_or_else(
         || Err(eyre!(message)),
         |reason| {

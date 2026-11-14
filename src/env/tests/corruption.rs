@@ -5,7 +5,7 @@
 //! drops). These helpers are used by the parameterized `rstest` cases in
 //! `mod.rs`.
 
-use std::{ffi::OsString, panic};
+use std::ffi::OsString;
 
 use super::{ScopedEnv, THREAD_STATE};
 
@@ -31,7 +31,6 @@ pub(super) struct CorruptionCase {
     pub(super) setup_guards: fn(&OsString) -> GuardSet,
     pub(super) corrupt_state: fn() -> bool,
     pub(super) drop_guards: fn(GuardSet),
-    pub(super) drop_message: &'static str,
 }
 
 impl GuardSet {
@@ -71,13 +70,11 @@ pub(super) fn setup_nested_guards(key: &OsString) -> GuardSet {
 
 /// Returns true to signal callers should assert state restoration.
 pub(super) fn apply_invalid_scope_exit() -> bool {
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        THREAD_STATE.with(|cell| {
-            let mut state = cell.borrow_mut();
-            state.exit_scope(usize::MAX);
-        });
-    }));
-    assert!(result.is_ok(), "invalid scope exit should not panic");
+    // A panic here fails the test by itself, so no unwind probe is needed.
+    THREAD_STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        state.exit_scope(usize::MAX);
+    });
     true
 }
 

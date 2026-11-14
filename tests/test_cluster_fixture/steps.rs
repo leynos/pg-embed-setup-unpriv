@@ -1,15 +1,19 @@
 //! Test helpers and fixtures for cluster setup and teardown.
 
-use std::panic::AssertUnwindSafe;
-
 use color_eyre::eyre::{Result, ensure};
 use nix::unistd::geteuid;
-use pg_embedded_setup_unpriv::test_support::test_cluster;
 use rstest_bdd_macros::{given, scenario, then, when};
 
 use super::{
     serial::{ScenarioSerialGuard, serial_guard},
-    world::{FixtureEnvProfile, FixtureWorldFixture, borrow_world, env_for_profile, world},
+    world::{
+        FixtureEnvProfile,
+        FixtureWorldFixture,
+        borrow_world,
+        env_for_profile,
+        try_test_cluster,
+        world,
+    },
 };
 #[path = "../support/scenario.rs"]
 mod scenario;
@@ -95,9 +99,7 @@ fn when_fixture_runs(world: &FixtureWorldFixture) -> Result<()> {
     };
     let result = {
         let world_ref = world_cell.borrow();
-        world_ref.sandbox.with_env(vars, || {
-            std::panic::catch_unwind(AssertUnwindSafe(test_cluster))
-        })
+        world_ref.sandbox.with_env(vars, try_test_cluster)
     };
 
     match result {
@@ -112,8 +114,8 @@ fn when_fixture_runs(world: &FixtureWorldFixture) -> Result<()> {
             world_cell.borrow_mut().record_cluster(cluster);
             Ok(())
         }
-        Err(payload) => {
-            world_cell.borrow_mut().record_failure(payload);
+        Err(message) => {
+            world_cell.borrow_mut().record_failure(message);
             Ok(())
         }
     }
