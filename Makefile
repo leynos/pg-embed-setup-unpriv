@@ -1,4 +1,5 @@
-.PHONY: help all clean fetch test test-doc test-loom test-scripts msrv build release \
+.PHONY: help all clean fetch test test-doc test-loom test-scripts \
+	test-serial-group msrv build release \
 	release-archive lint lint-clippy lint-whitaker fmt \
 	check-fmt markdownlint nixie spelling typecheck test-workflow-contracts
 
@@ -56,6 +57,7 @@ SCRIPT_PY_DOCTESTS := scripts/msrv_check.py \
 	scripts/tests/serial_inventory.py \
 	scripts/tests/runner_placement.py \
 	scripts/tests/rustc_wrapper.py \
+	scripts/tests/test_nextest_serial_group_cli.py \
 	scripts/tests/workflow_reader.py
 SCRIPT_PYTEST = $(UV_ENV) $(UV) run --no-project --python 3.13 \
 	--with cmd-mox==$(CMD_MOX_VERSION) \
@@ -159,6 +161,12 @@ test-loom: ## Run Loom concurrency tests
 test-scripts: ## Run the Python release-tooling tests
 	$(SCRIPT_PYTEST) $(SCRIPT_PY_TESTS) -c /dev/null --rootdir=. -p no:cacheprovider
 	$(SCRIPT_PYTEST) --doctest-modules $(SCRIPT_PY_DOCTESTS) -c /dev/null --rootdir=. -p no:cacheprovider
+
+# `show-config` builds every test target before it can resolve the filters,
+# so this target assigns the same RUSTFLAGS as `test` above: after `make
+# test` the build is reused, and CI runs it directly after its test step.
+test-serial-group: ## Ask nextest which tests the `serial` group schedules
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(SCRIPT_PYTEST) scripts/tests/test_nextest_serial_group_cli.py -c /dev/null --rootdir=. -p no:cacheprovider
 
 msrv: ## Build at the declared rust-version against a lockfile resolved for it
 	$(UV) run --no-project --python 3.13 scripts/msrv_check.py

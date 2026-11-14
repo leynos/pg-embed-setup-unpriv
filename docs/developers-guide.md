@@ -515,6 +515,17 @@ of the serial assignment. `test_nextest_filters_properties.py` uses Hypothesis
 for filters no file in the repository writes, such as a name using every
 permitted character and a term placed anywhere in the disjunction.
 
+`make test-serial-group` checks the configuration against nextest's own
+interpretation of it. `test_nextest_serial_group_cli.py` runs
+`cargo nextest show-config test-groups --all-targets --all-features`, requires
+the `serial` group to report `max threads = 1`, and compares the binaries
+nextest schedules with the pinned consumers plus every binary that compiles
+`tests/support/serial.rs` through the embedded term. Resolving the groups
+builds every test target first, so this target is outside `make test-scripts`
+and outside `make all`: it assigns the same `RUSTFLAGS` as `make test` so the
+build is reused, and CI runs it directly after its test step. Without
+`cargo-nextest` installed the module skips, and the skip names that reason.
+
 ## Minimum supported Rust version
 
 `rust-version` in `Cargo.toml` is a promise to downstream projects. It is 1.94

@@ -140,6 +140,14 @@ jobs:
         run: >-
           RUSTFLAGS="-D warnings -Zthreads=8 -Clink-arg=-fuse-ld=mold"
           cargo nextest run --all-targets --all-features
+      - name: Check the nextest serial group
+        if: ${{ matrix.privilege == 'unprivileged' }}
+        # `show-config` compiles every test target before it can resolve the
+        # filters. Running it directly after the test step, with the same
+        # RUSTFLAGS and plain rustc, reuses that build instead of repeating it.
+        env:
+          RUSTC_WRAPPER: ""
+        run: make test-serial-group
       - name: Run Loom model tests (unprivileged)
         if: ${{ matrix.privilege == 'unprivileged' }}
         timeout-minutes: 10
