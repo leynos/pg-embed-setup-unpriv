@@ -138,3 +138,28 @@ pub(super) fn fixture_teardown_resource_cleanup(_serial_guard: ScenarioSerialGua
     );
     Ok(())
 }
+
+/// The missing-worker condition is the one `ensure_worker_env` panics on, and
+/// the worker lookup, which stages the binary, only runs when it is needed.
+#[rstest]
+#[case::root_without_worker(true, false, false, true)]
+#[case::root_with_discoverable_worker(true, false, true, false)]
+#[case::root_with_configured_worker(true, true, false, false)]
+#[case::unprivileged(false, false, false, false)]
+fn worker_is_missing_only_for_a_root_run_that_finds_none(
+    #[case] is_root: bool,
+    #[case] worker_configured: bool,
+    #[case] worker_found: bool,
+    #[case] expected: bool,
+) {
+    let lookup_runs = is_root && !worker_configured;
+    let lookup_ran = std::cell::Cell::new(false);
+
+    let missing = super::world::worker_is_missing(is_root, worker_configured, || {
+        lookup_ran.set(true);
+        worker_found
+    });
+
+    assert_eq!(missing, expected, "missing-worker decision");
+    assert_eq!(lookup_ran.get(), lookup_runs, "lookup only when needed");
+}

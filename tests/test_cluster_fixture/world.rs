@@ -203,14 +203,22 @@ fn create_dir_with_mode(path: &Utf8PathBuf, mode: u32) -> Result<()> {
         .with_context(|| format!("set permissions {mode:o} for {path}"))
 }
 
-/// Return whether a root run must locate a worker binary itself.
-fn root_run_needs_a_discovered_worker() -> bool {
-    geteuid().is_root() && std::env::var_os("PG_EMBEDDED_WORKER").is_none()
+/// Return whether a run must locate a worker binary itself: only a root run
+/// with no configured worker does.
+const fn needs_discovered_worker(is_root: bool, worker_configured: bool) -> bool {
+    is_root && !worker_configured
 }
 
 /// Return whether `ensure_worker_env` would panic for want of a worker.
-fn root_run_lacks_a_worker() -> bool {
-    root_run_needs_a_discovered_worker() && worker_binary_for_tests().is_none()
+///
+/// `find_worker` is only called when discovery is needed, as in the fixture,
+/// because looking for a worker stages the binary as a side effect.
+pub(super) fn worker_is_missing(
+    is_root: bool,
+    worker_configured: bool,
+    find_worker: impl FnOnce() -> bool,
+) -> bool {
+    needs_discovered_worker(is_root, worker_configured) && !find_worker()
 }
 
 /// Start the fixture's cluster, returning the failure message instead of
@@ -218,13 +226,20 @@ fn root_run_lacks_a_worker() -> bool {
 ///
 /// This mirrors `test_support::test_cluster`, whose failure path panics with
 /// `SKIP-TEST-CLUSTER`. Calling the fallible constructor directly lets the
-/// tests inspect the failure as data, with no `catch_unwind`; the fixture's
-/// own panic is covered by `should_panic` in the library's unit tests.
+/// tests inspect the failure as data, with no `catch_unwind`. The fixture's
+/// own wrapper is no longer exercised by these tests: the library's unit tests
+/// cover the missing-worker panic (`resolve_worker_path`) and
+/// `SKIP-TEST-CLUSTER` handling, but not the constructor-error mapping, which
+/// this helper repeats.
 pub(super) fn try_test_cluster() -> std::result::Result<TestCluster, String> {
     // `ensure_worker_env` panics with `SKIP-TEST-CLUSTER` when a root run has
     // no worker binary to find. Check that condition first and return it as
     // data, so the helper never panics where the fixture would have skipped.
-    if root_run_lacks_a_worker() {
+    if worker_is_missing(
+        geteuid().is_root(),
+        std::env::var_os("PG_EMBEDDED_WORKER").is_some(),
+        || worker_binary_for_tests().is_some(),
+    ) {
         return Err(
             "SKIP-TEST-CLUSTER: PG_EMBEDDED_WORKER is not set and pg_worker binary was not found"
                 .to_owned(),

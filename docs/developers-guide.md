@@ -1392,11 +1392,13 @@ and read the failure message as data, and the "should not panic" probes in
 `src/env/tests` and `src/cluster/startup_tests.rs` are plain calls. The tests
 that still need unwinding are genuine: `lifecycle_template`'s panic cleanup,
 `ScopedEnv`'s poisoned-lock recovery and its post-panic state checks in
-`src/env/tests`, the Loom unwind model in `src/env/loom_tests`, the
-`resume_unwind` helpers, and the non-Unix lock tests in
-`tests/support/serial/non_unix_tests.rs`, which do not build on Linux. The
-`test_cluster_fixture` binary now passes 18 of 18 under Cranelift on
-`nightly-2026-11-06` (2026-11-14; it was 17 of 18 before), but the rest of the
-suite has not been re-measured since the conversion. Re-measure the whole suite
-under the backend, with CI's environment, on the next attempt to adopt it, and
-adopt it only if every test passes.
+`src/env/tests`, the Loom unwind model in `src/env/loom_tests`, and the
+non-Unix lock tests in `tests/support/serial/non_unix_tests.rs`, which do not
+build on Linux. The `resume_unwind` helpers (`src/env/tests/thread_helpers.rs`,
+`src/cluster/shutdown_hook/tests.rs`) are not tests of unwinding: they
+propagate a worker thread's panic to the test. The `test_cluster_fixture`
+binary now passes 18 of 18 under Cranelift on `nightly-2026-11-06` (2026-11-14;
+it was 17 of 18 before), but the rest of the suite has not been re-measured
+since the conversion. Re-measure the whole suite under the backend, with CI's
+environment, on the next attempt to adopt it, and adopt it only if every test
+passes.
