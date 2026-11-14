@@ -528,13 +528,15 @@ the `serial` group to report `max threads = 1`, and compares the binaries
 nextest schedules with the pinned consumers plus every binary that compiles
 `tests/support/serial.rs` through the embedded term. Resolving the groups
 builds every test target first, so this target is outside `make test-scripts`
-and outside `make all`: it assigns the same `RUSTFLAGS` as `make test` so the
-build is reused, and CI runs it directly after its test step. Without
-`cargo-nextest` installed the module skips, and the skip names that reason. The
-listing parser lives in `nextest_serial_group.py`, which carries no tests of
-its own: `make test-scripts` collects the doctests of the modules it lists and
-also runs a listed test module's tests, so keeping the parser in a helper lets
-the doctest gate exercise it without building the workspace.
+and outside `make all`: it runs under the same `RUSTFLAGS` as the build it
+reads — a caller's assignment verbatim, or the sequence `make test` composes
+when none is set — so the build is reused, and CI runs it directly after its
+test step under exactly that step's flags. Without `cargo-nextest` installed
+the module skips, and the skip names that reason. The listing parser lives in
+`nextest_serial_group.py`, which carries no tests of its own:
+`make test-scripts` collects the doctests of the modules it lists and also runs
+a listed test module's tests, so keeping the parser in a helper lets the
+doctest gate exercise it without building the workspace.
 
 ## Minimum supported Rust version
 

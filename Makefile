@@ -163,11 +163,17 @@ test-scripts: ## Run the Python release-tooling tests
 	$(SCRIPT_PYTEST) $(SCRIPT_PY_TESTS) -c /dev/null --rootdir=. -p no:cacheprovider
 	$(SCRIPT_PYTEST) --doctest-modules $(SCRIPT_PY_DOCTESTS) -c /dev/null --rootdir=. -p no:cacheprovider
 
-# `show-config` builds every test target before it can resolve the filters,
-# so this target assigns the same RUSTFLAGS as `test` above: after `make
-# test` the build is reused, and CI runs it directly after its test step.
+# `show-config` builds every test target before it can resolve the filters, and
+# Cargo fingerprints the exact RUSTFLAGS string, so this target must run under
+# precisely the flags that built the tree it reads. A caller that assigns
+# RUSTFLAGS therefore has that value used verbatim, which is what lets CI
+# restate its test step's sequence without this recipe appending a second
+# `-D warnings`; with none assigned, the value is the sequence `test` composes,
+# so a local run after `make test` still reuses that build.
+SERIAL_GROUP_RUSTFLAGS = $(if $(strip $(RUSTFLAGS)),$(RUSTFLAGS),-D warnings $(STANDARD_RUSTFLAGS))
+
 test-serial-group: ## Ask nextest which tests the `serial` group schedules
-	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(SCRIPT_PYTEST) scripts/tests/test_nextest_serial_group_cli.py -c /dev/null --rootdir=. -p no:cacheprovider
+	RUSTFLAGS="$(SERIAL_GROUP_RUSTFLAGS)" $(SCRIPT_PYTEST) scripts/tests/test_nextest_serial_group_cli.py -c /dev/null --rootdir=. -p no:cacheprovider
 
 msrv: ## Build at the declared rust-version against a lockfile resolved for it
 	$(UV) run --no-project --python 3.13 scripts/msrv_check.py

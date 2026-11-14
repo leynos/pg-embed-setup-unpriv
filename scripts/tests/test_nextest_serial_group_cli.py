@@ -15,8 +15,9 @@ compare against.
 
 ``show-config`` builds every test target before it can resolve the filters,
 so this module is deliberately not part of ``make test-scripts``, which runs
-before CI fetches dependencies. ``make test-serial-group`` assigns the same
-``RUSTFLAGS`` as ``make test`` so the build is reused rather than repeated.
+before CI fetches dependencies. ``make test-serial-group`` runs under the
+same ``RUSTFLAGS`` as ``make test`` — a caller's assignment verbatim, or that
+sequence when none is set — so the build is reused rather than repeated.
 The listing parser is :mod:`nextest_serial_group` for the same reason: the
 ``make test-scripts`` doctest gate runs a listed test module's tests as well
 as its examples, and a doctest must not build the workspace.

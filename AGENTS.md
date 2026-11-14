@@ -73,9 +73,10 @@
     and CI bounds the run at ten minutes. Run `make test-loom` after changing
     Loom-modelled code or its scheduler bounds.
   - `make test-serial-group` asks nextest which tests the `serial` group
-    schedules, which requires every test target to be built. It assigns the
-    same `RUSTFLAGS` as `make test`, so run it after `make test` to reuse that
-    build, and after changing the serial filter.
+    schedules, which requires every test target to be built. It runs under the
+    same `RUSTFLAGS` as `make test` — a caller's assignment verbatim, or the
+    same composed sequence — so run it after `make test` to reuse that build,
+    and after changing the serial filter.
 - **Committing:**
   - Only changes that meet all the quality gates above should be committed.
   - Write clear, descriptive commit messages summarizing the change, following
