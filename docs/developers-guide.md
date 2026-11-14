@@ -508,12 +508,16 @@ starts calling `serial_guard` therefore fails `make test-scripts` even though
 nobody edited either list, and so does a lock-taking binary whose filter term
 is dropped. A binary that compiles `tests/support/serial.rs` but keeps its
 cases isolated stays out of the group because the lock module's uses are
-covered by the embedded term rather than by whole-binary membership. The same
-contract refuses a `platform`-restricted serial override, and a group assigned
-ahead of the serial one, which nextest would apply to a matching binary instead
-of the serial assignment. `test_nextest_filters_properties.py` uses Hypothesis
-for filters no file in the repository writes, such as a name using every
-permitted character and a term placed anywhere in the disjunction.
+covered by the embedded term rather than by whole-binary membership. That
+exemption follows the namespace the module compiles, not its directory: a file
+the lock module declares is named `serial::<name>`, while a file in
+`tests/support/serial/` that a crate root declares itself is named under that
+binary, so its lock use makes the binary a member. The same contract refuses a
+`platform`-restricted serial override, and a group assigned ahead of the serial
+one, which nextest would apply to a matching binary instead of the serial
+assignment. `test_nextest_filters_properties.py` uses Hypothesis for filters no
+file in the repository writes, such as a name using every permitted character
+and a term placed anywhere in the disjunction.
 
 `make test-serial-group` checks the configuration against nextest's own
 interpretation of it. `test_nextest_serial_group_cli.py` runs

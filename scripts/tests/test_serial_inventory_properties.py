@@ -7,9 +7,12 @@ shared ``#[path]`` module, a binary that includes the lock module but keeps
 its own cases isolated, a binary that takes the lock itself, and a use no
 binary compiles all have to keep their own answer.
 
-Files under the lock module's own directory, ``support/serial``, are covered
-by the group's embedded test-name term. A binary that compiles one is not a
-member, and an uncompiled one is not an orphan fault.
+A file in the lock module's own directory, ``support/serial``, is not exempt
+by its path. The lock module declares its children itself, so their tests are
+named ``serial::<name>`` and the group's embedded term covers them; a file the
+same directory holds but a crate root declares is named under that binary, so
+its lock use attributes to the binary. An uncompiled file in the directory is
+not an orphan fault, because it has no tests for any term to schedule.
 
 See "Test timeouts: four tiers, outermost last" in
 ``docs/developers-guide.md``.
@@ -35,6 +38,10 @@ _ISOLATED = "fn f(_g: serial::ScenarioLocalGuard) {}\n"
 
 #: The scenario-lock module, without its extension, as a ``#[path]``.
 _LOCK_MODULE = "support/serial"
+
+#: A file the lock module declares itself, so its tests are named under
+#: ``serial::``. The embedded term covers it and no binary owns it.
+_COVERED = "covered"
 
 #: A support module no binary compiles.
 _ORPHAN = "orphan"
@@ -159,13 +166,24 @@ def _write_binary(tests_directory: Path, binary: _Binary) -> None:
     )
 
 
+def _write_lock_module(tests_directory: Path) -> None:
+    """Write the lock module, which takes the lock and declares ``covered``."""
+    support = tests_directory / "support"
+    support.mkdir(parents=True, exist_ok=True)
+    (support / "serial.rs").write_text(
+        _LOCKING + f"mod {_COVERED};\n", encoding="utf-8"
+    )
+    _write_serial_file(tests_directory, _COVERED, True)
+
+
 def _write_tree(tests_directory: Path, tree: _Tree) -> None:
     """Write every source a tree describes.
 
-    The lock module always takes the lock, and the orphan takes it when the
-    plan says so; no binary compiles the orphan.
+    The lock module always takes the lock and declares a locking child of
+    its own, so every example exercises the namespace exemption. The orphan
+    takes the lock when the plan says so; no binary compiles the orphan.
     """
-    _write_module(tests_directory, _LOCK_MODULE.rsplit("/", 1)[-1], True)
+    _write_lock_module(tests_directory)
     for name, takes_lock in tree.modules:
         _write_module(tests_directory, name, takes_lock)
     for name, takes_lock in tree.serial_files:
@@ -176,19 +194,32 @@ def _write_tree(tests_directory: Path, tree: _Tree) -> None:
 
 
 def _locking_paths(tree: _Tree) -> frozenset[str]:
-    """Return the generated modules, outside the lock directory, that lock."""
-    return frozenset(
-        f"support/{name}"
-        for name, takes_lock in tree.modules
+    """Return the generated files whose lock use belongs to their compiler.
+
+    A support module and a lock-directory file a crate root declares are
+    both compiled under the declaring binary, so a lock use in either
+    attributes to it. ``support/serial/covered.rs`` is absent: the lock
+    module declares it, which names it ``serial::covered``, so the group's
+    embedded term covers it instead.
+    """
+    modules = [
+        f"support/{name}" for name, takes_lock in tree.modules if takes_lock
+    ]
+    cases = [
+        f"support/serial/{name}"
+        for name, takes_lock in tree.serial_files
         if takes_lock
-    )
+    ]
+    return frozenset(modules + cases)
 
 
 def _expected_members(tree: _Tree) -> frozenset[str]:
-    """Return the binaries whose own text, outside the lock module, locks.
+    """Return the binaries that compile a lock use under their own name.
 
-    The lock module and its directory are covered by the group's embedded
-    term, so a binary that only compiles those files is not a member.
+    The lock module's namespace — the module and the files it declares — is
+    covered by the group's embedded term, so a binary that compiles only
+    those files is not a member. A lock-directory file the binary declares
+    itself is not in that namespace, so it is.
     """
     locking = _locking_paths(tree)
     return frozenset(
@@ -203,8 +234,9 @@ def _expected_orphans(tree: _Tree) -> frozenset[str]:
 
     A generated module may be included by no binary, which is an orphan for
     the same reason the designated one is; the expectation is computed from
-    the plan rather than from the reader. Files in the lock module's
-    directory are never orphans, because the embedded term covers them.
+    the plan rather than from the reader. A file in the lock module's
+    directory is never an orphan: it has no tests for any filter term to
+    schedule, whether or not the lock module declares it.
     """
     included = frozenset().union(
         *(binary.includes for binary in tree.binaries)
@@ -255,3 +287,42 @@ def test_discovery_matches_the_declared_attribution(tree: _Tree) -> None:
         f"expected {sorted(expected)}, got {sorted(discovered)}"
     )
     _assert_faults(tree, faults)
+
+
+def test_a_lock_directory_file_declared_by_a_binary_is_a_member() -> None:
+    """The exemption follows the namespace, not the lock module's directory.
+
+    ``shared`` compiles the lock module, so its embedded ``serial::`` cases
+    already put it in the group by test name whatever the oracle says. It
+    also declares a lock-taking file from the lock module's directory at its
+    own crate root, which names that file's tests ``case_x::*``: the embedded
+    term does not cover them, so the binary is a member. An oracle that
+    exempts the directory instead of the namespace cannot see the difference.
+    """
+    tree = _Tree(
+        binaries=(
+            _Binary(
+                "shared",
+                False,
+                frozenset({_LOCK_MODULE, "support/serial/case_x"}),
+            ),
+        ),
+        modules=(),
+        serial_files=(("case_x", True),),
+        orphan_takes_lock=False,
+    )
+    assert _locking_paths(tree) == frozenset({"support/serial/case_x"})
+    assert _expected_members(tree) == frozenset({"shared"})
+    with tempfile.TemporaryDirectory() as directory:
+        tests_directory = Path(directory) / "tests"
+        tests_directory.mkdir()
+        _write_tree(tests_directory, tree)
+        root = tests_directory.resolve()
+        discovered, faults = lock_consuming_binaries(
+            load_test_sources(root), root=root
+        )
+    assert faults == [], f"the counterexample tree must be fault-free: {faults}"
+    assert discovered == _expected_members(tree), (
+        "a lock-directory file the crate root declares belongs to the "
+        f"binary: got {sorted(discovered)}"
+    )
