@@ -212,25 +212,44 @@ fn provision_password_file_for_nobody(
         .password_file
         .strip_prefix(config.install_dir())
         .map_err(|_| eyre!("password file must live inside install dir"))?;
-    let mut pgpass = install_handle
-        .open_with(
-            password_relative.as_std_path(),
-            OpenOptions::new().create(true).truncate(true).write(true),
-        )
-        .context("provision password file for embedded postgres")?;
-    write!(pgpass, "{}", context.settings.password).context("write postgres password")?;
-    pgpass.sync_all().context("flush password file")?;
+    let pgpass = write_password_file(
+        &install_handle,
+        password_relative,
+        &context.settings.password,
+    )?;
     install_handle
         .set_permissions(
             password_relative.as_std_path(),
             cap_std::fs::Permissions::from_mode(0o600),
         )
         .context("set permissions on password file")?;
-    let user = User::from_name("nobody")
-        .context("resolve user 'nobody'")?
-        .ok_or_else(|| eyre!("user 'nobody' not found"))?;
+    let user = nobody_user()?;
     fchown(&pgpass, Some(user.uid), Some(user.gid)).context("chown password file to nobody")?;
     Ok(())
+}
+
+/// Creates the password file under `install_handle`, writes `password` to it and flushes it.
+fn write_password_file(
+    install_handle: &cap_std::fs::Dir,
+    relative: &camino::Utf8Path,
+    password: &str,
+) -> Result<cap_std::fs::File> {
+    let mut pgpass = install_handle
+        .open_with(
+            relative.as_std_path(),
+            OpenOptions::new().create(true).truncate(true).write(true),
+        )
+        .context("provision password file for embedded postgres")?;
+    write!(pgpass, "{password}").context("write postgres password")?;
+    pgpass.sync_all().context("flush password file")?;
+    Ok(pgpass)
+}
+
+/// Looks up the unprivileged `nobody` account.
+fn nobody_user() -> Result<User> {
+    User::from_name("nobody")
+        .context("resolve user 'nobody'")?
+        .ok_or_else(|| eyre!("user 'nobody' not found"))
 }
 
 fn run_diesel_operations(database_url: &str, config: &TestConfig) -> Result<()> {

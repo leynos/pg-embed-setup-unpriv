@@ -24,27 +24,38 @@ use crate::observability::LOG_TARGET;
 /// Returns an error if the path cannot be opened as a directory.
 pub fn ambient_dir_and_path(path: &Utf8Path) -> Result<(Dir, Utf8PathBuf)> {
     if path.has_root() {
-        let (dir_path, relative) = match path.parent() {
-            Some(parent) => {
-                let relative = path
-                    .strip_prefix(parent)
-                    .with_context(|| {
-                        format!("strip parent {} from {}", parent.as_str(), path.as_str())
-                    })?
-                    .to_path_buf();
-                (parent, relative)
-            }
-            // Root paths have no parent; an empty relative path marks the ambient root.
-            None => (path, Utf8PathBuf::new()),
-        };
-        let dir = Dir::open_ambient_dir(dir_path.as_std_path(), ambient_authority())
-            .context("open ambient directory for absolute path")?;
-        Ok((dir, relative))
+        absolute_dir_and_path(path)
     } else {
-        let dir = Dir::open_ambient_dir(".", ambient_authority())
-            .context("open ambient working directory")?;
-        Ok((dir, path.to_path_buf()))
+        working_dir_and_path(path)
     }
+}
+
+/// Opens the parent of an absolute `path`, pairing it with the final component.
+fn absolute_dir_and_path(path: &Utf8Path) -> Result<(Dir, Utf8PathBuf)> {
+    let (dir_path, relative) = split_off_parent(path)?;
+    let dir = Dir::open_ambient_dir(dir_path.as_std_path(), ambient_authority())
+        .context("open ambient directory for absolute path")?;
+    Ok((dir, relative))
+}
+
+/// Splits an absolute `path` into its parent and the path relative to it.
+fn split_off_parent(path: &Utf8Path) -> Result<(&Utf8Path, Utf8PathBuf)> {
+    let Some(parent) = path.parent() else {
+        // Root paths have no parent; an empty relative path marks the ambient root.
+        return Ok((path, Utf8PathBuf::new()));
+    };
+    let relative = path
+        .strip_prefix(parent)
+        .with_context(|| format!("strip parent {} from {}", parent.as_str(), path.as_str()))?
+        .to_path_buf();
+    Ok((parent, relative))
+}
+
+/// Opens the current working directory, pairing it with the relative `path`.
+fn working_dir_and_path(path: &Utf8Path) -> Result<(Dir, Utf8PathBuf)> {
+    let dir = Dir::open_ambient_dir(".", ambient_authority())
+        .context("open ambient working directory")?;
+    Ok((dir, path.to_path_buf()))
 }
 
 /// Ensures the provided path exists, creating intermediate directories when required.

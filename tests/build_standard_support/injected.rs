@@ -164,6 +164,13 @@ fn the_development_policy_runs_against_an_injected_runner() -> Result<(), String
 fn a_development_command_without_an_assignment_is_refused_and_an_exempt_one_is_not()
 -> Result<(), String> {
     let pin = Pin::Nightly;
+    bare_commands_are_refused(pin)?;
+    a_chained_bare_command_is_refused(pin)?;
+    exempt_commands_are_not_refused(pin)
+}
+
+/// Requires a bare test command and bare lint commands to each raise a problem.
+fn bare_commands_are_refused(pin: Pin) -> Result<(), String> {
     let (bare_test, _) = development_problems_expecting(bare_test_make, Host::Linux, pin, &[])?;
     ensure(
         !bare_test.is_empty(),
@@ -173,7 +180,11 @@ fn a_development_command_without_an_assignment_is_refused_and_an_exempt_one_is_n
     ensure(
         !bare_lint.is_empty(),
         "lint commands that assign no RUSTFLAGS passed",
-    )?;
+    )
+}
+
+/// Requires a bare command chained beside an assigning probe to be refused, and only it.
+fn a_chained_bare_command_is_refused(pin: Pin) -> Result<(), String> {
     let (chained, _) = development_problems_expecting(chained_bare_make, Host::Linux, pin, &[])?;
     ensure(
         !chained.is_empty()
@@ -181,7 +192,11 @@ fn a_development_command_without_an_assignment_is_refused_and_an_exempt_one_is_n
                 .iter()
                 .all(|problem| problem.contains("nextest run")),
         &format!("a bare command chained beside an assigning probe raised {chained:?}"),
-    )?;
+    )
+}
+
+/// Requires a formatter, a metadata probe and a documentation build to raise no problem.
+fn exempt_commands_are_not_refused(pin: Pin) -> Result<(), String> {
     let (exempt, exempt_read) =
         development_problems_expecting(exempt_commands_make, Host::Linux, pin, &[])?;
     ensure(

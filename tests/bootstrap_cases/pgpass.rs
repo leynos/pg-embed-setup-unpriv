@@ -20,6 +20,40 @@ use pg_embedded_setup_unpriv::{
 
 use super::sandbox::TestSandbox;
 
+/// Resets `sandbox`, gives it a cluster, and seeds a world-readable `.pgpass`.
+///
+/// The data directory must hold a cluster for the password file to be kept:
+/// with no cluster, a leftover file is removed as stale (#259). Returns the
+/// password file's path.
+fn seed_cluster_with_open_pgpass(sandbox: &TestSandbox) -> Result<camino::Utf8PathBuf> {
+    sandbox.reset()?;
+    fs::create_dir_all(sandbox.install_dir().as_std_path()).context("create install dir")?;
+    fs::create_dir_all(sandbox.data_dir().as_std_path()).context("create data dir")?;
+    fs::write(sandbox.data_dir().join("PG_VERSION").as_std_path(), b"17\n")
+        .context("write PG_VERSION")?;
+
+    let pgpass_path = sandbox.install_dir().join(".pgpass");
+    fs::write(pgpass_path.as_std_path(), b"pgpass").context("write pgpass")?;
+    let mut perms = fs::metadata(pgpass_path.as_std_path())
+        .context("pgpass metadata")?
+        .permissions();
+    perms.set_mode(0o644);
+    fs::set_permissions(pgpass_path.as_std_path(), perms).context("seed pgpass permissions")?;
+    Ok(pgpass_path)
+}
+
+/// The account that must own the password file: `nobody` under root, else the caller.
+fn expected_pgpass_owner(privileges: ExecutionPrivileges) -> Result<User> {
+    match privileges {
+        ExecutionPrivileges::Root => User::from_name("nobody")
+            .context("resolve nobody user")?
+            .ok_or_else(|| eyre!("user 'nobody' not found")),
+        ExecutionPrivileges::Unprivileged => User::from_uid(nix::unistd::geteuid())
+            .context("resolve current user")?
+            .ok_or_else(|| eyre!("current user not found")),
+    }
+}
+
 #[test]
 fn bootstrap_for_tests_sets_pgpass_permissions_and_owner() -> Result<()> {
     if detect_execution_privileges() == ExecutionPrivileges::Root
@@ -32,35 +66,14 @@ fn bootstrap_for_tests_sets_pgpass_permissions_and_owner() -> Result<()> {
     }
 
     let sandbox = TestSandbox::new("bootstrap-pgpass")?;
-    sandbox.reset()?;
-    fs::create_dir_all(sandbox.install_dir().as_std_path()).context("create install dir")?;
-    fs::create_dir_all(sandbox.data_dir().as_std_path()).context("create data dir")?;
-    // The data directory must hold a cluster for the password file to be
-    // kept: with no cluster, a leftover file is removed as stale (#259).
-    fs::write(sandbox.data_dir().join("PG_VERSION").as_std_path(), b"17\n")
-        .context("write PG_VERSION")?;
-
-    let pgpass_path = sandbox.install_dir().join(".pgpass");
-    fs::write(pgpass_path.as_std_path(), b"pgpass").context("write pgpass")?;
-    let mut perms = fs::metadata(pgpass_path.as_std_path())
-        .context("pgpass metadata")?
-        .permissions();
-    perms.set_mode(0o644);
-    fs::set_permissions(pgpass_path.as_std_path(), perms).context("seed pgpass permissions")?;
+    let pgpass_path = seed_cluster_with_open_pgpass(&sandbox)?;
 
     let env_vars = sandbox.base_env();
     let bootstrap = sandbox
         .with_env(env_vars, bootstrap_for_tests)
         .context("bootstrap_for_tests")?;
 
-    let expected_user = match bootstrap.privileges {
-        ExecutionPrivileges::Root => User::from_name("nobody")
-            .context("resolve nobody user")?
-            .ok_or_else(|| eyre!("user 'nobody' not found"))?,
-        ExecutionPrivileges::Unprivileged => User::from_uid(nix::unistd::geteuid())
-            .context("resolve current user")?
-            .ok_or_else(|| eyre!("current user not found"))?,
-    };
+    let expected_user = expected_pgpass_owner(bootstrap.privileges)?;
 
     let metadata = fs::metadata(pgpass_path.as_std_path()).context("pgpass metadata")?;
     let observed_mode = metadata.permissions().mode() & 0o777;
