@@ -219,6 +219,8 @@ fn explicit_configuration_ignores_pg_test_backend() -> Result<()> {
 #[rstest]
 #[case::defaults_when_ambient_invalid(None, Some(Duration::from_secs(15)))]
 #[case::explicit_timeout_wins(Some(Duration::from_secs(30)), Some(Duration::from_secs(30)))]
+#[case::lower_bound_accepted(Some(Duration::from_secs(1)), Some(Duration::from_secs(1)))]
+#[case::upper_bound_accepted(Some(Duration::from_secs(600)), Some(Duration::from_secs(600)))]
 #[case::zero_rejected(Some(Duration::ZERO), None)]
 #[case::over_limit_rejected(Some(Duration::from_secs(601)), None)]
 fn explicit_shutdown_timeout_ignores_ambient_value(
@@ -295,23 +297,65 @@ fn explicit_release_url_rejects_empty(#[case] url: &str) -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn explicit_max_connections_below_floor_is_rejected() -> Result<()> {
-    if skip_without_test_worker("explicit max_connections floor") {
+/// The explicit connection limit is refused below the floor of 4 (three slots
+/// are reserved for superusers) and applied from the floor upwards, whatever
+/// `PG_MAX_CONNECTIONS` says.
+#[rstest]
+#[case::below_floor(3, None)]
+#[case::at_floor(4, Some("4"))]
+#[case::above_floor(5, Some("5"))]
+fn explicit_max_connections_boundaries(
+    #[case] limit: u32,
+    #[case] expected: Option<&str>,
+) -> Result<()> {
+    if skip_without_test_worker("explicit max_connections boundaries") {
         return Ok(());
     }
 
     let scratch = scratch()?;
     let cfg = PgEnvCfg {
-        max_connections: Some(2),
+        max_connections: Some(limit),
         ..explicit_cfg(&scratch)
     };
 
-    let err = bootstrap_with(&scratch, cfg, &[])
-        .expect_err("max_connections below the floor must be rejected");
+    let outcome = bootstrap_with(&scratch, cfg, &[("PG_MAX_CONNECTIONS", Some("99"))]);
+    match (outcome, expected) {
+        (Err(err), None) => ensure!(
+            err.to_string().contains("PG_MAX_CONNECTIONS"),
+            "unexpected error: {err}"
+        ),
+        (Ok(bootstrap), Some(applied)) => ensure!(
+            bootstrap
+                .settings
+                .configuration
+                .get("max_connections")
+                .is_some_and(|value| value == applied),
+            "expected max_connections {applied}, got {:?}",
+            bootstrap.settings.configuration.get("max_connections")
+        ),
+        (Ok(_), None) => bail!("max_connections={limit} must be rejected"),
+        (Err(err), Some(_)) => bail!("unexpected failure: {err}"),
+    }
+    Ok(())
+}
+
+#[test]
+fn explicit_bootstrap_ignores_an_invalid_ambient_worker_variable() -> Result<()> {
+    if skip_without_test_worker("explicit bootstrap ignoring PG_EMBEDDED_WORKER") {
+        return Ok(());
+    }
+
+    let scratch = scratch()?;
+    let missing = scratch.root.join("ambient-missing-worker");
+    let bootstrap = bootstrap_with(
+        &scratch,
+        explicit_cfg(&scratch),
+        &[("PG_EMBEDDED_WORKER", Some(missing.as_str()))],
+    );
     ensure!(
-        err.to_string().contains("PG_MAX_CONNECTIONS"),
-        "unexpected error: {err}"
+        bootstrap.is_ok(),
+        "an invalid ambient PG_EMBEDDED_WORKER must not affect the explicit path: {:?}",
+        bootstrap.err()
     );
     Ok(())
 }
