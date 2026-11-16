@@ -73,47 +73,54 @@ fn find_existing_ancestor(path: &Utf8Path) -> Result<(Dir, Utf8PathBuf)> {
     let mut last_err = None;
 
     for ancestor in path.ancestors() {
-        // For the empty ancestor of a relative path, use "."
-        let dir_fs_path = if ancestor.as_str().is_empty() {
-            std::path::Path::new(".")
-        } else {
-            ancestor.as_std_path()
-        };
-
-        match Dir::open_ambient_dir(dir_fs_path, ambient_authority()) {
-            Ok(dir) => {
-                let relative = path
-                    .strip_prefix(ancestor)
-                    .with_context(|| {
-                        format!(
-                            "strip ancestor {} from {}",
-                            ancestor.as_str(),
-                            path.as_str()
-                        )
-                    })?
-                    .to_path_buf();
-                return Ok((dir, relative));
-            }
-            Err(err)
-                if err.kind() == ErrorKind::NotFound || err.kind() == ErrorKind::NotADirectory =>
-            {
-                // Path doesn't exist or exists but is not a directory; try parent.
-                last_err = Some(err);
-            }
-            Err(err) => {
-                return Err(err).context("open ambient directory for path");
-            }
+        match open_ancestor_dir(ancestor) {
+            Ok(dir) => return Ok((dir, relative_to_ancestor(path, ancestor)?)),
+            Err(err) if is_absent_ancestor(&err) => last_err = Some(err),
+            Err(err) => return Err(err).context("open ambient directory for path"),
         }
     }
 
-    // If we get here, every ancestor, including root/".", failed with NotFound
-    Err(last_err.unwrap_or_else(|| {
+    // Every ancestor, including root/".", failed with NotFound or NotADirectory.
+    Err(no_existing_ancestor(path, last_err)).context("find existing ancestor directory")
+}
+
+/// Opens `ancestor` as an ambient directory, treating the empty ancestor of a relative path as ".".
+fn open_ancestor_dir(ancestor: &Utf8Path) -> std::io::Result<Dir> {
+    let dir_fs_path = if ancestor.as_str().is_empty() {
+        std::path::Path::new(".")
+    } else {
+        ancestor.as_std_path()
+    };
+    Dir::open_ambient_dir(dir_fs_path, ambient_authority())
+}
+
+/// Reports whether opening an ancestor failed because it is absent or not a directory, so the
+/// search should continue with its parent.
+fn is_absent_ancestor(err: &std::io::Error) -> bool {
+    matches!(err.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
+}
+
+/// Returns the path from `ancestor` down to `path`.
+fn relative_to_ancestor(path: &Utf8Path, ancestor: &Utf8Path) -> Result<Utf8PathBuf> {
+    let relative = path.strip_prefix(ancestor).with_context(|| {
+        format!(
+            "strip ancestor {} from {}",
+            ancestor.as_str(),
+            path.as_str()
+        )
+    })?;
+    Ok(relative.to_path_buf())
+}
+
+/// Chooses the error reported when no ancestor of `path` exists: the last open failure, or a
+/// synthetic `NotFound` when `path` had no ancestors to try.
+fn no_existing_ancestor(path: &Utf8Path, last_err: Option<std::io::Error>) -> std::io::Error {
+    last_err.unwrap_or_else(|| {
         std::io::Error::new(
             ErrorKind::NotFound,
             format!("no existing ancestor for {path}"),
         )
-    }))
-    .context("find existing ancestor directory")
+    })
 }
 
 fn ensure_dir_exists_inner(path: &Utf8Path, dir: &Dir, relative: &Utf8PathBuf) -> Result<()> {
