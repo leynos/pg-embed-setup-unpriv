@@ -168,16 +168,7 @@ pub(super) fn worker_binary_from_env(
     }
 
     if let Some(raw) = env::var_os("PG_EMBEDDED_WORKER") {
-        let path = Utf8PathBuf::from_path_buf(PathBuf::from(&raw)).map_err(|_| {
-            let invalid_value = raw.to_string_lossy().to_string();
-            BootstrapError::from(color_eyre::eyre::eyre!(
-                "PG_EMBEDDED_WORKER contains a non-UTF-8 value: {invalid_value:?}. Provide a \
-                 UTF-8 encoded absolute path to the worker binary."
-            ))
-        })?;
-
-        validate_worker_path(&path)?;
-        return Ok(Some(path));
+        return worker_from_override(&raw).map(Some);
     }
 
     #[cfg(unix)]
@@ -189,6 +180,20 @@ pub(super) fn worker_binary_from_env(
     }
 
     Ok(None)
+}
+
+/// Converts the `PG_EMBEDDED_WORKER` override into a validated UTF-8 worker path.
+fn worker_from_override(raw: &std::ffi::OsStr) -> BootstrapResult<Utf8PathBuf> {
+    let path = Utf8PathBuf::from_path_buf(PathBuf::from(raw)).map_err(|_| {
+        let invalid_value = raw.to_string_lossy().to_string();
+        BootstrapError::from(color_eyre::eyre::eyre!(
+            "PG_EMBEDDED_WORKER contains a non-UTF-8 value: {invalid_value:?}. Provide a UTF-8 \
+             encoded absolute path to the worker binary."
+        ))
+    })?;
+
+    validate_worker_path(&path)?;
+    Ok(path)
 }
 
 fn validate_worker_path(path: &Utf8PathBuf) -> BootstrapResult<()> {

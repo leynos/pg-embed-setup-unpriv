@@ -195,31 +195,56 @@ fn orchestrate_bootstrap(kind: BootstrapKind) -> BootstrapResult<TestBootstrapSe
     }
 
     let privileges = detect_execution_privileges();
-    let cfg = PgEnvCfg::load().context("failed to load configuration via OrthoConfig")?;
-    let settings = match kind {
-        BootstrapKind::Default => cfg.to_settings()?,
-        BootstrapKind::Test => cfg.to_settings_for_tests()?,
-    };
-    let worker_binary = worker_binary_from_env(privileges)?;
-    let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
-    let shutdown_timeout = shutdown_timeout_from_env()?;
+    let (cfg, settings) = load_config_and_settings(kind)?;
+    let launch = LaunchPlan::resolve(privileges)?;
     let extensions = ExtensionRequest::from_config(&cfg)?;
     let prepared = prepare_bootstrap(privileges, settings, &cfg, kind.data_layout())?;
 
     Ok(TestBootstrapSettings {
         privileges,
-        execution_mode,
+        execution_mode: launch.execution_mode,
         settings: prepared.settings,
         environment: prepared.environment,
-        worker_binary,
+        worker_binary: launch.worker_binary,
         setup_timeout: DEFAULT_SETUP_TIMEOUT,
         start_timeout: DEFAULT_START_TIMEOUT,
-        shutdown_timeout,
+        shutdown_timeout: launch.shutdown_timeout,
         cleanup_mode: CleanupMode::default(),
         binary_cache_dir: cfg.binary_cache_dir,
         extensions,
         installed_extensions: Vec::new(),
     })
+}
+
+/// Loads the `OrthoConfig` configuration and derives the `PostgreSQL` settings for `kind`.
+fn load_config_and_settings(kind: BootstrapKind) -> BootstrapResult<(PgEnvCfg, Settings)> {
+    let cfg = PgEnvCfg::load().context("failed to load configuration via OrthoConfig")?;
+    let settings = match kind {
+        BootstrapKind::Default => cfg.to_settings()?,
+        BootstrapKind::Test => cfg.to_settings_for_tests()?,
+    };
+    Ok((cfg, settings))
+}
+
+/// How the cluster will be launched: the worker to run and the shutdown grace period.
+struct LaunchPlan {
+    worker_binary: Option<camino::Utf8PathBuf>,
+    execution_mode: ExecutionMode,
+    shutdown_timeout: Duration,
+}
+
+impl LaunchPlan {
+    /// Resolves the worker binary, the execution mode it implies and the shutdown timeout.
+    fn resolve(privileges: ExecutionPrivileges) -> BootstrapResult<Self> {
+        let worker_binary = worker_binary_from_env(privileges)?;
+        let execution_mode = determine_execution_mode(privileges, worker_binary.as_ref())?;
+        let shutdown_timeout = shutdown_timeout_from_env()?;
+        Ok(Self {
+            worker_binary,
+            execution_mode,
+            shutdown_timeout,
+        })
+    }
 }
 
 fn install_color_eyre() {

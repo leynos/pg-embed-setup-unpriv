@@ -163,16 +163,27 @@ fn a_matching_server_is_signalled_only_after_the_owner_dies() -> Result<()> {
     slot.name_pid_file(server.0.id())?;
     let mut watcher = spawn_watcher(&slot.lock, &slot.data_dir)?;
 
+    assert_watcher_waits_for_the_owner(&mut server, &mut watcher)?;
+
+    slot.owner_dies();
+
+    assert_server_ends_by_sigquit(&mut server, &mut watcher)
+}
+
+/// Requires the watcher to be queued on the owner's lock with both processes still alive.
+fn assert_watcher_waits_for_the_owner(server: &mut Stand, watcher: &mut Child) -> Result<()> {
     wait_until_blocked_on_a_lock(watcher.id())?;
     ensure!(
         server.0.try_wait()?.is_none() && watcher.try_wait()?.is_none(),
         "the watcher must wait for the owner's lock"
     );
+    Ok(())
+}
 
-    slot.owner_dies();
-
+/// Requires the watcher to end after acting and the server to end by `SIGQUIT`.
+fn assert_server_ends_by_sigquit(server: &mut Stand, watcher: &mut Child) -> Result<()> {
     ensure!(
-        wait_exit(&mut watcher, WAIT)?.is_some(),
+        wait_exit(watcher, WAIT)?.is_some(),
         "the watcher ends once it has acted"
     );
     let status = wait_exit(&mut server.0, WAIT)?

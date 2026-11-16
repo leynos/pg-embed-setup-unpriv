@@ -161,15 +161,7 @@ fn median_and_max(mut values: Vec<u128>) -> (u128, u128) {
 #[test]
 #[ignore = "a manual measurement, run with --ignored --nocapture"]
 fn start_ramp() -> std::io::Result<()> {
-    // A RAM-backed root (for example under /dev/shm) takes disk contention out
-    // of `initdb`, so the serial step shows up on its own.
-    let root: PathBuf = std::env::var_os("START_RAMP_ROOT").map_or_else(
-        || Path::new(env!("CARGO_TARGET_TMPDIR")).join("start-ramp"),
-        PathBuf::from,
-    );
-    // Created through the filesystem root, since the root is an absolute path.
-    let base = cap_std::fs::Dir::open_ambient_dir("/", cap_std::ambient_authority())?;
-    base.create_dir_all(root.strip_prefix("/").map_err(std::io::Error::other)?)?;
+    let root = create_ramp_root()?;
     // Two single-process rounds warm the download, the binary cache and the
     // install tree, so the rest measure the warm case.
     round(&root, 1)?;
@@ -181,16 +173,36 @@ fn start_ramp() -> std::io::Result<()> {
     )?;
     for count in counts() {
         let timings = round(&root, count)?;
-        let (wall, wall_max) = median_and_max(timings.iter().map(|t| t.wall).collect());
-        let (lock, lock_max) = median_and_max(timings.iter().map(|t| t.lock_wait).collect());
-        let (setup, setup_max) = median_and_max(timings.iter().map(|t| t.setup).collect());
-        let (start, start_max) = median_and_max(timings.iter().map(|t| t.start).collect());
-        writeln!(
-            out,
-            "{count:<2} | {wall}/{wall_max} | {lock}/{lock_max} | {setup}/{setup_max} | \
-             {start}/{start_max}"
-        )?;
+        write_ramp_row(&mut out, count, &timings)?;
         std::thread::sleep(Duration::from_secs(1));
     }
     Ok(())
+}
+
+/// Creates and returns the directory the ramp's clusters live under.
+fn create_ramp_root() -> std::io::Result<PathBuf> {
+    // A RAM-backed root (for example under /dev/shm) takes disk contention out
+    // of `initdb`, so the serial step shows up on its own.
+    let root: PathBuf = std::env::var_os("START_RAMP_ROOT").map_or_else(
+        || Path::new(env!("CARGO_TARGET_TMPDIR")).join("start-ramp"),
+        PathBuf::from,
+    );
+    // Created through the filesystem root, since the root is an absolute path.
+    let base = cap_std::fs::Dir::open_ambient_dir("/", cap_std::ambient_authority())?;
+    base.create_dir_all(root.strip_prefix("/").map_err(std::io::Error::other)?)?;
+    Ok(root)
+}
+
+/// Writes one table row: the median and maximum of each phase over `timings`.
+fn write_ramp_row(out: &mut impl Write, count: usize, timings: &[Timings]) -> std::io::Result<()> {
+    let phase = |pick: fn(&Timings) -> u128| median_and_max(timings.iter().map(pick).collect());
+    let (wall, wall_max) = phase(|t| t.wall);
+    let (lock, lock_max) = phase(|t| t.lock_wait);
+    let (setup, setup_max) = phase(|t| t.setup);
+    let (start, start_max) = phase(|t| t.start);
+    writeln!(
+        out,
+        "{count:<2} | {wall}/{wall_max} | {lock}/{lock_max} | {setup}/{setup_max} | \
+         {start}/{start_max}"
+    )
 }

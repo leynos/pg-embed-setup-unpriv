@@ -155,11 +155,31 @@ fn the_held_out_policy_runs_against_an_injected_runner() -> Result<(), String> {
         held_out_problems_for(undefined_make, &["synthetic"]).is_err(),
         "a held-out runner error was swallowed",
     )?;
+    an_assigning_held_out_command_is_clean()?;
+    held_out_commands_that_need_no_assignment_are_clean()?;
+    ensure(
+        !held_out_problems_for(held_out_unassigned_make, &["synthetic"])?
+            .0
+            .is_empty(),
+        "a held-out command that assigns no RUSTFLAGS passed",
+    )?;
+    ensure(
+        held_out_target_count() == 0 || held_out_problems(undefined_make).is_err(),
+        "the listed held-out targets were not run",
+    )
+}
+
+/// Requires a held-out command that assigns `RUSTFLAGS` to raise no problem, after one read.
+fn an_assigning_held_out_command_is_clean() -> Result<(), String> {
     let (clean, read) = held_out_problems_for(held_out_assigning_make, &["synthetic"])?;
     ensure(
         clean.is_empty() && read == 1,
         &format!("an assigning held-out command raised {clean:?}"),
-    )?;
+    )
+}
+
+/// Requires a coverage build and an inspection command to raise no problem.
+fn held_out_commands_that_need_no_assignment_are_clean() -> Result<(), String> {
     let (measuring, _) = held_out_problems_for(release_clearing_make, &["coverage"])?;
     ensure(
         measuring.is_empty(),
@@ -169,15 +189,6 @@ fn the_held_out_policy_runs_against_an_injected_runner() -> Result<(), String> {
     ensure(
         inspecting.is_empty(),
         &format!("an inspection command in a held-out target raised {inspecting:?}"),
-    )?;
-    let (unassigned, _) = held_out_problems_for(held_out_unassigned_make, &["synthetic"])?;
-    ensure(
-        !unassigned.is_empty(),
-        "a held-out command that assigns no RUSTFLAGS passed",
-    )?;
-    ensure(
-        held_out_target_count() == 0 || held_out_problems(undefined_make).is_err(),
-        "the listed held-out targets were not run",
     )
 }
 

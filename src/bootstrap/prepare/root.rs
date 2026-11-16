@@ -13,6 +13,7 @@ use postgresql_embedded::Settings;
 
 use super::{
     PreparedBootstrap,
+    SettingsPaths,
     ensure_parents_for_paths,
     log_sanitized_settings,
     prepare_xdg_dirs,
@@ -21,7 +22,10 @@ use super::{
 };
 use crate::{
     PgEnvCfg,
-    bootstrap::env::{TestBootstrapEnvironment, XdgDirs, prepare_timezone_env},
+    bootstrap::{
+        env::{TestBootstrapEnvironment, XdgDirs, prepare_timezone_env},
+        env_types::TimezoneEnv,
+    },
     error::{BootstrapError, BootstrapResult},
     privileges::{ensure_dir_for_user, ensure_tree_owned_by_user, make_data_dir_private},
 };
@@ -36,45 +40,81 @@ pub(super) fn bootstrap_with_root(
     settings.temporary = false;
     ensure_root_port(&mut settings)?;
 
-    let nobody_user = User::from_name("nobody")
-        .context("failed to resolve user 'nobody'")?
-        .ok_or_else(|| color_eyre::eyre::eyre!("user 'nobody' not found"))?;
-
-    let mut paths = resolve_settings_paths_for_uid(&mut settings, cfg, nobody_user.uid)?;
-    let has_slot = super::claim_derived_slot(&mut settings, &mut paths, layout)?;
-    super::reuse_existing_password(
-        &mut settings,
-        &paths.data_dir,
-        &paths.password_file,
-        cfg.password.is_some(),
-    )?;
-    log_sanitized_settings(&settings);
-
-    ensure_parents_for_paths(&paths, |path| ensure_parent_for_user(path, &nobody_user))?;
-
-    ensure_install_dir_for_user(&paths.install_dir, &nobody_user)?;
-    make_data_dir_private(&paths.data_dir, &nobody_user)?;
-
-    let timezone = prepare_timezone_env()?;
-    let xdg = prepare_xdg_dirs(&paths.install_dir)?;
-    ensure_xdg_dirs_owned_by_user(&xdg, &nobody_user)?;
-
-    super::stale_password::discard_orphaned_password_file(&paths.data_dir, &paths.password_file)?;
-    ensure_pgpass_for_user(&paths.password_file, &nobody_user)?;
-    if has_slot {
-        ensure_slot_lock_owned_by_user(&paths.data_dir, &nobody_user)?;
-    }
-
-    ensure_tree_owned_by_user(&paths.install_dir, &nobody_user)?;
-    if paths.data_default {
-        ensure_tree_owned_by_user(&paths.data_dir, &nobody_user)?;
-    }
+    let nobody_user = resolve_nobody_user()?;
+    let (paths, has_slot) = claim_root_paths(&mut settings, cfg, layout, &nobody_user)?;
+    prepare_root_directories(&paths, &nobody_user)?;
+    let (timezone, xdg) = prepare_root_environment(&paths, &nobody_user)?;
+    hand_files_to_user(&paths, &nobody_user, has_slot)?;
 
     let environment = TestBootstrapEnvironment::from_components(xdg, paths.password_file, timezone);
     Ok(PreparedBootstrap {
         settings,
         environment,
     })
+}
+
+/// Looks up the unprivileged `nobody` account the bootstrap hands paths to.
+fn resolve_nobody_user() -> BootstrapResult<User> {
+    User::from_name("nobody")
+        .context("failed to resolve user 'nobody'")?
+        .ok_or_else(|| color_eyre::eyre::eyre!("user 'nobody' not found"))
+        .map_err(BootstrapError::from)
+}
+
+/// Resolves the settings paths for `user`, claims a derived slot and reuses a stored password.
+///
+/// Returns the paths and whether a derived slot was claimed.
+fn claim_root_paths(
+    settings: &mut Settings,
+    cfg: &PgEnvCfg,
+    layout: super::DataLayout,
+    user: &User,
+) -> BootstrapResult<(SettingsPaths, bool)> {
+    let mut paths = resolve_settings_paths_for_uid(settings, cfg, user.uid)?;
+    let has_slot = super::claim_derived_slot(settings, &mut paths, layout)?;
+    super::reuse_existing_password(
+        settings,
+        &paths.data_dir,
+        &paths.password_file,
+        cfg.password.is_some(),
+    )?;
+    log_sanitized_settings(settings);
+    Ok((paths, has_slot))
+}
+
+/// Creates the parents of every settings path and makes the install and data
+/// directories usable by `user`.
+fn prepare_root_directories(paths: &SettingsPaths, user: &User) -> BootstrapResult<()> {
+    ensure_parents_for_paths(paths, |path| ensure_parent_for_user(path, user))?;
+    ensure_install_dir_for_user(&paths.install_dir, user)?;
+    make_data_dir_private(&paths.data_dir, user)?;
+    Ok(())
+}
+
+/// Prepares the timezone and XDG directories the unprivileged worker runs with.
+fn prepare_root_environment(
+    paths: &SettingsPaths,
+    user: &User,
+) -> BootstrapResult<(TimezoneEnv, XdgDirs)> {
+    let timezone = prepare_timezone_env()?;
+    let xdg = prepare_xdg_dirs(&paths.install_dir)?;
+    ensure_xdg_dirs_owned_by_user(&xdg, user)?;
+    Ok((timezone, xdg))
+}
+
+/// Hands the password file, the slot lock and the install and data trees to `user`.
+fn hand_files_to_user(paths: &SettingsPaths, user: &User, has_slot: bool) -> BootstrapResult<()> {
+    super::stale_password::discard_orphaned_password_file(&paths.data_dir, &paths.password_file)?;
+    ensure_pgpass_for_user(&paths.password_file, user)?;
+    if has_slot {
+        ensure_slot_lock_owned_by_user(&paths.data_dir, user)?;
+    }
+
+    ensure_tree_owned_by_user(&paths.install_dir, user)?;
+    if paths.data_default {
+        ensure_tree_owned_by_user(&paths.data_dir, user)?;
+    }
+    Ok(())
 }
 
 /// Hands a claimed slot's lock file to `user`.
