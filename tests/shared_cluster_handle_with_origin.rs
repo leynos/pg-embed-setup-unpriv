@@ -13,14 +13,11 @@
 use std::ffi::OsString;
 
 use pg_embedded_setup_unpriv::{
-    BootstrapError,
-    ClusterHandle,
     PgEnvCfg,
     ScopedEnv,
     TestBootstrapConfig,
     test_support::{scoped_env, shared_cluster_handle, shared_cluster_handle_with},
 };
-use tracing::warn;
 
 /// Forces bootstrap to fail quickly by pointing `TZDIR` at a missing directory.
 fn setup_failing_environment() -> ScopedEnv {
@@ -44,18 +41,6 @@ fn config_on_port(port: u16) -> TestBootstrapConfig {
     })
 }
 
-/// Returns the error message, or `None` (after logging) when the call succeeded.
-fn failure_message(
-    result: Result<&'static ClusterHandle, BootstrapError>,
-    context: &str,
-) -> Option<String> {
-    if let Err(err) = result {
-        return Some(err.to_string());
-    }
-    warn!("SKIP: shared cluster started despite an invalid TZDIR ({context})");
-    None
-}
-
 /// A failed explicit initialization fixes the singleton's origin.
 ///
 /// After one explicit configuration fails: a different explicit configuration
@@ -65,10 +50,11 @@ fn failure_message(
 fn explicit_origin_governs_later_callers_after_a_failure() {
     let _env_guard = setup_failing_environment();
 
-    let Some(first) = failure_message(shared_cluster_handle_with(config_on_port(54_321)), "prime")
-    else {
-        return;
-    };
+    // An unexpected success would leave nothing to assert about, so it fails
+    // the test rather than skipping it.
+    let first = shared_cluster_handle_with(config_on_port(54_321))
+        .expect_err("the priming call must fail with an invalid TZDIR")
+        .to_string();
     assert!(
         !first.contains("previously failed"),
         "the priming call must report the original failure: {first}"
