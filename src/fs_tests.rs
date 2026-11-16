@@ -210,3 +210,19 @@ fn set_permissions_checks_target_exists_before_skipping_posix_permissions() {
         "expected NotFound in error chain for missing target, got {err:?}"
     );
 }
+
+#[cfg(unix)]
+#[rstest]
+#[case::absolute("/usr/lib", "lib")]
+#[case::single_component("/tmp", "tmp")]
+#[case::root("/", "")]
+#[case::relative("relative/dir", "relative/dir")]
+fn ambient_dir_and_path_pairs_a_directory_with_the_relative_remainder(
+    #[case] path: &str,
+    #[case] expected_relative: &str,
+) {
+    let (_dir, relative) =
+        super::ambient_dir_and_path(Utf8Path::new(path)).expect("directory should open");
+
+    assert_eq!(relative.as_str(), expected_relative);
+}
