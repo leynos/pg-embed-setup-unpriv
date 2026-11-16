@@ -58,25 +58,44 @@ fn bootstrap_with(
     extra: &[(&str, Option<&str>)],
 ) -> BootstrapResult<TestBootstrapSettings> {
     let worker_config = ensure_test_worker(config.into());
+    let vars = controlled_environment(scratch, extra);
+
+    env::with_scoped_env(vars, || bootstrap_for_tests_with(worker_config))
+}
+
+/// Builds the ambient environment for a scenario.
+///
+/// Clears every variable the explicit path ignores, points `TZDIR` at the
+/// scratch directory, then applies `extra` last so a scenario can override.
+fn controlled_environment(
+    scratch: &Scratch,
+    extra: &[(&str, Option<&str>)],
+) -> Vec<(OsString, Option<OsString>)> {
     let mut vars = env::build_env([("PG_EMBED_ROOT", scratch.root.as_str())]);
-    for key in [
+    vars.extend(cleared_variables());
+    vars.push((
+        OsString::from("TZDIR"),
+        Some(OsString::from(scratch.tzdir.as_str())),
+    ));
+    vars.extend(
+        extra
+            .iter()
+            .map(|(key, value)| (OsString::from(*key), value.map(OsString::from))),
+    );
+    vars
+}
+
+/// The variables the explicit path must not read, each cleared.
+fn cleared_variables() -> impl Iterator<Item = (OsString, Option<OsString>)> {
+    [
         "PG_RUNTIME_DIR",
         "PG_DATA_DIR",
         "PG_MAX_CONNECTIONS",
         "PG_EMBED_DURABLE",
         "TZ",
-    ] {
-        vars.push((OsString::from(key), None));
-    }
-    vars.push((
-        OsString::from("TZDIR"),
-        Some(OsString::from(scratch.tzdir.as_str())),
-    ));
-    for (key, value) in extra {
-        vars.push((OsString::from(*key), value.map(OsString::from)));
-    }
-
-    env::with_scoped_env(vars, || bootstrap_for_tests_with(worker_config))
+    ]
+    .into_iter()
+    .map(|key| (OsString::from(key), None))
 }
 
 fn explicit_cfg(scratch: &Scratch) -> PgEnvCfg {
