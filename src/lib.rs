@@ -152,9 +152,11 @@ pub use bootstrap::{
     ExecutionMode,
     ExecutionPrivileges,
     PasswordReuseOutcome,
+    TestBootstrapConfig,
     TestBootstrapEnvironment,
     TestBootstrapSettings,
     bootstrap_for_tests,
+    bootstrap_for_tests_with,
     default_paths_under,
     detect_execution_privileges,
     find_timezone_dir,
@@ -289,7 +291,7 @@ fn is_blank(value: &serde_json::Value) -> bool {
 }
 
 /// Captures `PostgreSQL` settings supplied via environment variables.
-#[derive(Debug, Clone, Serialize, Deserialize, OrthoConfig, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, OrthoConfig, Default)]
 #[ortho_config(prefix = "PG")]
 ///
 /// # Examples

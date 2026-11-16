@@ -9,11 +9,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use super::{
     bootstrap_retry::{RetryPolicy, retry_transient},
     fixtures::ensure_worker_env,
+    shared_config::{ensure_compatible, record_origin},
     shared_singleton_core::{SharedInitState, get_or_try_init_shared},
 };
 use crate::{
+    ClusterGuard,
     ClusterHandle,
+    TestBootstrapConfig,
     TestCluster,
+    bootstrap::ConfigSource,
+    env::ScopedEnv,
     error::{BootstrapError, BootstrapResult},
 };
 
@@ -30,7 +35,21 @@ use crate::{
 /// The handle is leaked to obtain a `'static` reference for the entire
 /// process lifetime.
 static SHARED_CLUSTER_HANDLE: OnceLock<Mutex<SharedHandleState>> = OnceLock::new();
-type SharedHandleState = SharedInitState<&'static ClusterHandle, Arc<BootstrapError>>;
+
+/// Cached handle state plus the configuration that produced it.
+struct SharedHandleState {
+    state: SharedInitState<&'static ClusterHandle, Arc<BootstrapError>>,
+    origin: Option<ConfigSource>,
+}
+
+impl SharedHandleState {
+    const fn uninitialized() -> Self {
+        Self {
+            state: SharedInitState::Uninitialized,
+            origin: None,
+        }
+    }
+}
 /// Returns a reference to the shared cluster handle.
 ///
 /// The cluster is initialized lazily on first access using [`OnceLock`] for
@@ -74,25 +93,117 @@ type SharedHandleState = SharedInitState<&'static ClusterHandle, Arc<BootstrapEr
 /// # }
 /// ```
 pub fn shared_cluster_handle() -> BootstrapResult<&'static ClusterHandle> {
-    let mutex = SHARED_CLUSTER_HANDLE.get_or_init(|| Mutex::new(SharedInitState::Uninitialized));
+    shared_cluster_handle_with_origin(&ConfigSource::Ambient)
+}
+
+/// Returns a reference to the shared cluster handle built from `config`.
+///
+/// The shared cluster is a process-wide singleton, so the first caller decides
+/// which configuration it runs with. An explicit call reuses the cached result
+/// only when the singleton was initialized with an equal
+/// [`TestBootstrapConfig`]; otherwise it returns a configuration error that
+/// names the conflict without printing configuration values. Ambient callers
+/// of [`shared_cluster_handle`] always reuse the cached result.
+///
+/// # Errors
+///
+/// Returns a [`BootstrapError`] when the cluster cannot be started, when a
+/// previous initialization failure is replayed, or when the requested
+/// configuration conflicts with the singleton's origin.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pg_embedded_setup_unpriv::{
+///     PgEnvCfg,
+///     TestBootstrapConfig,
+///     test_support::shared_cluster_handle_with,
+/// };
+///
+/// # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
+/// let config = TestBootstrapConfig::new(PgEnvCfg::default());
+/// let handle = shared_cluster_handle_with(config)?;
+/// assert!(handle.database_exists("postgres")?);
+/// # Ok(())
+/// # }
+/// ```
+pub fn shared_cluster_handle_with(
+    config: impl Into<TestBootstrapConfig>,
+) -> BootstrapResult<&'static ClusterHandle> {
+    shared_cluster_handle_with_origin(&ConfigSource::Explicit(Box::new(config.into())))
+}
+
+fn shared_cluster_handle_with_origin(
+    requested: &ConfigSource,
+) -> BootstrapResult<&'static ClusterHandle> {
+    let mutex =
+        SHARED_CLUSTER_HANDLE.get_or_init(|| Mutex::new(SharedHandleState::uninitialized()));
     let mut guard = mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    get_or_try_init_shared(
-        &mut guard,
-        initialize_shared_cluster_handle,
-        cached_shared_handle_error,
-    )
+    ensure_compatible(guard.origin.as_ref(), requested)?;
+
+    let result = initialize_shared_handle_once(&mut guard.state, requested);
+    // An initializer that panics unwinds past this point, leaving the origin
+    // unset so a later call can still take over the uninitialized singleton.
+    if guard.origin.is_none() {
+        record_origin(&mut guard.origin, requested);
+    }
+    result
+}
+
+/// Initializes the singleton state from `requested`, at most once.
+fn initialize_shared_handle_once(
+    state: &mut SharedInitState<&'static ClusterHandle, Arc<BootstrapError>>,
+    requested: &ConfigSource,
+) -> BootstrapResult<&'static ClusterHandle> {
+    match requested {
+        ConfigSource::Ambient => get_or_try_init_shared(
+            state,
+            initialize_shared_cluster_handle,
+            cached_shared_handle_error,
+        ),
+        ConfigSource::Explicit(config) => get_or_try_init_shared(
+            state,
+            || initialize_shared_cluster_handle_with(config),
+            cached_shared_handle_error,
+        ),
+    }
 }
 
 fn initialize_shared_cluster_handle()
 -> Result<&'static ClusterHandle, (Arc<BootstrapError>, BootstrapError)> {
     let worker_guard = ensure_worker_env();
-    match retry_transient(
-        RetryPolicy::SHARED_CLUSTER,
-        TestCluster::new_split,
-        std::thread::sleep,
-    ) {
+    finish_shared_handle(
+        worker_guard,
+        retry_transient(
+            RetryPolicy::SHARED_CLUSTER,
+            TestCluster::new_split,
+            std::thread::sleep,
+        ),
+    )
+}
+
+fn initialize_shared_cluster_handle_with(
+    config: &TestBootstrapConfig,
+) -> Result<&'static ClusterHandle, (Arc<BootstrapError>, BootstrapError)> {
+    // The explicit path supplies its own worker binary (or relies on PATH
+    // discovery), so it must not read or mutate `PG_EMBEDDED_WORKER`.
+    finish_shared_handle(
+        None,
+        retry_transient(
+            RetryPolicy::SHARED_CLUSTER,
+            || TestCluster::new_split_with(config.clone()),
+            std::thread::sleep,
+        ),
+    )
+}
+
+fn finish_shared_handle(
+    worker_guard: Option<ScopedEnv>,
+    outcome: BootstrapResult<(ClusterHandle, ClusterGuard)>,
+) -> Result<&'static ClusterHandle, (Arc<BootstrapError>, BootstrapError)> {
+    match outcome {
         Ok((handle, cluster_guard)) => {
             // Attach worker guard to cluster guard, then leak it.
             // The guard manages shutdown; leaking it means the cluster
@@ -118,7 +229,7 @@ fn initialize_shared_cluster_handle()
     }
 }
 
-fn cached_shared_handle_error(original_err: &Arc<BootstrapError>) -> BootstrapError {
+pub(super) fn cached_shared_handle_error(original_err: &Arc<BootstrapError>) -> BootstrapError {
     log_cached_shared_handle_error(original_err);
     let report = color_eyre::eyre::eyre!(
         "shared cluster initialization previously failed: {:?}",
@@ -127,7 +238,7 @@ fn cached_shared_handle_error(original_err: &Arc<BootstrapError>) -> BootstrapEr
     BootstrapError::new(original_err.kind(), report)
 }
 
-fn register_shutdown_hook_or_fail<T, Register>(
+pub(super) fn register_shutdown_hook_or_fail<T, Register>(
     target: &T,
     register_shutdown_hook: Register,
     failure_message: &'static str,
@@ -169,14 +280,14 @@ where
     Ok(Box::leak(Box::new(handle)))
 }
 
-fn log_shared_cluster_event(message: &'static str) {
+pub(super) fn log_shared_cluster_event(message: &'static str) {
     tracing::debug!(
         target: crate::observability::LOG_TARGET,
         "{message}"
     );
 }
 
-fn log_shared_cluster_error(err: &BootstrapError, message: &'static str) {
+pub(super) fn log_shared_cluster_error(err: &BootstrapError, message: &'static str) {
     tracing::error!(
         target: crate::observability::LOG_TARGET,
         error = ?err,
@@ -190,140 +301,6 @@ fn log_cached_shared_handle_error(original_err: &Arc<BootstrapError>) {
         error = ?original_err,
         "replaying cached shared cluster initialization failure"
     );
-}
-
-// ============================================================================
-// Legacy shared cluster singleton (for backward compatibility)
-// ============================================================================
-
-/// Global state for the legacy shared cluster singleton.
-///
-/// Uses `OnceLock<Mutex<...>>` to support fallible initialization whilst
-/// maintaining thread-safe singleton semantics.
-static SHARED_CLUSTER: OnceLock<Mutex<SharedClusterState>> = OnceLock::new();
-
-type SharedClusterState = SharedInitState<SharedClusterPtr, Arc<BootstrapError>>;
-
-/// Wrapper around raw pointer to `TestCluster` that implements `Send + Sync`.
-///
-/// Required because `TestCluster` is `!Send` (contains `ScopedEnv` with
-/// `PhantomData<Rc<()>>`). The pointer is safe to share across threads because:
-/// 1. The cluster is only initialized once and never moved.
-/// 2. All access goes through immutable references.
-/// 3. The cluster's public API is thread-safe (database operations use independent connections).
-#[derive(Clone, Copy)]
-struct SharedClusterPtr(*const TestCluster);
-
-// SAFETY: SharedClusterPtr upholds the following invariants:
-// 1. The pointer targets a `Box::leak`ed allocation that outlives all references.
-// 2. No mutable access occurs through this pointer; all usage is via `&TestCluster`.
-// 3. `TestCluster` methods internally handle synchronization (each database operation creates an
-//    independent connection).
-unsafe impl Send for SharedClusterPtr {}
-unsafe impl Sync for SharedClusterPtr {}
-
-/// Returns a reference to the shared test cluster.
-///
-/// The cluster is initialized lazily on first access using [`OnceLock`] for
-/// thread-safe singleton semantics. Subsequent calls return the same cluster
-/// instance, eliminating per-test bootstrap overhead.
-///
-/// # Recommendation
-///
-/// Prefer [`shared_cluster_handle()`] for new code. It returns a `Send + Sync`
-/// handle suitable for rstest fixtures with timeouts and other thread-safe
-/// contexts. This function is retained for backward compatibility with
-/// existing tests that depend on the `TestCluster` type.
-///
-/// # Errors
-///
-/// Returns a [`BootstrapError`] if the cluster cannot be started. A transient
-/// failure (a download or extraction I/O error, a lifecycle timeout, or an
-/// extension archive that could not be fetched) is retried up to three
-/// attempts in all, one then two seconds apart, and reports the attempt count
-/// if it persists. Any other failure is returned at once. Once
-/// initialization fails, subsequent calls return an error with the same
-/// [`BootstrapErrorKind`](crate::error::BootstrapErrorKind) and a message
-/// indicating the previous failure.
-///
-/// # Thread Safety
-///
-/// This function is safe to call from multiple threads concurrently. The first
-/// caller to reach the initialization path will bootstrap the cluster while
-/// other callers wait. All callers receive the same cluster reference.
-///
-/// # Examples
-///
-/// ```no_run
-/// use pg_embedded_setup_unpriv::test_support::shared_cluster;
-///
-/// # fn main() -> pg_embedded_setup_unpriv::BootstrapResult<()> {
-/// let cluster = shared_cluster()?;
-/// assert!(cluster.database_exists("postgres")?);
-///
-/// // Second call returns the same instance
-/// let cluster2 = shared_cluster()?;
-/// assert!(std::ptr::eq(cluster, cluster2));
-/// # Ok(())
-/// # }
-/// ```
-pub fn shared_cluster() -> BootstrapResult<&'static TestCluster> {
-    let mutex = SHARED_CLUSTER.get_or_init(|| Mutex::new(SharedClusterState::Uninitialized));
-    let mut guard = mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let ptr = get_or_try_init_shared(
-        &mut guard,
-        initialize_shared_cluster,
-        cached_shared_handle_error,
-    )?;
-
-    // SAFETY: The pointer was created from Box::leak and is valid forever.
-    Ok(unsafe { &*ptr.0 })
-}
-
-fn initialize_shared_cluster() -> Result<SharedClusterPtr, (Arc<BootstrapError>, BootstrapError)> {
-    let worker_guard = ensure_worker_env();
-    match retry_transient(
-        RetryPolicy::SHARED_CLUSTER,
-        TestCluster::new,
-        std::thread::sleep,
-    ) {
-        Ok(new_cluster) => {
-            log_shared_cluster_event("shared cluster initialized");
-            leak_shared_cluster_after_shutdown_hook(
-                new_cluster.with_worker_guard(worker_guard),
-                |cluster| cluster.handle.register_shutdown_on_exit(),
-            )
-            .map(SharedClusterPtr)
-        }
-        Err(err) => {
-            log_shared_cluster_error(&err, "shared cluster initialization failed");
-            let stored = Arc::new(BootstrapError::new(
-                err.kind(),
-                color_eyre::eyre::eyre!("bootstrap failed: {:?}", err),
-            ));
-            Err((stored, err))
-        }
-    }
-}
-
-fn leak_shared_cluster_after_shutdown_hook<Cluster, Register>(
-    cluster: Cluster,
-    register_shutdown_hook: Register,
-) -> Result<*const Cluster, (Arc<BootstrapError>, BootstrapError)>
-where
-    Register: FnOnce(&Cluster) -> BootstrapResult<()>,
-{
-    register_shutdown_hook_or_fail(
-        &cluster,
-        register_shutdown_hook,
-        "shared cluster shutdown hook registration failed; dropping cluster",
-    )?;
-
-    let leaked = Box::leak(Box::new(cluster));
-    log_shared_cluster_event("shared cluster shutdown hook registered; leaking cluster");
-    Ok(std::ptr::from_ref(leaked))
 }
 
 #[cfg(test)]
@@ -366,27 +343,6 @@ mod tests {
                 "guard must drop on registration failure so postmaster.pid is removed ",
                 "and no orphaned PostgreSQL process remains"
             )
-        );
-    }
-
-    #[test]
-    fn registration_failure_drops_guard_instead_of_leaking_shared_cluster() {
-        let was_dropped = Arc::new(AtomicBool::new(false));
-        let cluster = DropProbe(Arc::clone(&was_dropped));
-
-        let result = leak_shared_cluster_after_shutdown_hook(cluster, |_| {
-            Err(BootstrapError::from(color_eyre::eyre::eyre!(
-                "injected shutdown hook failure"
-            )))
-        });
-
-        assert!(
-            result.is_err(),
-            "shared-cluster initialization should fail when shutdown hook registration fails"
-        );
-        assert!(
-            was_dropped.load(Ordering::SeqCst),
-            "cluster must drop when shutdown hook registration fails"
         );
     }
 }

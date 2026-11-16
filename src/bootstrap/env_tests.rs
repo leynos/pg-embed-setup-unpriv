@@ -76,11 +76,11 @@ fn validate_shutdown_timeout_secs_enforces_bounds() {
 #[test]
 fn validate_worker_path_rejects_empty_and_root() {
     assert!(
-        validate_worker_path(&camino::Utf8PathBuf::from("")).is_err(),
+        validate_worker_path(&camino::Utf8PathBuf::from(""), "PG_EMBEDDED_WORKER").is_err(),
         "empty path rejected"
     );
     assert!(
-        validate_worker_path(&camino::Utf8PathBuf::from("/")).is_err(),
+        validate_worker_path(&camino::Utf8PathBuf::from("/"), "PG_EMBEDDED_WORKER").is_err(),
         "filesystem root rejected"
     );
 }
