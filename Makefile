@@ -10,6 +10,8 @@ RELEASE_BINARIES ?= pg_embedded_setup_unpriv pg_worker
 TARGET ?=
 UV ?= uv
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
+LOOM_PROFILE ?= pr
+LOOM_OUTPUT_DIR ?= target/loom-report
 
 # The CV-005 CodeScene contracts live in shared-actions and run from a full
 # commit, so a fix is a pin bump. `.github/cv005.toml` holds this repository's
@@ -32,6 +34,10 @@ PYYAML_VERSION ?= 6.0.3
 SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 	scripts/tests/test_cluster_sources_properties.py \
 	scripts/tests/test_cluster_tier_coverage_contract.py \
+	scripts/tests/test_loom_contracts.py \
+	scripts/tests/test_loom_runner.py \
+	scripts/tests/test_loom_runner_report.py \
+	scripts/tests/test_loom_workflow_contract.py \
 	scripts/tests/test_markdown_gate_contract.py \
 	scripts/tests/test_markdown_gate_e2e.py \
 	scripts/tests/test_msrv_check.py \
@@ -49,7 +55,13 @@ SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 	scripts/tests/test_timeout_reading_contract.py \
 	scripts/tests/test_timeout_reading_properties.py
 # Modules whose examples are collected as doctests alongside the suites.
-SCRIPT_PY_DOCTESTS := scripts/msrv_check.py \
+SCRIPT_PY_DOCTESTS := scripts/loom_discovery.py \
+	scripts/loom_manifest.py \
+	scripts/loom_process.py \
+	scripts/loom_report.py \
+	scripts/loom_runner.py \
+	scripts/msrv_check.py \
+	scripts/tests/loom_runner_fakes.py \
 	scripts/tests/nextest_filters.py \
 	scripts/tests/runner_placement.py \
 	scripts/tests/rustc_wrapper.py \
@@ -150,8 +162,13 @@ test: fetch test-doc ## Run tests with warnings treated as errors
 test-doc: ## Run the documentation examples
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) test --doc --all-features $(BUILD_JOBS)
 
-test-loom: ## Run Loom concurrency tests
-	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) test --features "loom-tests" --lib -- --ignored
+test-loom: ## Run the Loom model inventory under an exploration profile
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" \
+		$(UV_ENV) $(UV) run --script scripts/loom_runner.py \
+		--profile "$(LOOM_PROFILE)" \
+		--manifest .config/loom-models.toml \
+		--output-dir "$(LOOM_OUTPUT_DIR)" \
+		--cargo "$(CARGO)"
 
 test-scripts: ## Run the Python release-tooling tests
 	$(SCRIPT_PYTEST) $(SCRIPT_PY_TESTS) -c /dev/null --rootdir=. -p no:cacheprovider

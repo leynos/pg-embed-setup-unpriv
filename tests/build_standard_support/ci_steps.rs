@@ -28,6 +28,13 @@ pub const WORKFLOWS: &[(&str, &str)] = &[
             "/.github/workflows/coverage-main.yml"
         )),
     ),
+    (
+        "loom.yml",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/.github/workflows/loom.yml"
+        )),
+    ),
 ];
 
 /// A workflow file: its name for complaints, and its text.
