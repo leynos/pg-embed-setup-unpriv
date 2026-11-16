@@ -368,13 +368,19 @@ fn explicit_cluster() -> BootstrapResult<()> {
         ..PgEnvCfg::default()
     })
     .with_shutdown_timeout(Duration::from_secs(30))
-    .with_releases_url("https://example.invalid/postgresql");
+    .with_releases_url("https://github.com/theseus-rs/postgresql-binaries");
 
     let cluster = TestCluster::new_with(config)?;
     drop(cluster);
     Ok(())
 }
 ```
+
+The release URL selects among the download sources that `postgresql_archive`
+already supports (the Theseus binaries, and the Zonky binaries when that
+feature is enabled). It does not register a new source: any other URL passes
+the bootstrap's non-empty check but fails with an unsupported-repository error
+when a cache miss forces a download.
 
 `bootstrap_for_tests_with(config)` is the corresponding bootstrap helper, and
 `TestCluster::new_split_with(config)` returns the handle/guard pair directly.

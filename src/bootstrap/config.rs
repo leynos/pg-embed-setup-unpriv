@@ -185,7 +185,13 @@ impl TestBootstrapConfig {
 
     /// Sets the release URL used to download `PostgreSQL` archives.
     ///
-    /// The bootstrap rejects an empty or whitespace-only URL.
+    /// The bootstrap rejects an empty or whitespace-only URL. It does not
+    /// register a download source: the URL must start with a repository that
+    /// `postgresql_archive` already supports (the Theseus binaries at
+    /// `https://github.com/theseus-rs/postgresql-binaries`, or the Zonky
+    /// binaries when that feature is enabled). Any other URL is accepted here
+    /// but fails with an unsupported-repository error the first time a cache
+    /// miss forces a download, in the calling process and in the worker alike.
     ///
     /// # Examples
     ///
@@ -193,10 +199,10 @@ impl TestBootstrapConfig {
     /// use pg_embedded_setup_unpriv::{PgEnvCfg, TestBootstrapConfig};
     ///
     /// let config = TestBootstrapConfig::new(PgEnvCfg::default())
-    ///     .with_releases_url("https://example.invalid/releases");
+    ///     .with_releases_url("https://github.com/theseus-rs/postgresql-binaries");
     /// assert_eq!(
     ///     config.releases_url(),
-    ///     Some("https://example.invalid/releases")
+    ///     Some("https://github.com/theseus-rs/postgresql-binaries")
     /// );
     /// ```
     #[must_use]
