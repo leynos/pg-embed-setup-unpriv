@@ -337,4 +337,3 @@ def module_sources(
     return frozenset(
         _compiled_sources(path, {}, is_crate_root=False, sources=sources)
     )
-

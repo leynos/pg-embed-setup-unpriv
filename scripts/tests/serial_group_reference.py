@@ -109,4 +109,3 @@ def add_support_only_binary(tests_directory: Path) -> None:
     (tests_directory / "solo.rs").write_text(
         '#[path = "support/only_lock.rs"]\nmod only_lock;\n', encoding="utf-8"
     )
-
