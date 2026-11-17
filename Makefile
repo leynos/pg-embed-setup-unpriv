@@ -1,4 +1,5 @@
-.PHONY: help all clean fetch test test-doc test-loom test-scripts msrv build release \
+.PHONY: help all clean fetch test test-doc test-loom test-scripts \
+	test-serial-group msrv build release \
 	release-archive lint lint-clippy lint-whitaker fmt \
 	check-fmt markdownlint nixie spelling typecheck test-workflow-contracts
 
@@ -43,6 +44,9 @@ SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 	scripts/tests/test_release_workflow_contract.py \
 	scripts/tests/test_runner_placement.py \
 	scripts/tests/test_rustc_wrapper_contract.py \
+	scripts/tests/test_serial_group_contract.py \
+	scripts/tests/test_serial_group_faults_contract.py \
+	scripts/tests/test_serial_inventory_properties.py \
 	scripts/tests/test_workflow_reader.py \
 	scripts/tests/test_timeout_exactness_contract.py \
 	scripts/tests/test_timeout_ordering_contract.py \
@@ -51,6 +55,8 @@ SCRIPT_PY_TESTS := scripts/tests/test_cluster_sources_loader_contract.py \
 # Modules whose examples are collected as doctests alongside the suites.
 SCRIPT_PY_DOCTESTS := scripts/msrv_check.py \
 	scripts/tests/nextest_filters.py \
+	scripts/tests/nextest_serial_group.py \
+	scripts/tests/serial_inventory.py \
 	scripts/tests/runner_placement.py \
 	scripts/tests/rustc_wrapper.py \
 	scripts/tests/workflow_reader.py
@@ -156,6 +162,18 @@ test-loom: ## Run Loom concurrency tests
 test-scripts: ## Run the Python release-tooling tests
 	$(SCRIPT_PYTEST) $(SCRIPT_PY_TESTS) -c /dev/null --rootdir=. -p no:cacheprovider
 	$(SCRIPT_PYTEST) --doctest-modules $(SCRIPT_PY_DOCTESTS) -c /dev/null --rootdir=. -p no:cacheprovider
+
+# `show-config` builds every test target before it can resolve the filters, and
+# Cargo fingerprints the exact RUSTFLAGS string, so this target must run under
+# precisely the flags that built the tree it reads. A caller that assigns
+# RUSTFLAGS therefore has that value used verbatim, which is what lets CI
+# restate its test step's sequence without this recipe appending a second
+# `-D warnings`; with none assigned, the value is the sequence `test` composes,
+# so a local run after `make test` still reuses that build.
+SERIAL_GROUP_RUSTFLAGS = $(if $(strip $(RUSTFLAGS)),$(RUSTFLAGS),-D warnings $(STANDARD_RUSTFLAGS))
+
+test-serial-group: ## Ask nextest which tests the `serial` group schedules
+	RUSTFLAGS="$(SERIAL_GROUP_RUSTFLAGS)" $(SCRIPT_PYTEST) scripts/tests/test_nextest_serial_group_cli.py -c /dev/null --rootdir=. -p no:cacheprovider
 
 msrv: ## Build at the declared rust-version against a lockfile resolved for it
 	$(UV) run --no-project --python 3.13 scripts/msrv_check.py
