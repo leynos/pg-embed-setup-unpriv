@@ -20,6 +20,7 @@ See "Test timeouts: four tiers, outermost last" in
 
 from __future__ import annotations
 
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,11 @@ _COVERED = "covered"
 
 #: A support module no binary compiles.
 _ORPHAN = "orphan"
+
+#: The directory a fault names, spelled as the scanner's ``str(Path)`` spells
+#: it on this platform. Windows separates with a backslash, so a POSIX
+#: literal would fail the assertions against a correct scan there.
+_SUPPORT_DIR = f"support{os.sep}"
 
 #: Each example writes a tree and scans it, which the default 200 ms deadline
 #: does not allow for on a loaded runner. A slow example is not a defect.
@@ -260,11 +266,11 @@ def _assert_faults(tree: _Tree, faults: list[str]) -> None:
         )
         return
     assert len(faults) == 1, f"orphans are reported once: {faults}"
-    assert faults[0].count("support/") == len(expected), (
+    assert faults[0].count(_SUPPORT_DIR) == len(expected), (
         f"only the orphaned modules may be reported: {faults}"
     )
     for path in expected:
-        assert f"{path}.rs" in faults[0], (
+        assert str(Path(f"{path}.rs")) in faults[0], (
             f"the orphan {path} must be named: {faults}"
         )
 
