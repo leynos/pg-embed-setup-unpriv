@@ -92,9 +92,11 @@ Only Linux is checked. On macOS and Windows the preflight is skipped.
 
 The check needs `ldd`. When it cannot run, the bootstrap fails with
 `BootstrapErrorKind::RuntimeCheckIndeterminate` rather than passing silently.
-The `libc-bin` package provides `ldd` and is installed on every Debian and
-Ubuntu image, so only distroless-style images lack it. Either install it, or
-opt out explicitly:
+The one exception is the explanation of a failed first-download `Setup`: with no
+`ldd` the explanation cannot be made, so that run returns the original
+`initdb` failure unchanged. The `libc-bin` package provides `ldd` and is
+installed on every Debian and Ubuntu image, so only distroless-style images
+lack it. Either install it, or opt out explicitly:
 
 ```rust
 use pg_embedded_setup_unpriv::{PgEnvCfg, RuntimePreflight, TestBootstrapConfig};
