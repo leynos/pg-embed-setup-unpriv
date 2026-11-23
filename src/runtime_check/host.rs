@@ -1,4 +1,9 @@
 //! Host identity used in diagnostics and in the preflight cache key.
+//!
+//! The pretty name comes from `/etc/os-release` and appears in errors. The
+//! fingerprint joins the distribution, release and architecture with a
+//! signature of the loader cache (`/etc/ld.so.cache`), so installing or
+//! removing a library package invalidates a recorded pass in the marker.
 
 use std::{
     fs,

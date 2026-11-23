@@ -1,5 +1,14 @@
 //! Bridges the preflight to the bootstrap: find the staged tree, build the
 //! diagnostic context and map failures onto [`BootstrapError`].
+//!
+//! The functions here are the lifecycle's hook points: `check_staged_executables`
+//! runs before `Setup` (when a tree is already staged) and again after it,
+//! `explain_setup_failure` runs after a failed `Setup` and replaces an opaque
+//! `initdb` failure with the typed explanation, and `check_extension_libraries`
+//! runs after the extension hook. The `*_async` twins run the same work on the
+//! blocking pool. Each hook returns early when the caller opted out, the host
+//! is not Linux, or no `postgres` is staged. A pass is recorded in the marker
+//! (see `marker`).
 
 use std::path::{Path, PathBuf};
 

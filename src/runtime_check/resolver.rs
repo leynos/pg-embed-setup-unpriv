@@ -1,5 +1,11 @@
 //! The port through which the preflight asks the host about shared libraries.
 //!
+//! The adapter parses `ldd` output and accepts its "not a dynamic executable"
+//! message only for a well-formed ELF with no interpreter, so a truncated or
+//! non-ELF file is reported as unavailable rather than passing. Callers can
+//! fail to resolve in exactly one way, [`ResolverUnavailable`], which the
+//! preflight turns into an indeterminate error.
+//!
 //! Production code uses [`LddResolver`], which runs the platform's `ldd`.
 //! Tests supply their own implementation, so no real host is needed.
 

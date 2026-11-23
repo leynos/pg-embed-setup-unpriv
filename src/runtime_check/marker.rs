@@ -5,6 +5,11 @@
 //! describes one host's library environment. Its content is a key that names
 //! the archive, the host operating system and the loader cache, so a marker
 //! left in an installation directory that moves to another host does not match.
+//!
+//! `check_executables` reads it before running the resolver and writes it on a
+//! pass, which covers the hook points before and after `Setup`; a failure is
+//! never recorded, and the explanation of a failed `Setup` ignores it. The
+//! file is `.pg-embed-runtime-ok`; deleting it forces a new check.
 
 use std::{fs, path::Path};
 

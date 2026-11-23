@@ -1,4 +1,12 @@
 //! The preflight proper: resolve every staged object through the port.
+//!
+//! [`Preflight`] holds a resolver and the archive and host context. Its
+//! entry points match the hook points in `stage`: `check_executables` runs
+//! before and after `Setup` and is cheap to repeat because it consults the
+//! pass marker; `diagnose_executables` runs after a failed `Setup` and always
+//! checks afresh; `check_objects` serves the extension libraries and never
+//! touches the marker. The marker key joins the `PostgreSQL` version, a digest
+//! of the release URL and the host fingerprint (see `host`).
 
 use std::{
     path::{Path, PathBuf},
