@@ -222,11 +222,12 @@ fn a_truncated_elf_is_unavailable_not_static() {
 
 #[test]
 fn a_system_ldconfig_resolves_whether_it_is_static_or_dynamic() {
-    // ldconfig is statically linked on many distributions, which is the case
-    // the static fallback exists for; elsewhere it is an ordinary dynamic file.
+    // ldconfig is a statically linked ELF on many distributions, which is the
+    // case the static fallback exists for. Some distributions ship a shell
+    // wrapper instead, which is correctly not a pass, so only an ELF counts.
     let Some(path) = ["/usr/sbin/ldconfig", "/sbin/ldconfig"]
         .into_iter()
-        .find(|path| Path::new(path).is_file())
+        .find(|path| fs::read(path).is_ok_and(|bytes| bytes.starts_with(b"\x7fELF")))
     else {
         return;
     };
