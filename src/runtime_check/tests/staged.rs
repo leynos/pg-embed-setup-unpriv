@@ -209,6 +209,34 @@ fn a_non_elf_file_is_unavailable_not_static() {
 }
 
 #[test]
+fn a_truncated_elf_is_unavailable_not_static() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cut = dir.path().join("cut.so");
+    fs::write(&cut, b"\x7fELF\x02\x01\x01").expect("write");
+    let object = Utf8PathBuf::from_path_buf(cut).expect("utf8");
+
+    let outcome = LddResolver::new().unresolved(&object);
+
+    assert!(outcome.is_err(), "{outcome:?}");
+}
+
+#[test]
+fn a_system_ldconfig_resolves_whether_it_is_static_or_dynamic() {
+    // ldconfig is statically linked on many distributions, which is the case
+    // the static fallback exists for; elsewhere it is an ordinary dynamic file.
+    let Some(path) = ["/usr/sbin/ldconfig", "/sbin/ldconfig"]
+        .into_iter()
+        .find(|path| Path::new(path).is_file())
+    else {
+        return;
+    };
+
+    let outcome = LddResolver::new().unresolved(Utf8Path::new(path));
+
+    assert_eq!(outcome, Ok(Vec::new()));
+}
+
+#[test]
 fn installed_extension_libraries_are_checked() {
     let staged = staged_tree();
     let mut bootstrap = bootstrap_for(&staged);

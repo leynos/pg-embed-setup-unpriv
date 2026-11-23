@@ -189,7 +189,11 @@ is not part of the binary-cache key, give the new source its own
 [Binary cache and release sources](#binary-cache-and-release-sources)). Also
 choose a fresh `runtime_dir`: an incompatible archive that is already staged in
 the old one is checked before any download, so the preflight would report it
-again. Keep the existing data directory out of this change.
+again. If an existing cluster keeps its explicit `PG_DATA_DIR`, set
+`PG_PASSWORD` to that cluster's password when switching installation
+directories: the password file lives in the installation tree, so the new
+directory has none and the bootstrap would otherwise fail with
+`ClusterPasswordMissing`.
 
 ## Test backend selection
 
