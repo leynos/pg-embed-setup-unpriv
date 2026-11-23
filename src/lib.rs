@@ -28,6 +28,7 @@ pub mod observability;
     ),
 ))]
 mod privileges;
+mod runtime_check;
 #[doc(hidden)]
 pub mod test_support;
 #[doc(hidden)]
@@ -226,6 +227,13 @@ pub use privileges::{
     make_data_dir_private,
     make_dir_accessible,
     nobody_uid,
+};
+pub use runtime_check::{
+    BinaryFinding,
+    IndeterminateRuntime,
+    RuntimePreflight,
+    RuntimePreflightError,
+    UnresolvedLibraries,
 };
 use serde::{Deserialize, Serialize};
 

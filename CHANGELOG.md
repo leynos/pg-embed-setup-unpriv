@@ -3,6 +3,27 @@
 All notable changes to this crate are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Runtime-compatibility preflight
+
+- The bootstrap now checks the staged `postgres`, `initdb` and `pg_ctl`
+  executables, and the installed extension libraries, for shared libraries the
+  host cannot resolve, and fails with a typed, actionable error
+  (`BootstrapErrorKind::RuntimeIncompatible`, carrying a
+  `RuntimePreflightError`) naming the binary, each missing SONAME, the host, the
+  `PostgreSQL` version, the archive source and the remedies. Before this, an
+  incompatible host (for example Ubuntu 26.04, which lacks `libxml2.so.2`)
+  failed with an opaque start-up error. The check uses `ldd` on Linux, is
+  remembered per staged archive and host, and is skipped on other platforms. A
+  host without `ldd` fails with
+  `BootstrapErrorKind::RuntimeCheckIndeterminate`; opt out with
+  `TestBootstrapConfig::with_runtime_preflight(RuntimePreflight::Skip)`.
+- `TestBootstrapSettings` gains a public `runtime_preflight` field. A caller
+  that builds the struct with a literal must set it.
+- The users' guide lists the supported host images, their runtime packages and
+  the Ubuntu 26.04 gap.
+
 ## 0.7.0
 
 This release raises the minimum supported Rust version to 1.94.

@@ -24,6 +24,7 @@ use crate::{
     env::ScopedEnv,
     error::BootstrapResult,
     observability::LOG_TARGET,
+    runtime_check::{check_staged_executables, explain_setup_failure},
 };
 
 /// Performs `PostgreSQL` setup (download + `initdb`) without starting the server.
@@ -66,7 +67,9 @@ pub(in crate::cluster) fn setup_lifecycle(
     let cache_hit =
         cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
 
-    setup_with_privileges(privileges, runtime, &mut bootstrap, env_vars)?;
+    check_staged_executables(&bootstrap)?;
+    setup_with_privileges(privileges, runtime, &mut bootstrap, env_vars)
+        .map_err(|err| explain_setup_failure(&bootstrap, err))?;
     run_post_setup(
         &mut bootstrap,
         PostSetup {

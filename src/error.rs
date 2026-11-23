@@ -71,6 +71,17 @@ pub enum BootstrapErrorKind {
     ExtensionArchiveInvalid,
     /// Writing the extension files into the installation tree failed.
     ExtensionInstallFailed,
+    /// The staged `PostgreSQL` binaries need shared libraries this host lacks.
+    ///
+    /// The report downcasts to
+    /// [`RuntimePreflightError`](crate::RuntimePreflightError).
+    RuntimeIncompatible,
+    /// The host's dependency resolver could not run, so the staged binaries
+    /// could not be checked.
+    ///
+    /// Opt out with
+    /// [`TestBootstrapConfig::with_runtime_preflight`](crate::TestBootstrapConfig::with_runtime_preflight).
+    RuntimeCheckIndeterminate,
 }
 
 impl BootstrapErrorKind {

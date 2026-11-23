@@ -25,6 +25,7 @@ use crate::{
     cache::BinaryCacheConfig,
     error::BootstrapResult,
     observability::LOG_TARGET,
+    runtime_check::{check_staged_executables, explain_setup_failure},
 };
 
 #[path = "startup_setup_only.rs"]
@@ -39,31 +40,9 @@ pub(super) use self::setup_only::{setup_lifecycle, setup_with_privileges};
 #[cfg(feature = "async-api")]
 use self::timing::timed_step_async;
 use self::{
-    timing::timed_step,
+    timing::{LifecycleStep, timed_step},
     watch::{release_owner_watcher, watch_for_owner_death},
 };
-
-#[derive(Clone, Copy)]
-enum LifecycleStep {
-    Setup,
-    Start,
-}
-
-impl LifecycleStep {
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Setup => "setup",
-            Self::Start => "start",
-        }
-    }
-
-    const fn worker_operation(self) -> worker_operation::WorkerOperation {
-        match self {
-            Self::Setup => worker_operation::WorkerOperation::Setup,
-            Self::Start => worker_operation::WorkerOperation::Start,
-        }
-    }
-}
 
 /// Outcome from starting the `PostgreSQL` instance.
 pub(super) struct StartupOutcome {
@@ -104,6 +83,9 @@ pub(super) fn start_postgres(
     let cache_hit =
         cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
     let (_setup, install_lock) = InstallLock::after_cache_lookup(setup, cache_hit, &install_root);
+    // A staged tree (a cache hit or an earlier install) is checked before
+    // `initdb` can fail on it; a first download is explained after `Setup`.
+    check_staged_executables(&bootstrap)?;
 
     let context = LifecycleContext {
         runtime,
@@ -242,7 +224,8 @@ where
     let setup_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
     timed_step(LifecycleStep::Setup, || {
         dispatch(&setup_invoker, LifecycleStep::Setup)
-    })?;
+    })
+    .map_err(|err| explain_setup_failure(bootstrap, err))?;
     run_post_setup(bootstrap, context.post)?;
     let start_invoker = ClusterWorkerInvoker::new(context.runtime, bootstrap, context.env_vars);
     timed_step(LifecycleStep::Start, || {
@@ -295,6 +278,7 @@ pub(super) async fn start_postgres_async(
         cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
 
     let (_setup, install_lock) = InstallLock::after_cache_lookup(setup, cache_hit, &install_root);
+    check_staged_executables(&bootstrap)?;
     let post = PostSetup {
         cache_config,
         cache_hit,
@@ -347,7 +331,8 @@ async fn invoke_lifecycle_async(
             crate::durability::setup_disposable(embedded),
         )),
     )
-    .await?;
+    .await
+    .map_err(|err| explain_setup_failure(bootstrap, err))?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
     timed_step_async(
@@ -379,7 +364,8 @@ async fn invoke_lifecycle_root_async(
             }),
         ),
     )
-    .await?;
+    .await
+    .map_err(|err| explain_setup_failure(bootstrap, err))?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual start; this drives the invocation.
