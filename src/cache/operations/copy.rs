@@ -84,6 +84,11 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 
     for dir_entry in fs::read_dir(src)? {
         let entry = dir_entry?;
+        // A runtime-preflight pass describes one host's library environment,
+        // so it must not travel through the cache to another host.
+        if entry.file_name() == crate::runtime_check::MARKER_FILE {
+            continue;
+        }
         let file_type = entry.file_type()?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());

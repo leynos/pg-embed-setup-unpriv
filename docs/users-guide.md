@@ -64,11 +64,15 @@ runs at three points:
 
 A pass is remembered in a marker file inside the staged installation directory,
 keyed by the `PostgreSQL` version, the release URL and the host operating
-system and architecture. A later run on the same host skips the check, and a
-shared binary cache that moves between hosts re-checks on each new host. A
-failure is never remembered. On a warm run the check costs a single file read;
-a cold check runs `ldd` three times, which took about 30 ms in total on the
-`ubuntu:24.04` container measured below.
+system release and architecture. A later run on the same host skips the check.
+The marker never enters the shared binary cache, so a cache that several hosts
+or images share is checked afresh for each installation. The key does not see
+which packages an image has installed: if one installation directory is shared
+between images that differ only in packages, delete the `.pg-embed-runtime-ok`
+file in it to force a new check. A failure is never remembered, and the
+explanation of a failed `Setup` always checks afresh. On a warm run the check
+costs a single file read; a cold check runs `ldd` three times, which took about
+30 ms in total on the `ubuntu:24.04` container measured below.
 
 On failure the bootstrap returns a `BootstrapError` whose kind is
 `BootstrapErrorKind::RuntimeIncompatible`. Downcast its report to

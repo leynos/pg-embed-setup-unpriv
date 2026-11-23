@@ -78,6 +78,17 @@ impl<'a, R: SharedLibraryResolver> Preflight<'a, R> {
         Ok(())
     }
 
+    /// Checks the staged executables afresh, ignoring any recorded pass.
+    ///
+    /// Used to explain a failure: a marker only says the check passed once,
+    /// and the failure being explained is evidence the environment changed.
+    ///
+    /// # Errors
+    /// As for [`Self::check_executables`].
+    pub(crate) fn diagnose_executables(&self, staged: &Path) -> Result<(), RuntimePreflightError> {
+        self.check_objects(&staged_executables(staged))
+    }
+
     /// Checks the given objects, without consulting or writing the marker.
     ///
     /// # Errors

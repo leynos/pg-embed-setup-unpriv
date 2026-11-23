@@ -30,6 +30,7 @@ mod stage;
 mod tests;
 
 pub use error::{BinaryFinding, IndeterminateRuntime, RuntimePreflightError, UnresolvedLibraries};
+pub(crate) use marker::MARKER_FILE;
 pub(crate) use stage::{
     check_extension_libraries,
     check_staged_executables,

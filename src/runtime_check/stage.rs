@@ -153,7 +153,7 @@ pub(super) fn explain_setup_failure_with<R: SharedLibraryResolver>(
     let Some(staged) = locate(bootstrap) else {
         return original;
     };
-    match Preflight::new(resolver, staged.context).check_executables(&staged.dir) {
+    match Preflight::new(resolver, staged.context).diagnose_executables(&staged.dir) {
         Err(unresolved @ RuntimePreflightError::Unresolved(_)) => {
             warn!(
                 target: LOG_TARGET,

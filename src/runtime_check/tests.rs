@@ -328,6 +328,20 @@ mod staged {
     }
 
     #[test]
+    fn a_failed_setup_is_explained_even_when_a_pass_was_recorded() {
+        let staged = staged_tree();
+        let bootstrap = bootstrap_for(&staged);
+        check_staged_executables_with(&FakeResolver::default(), &bootstrap).expect("first pass");
+        assert!(staged.path().join(marker::MARKER_FILE).is_file());
+        let resolver = FakeResolver::missing("postgres", &["libxml2.so.2"]);
+        let initdb_failure = BootstrapError::from(eyre!("initdb failed"));
+
+        let err = explain_setup_failure_with(&resolver, &bootstrap, initdb_failure);
+
+        assert_eq!(err.kind(), BootstrapErrorKind::RuntimeIncompatible);
+    }
+
+    #[test]
     fn a_failed_setup_is_explained_by_the_unresolved_library() {
         let staged = staged_tree();
         let bootstrap = bootstrap_for(&staged);
