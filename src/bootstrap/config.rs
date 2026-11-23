@@ -55,7 +55,7 @@ use std::{fmt, time::Duration};
 
 use camino::Utf8PathBuf;
 
-use crate::PgEnvCfg;
+use crate::{PgEnvCfg, RuntimePreflight};
 
 /// Explicit inputs for [`bootstrap_for_tests_with`](crate::bootstrap_for_tests_with).
 ///
@@ -78,6 +78,7 @@ pub struct TestBootstrapConfig {
     worker_binary: Option<Utf8PathBuf>,
     shutdown_timeout: Option<Duration>,
     releases_url: Option<String>,
+    runtime_preflight: RuntimePreflight,
 }
 
 impl TestBootstrapConfig {
@@ -98,6 +99,7 @@ impl TestBootstrapConfig {
             worker_binary: None,
             shutdown_timeout: None,
             releases_url: None,
+            runtime_preflight: RuntimePreflight::Check,
         }
     }
 
@@ -137,6 +139,12 @@ impl TestBootstrapConfig {
     /// [`PgEnvCfg::to_settings_for_tests`].
     #[must_use]
     pub fn releases_url(&self) -> Option<&str> { self.releases_url.as_deref() }
+
+    /// Returns whether staged binaries are checked for unresolved libraries.
+    ///
+    /// Defaults to [`RuntimePreflight::Check`].
+    #[must_use]
+    pub const fn runtime_preflight(&self) -> RuntimePreflight { self.runtime_preflight }
 
     /// Sets the worker binary used for privileged subprocess execution.
     ///
@@ -212,6 +220,30 @@ impl TestBootstrapConfig {
     }
 }
 
+impl TestBootstrapConfig {
+    /// Chooses whether the bootstrap checks staged binaries for unresolved
+    /// shared libraries.
+    ///
+    /// The check is on by default and needs `ldd` (package `libc-bin` on
+    /// Debian and Ubuntu). Pass [`RuntimePreflight::Skip`] on a host without a
+    /// resolver, such as a distroless image.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use pg_embedded_setup_unpriv::{PgEnvCfg, RuntimePreflight, TestBootstrapConfig};
+    ///
+    /// let config = TestBootstrapConfig::new(PgEnvCfg::default())
+    ///     .with_runtime_preflight(RuntimePreflight::Skip);
+    /// assert_eq!(config.runtime_preflight(), RuntimePreflight::Skip);
+    /// ```
+    #[must_use]
+    pub const fn with_runtime_preflight(mut self, preflight: RuntimePreflight) -> Self {
+        self.runtime_preflight = preflight;
+        self
+    }
+}
+
 impl From<PgEnvCfg> for TestBootstrapConfig {
     fn from(cfg: PgEnvCfg) -> Self { Self::new(cfg) }
 }
@@ -230,6 +262,7 @@ impl fmt::Debug for TestBootstrapConfig {
             .field("worker_binary", &self.worker_binary)
             .field("shutdown_timeout", &self.shutdown_timeout)
             .field("releases_url", &self.releases_url)
+            .field("runtime_preflight", &self.runtime_preflight)
             .finish()
     }
 }

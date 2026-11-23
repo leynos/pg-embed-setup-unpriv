@@ -11,11 +11,14 @@ use color_eyre::eyre::eyre;
 use super::{cache_integration, installation, setup_lock::InstallLock};
 #[cfg(feature = "async-api")]
 use crate::extensions::install_extensions_async;
+#[cfg(feature = "async-api")]
+use crate::runtime_check::{check_extension_libraries_async, check_staged_executables_async};
 use crate::{
     TestBootstrapSettings,
     cache::BinaryCacheConfig,
     error::{BootstrapError, BootstrapErrorKind, BootstrapResult},
     extensions::{ExtensionRequest, install_extensions},
+    runtime_check::{check_extension_libraries, check_staged_executables},
 };
 
 /// Binary-cache state carried from the pre-setup lookup into the hook.
@@ -36,13 +39,14 @@ pub(super) fn run_post_setup(
     post: PostSetup<'_>,
 ) -> BootstrapResult<()> {
     installation::refresh_worker_installation_dir(bootstrap);
+    check_staged_executables(bootstrap)?;
     populate_cache_on_miss(post, bootstrap);
     let Some((request, install_dir)) = extension_target(bootstrap)? else {
         return Ok(());
     };
     let _hook_lock = post.install_lock.for_hook()?;
     bootstrap.installed_extensions = install_extensions(&request, &install_dir)?;
-    Ok(())
+    check_extension_libraries(bootstrap)
 }
 
 /// Async twin of [`run_post_setup`]; the install runs on the blocking pool.
@@ -52,13 +56,14 @@ pub(super) async fn run_post_setup_async(
     post: PostSetup<'_>,
 ) -> BootstrapResult<()> {
     installation::refresh_worker_installation_dir(bootstrap);
+    check_staged_executables_async(bootstrap).await?;
     populate_cache_on_miss(post, bootstrap);
     let Some((request, install_dir)) = extension_target(bootstrap)? else {
         return Ok(());
     };
     let _hook_lock = post.install_lock.for_hook_async().await?;
     bootstrap.installed_extensions = install_extensions_async(request, install_dir).await?;
-    Ok(())
+    check_extension_libraries_async(bootstrap).await
 }
 
 /// Populates the binary cache after a successful setup on a cache miss.

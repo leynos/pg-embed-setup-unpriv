@@ -132,6 +132,23 @@ fn copy_from_cache_copies_files() {
     assert!(target.join("bin/pg_ctl").exists());
 }
 
+/// A preflight pass records one host's library environment, so it stays out of
+/// the shared cache in both directions.
+#[test]
+fn a_runtime_preflight_pass_does_not_travel_through_the_cache() {
+    let source_temp = tempdir().expect("source tempdir");
+    let target_temp = tempdir().expect("target tempdir");
+    let source = Utf8Path::from_path(source_temp.path()).expect("utf8 source");
+    let target = Utf8Path::from_path(target_temp.path()).expect("utf8 target");
+    create_mock_binaries(source).expect("create mock binaries");
+    fs::write(source.join(crate::runtime_check::MARKER_FILE), "pass").expect("write marker");
+
+    copy_from_cache(source, target).expect("copy from cache");
+
+    assert!(target.join("bin/postgres").exists());
+    assert!(!target.join(crate::runtime_check::MARKER_FILE).exists());
+}
+
 /// A file the target already holds at the cached size is left alone, because
 /// a server from another process may be running it; one cut short is copied
 /// again.

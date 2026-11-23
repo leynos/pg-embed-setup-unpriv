@@ -47,6 +47,7 @@ use self::{
 use crate::{
     error::{BootstrapResult, Result as CrateResult},
     extensions::{ExtensionRequest, InstalledExtension},
+    runtime_check::RuntimePreflight,
 };
 
 const DEFAULT_SETUP_TIMEOUT: Duration = Duration::from_mins(3);
@@ -121,6 +122,8 @@ pub struct TestBootstrapSettings {
     pub extensions: Option<ExtensionRequest>,
     /// What the extension hook installed, filled in once the cluster started.
     pub installed_extensions: Vec<InstalledExtension>,
+    /// Whether staged binaries are checked for unresolved shared libraries.
+    pub runtime_preflight: RuntimePreflight,
 }
 
 /// Bootstraps an embedded `PostgreSQL` instance, downloads the distribution,
@@ -263,6 +266,7 @@ fn orchestrate_bootstrap(
         binary_cache_dir: inputs.cfg.binary_cache_dir,
         extensions,
         installed_extensions: Vec::new(),
+        runtime_preflight: inputs.runtime_preflight,
     })
 }
 

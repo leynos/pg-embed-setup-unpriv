@@ -62,6 +62,11 @@ path = "tests/bootstrap_worker_binary.rs"
 required-features = ["cluster-unit-tests"]
 
 [[test]]
+name = "runtime_preflight"
+path = "tests/runtime_preflight.rs"
+required-features = ["cluster-unit-tests"]
+
+[[test]]
 name = "cluster_split_constructors"
 path = "tests/cluster_split_constructors.rs"
 required-features = ["cluster-unit-tests"]

@@ -28,6 +28,7 @@ use super::{
 };
 use crate::{
     PgEnvCfg,
+    RuntimePreflight,
     TestBootstrapConfig,
     error::{BootstrapError, BootstrapResult},
 };
@@ -109,6 +110,7 @@ pub(super) struct ResolvedInputs {
     pub(super) worker_binary: Option<Utf8PathBuf>,
     pub(super) execution_mode: ExecutionMode,
     pub(super) shutdown_timeout: Duration,
+    pub(super) runtime_preflight: RuntimePreflight,
 }
 
 /// Resolves the inputs for `source`, dispatching to the matching reader.
@@ -139,6 +141,7 @@ fn resolve_ambient_inputs(
         worker_binary: launch.worker_binary,
         execution_mode: launch.execution_mode,
         shutdown_timeout: launch.shutdown_timeout,
+        runtime_preflight: RuntimePreflight::default(),
     })
 }
 
@@ -175,6 +178,7 @@ fn resolve_explicit_inputs(
         worker_binary,
         execution_mode,
         shutdown_timeout,
+        runtime_preflight: config.runtime_preflight(),
     })
 }
 

@@ -36,6 +36,165 @@ tool and integrate it into automated test flows.
 - Windows on ARM is not a supported target because the upstream PostgreSQL
   binary archive does not provide `aarch64-pc-windows-msvc` binaries.
 
+## Supported host images and runtime packages
+
+The staged `PostgreSQL` binaries are prebuilt and dynamically linked against
+the host's shared libraries. A host that lacks one of them cannot load
+`postgres`, and the failure would otherwise surface as an opaque cluster
+start-up error. The bootstrap therefore runs a runtime-compatibility preflight
+in the normal path, with no opt-in.
+
+### What the preflight checks and when
+
+The preflight asks the host's `ldd` which shared libraries (SONAMEs) the staged
+`postgres`, `initdb` and `pg_ctl` cannot resolve, and, after the extension hook
+runs, the same for the installed extension libraries (`vector.so`, for example).
+`postgresql_embedded` downloads, extracts and runs `initdb` inside a single
+`setup()` call, and this crate does not bypass that call. The check therefore
+runs at three points:
+
+- Before `Setup`, when a tree is already staged (a binary-cache hit or an
+  earlier install). This check precedes `initdb`.
+- After a failed `Setup`. On a first download nothing is staged beforehand, so
+  `initdb` fails first on an incompatible host. The preflight then inspects the
+  freshly staged tree and replaces that opaque failure with the explanation
+  below. A first run on an incompatible host therefore fails at `initdb` and is
+  then explained. Later runs check before `initdb`, unless a recorded pass
+  (below) skips the check.
+- After the extension hook, for the extension libraries it installed.
+
+A pass is remembered in a marker file inside the staged installation directory,
+keyed by the `PostgreSQL` version, the release URL, the host operating system
+release and architecture, and the size and modification time of the loader cache
+(`/etc/ld.so.cache`), which installing or removing a library package changes.
+A later run on the same host skips the check. The marker never enters the
+shared binary cache, so a cache that several hosts or images share is checked
+afresh for each installation. A failure is never remembered, and the
+explanation of a failed `Setup` always checks afresh. A host that changes
+libraries without touching the loader cache is not seen; delete the
+`.pg-embed-runtime-ok` file in the installation directory to force a new check.
+On a warm run the check costs a single file read; a cold check runs `ldd` three
+times, which took about 30 ms in total on the `ubuntu:24.04` container measured
+below.
+
+On failure the bootstrap returns a `BootstrapError` whose kind is
+`BootstrapErrorKind::RuntimeIncompatible`. Downcast its report to
+`RuntimePreflightError` to read the structured fields. The message names each
+binary, each missing SONAME, the host operating system from `/etc/os-release`,
+the `PostgreSQL` version and the archive source, and gives the two remedies:
+run on a supported host image, or point `with_releases_url` at an archive built
+for this host. The preflight never symlinks a SONAME and never fetches a
+library from another distribution.
+
+Only Linux is checked. On macOS and Windows the preflight is skipped.
+
+### Hosts without `ldd`
+
+The check needs `ldd`. When it cannot run, the bootstrap fails with
+`BootstrapErrorKind::RuntimeCheckIndeterminate` rather than passing silently.
+The one exception is the explanation of a failed first-download `Setup`: with no
+`ldd` the explanation cannot be made, so that run returns the original
+`initdb` failure with the same kind, plus a note that the runtime preflight was
+unavailable and why. The `libc-bin` package provides `ldd` and is installed on
+every Debian and Ubuntu image, so only distroless-style images lack it. Either
+install it, or opt out explicitly:
+
+```rust
+use pg_embedded_setup_unpriv::{PgEnvCfg, RuntimePreflight, TestBootstrapConfig};
+
+let config = TestBootstrapConfig::new(PgEnvCfg::default())
+    .with_runtime_preflight(RuntimePreflight::Skip);
+```
+
+The opt-out is a builder option and not an environment variable.
+
+### Supported host images
+
+| Host image   | Status                                | Runtime packages                          |
+| ------------ | ------------------------------------- | ----------------------------------------- |
+| Ubuntu 24.04 | Verified                              | `libxml2`, `libgssapi-krb5-2`, `libc-bin` |
+| Ubuntu 26.04 | Unsupported with the current archives | None available; see the known gap below   |
+
+_Table 1: Supported host images and their runtime packages._
+
+The package list came from running the check against the real staged
+`PostgreSQL` 17.11.0 `x86_64-unknown-linux-gnu` archive in a bare
+`ubuntu:24.04` container (Ubuntu 24.04.5 LTS), measured on 23 November 2026.
+The bare image resolved every library except two:
+
+| Unresolved SONAME     | Binary               | Ubuntu 24.04 package |
+| --------------------- | -------------------- | -------------------- |
+| `libxml2.so.2`        | `postgres`           | `libxml2`            |
+| `libgssapi_krb5.so.2` | `postgres`, `initdb` | `libgssapi-krb5-2`   |
+
+_Table 2: Libraries unresolved on a bare `ubuntu:24.04` image._
+
+After `apt-get install libxml2 libgssapi-krb5-2` all three executables
+resolved. The remaining SONAMEs (`libssl.so.3`, `libcrypto.so.3`, `libz.so.1`,
+`libzstd.so.1`, `liblz4.so.1`, `liblzma.so.5` and the Kerberos support
+libraries) are already present on the base image or arrive as dependencies of
+those two packages. Developer machines and hosted runner images usually have
+both packages already; when one is missing, the preflight names it. The crate's
+own integration test (`tests/runtime_preflight.rs`) runs the preflight against
+the real archive in Linux CI, where a failure would fail the build.
+
+The same archive also passed the preflight on a Fedora 43 development host,
+which provides the same SONAMEs. Other distributions that provide them can run
+the archives and the preflight will confirm it, but they are not part of the
+verified set.
+
+### Known gap: Ubuntu 26.04
+
+Ubuntu 26.04 (which `ubuntu-latest` resolves to on GitHub-hosted runners) ships
+`libxml2-16`, which provides `libxml2.so.16` and no `libxml2.so.2`. The staged
+`postgres` needs `libxml2.so.2`, so it cannot load there, and installing
+packages does not help: the 26.04 archive index has no package providing that
+SONAME. Measured in a bare `ubuntu:26.04` container (Ubuntu 26.04.1 LTS),
+`postgres` leaves `libxml2.so.2` unresolved even with `libxml2-16` and
+`libgssapi-krb5-2` installed. Consumers should pin their `PostgreSQL` CI lanes
+to `ubuntu-24.04` until a compatible archive exists.
+
+As of 23 November 2026, theseus-rs does not publish archives for Ubuntu 26.04.
+Its releases carry one archive per target triple (for example
+`postgresql-17.11.0-x86_64-unknown-linux-gnu.tar.gz`, plus a `musl` variant),
+built on its `ubuntu-latest` runners, with no per-distribution variants and no
+open upstream issue about this gap
+(`https://github.com/theseus-rs/postgresql-binaries/issues`). That is the known
+gap; this crate does not fork or rebuild archives.
+
+### Pointing `with_releases_url` at an archive built for the host
+
+`TestBootstrapConfig::with_releases_url` selects where archives are downloaded
+from (see [Explicit configuration](#explicit-configuration)). An archive built
+for a newer host image must:
+
+- carry the same `PostgreSQL` version that the configuration selects, so the
+  version pin and the binary cache entry stay valid;
+- use the Theseus layout and naming, `postgresql-<version>-<target>.tar.gz`
+  with a `.sha256` file beside it, and the same `bin/`, `lib/` and `share/`
+  tree;
+- keep `lib/` and `share/extension/` where the prebuilt extension hook expects
+  them, built for the same `PostgreSQL` major and minor and the same target
+  triple, so the pgvector artefact the hook installs still loads; and
+- be served from a URL that begins with a repository `postgresql_archive`
+  supports (the Theseus repository, or the Zonky repository when that feature
+  is enabled). The crate does not register new download sources.
+
+Because of the last point, no archive for Ubuntu 26.04 is reachable today: the
+upgrade path opens when upstream publishes one. When it does, pass the
+repository URL to `with_releases_url`, and the preflight confirms that the
+result resolves on the host before any cluster starts. Because the release URL
+is not part of the binary-cache key, give the new source its own
+`binary_cache_dir` (see
+[Binary cache and release sources](#binary-cache-and-release-sources)). Also
+choose a fresh `runtime_dir`: an incompatible archive that is already staged in
+the old one is checked before any download, so the preflight would report it
+again. If an existing cluster keeps its explicit `PG_DATA_DIR`, set
+`PG_PASSWORD` to that cluster's password when switching installation
+directories: the password file lives in the installation tree, so the new
+directory has none and the bootstrap would otherwise fail with
+`ClusterPasswordMissing`.
+
 ## Test backend selection
 
 `PG_TEST_BACKEND` selects the backend used by `bootstrap_for_tests()` and
@@ -71,7 +230,7 @@ Tagged releases publish both CLI binaries in `cargo binstall` archives for:
 | macOS            | `aarch64-apple-darwin`, `x86_64-apple-darwin`           |
 | Windows          | `x86_64-pc-windows-msvc`                                |
 
-_Table 1: Host release targets for tagged `cargo binstall` archives._
+_Table 3: Host release targets for tagged `cargo binstall` archives._
 
 Install the host release with:
 
@@ -401,7 +560,7 @@ seconds; the default is 15 seconds.
 Some inputs are still ambient by design. They are read after configuration
 resolution, and none of them can be supplied through `TestBootstrapConfig`:
 
-Table 1: Inputs that remain ambient after explicit configuration resolution.
+Table 4: Inputs that remain ambient after explicit configuration resolution.
 
 | Input                         | When it is read                                                    |
 | ----------------------------- | ------------------------------------------------------------------ |
@@ -581,7 +740,7 @@ assert!(std::ptr::eq(cluster, cluster2));
 | `test_cluster`        | Tests that modify cluster-level settings or state |
 | `shared_test_cluster` | Tests that only need database-level isolation     |
 
-_Table 2: Fixture selection for `pg-embed-setup-unpriv` test clusters._
+_Table 5: Fixture selection for `pg-embed-setup-unpriv` test clusters._
 
 The shared cluster is particularly effective when combined with template
 databases (see "Database lifecycle management" below) to reduce per-test
@@ -757,7 +916,7 @@ The following table reports approximate benchmark results from one development
 test environment. Treat the timings as environment-dependent guidance rather
 than guaranteed performance figures.
 
-_Table 3: Performance comparison for test isolation approaches._
+_Table 6: Performance comparison for test isolation approaches._
 
 | Approach                       | Bootstrap | Per-test overhead | Isolation |
 | ------------------------------ | --------- | ----------------- | --------- |

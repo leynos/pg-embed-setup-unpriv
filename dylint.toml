@@ -37,6 +37,7 @@ excluded_crates = [
     "localized_diagnostics",
     "observability",
     "recovery_integration",
+    "runtime_preflight",
     "settings",
     "settings_logging",
     "settings_snapshot_roundtrip",

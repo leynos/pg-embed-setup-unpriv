@@ -208,6 +208,7 @@ mod tests {
             binary_cache_dir: None,
             extensions: None,
             installed_extensions: Vec::new(),
+            runtime_preflight: crate::RuntimePreflight::default(),
         }
     }
 
