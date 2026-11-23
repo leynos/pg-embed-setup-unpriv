@@ -1,9 +1,10 @@
 //! Per-archive memo of a passed preflight.
 //!
-//! The marker sits inside the staged installation, so it travels with the
-//! archive into and out of the shared binary cache. Its content is a key that
-//! names the archive and the host; a marker written on another host does not
-//! match, so a cache shared between hosts never vouches for the wrong one.
+//! The marker sits inside the staged installation but never enters the shared
+//! binary cache: the cache copy skips it in both directions, because a pass
+//! describes one host's library environment. Its content is a key that names
+//! the archive, the host operating system and the loader cache, so a marker
+//! left in an installation directory that moves to another host does not match.
 
 use std::{fs, path::Path};
 
