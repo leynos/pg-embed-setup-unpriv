@@ -122,13 +122,13 @@ def test_stage_archive_accepts_prerelease_versions(tmp_path: Path) -> None:
         release_archive.ReleaseArchiveSpec(
             repo=tmp_path,
             target=target,
-            version="0.8.0-beta.1",
+            version="0.8.0-beta1",
             dist_dir=tmp_path / "dist",
             binaries=binaries,
         )
     )
 
-    root = f"pg-embed-setup-unpriv-{target}-v0.8.0-beta.1"
+    root = f"pg-embed-setup-unpriv-{target}-v0.8.0-beta1"
     assert archive.name == f"{root}.tgz"
     assert archive_members(archive)[0] == root
 

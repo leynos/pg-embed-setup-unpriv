@@ -38,11 +38,11 @@ jobs:
             tag="$REF_NAME"
           fi
 
-          # A prerelease suffix (-alpha.N, -beta.N, -rc.N) marks the GitHub
-          # release as a pre-release so it never becomes "Latest".
-          pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'
+          # Mirrors ortho-config: a semver suffix such as -beta1 marks the
+          # GitHub release as a pre-release so it never becomes "Latest".
+          pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
           if ! [[ "$tag" =~ $pattern ]]; then
-            echo "Release tags must match vMAJOR.MINOR.PATCH[-(alpha|beta|rc).N]: $tag" >&2
+            echo "Release tags must match vMAJOR.MINOR.PATCH[-suffix]: $tag" >&2
             exit 1
           fi
 
@@ -88,16 +88,11 @@ jobs:
             exit 1
           fi
 
-          prerelease_flag=()
-          if [ "$PRERELEASE" = "true" ]; then
-            prerelease_flag=(--prerelease)
-          fi
-
           gh release create "$TAG" \
             --draft \
             --generate-notes \
             --title "$TAG" \
-            "${prerelease_flag[@]}"
+            --prerelease="$PRERELEASE"
 
   build-assets:
     name: Build ${{ matrix.target }}
