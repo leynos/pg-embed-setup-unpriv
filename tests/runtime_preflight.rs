@@ -85,6 +85,13 @@ fn the_real_archive_passes_the_preflight_on_this_host(
             );
             let message = err.to_string();
             let debug = format!("{err:?}");
+            // The preflight is the first line of defence; if a loader failure
+            // from the server itself still reaches here, it is a missing
+            // library, which this test exists to catch, not a soft skip.
+            ensure!(
+                !debug.contains("error while loading shared libraries"),
+                "a staged binary could not load a shared library: {debug}"
+            );
             let reason = cluster_skip_message(&message, Some(&debug))
                 .ok_or_else(|| eyre!("bootstrap failed: {debug}"))?;
             tracing::warn!("{reason}");
