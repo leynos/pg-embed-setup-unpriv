@@ -27,7 +27,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 #: Ubicloud lane without a ceiling, or a class or ceiling changed, fails
 #: until it is reviewed.
 PLACEMENTS = [
-    (".github/workflows/ci.yml", "build-test", "ubicloud-standard-4", 66),
+    (".github/workflows/ci.yml", "build-test", "ubicloud-standard-4-ubuntu-2404", 66),
     (".github/workflows/ci.yml", "msrv", "ubicloud-standard-4", 30),
     (".github/workflows/ci.yml", "binstall-packaging", "ubicloud-standard-2", 15),
     (".github/workflows/coverage-main.yml", "coverage-upload", "ubicloud-standard-2", 66),
