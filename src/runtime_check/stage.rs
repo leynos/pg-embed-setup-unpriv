@@ -162,8 +162,16 @@ pub(super) fn explain_setup_failure_with<R: SharedLibraryResolver>(
             );
             into_bootstrap_error(unresolved)
         }
-        Ok(()) | Err(RuntimePreflightError::Indeterminate(_)) => original,
+        Ok(()) => original,
+        Err(RuntimePreflightError::Indeterminate(why)) => note_unavailable(original, &why.reason),
     }
+}
+
+/// Keeps `original` as the error and adds why the preflight could not explain it.
+fn note_unavailable(original: BootstrapError, reason: &str) -> BootstrapError {
+    let kind = original.kind();
+    let note = format!("{original} (runtime preflight unavailable: {reason})");
+    BootstrapError::new(kind, original.into_report().wrap_err(note))
 }
 
 /// Async twin of [`check_staged_executables`]; `ldd` runs on the blocking pool.

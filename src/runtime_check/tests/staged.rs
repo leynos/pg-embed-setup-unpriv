@@ -103,20 +103,33 @@ fn a_failed_setup_is_explained_by_the_unresolved_library() {
     assert_eq!(err.kind(), BootstrapErrorKind::RuntimeIncompatible);
 }
 
-#[rstest]
-#[case::libraries_resolve(FakeResolver::default())]
-#[case::resolver_unavailable(FakeResolver::unavailable())]
-fn a_failed_setup_keeps_its_own_error_when_the_tree_is_not_to_blame(
-    #[case] resolver: FakeResolver,
-) {
+#[test]
+fn a_failed_setup_keeps_its_own_error_when_the_libraries_resolve() {
     let staged = staged_tree();
     let bootstrap = bootstrap_for(&staged);
     let original = BootstrapError::from(eyre!("disk full"));
 
-    let err = explain_setup_failure_with(&resolver, &bootstrap, original);
+    let err = explain_setup_failure_with(&FakeResolver::default(), &bootstrap, original);
 
     assert_eq!(err.kind(), BootstrapErrorKind::Other);
     assert_eq!(err.to_string(), "disk full");
+}
+
+#[test]
+fn a_failed_setup_keeps_its_kind_and_notes_an_unavailable_resolver() {
+    let staged = staged_tree();
+    let bootstrap = bootstrap_for(&staged);
+    let original = BootstrapError::from(eyre!("disk full"));
+
+    let err = explain_setup_failure_with(&FakeResolver::unavailable(), &bootstrap, original);
+
+    assert_eq!(err.kind(), BootstrapErrorKind::Other);
+    let message = err.to_string();
+    assert!(message.contains("disk full"), "{message}");
+    assert!(
+        message.contains("runtime preflight unavailable: ldd is not installed"),
+        "{message}"
+    );
 }
 
 #[test]
