@@ -111,6 +111,28 @@ def test_manifest_version_reports_manifest_errors(
         assert exc_info.value.reason == expected_reason
 
 
+def test_stage_archive_accepts_prerelease_versions(tmp_path: Path) -> None:
+    """Prerelease versions keep their suffix in the archive name and root."""
+    target = "x86_64-unknown-linux-gnu"
+    binaries = ("pg_embedded_setup_unpriv", "pg_worker")
+    for binary in binaries:
+        write_release_binary(tmp_path, target, binary)
+
+    archive = release_archive.stage_archive(
+        release_archive.ReleaseArchiveSpec(
+            repo=tmp_path,
+            target=target,
+            version="0.8.0-beta.1",
+            dist_dir=tmp_path / "dist",
+            binaries=binaries,
+        )
+    )
+
+    root = f"pg-embed-setup-unpriv-{target}-v0.8.0-beta.1"
+    assert archive.name == f"{root}.tgz"
+    assert archive_members(archive)[0] == root
+
+
 def test_stage_archive_uses_cargo_binstall_layout_for_windows(tmp_path: Path) -> None:
     """Windows archives use cargo-binstall layout with `.exe` binaries."""
     target = "x86_64-pc-windows-msvc"

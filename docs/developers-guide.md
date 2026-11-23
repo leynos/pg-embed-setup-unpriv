@@ -467,6 +467,12 @@ workflow creates a draft GitHub release, builds native archives for Linux
 a `sha256sum`-compatible `.tgz.sha256` sidecar, so consumers can pin and verify
 a download without a second network round trip.
 
+Tags must look like `vMAJOR.MINOR.PATCH`, optionally followed by
+`-alpha.N`, `-beta.N` or `-rc.N`. A prerelease tag creates and publishes the
+GitHub release with `--prerelease`, so it never becomes "Latest"; a stable tag
+publishes with `--latest`. The workflow does not publish to crates.io; that
+remains a manual `cargo publish`.
+
 The `create-release` and `publish-release` jobs deliberately run without a
 checkout: they only call the GitHub API. They therefore set
 `GH_REPO: ${{ github.repository }}`, because `gh` otherwise infers the
