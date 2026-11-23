@@ -132,23 +132,90 @@ fn a_failed_setup_keeps_its_kind_and_notes_an_unavailable_resolver() {
     );
 }
 
-#[test]
-fn installed_extension_libraries_are_checked() {
-    let staged = staged_tree();
-    let mut bootstrap = bootstrap_for(&staged);
-    let name = ExtensionName::new("vector").expect("name");
-    bootstrap.installed_extensions = vec![InstalledExtension {
-        name,
+/// An installed `vector` extension that owns exactly `files`.
+fn installed_extension_with(files: &[&str]) -> InstalledExtension {
+    InstalledExtension {
+        name: ExtensionName::new("vector").expect("name"),
         version: "0.8.6".to_owned(),
         postgresql: "17.11.0".to_owned(),
         target: "x86_64-unknown-linux-gnu".to_owned(),
         archive_sha256: Sha256Hex::parse(&"0".repeat(64)).expect("digest"),
         origin: ArchiveOrigin::Cached,
-        files: vec![
-            Utf8PathBuf::from("lib/vector.so"),
-            Utf8PathBuf::from("share/extension/vector.control"),
-        ],
-    }];
+        files: files.iter().map(Utf8PathBuf::from).collect(),
+    }
+}
+
+#[test]
+fn credentials_in_the_release_url_reach_neither_the_error_nor_the_marker() {
+    let staged = staged_tree();
+    let mut bootstrap = bootstrap_for(&staged);
+    bootstrap.settings.releases_url =
+        "https://user:hunter2@example.com/pg?sig=abc123#frag".to_owned();
+    let failing = FakeResolver::missing("postgres", &["libxml2.so.2"]);
+
+    let err = check_staged_executables_with(&failing, &bootstrap).expect_err("fails");
+
+    let message = err.to_string();
+    assert!(message.contains("https://example.com/pg"), "{message}");
+    assert_no_secrets(&message);
+    check_staged_executables_with(&FakeResolver::default(), &bootstrap).expect("passes");
+    let marker =
+        fs::read_to_string(staged.path().join(crate::runtime_check::MARKER_FILE)).expect("marker");
+    assert_no_secrets(&marker);
+}
+
+/// Fails if `text` carries any part of the credentialed release URL.
+fn assert_no_secrets(text: &str) {
+    for secret in ["hunter2", "abc123", "frag"] {
+        assert!(!text.contains(secret), "{secret} leaked: {text}");
+    }
+}
+
+#[test]
+fn versioned_shared_libraries_are_checked_and_other_files_are_not() {
+    let staged = staged_tree();
+    let mut bootstrap = bootstrap_for(&staged);
+    let files = [
+        "lib/vector.so",
+        "lib/example.so.1",
+        "lib/example.so.1.2",
+        "share/extension/vector.control",
+        "share/extension/vector--0.8.sql",
+    ];
+    bootstrap.installed_extensions = vec![installed_extension_with(&files)];
+    let resolver = FakeResolver::default();
+
+    check_extension_libraries_with(&resolver, &bootstrap).expect("passes");
+
+    let seen: Vec<String> = resolver
+        .seen
+        .borrow()
+        .iter()
+        .map(|path| path.rsplit('/').next().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(seen, ["vector.so", "example.so.1", "example.so.1.2"]);
+}
+
+#[test]
+fn a_non_elf_file_is_unavailable_not_static() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let text = dir.path().join("not-elf.so");
+    fs::write(&text, b"plain text").expect("write");
+    let object = Utf8PathBuf::from_path_buf(text).expect("utf8");
+
+    let outcome = LddResolver::new().unresolved(&object);
+
+    assert!(outcome.is_err(), "{outcome:?}");
+}
+
+#[test]
+fn installed_extension_libraries_are_checked() {
+    let staged = staged_tree();
+    let mut bootstrap = bootstrap_for(&staged);
+    bootstrap.installed_extensions = vec![installed_extension_with(&[
+        "lib/vector.so",
+        "share/extension/vector.control",
+    ])];
     let resolver = FakeResolver::missing("vector.so", &["libgomp.so.1"]);
 
     let err = check_extension_libraries_with(&resolver, &bootstrap).expect_err("fails");

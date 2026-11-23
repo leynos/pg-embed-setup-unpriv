@@ -186,7 +186,10 @@ repository URL to `with_releases_url`, and the preflight confirms that the
 result resolves on the host before any cluster starts. Because the release URL
 is not part of the binary-cache key, give the new source its own
 `binary_cache_dir` (see
-[Binary cache and release sources](#binary-cache-and-release-sources)).
+[Binary cache and release sources](#binary-cache-and-release-sources)). Also
+choose a fresh `runtime_dir`: an incompatible archive that is already staged in
+the old one is checked before any download, so the preflight would report it
+again. Keep the existing data directory out of this change.
 
 ## Test backend selection
 

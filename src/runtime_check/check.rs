@@ -24,8 +24,12 @@ const CHECKED_EXECUTABLES: [&str; 3] = ["postgres", "initdb", "pg_ctl"];
 pub(crate) struct ArchiveContext {
     /// The staged `PostgreSQL` version.
     pub(crate) postgresql_version: String,
-    /// The configured releases URL the archive came from.
+    /// The releases URL the archive came from, with credentials, query and
+    /// fragment removed, for diagnostics.
     pub(crate) archive_source: String,
+    /// A digest of the full releases URL, so the cache key tells sources apart
+    /// without storing a secret.
+    pub(crate) source_digest: String,
     /// The host the objects must run on.
     pub(crate) host: HostOs,
 }
@@ -35,7 +39,7 @@ impl ArchiveContext {
     fn marker_key(&self) -> String {
         format!(
             "v1\n{}\n{}\n{}\n",
-            self.postgresql_version, self.archive_source, self.host.fingerprint
+            self.postgresql_version, self.source_digest, self.host.fingerprint
         )
     }
 }

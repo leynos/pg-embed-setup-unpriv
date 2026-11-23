@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use postgresql_embedded::Settings;
 use tracing::{debug, warn};
 
@@ -18,6 +18,7 @@ use crate::{
     TestBootstrapSettings,
     cluster::resolve_staged_dir,
     error::{BootstrapError, BootstrapErrorKind, BootstrapResult},
+    extensions::{Sha256Hex, redact_url},
     observability::LOG_TARGET,
 };
 
@@ -39,7 +40,8 @@ fn locate(bootstrap: &TestBootstrapSettings) -> Option<Staged> {
     let dir = staged_postgres_dir(&bootstrap.settings)?;
     let context = ArchiveContext {
         postgresql_version: staged_version(&dir, &bootstrap.settings),
-        archive_source: bootstrap.settings.releases_url.clone(),
+        archive_source: redact_url(&bootstrap.settings.releases_url),
+        source_digest: Sha256Hex::of_bytes(bootstrap.settings.releases_url.as_bytes()).to_string(),
         host: HostOs::detect(),
     };
     Some(Staged { dir, context })
@@ -122,7 +124,7 @@ pub(super) fn check_extension_libraries_with<R: SharedLibraryResolver>(
         .installed_extensions
         .iter()
         .flat_map(|extension| &extension.files)
-        .filter(|file| file.extension() == Some("so"))
+        .filter(|file| is_shared_library(file))
         .filter_map(|file| Utf8PathBuf::from_path_buf(staged.dir.join(file)).ok())
         .collect();
     Preflight::new(resolver, staged.context)
@@ -172,6 +174,20 @@ fn note_unavailable(original: BootstrapError, reason: &str) -> BootstrapError {
     let kind = original.kind();
     let note = format!("{original} (runtime preflight unavailable: {reason})");
     BootstrapError::new(kind, original.into_report().wrap_err(note))
+}
+
+/// Whether `file` is a shared library: `name.so` or a versioned `name.so.N`.
+fn is_shared_library(file: &Utf8Path) -> bool {
+    let Some(name) = file.file_name() else {
+        return false;
+    };
+    file.extension() == Some("so")
+        || name.rsplit_once(".so.").is_some_and(|(_, version)| {
+            !version.is_empty()
+                && version
+                    .split('.')
+                    .all(|part| part.bytes().all(|b| b.is_ascii_digit()) && !part.is_empty())
+        })
 }
 
 /// Async twin of [`check_staged_executables`]; `ldd` runs on the blocking pool.

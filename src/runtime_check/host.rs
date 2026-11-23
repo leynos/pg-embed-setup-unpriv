@@ -1,6 +1,10 @@
 //! Host identity used in diagnostics and in the preflight cache key.
 
-use std::{fs, path::Path, time::UNIX_EPOCH};
+use std::{
+    fs,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use camino::Utf8Path;
 
@@ -71,10 +75,18 @@ pub(crate) fn loader_cache_signature(path: &Path) -> String {
     let Ok(metadata) = fs::metadata(path) else {
         return "none".to_owned();
     };
-    let nanos = metadata
+    let modified = metadata
         .modified()
         .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("{}-{nanos}", metadata.len())
+        .map_or_else(|| "unknown".to_owned(), signed_nanos_since_epoch);
+    format!("{}-{modified}", metadata.len())
+}
+
+/// Encodes a time as signed nanoseconds from the Unix epoch, so two distinct
+/// times before the epoch stay distinct.
+pub(crate) fn signed_nanos_since_epoch(time: SystemTime) -> String {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(after) => format!("+{}", after.as_nanos()),
+        Err(before) => format!("-{}", before.duration().as_nanos()),
+    }
 }

@@ -14,7 +14,7 @@ use tempfile::TempDir;
 use super::{
     RuntimePreflightError,
     check::{ArchiveContext, Preflight},
-    host::{HostOs, loader_cache_signature},
+    host::{HostOs, loader_cache_signature, signed_nanos_since_epoch},
     marker,
     resolver::{LddResolver, ResolverUnavailable, SharedLibraryResolver, parse_missing_sonames},
 };
@@ -72,6 +72,7 @@ fn context(host: HostOs) -> ArchiveContext {
     ArchiveContext {
         postgresql_version: "17.11.0".to_owned(),
         archive_source: "https://github.com/theseus-rs/postgresql-binaries".to_owned(),
+        source_digest: "digest".to_owned(),
         host,
     }
 }
@@ -249,6 +250,19 @@ fn the_loader_cache_signature_sees_a_same_size_rewrite() {
         .expect("set time");
 
     assert_ne!(loader_cache_signature(&cache), before);
+}
+
+#[test]
+fn distinct_times_before_the_epoch_stay_distinct() {
+    let epoch = std::time::SystemTime::UNIX_EPOCH;
+    let two = signed_nanos_since_epoch(epoch - Duration::from_secs(2));
+    let one = signed_nanos_since_epoch(epoch - Duration::from_secs(1));
+
+    assert_ne!(two, one);
+    assert_ne!(
+        one,
+        signed_nanos_since_epoch(epoch + Duration::from_secs(1))
+    );
 }
 
 #[test]

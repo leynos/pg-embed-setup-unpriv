@@ -54,7 +54,8 @@ impl SharedLibraryResolver for LddResolver {
             })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if output.status.success() || is_static_object(&stdout, &stderr) {
+        let is_static_elf = is_static_object(&stdout, &stderr) && is_elf(object);
+        if output.status.success() || is_static_elf {
             return Ok(parse_missing_sonames(&stdout));
         }
         Err(ResolverUnavailable {
@@ -72,6 +73,18 @@ impl SharedLibraryResolver for LddResolver {
 fn is_static_object(stdout: &str, stderr: &str) -> bool {
     const MARKER: &str = "not a dynamic executable";
     stdout.contains(MARKER) || stderr.contains(MARKER)
+}
+
+/// Whether the file starts with the ELF magic.
+///
+/// `ldd` says "not a dynamic executable" for any file it cannot load,
+/// including an empty or non-ELF one, so only an ELF file may take the static
+/// fallback.
+fn is_elf(object: &Utf8Path) -> bool {
+    let mut magic = [0_u8; 4];
+    std::fs::File::open(object)
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut magic))
+        .is_ok_and(|()| magic == *b"\x7fELF")
 }
 
 /// Extracts the SONAMEs from `lib.so.N => not found` lines, sorted and unique.
