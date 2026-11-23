@@ -18,26 +18,66 @@ use cap_std::{ambient_authority, fs::Dir};
 use color_eyre::eyre::{Result, eyre};
 use ortho_config::MapEnv;
 use pg_embedded_setup_unpriv::PgEnvCfg;
+use rstest::{fixture, rstest};
 use tempfile::TempDir;
 
 /// An environment with nothing configured, rooted at `empty`.
 ///
 /// The XDG and home locations name `empty`, so no user-level file is
 /// discovered, and `empty` is the working directory.
-fn isolated_environment(empty: &std::path::Path) -> Arc<MapEnv> {
-    let env = ["XDG_CONFIG_HOME", "HOME", "APPDATA", "USERPROFILE"]
+fn isolated_environment(empty: &std::path::Path) -> MapEnv {
+    ["XDG_CONFIG_HOME", "HOME", "APPDATA", "USERPROFILE"]
         .into_iter()
         .fold(MapEnv::new().with_current_dir(empty), |env, name| {
             env.with_var(name, empty)
-        });
-    Arc::new(env)
+        })
+}
+
+/// An empty directory that doubles as the injected working directory.
+#[fixture]
+fn empty() -> TempDir {
+    let dir = TempDir::new().expect("create an empty working directory");
+    assert!(dir.path().is_dir(), "the working directory should exist");
+    dir
+}
+
+/// Load with `port = 5543` in `.pg.toml` and, optionally, `PG_PORT` injected, and
+/// return the resulting port. The expected port proves the second-stage load
+/// reads the injected source: a process-backed load would see neither.
+fn load_port(empty: &TempDir, pg_port: Option<&str>) -> Result<Option<u16>> {
+    let root = Dir::open_ambient_dir(empty.path(), ambient_authority())?;
+    root.write(".pg.toml", "port = 5543\n")?;
+    let base = isolated_environment(empty.path());
+    let env = match pg_port {
+        Some(port) => base.with_var("PG_PORT", port),
+        None => base,
+    };
+    let cfg = PgEnvCfg::load_with_env(Arc::new(env)).map_err(|err| eyre!("{err:?}"))?;
+    Ok(cfg.port)
+}
+
+/// The injected file and `PG_PORT` feed the load, and the variable wins.
+#[rstest]
+#[case::file_only(None, Some(5543))]
+#[case::environment_over_file(Some("5544"), Some(5544))]
+fn load_reads_the_injected_sources(
+    empty: TempDir,
+    #[case] pg_port: Option<&str>,
+    #[case] expected: Option<u16>,
+) -> Result<()> {
+    let port = load_port(&empty, pg_port)?;
+    if port == expected {
+        return Ok(());
+    }
+    Err(eyre!(
+        "PG_PORT={pg_port:?} over a file port of 5543 gave {port:?}, expected {expected:?}"
+    ))
 }
 
 /// With nothing configured anywhere, `load()` returns the default configuration.
-#[test]
-fn load_succeeds_with_no_configuration_at_all() -> Result<()> {
-    let empty = TempDir::new()?;
-    let cfg = PgEnvCfg::load_with_env(isolated_environment(empty.path()))
+#[rstest]
+fn load_succeeds_with_no_configuration_at_all(empty: TempDir) -> Result<()> {
+    let cfg = PgEnvCfg::load_with_env(Arc::new(isolated_environment(empty.path())))
         .map_err(|err| eyre!("{err:?}"))?;
     let default = PgEnvCfg::default();
     if format!("{cfg:?}") != format!("{default:?}") {
@@ -49,12 +89,11 @@ fn load_succeeds_with_no_configuration_at_all() -> Result<()> {
 /// A malformed `.pg.toml` in the working directory is a mistake the user should
 /// hear about, not an absent source: `load()` must still fail rather than fall
 /// back to the defaults.
-#[test]
-fn load_still_fails_for_an_unreadable_file() -> Result<()> {
-    let empty = TempDir::new()?;
+#[rstest]
+fn load_still_fails_for_an_unreadable_file(empty: TempDir) -> Result<()> {
     let root = Dir::open_ambient_dir(empty.path(), ambient_authority())?;
     root.write(".pg.toml", "= not toml")?;
-    PgEnvCfg::load_with_env(isolated_environment(empty.path())).map_or_else(
+    PgEnvCfg::load_with_env(Arc::new(isolated_environment(empty.path()))).map_or_else(
         |_| Ok(()),
         |cfg| Err(eyre!("an unreadable file was defaulted to {cfg:?}")),
     )
