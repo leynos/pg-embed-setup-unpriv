@@ -22,8 +22,11 @@ use pg_embedded_setup_unpriv::PgEnvCfg;
 use rstest::{fixture, rstest};
 use tempfile::TempDir;
 
-/// Names the variables whose presence makes the test binary act as the child.
-const CHILD_MARKER: &str = "PG_EMBEDDED_ZERO_CONFIG_CHILD";
+/// Names the variable whose presence makes the test binary act as the child.
+///
+/// It must not start with `PG_`: the loader would read it as configuration and
+/// the child would no longer exercise the empty-configuration branch.
+const CHILD_MARKER: &str = "ZERO_CONFIG_LOAD_CHILD";
 
 /// Locations where `ortho_config` looks for a user-level configuration file.
 const DISCOVERY_VARS: [&str; 5] = [
