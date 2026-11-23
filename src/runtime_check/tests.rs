@@ -6,7 +6,7 @@ use std::{
     fs,
 };
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use rstest::rstest;
 use tempfile::TempDir;
 
@@ -252,6 +252,7 @@ mod staged {
 
     use std::path::Path;
 
+    use camino::Utf8PathBuf;
     use color_eyre::eyre::eyre;
 
     use super::*;
