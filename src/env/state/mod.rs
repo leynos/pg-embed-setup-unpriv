@@ -57,6 +57,11 @@ impl EnvLockOps for StdEnvLock {
     fn var_os(_guard: &Self::Guard, key: &OsString) -> Option<OsString> { env::var_os(key) }
 
     /// Delegate locked writes to `std::env::set_var`.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the library's lock-serialized environment scope is the sanctioned writer; \
+                  migrate to an injected environment"
+    )]
     fn set_var(_guard: &mut Self::Guard, key: &OsString, value: OsString) {
         unsafe {
             // SAFETY: `ENV_LOCK` serializes changes. Drop restores recorded
@@ -66,6 +71,11 @@ impl EnvLockOps for StdEnvLock {
     }
 
     /// Delegate locked removals to `std::env::remove_var`.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the library's lock-serialized environment scope is the sanctioned writer; \
+                  migrate to an injected environment"
+    )]
     fn remove_var(_guard: &mut Self::Guard, key: &OsString) {
         unsafe {
             // SAFETY: `ENV_LOCK` serializes changes. Drop restores recorded

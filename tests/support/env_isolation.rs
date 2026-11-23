@@ -41,6 +41,11 @@ impl Drop for EnvIsolationGuard {
 }
 
 /// Sets an environment variable whilst bypassing nightly's lint.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "serialized test-environment helper; migrate callers to an injected environment or a \
+              subprocess"
+)]
 pub unsafe fn set_env_var<K, V>(key: K, value: V)
 where
     K: AsRef<OsStr>,
@@ -51,6 +56,11 @@ where
 }
 
 /// Removes an environment variable whilst bypassing nightly's lint.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "serialized test-environment helper; migrate callers to an injected environment or a \
+              subprocess"
+)]
 pub unsafe fn remove_env_var<K>(key: K)
 where
     K: AsRef<OsStr>,
