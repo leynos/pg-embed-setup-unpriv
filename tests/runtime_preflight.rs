@@ -3,7 +3,9 @@
 //! The first run stages the real Theseus archive (or reuses the shared binary
 //! cache). The preflight runs in the normal bootstrap path, so the cluster
 //! starting at all shows the archive passed on this host; the marker beside
-//! the staged tree shows the check ran and was remembered.
+//! the staged tree shows the check ran and was remembered. The opt-out is
+//! covered by a unit test: a cache entry staged before the opt-out can carry
+//! a marker, so the marker's absence is not a reliable observation here.
 #![cfg(target_os = "linux")]
 
 use std::{fs, path::PathBuf};
@@ -59,16 +61,12 @@ fn marker_present(install_dir: &camino::Utf8Path) -> bool {
 }
 
 #[rstest]
-#[case::checked(RuntimePreflight::Check, true)]
-#[case::skipped(RuntimePreflight::Skip, false)]
 fn the_real_archive_passes_the_preflight_on_this_host(
     serial_guard: ScenarioSerialGuard,
-    #[case] preflight: RuntimePreflight,
-    #[case] expects_marker: bool,
 ) -> Result<()> {
     let root = tempfile::tempdir().context("create temporary root")?;
     let root_path = Utf8Path::from_path(root.path()).ok_or_else(|| eyre!("non-UTF-8 tempdir"))?;
-    let config = config(root_path, preflight)?;
+    let config = config(root_path, RuntimePreflight::Check)?;
 
     let started = TestCluster::new_split_with(config);
     let (handle, guard) = match started {
@@ -86,8 +84,8 @@ fn the_real_archive_passes_the_preflight_on_this_host(
     drop(handle);
 
     ensure!(
-        marker_present(&root_path.join("install")) == expects_marker,
-        "unexpected preflight marker state for {preflight:?}"
+        marker_present(&root_path.join("install")),
+        "the preflight should have passed and left its marker beside the staged tree"
     );
     drop(serial_guard);
     Ok(())

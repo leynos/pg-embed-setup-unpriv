@@ -4,16 +4,13 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     fs,
-    path::Path,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use color_eyre::eyre::eyre;
 use rstest::rstest;
 use tempfile::TempDir;
 
 use super::{
-    RuntimePreflight,
     RuntimePreflightError,
     check::{ArchiveContext, Preflight},
     host::HostOs,
@@ -87,10 +84,6 @@ fn staged_tree() -> TempDir {
         fs::write(bin.join(name), b"").expect("write executable");
     }
     dir
-}
-
-fn utf8(path: &Path) -> Utf8PathBuf {
-    Utf8PathBuf::from_path_buf(path.to_path_buf()).expect("utf8")
 }
 
 #[test]
@@ -257,11 +250,16 @@ fn the_real_resolver_finds_nothing_missing_for_a_system_binary() {
 mod staged {
     //! The bootstrap-facing hooks, against a temporary staged tree.
 
+    use std::path::Path;
+
+    use color_eyre::eyre::eyre;
+
     use super::*;
     use crate::{
         BootstrapError,
         BootstrapErrorKind,
         ExecutionPrivileges,
+        RuntimePreflight,
         TestBootstrapSettings,
         extensions::{ArchiveOrigin, ExtensionName, InstalledExtension, Sha256Hex},
         runtime_check::stage::{
@@ -271,6 +269,10 @@ mod staged {
         },
         test_support::dummy_settings,
     };
+
+    fn utf8(path: &Path) -> Utf8PathBuf {
+        Utf8PathBuf::from_path_buf(path.to_path_buf()).expect("utf8")
+    }
 
     fn bootstrap_for(staged: &TempDir) -> TestBootstrapSettings {
         let mut bootstrap = dummy_settings(ExecutionPrivileges::Unprivileged);
