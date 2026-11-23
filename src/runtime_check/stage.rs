@@ -165,3 +165,63 @@ pub(super) fn explain_setup_failure_with<R: SharedLibraryResolver>(
         Ok(()) | Err(RuntimePreflightError::Indeterminate(_)) => original,
     }
 }
+
+/// Async twin of [`check_staged_executables`]; `ldd` runs on the blocking pool.
+///
+/// # Errors
+/// As for [`check_staged_executables`], plus a failure of the blocking task.
+#[cfg(feature = "async-api")]
+pub(crate) async fn check_staged_executables_async(
+    bootstrap: &TestBootstrapSettings,
+) -> BootstrapResult<()> {
+    let owned = bootstrap.clone();
+    tokio::task::spawn_blocking(move || check_staged_executables(&owned))
+        .await
+        .unwrap_or_else(|err| Err(blocking_task_failed(err)))
+}
+
+/// Async twin of [`check_extension_libraries`]; `ldd` runs on the blocking pool.
+///
+/// # Errors
+/// As for [`check_extension_libraries`], plus a failure of the blocking task.
+#[cfg(feature = "async-api")]
+pub(crate) async fn check_extension_libraries_async(
+    bootstrap: &TestBootstrapSettings,
+) -> BootstrapResult<()> {
+    let owned = bootstrap.clone();
+    tokio::task::spawn_blocking(move || check_extension_libraries(&owned))
+        .await
+        .unwrap_or_else(|err| Err(blocking_task_failed(err)))
+}
+
+/// Async twin of [`explain_setup_failure`]; `ldd` runs on the blocking pool.
+#[cfg(feature = "async-api")]
+pub(crate) async fn explain_setup_failure_async(
+    bootstrap: &TestBootstrapSettings,
+    original: BootstrapError,
+) -> BootstrapError {
+    let owned = bootstrap.clone();
+    tokio::task::spawn_blocking(move || explain_setup_failure(&owned, original))
+        .await
+        .unwrap_or_else(blocking_task_failed)
+}
+
+/// Replaces a failed async `Setup` result with its explanation, when one exists.
+///
+/// # Errors
+/// Returns `result`'s error, possibly replaced by the typed explanation.
+#[cfg(feature = "async-api")]
+pub(crate) async fn explain_failed_setup_async(
+    bootstrap: &TestBootstrapSettings,
+    result: BootstrapResult<()>,
+) -> BootstrapResult<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(err) => Err(explain_setup_failure_async(bootstrap, err).await),
+    }
+}
+
+#[cfg(feature = "async-api")]
+fn blocking_task_failed(err: tokio::task::JoinError) -> BootstrapError {
+    BootstrapError::from(color_eyre::Report::new(err).wrap_err("runtime preflight task failed"))
+}

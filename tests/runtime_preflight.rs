@@ -13,6 +13,7 @@ use std::{fs, path::PathBuf};
 use camino::{Utf8Path, Utf8PathBuf};
 use color_eyre::eyre::{Context, Result, ensure, eyre};
 use pg_embedded_setup_unpriv::{
+    BootstrapErrorKind,
     PgEnvCfg,
     RuntimePreflight,
     TestBootstrapConfig,
@@ -72,6 +73,16 @@ fn the_real_archive_passes_the_preflight_on_this_host(
     let (handle, guard) = match started {
         Ok(pair) => pair,
         Err(err) => {
+            // A resolver that cannot run must fail this test, not match the
+            // soft-skip text for a missing file and pass without checking.
+            ensure!(
+                !matches!(
+                    err.kind(),
+                    BootstrapErrorKind::RuntimeIncompatible
+                        | BootstrapErrorKind::RuntimeCheckIndeterminate
+                ),
+                "the preflight rejected this host: {err}"
+            );
             let message = err.to_string();
             let debug = format!("{err:?}");
             let reason = cluster_skip_message(&message, Some(&debug))

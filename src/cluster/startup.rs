@@ -19,6 +19,8 @@ use super::{
     worker_invoker::WorkerInvoker as ClusterWorkerInvoker,
     worker_operation,
 };
+#[cfg(feature = "async-api")]
+use crate::runtime_check::{check_staged_executables_async, explain_failed_setup_async};
 use crate::{
     ExecutionPrivileges,
     TestBootstrapSettings,
@@ -278,7 +280,7 @@ pub(super) async fn start_postgres_async(
         cache_integration::try_use_binary_cache(cache_config, &version_req, &mut bootstrap);
 
     let (_setup, install_lock) = InstallLock::after_cache_lookup(setup, cache_hit, &install_root);
-    check_staged_executables(&bootstrap)?;
+    check_staged_executables_async(&bootstrap).await?;
     let post = PostSetup {
         cache_config,
         cache_hit,
@@ -324,15 +326,15 @@ async fn invoke_lifecycle_async(
     embedded: &mut PostgreSQL,
 ) -> BootstrapResult<()> {
     let invoker = AsyncInvoker::new(bootstrap, env_vars);
-    timed_step_async(
+    let setup = timed_step_async(
         LifecycleStep::Setup,
         Box::pin(invoker.invoke(
             worker_operation::WorkerOperation::Setup,
             crate::durability::setup_disposable(embedded),
         )),
     )
-    .await
-    .map_err(|err| explain_setup_failure(bootstrap, err))?;
+    .await;
+    explain_failed_setup_async(bootstrap, setup).await?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
     timed_step_async(
@@ -356,7 +358,7 @@ async fn invoke_lifecycle_root_async(
 ) -> BootstrapResult<()> {
     let setup_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual setup; this drives the invocation.
-    timed_step_async(
+    let setup = timed_step_async(
         LifecycleStep::Setup,
         Box::pin(
             setup_invoker.invoke(worker_operation::WorkerOperation::Setup, async {
@@ -364,8 +366,8 @@ async fn invoke_lifecycle_root_async(
             }),
         ),
     )
-    .await
-    .map_err(|err| explain_setup_failure(bootstrap, err))?;
+    .await;
+    explain_failed_setup_async(bootstrap, setup).await?;
     super::extension_hook::run_post_setup_async(bootstrap, post).await?;
     let start_invoker = AsyncInvoker::new(bootstrap, env_vars);
     // No-op future: the worker subprocess performs the actual start; this drives the invocation.

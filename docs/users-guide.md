@@ -63,16 +63,18 @@ runs at three points:
 - After the extension hook, for the extension libraries it installed.
 
 A pass is remembered in a marker file inside the staged installation directory,
-keyed by the `PostgreSQL` version, the release URL and the host operating
-system release and architecture. A later run on the same host skips the check.
-The marker never enters the shared binary cache, so a cache that several hosts
-or images share is checked afresh for each installation. The key does not see
-which packages an image has installed: if one installation directory is shared
-between images that differ only in packages, delete the `.pg-embed-runtime-ok`
-file in it to force a new check. A failure is never remembered, and the
-explanation of a failed `Setup` always checks afresh. On a warm run the check
-costs a single file read; a cold check runs `ldd` three times, which took about
-30 ms in total on the `ubuntu:24.04` container measured below.
+keyed by the `PostgreSQL` version, the release URL, the host operating system
+release and architecture, and the size and modification time of the loader cache
+(`/etc/ld.so.cache`), which installing or removing a library package changes.
+A later run on the same host skips the check. The marker never enters the
+shared binary cache, so a cache that several hosts or images share is checked
+afresh for each installation. A failure is never remembered, and the
+explanation of a failed `Setup` always checks afresh. A host that changes
+libraries without touching the loader cache is not seen; delete the
+`.pg-embed-runtime-ok` file in the installation directory to force a new check.
+On a warm run the check costs a single file read; a cold check runs `ldd` three
+times, which took about 30 ms in total on the `ubuntu:24.04` container measured
+below.
 
 On failure the bootstrap returns a `BootstrapError` whose kind is
 `BootstrapErrorKind::RuntimeIncompatible`. Downcast its report to
@@ -109,6 +111,8 @@ The opt-out is a builder option and not an environment variable.
 | Ubuntu 24.04 | Verified                              | `libxml2`, `libgssapi-krb5-2`, `libc-bin` |
 | Ubuntu 26.04 | Unsupported with the current archives | None available; see the known gap below   |
 
+_Table 1: Supported host images and their runtime packages._
+
 The package list came from running the check against the real staged
 `PostgreSQL` 17.11.0 `x86_64-unknown-linux-gnu` archive in a bare
 `ubuntu:24.04` container (Ubuntu 24.04.5 LTS), measured on 23 November 2026.
@@ -118,6 +122,8 @@ The bare image resolved every library except two:
 | --------------------- | -------------------- | -------------------- |
 | `libxml2.so.2`        | `postgres`           | `libxml2`            |
 | `libgssapi_krb5.so.2` | `postgres`, `initdb` | `libgssapi-krb5-2`   |
+
+_Table 2: Libraries unresolved on a bare `ubuntu:24.04` image._
 
 After `apt-get install libxml2 libgssapi-krb5-2` all three executables
 resolved. The remaining SONAMEs (`libssl.so.3`, `libcrypto.so.3`, `libz.so.1`,
@@ -152,7 +158,7 @@ open upstream issue about this gap
 (`https://github.com/theseus-rs/postgresql-binaries/issues`). That is the known
 gap; this crate does not fork or rebuild archives.
 
-### Pointing `with_releases_url` at an archive built for your host
+### Pointing `with_releases_url` at an archive built for the host
 
 `TestBootstrapConfig::with_releases_url` selects where archives are downloaded
 from (see [Explicit configuration](#explicit-configuration)). An archive built
@@ -213,7 +219,7 @@ Tagged releases publish both CLI binaries in `cargo binstall` archives for:
 | macOS            | `aarch64-apple-darwin`, `x86_64-apple-darwin`           |
 | Windows          | `x86_64-pc-windows-msvc`                                |
 
-_Table 1: Host release targets for tagged `cargo binstall` archives._
+_Table 3: Host release targets for tagged `cargo binstall` archives._
 
 Install the host release with:
 
@@ -543,7 +549,7 @@ seconds; the default is 15 seconds.
 Some inputs are still ambient by design. They are read after configuration
 resolution, and none of them can be supplied through `TestBootstrapConfig`:
 
-Table 1: Inputs that remain ambient after explicit configuration resolution.
+Table 4: Inputs that remain ambient after explicit configuration resolution.
 
 | Input                         | When it is read                                                    |
 | ----------------------------- | ------------------------------------------------------------------ |
@@ -723,7 +729,7 @@ assert!(std::ptr::eq(cluster, cluster2));
 | `test_cluster`        | Tests that modify cluster-level settings or state |
 | `shared_test_cluster` | Tests that only need database-level isolation     |
 
-_Table 2: Fixture selection for `pg-embed-setup-unpriv` test clusters._
+_Table 5: Fixture selection for `pg-embed-setup-unpriv` test clusters._
 
 The shared cluster is particularly effective when combined with template
 databases (see "Database lifecycle management" below) to reduce per-test
@@ -899,7 +905,7 @@ The following table reports approximate benchmark results from one development
 test environment. Treat the timings as environment-dependent guidance rather
 than guaranteed performance figures.
 
-_Table 3: Performance comparison for test isolation approaches._
+_Table 6: Performance comparison for test isolation approaches._
 
 | Approach                       | Bootstrap | Per-test overhead | Isolation |
 | ------------------------------ | --------- | ----------------- | --------- |

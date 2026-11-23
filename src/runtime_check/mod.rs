@@ -36,6 +36,12 @@ pub(crate) use stage::{
     check_staged_executables,
     explain_setup_failure,
 };
+#[cfg(feature = "async-api")]
+pub(crate) use stage::{
+    check_extension_libraries_async,
+    check_staged_executables_async,
+    explain_failed_setup_async,
+};
 
 /// Whether the bootstrap checks staged binaries for unresolved libraries.
 ///
