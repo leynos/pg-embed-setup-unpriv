@@ -92,6 +92,12 @@ fn the_real_archive_passes_the_preflight_on_this_host(
                 !debug.contains("error while loading shared libraries"),
                 "a staged binary could not load a shared library: {debug}"
             );
+            // A failed first Setup keeps its own kind and notes an unavailable
+            // resolver; that note must fail this test, not match a skip.
+            ensure!(
+                !debug.contains("runtime preflight unavailable"),
+                "the preflight could not run: {debug}"
+            );
             let reason = cluster_skip_message(&message, Some(&debug))
                 .ok_or_else(|| eyre!("bootstrap failed: {debug}"))?;
             tracing::warn!("{reason}");
