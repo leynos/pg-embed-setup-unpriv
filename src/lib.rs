@@ -146,7 +146,7 @@ pub mod worker_process_test_api {
     }
 }
 
-use std::ffi::OsString;
+use std::{ffi::OsString, sync::Arc};
 
 pub use bootstrap::{
     CleanupMode,
@@ -193,7 +193,13 @@ pub use error::{
     PrivilegeResult,
     Result,
 };
-use ortho_config::{OrthoConfig, declarative::LayerComposition};
+use ortho_config::{
+    EnvSource,
+    OrthoConfig,
+    ProcessEnv,
+    ScanEnvSource,
+    declarative::LayerComposition,
+};
 use postgresql_embedded::{Settings, VersionReq};
 #[cfg(feature = "privileged-tests")]
 #[cfg(all(
@@ -380,9 +386,27 @@ impl PgEnvCfg {
     /// # Errors
     /// Returns an error when environment parsing fails or derived configuration
     /// cannot be represented using UTF-8 paths.
-    pub fn load() -> ConfigResult<Self> {
+    pub fn load() -> ConfigResult<Self> { Self::load_with_env(Arc::new(ProcessEnv)) }
+
+    /// Loads configuration from an injected environment.
+    ///
+    /// Behaves like [`load`](Self::load), but the `PG_*` variables, the
+    /// configuration discovery locations, and the working directory come from
+    /// `env` instead of the process. Pin the working directory with
+    /// [`ortho_config::MapEnv::with_current_dir`] to keep the load off the process entirely.
+    ///
+    /// # Errors
+    /// Returns an error when environment parsing fails or derived configuration
+    /// cannot be represented using UTF-8 paths.
+    pub fn load_with_env<E>(env: Arc<E>) -> ConfigResult<Self>
+    where
+        E: EnvSource + ScanEnvSource + 'static,
+    {
         let args = [OsString::from("pg-embedded-setup-unpriv")];
-        if composed_no_source(Self::compose_layers_from_iter(args.clone())) {
+        if composed_no_source(Self::compose_layers_from_iter_with_env(
+            args.clone(),
+            Arc::clone(&env),
+        )) {
             tracing::debug!(
                 target: crate::observability::LOG_TARGET,
                 operation = "PgEnvCfg::load",
@@ -391,7 +415,7 @@ impl PgEnvCfg {
             );
             return Ok(Self::default());
         }
-        Self::load_from_iter(args).map_err(|err| ConfigError::from(eyre!(err)))
+        Self::load_from_iter_with_env(args, env).map_err(|err| ConfigError::from(eyre!(err)))
     }
 
     /// Converts the configuration into a complete `postgresql_embedded::Settings` object.

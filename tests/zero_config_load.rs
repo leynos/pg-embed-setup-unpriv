@@ -6,69 +6,39 @@
 //! other source contributes a field, and deserializing that into the struct
 //! fails, so the case needs its own test. A CI runner that happens to export a
 //! `PG_*` variable, or a checkout that holds a `.pg.toml`, hides the defect, so
-//! every test here clears the `PG_*` variables (which include the prefixed
-//! configuration path selector), the unprefixed `CONFIG_PATH`, the XDG and
-//! home locations, and runs from an empty directory.
+//! every test here loads through an injected environment that holds no `PG_*`
+//! variable (which includes the prefixed configuration path selector) or
+//! unprefixed `CONFIG_PATH`, points the XDG and home locations at an empty
+//! directory, and pins that directory as the working directory. The process
+//! environment and working directory are never touched.
 
-use std::{ffi::OsString, path::PathBuf};
+use std::sync::Arc;
 
 use cap_std::{ambient_authority, fs::Dir};
 use color_eyre::eyre::{Result, eyre};
-use pg_embedded_setup_unpriv::{PgEnvCfg, test_support::scoped_env};
+use ortho_config::MapEnv;
+use pg_embedded_setup_unpriv::PgEnvCfg;
 use tempfile::TempDir;
 
-/// Restores the working directory when dropped.
-struct CwdGuard(PathBuf);
-
-impl CwdGuard {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the zero-config loader reads the working directory; migrate to a subprocess \
-                  with Command::current_dir"
-    )]
-    fn enter(dir: &std::path::Path) -> Result<Self> {
-        let previous = std::env::current_dir()?;
-        std::env::set_current_dir(dir)?;
-        Ok(Self(previous))
-    }
-}
-
-impl Drop for CwdGuard {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "restores the working directory entered above; goes with it when the test moves \
-                  to a subprocess"
-    )]
-    fn drop(&mut self) {
-        // Best effort: a failure here cannot be reported from `drop`, and the
-        // test process is about to end or enter another isolated test.
-        drop(std::env::set_current_dir(&self.0));
-    }
-}
-
-/// Every `PG_*` variable in the environment, set to unset, plus the XDG and
-/// home locations pointed at `empty` so no user-level file is discovered.
-fn isolated_environment(empty: &std::path::Path) -> Vec<(OsString, Option<OsString>)> {
-    let mut vars: Vec<(OsString, Option<OsString>)> = std::env::vars_os()
-        .filter(|(name, _)| name.to_string_lossy().starts_with("PG_"))
-        .map(|(name, _)| (name, None))
-        .collect();
-    for name in ["XDG_CONFIG_HOME", "HOME", "APPDATA", "USERPROFILE"] {
-        vars.push((name.into(), Some(empty.as_os_str().to_owned())));
-    }
-    // `ortho_config` also honours the unprefixed selector.
-    vars.push(("CONFIG_PATH".into(), None));
-    vars.push(("XDG_CONFIG_DIRS".into(), None));
-    vars
+/// An environment with nothing configured, rooted at `empty`.
+///
+/// The XDG and home locations name `empty`, so no user-level file is
+/// discovered, and `empty` is the working directory.
+fn isolated_environment(empty: &std::path::Path) -> Arc<MapEnv> {
+    let env = ["XDG_CONFIG_HOME", "HOME", "APPDATA", "USERPROFILE"]
+        .into_iter()
+        .fold(MapEnv::new().with_current_dir(empty), |env, name| {
+            env.with_var(name, empty)
+        });
+    Arc::new(env)
 }
 
 /// With nothing configured anywhere, `load()` returns the default configuration.
 #[test]
 fn load_succeeds_with_no_configuration_at_all() -> Result<()> {
     let empty = TempDir::new()?;
-    let _env = scoped_env(isolated_environment(empty.path()));
-    let _cwd = CwdGuard::enter(empty.path())?;
-    let cfg = PgEnvCfg::load().map_err(|err| eyre!("{err:?}"))?;
+    let cfg = PgEnvCfg::load_with_env(isolated_environment(empty.path()))
+        .map_err(|err| eyre!("{err:?}"))?;
     let default = PgEnvCfg::default();
     if format!("{cfg:?}") != format!("{default:?}") {
         return Err(eyre!("expected the default configuration, got {cfg:?}"));
@@ -84,9 +54,7 @@ fn load_still_fails_for_an_unreadable_file() -> Result<()> {
     let empty = TempDir::new()?;
     let root = Dir::open_ambient_dir(empty.path(), ambient_authority())?;
     root.write(".pg.toml", "= not toml")?;
-    let _env = scoped_env(isolated_environment(empty.path()));
-    let _cwd = CwdGuard::enter(empty.path())?;
-    PgEnvCfg::load().map_or_else(
+    PgEnvCfg::load_with_env(isolated_environment(empty.path())).map_or_else(
         |_| Ok(()),
         |cfg| Err(eyre!("an unreadable file was defaulted to {cfg:?}")),
     )
