@@ -144,11 +144,11 @@ fn missing_libraries_yield_an_actionable_typed_error() {
     let [finding] = found.findings.as_slice() else {
         panic!("expected one finding, got {:?}", found.findings);
     };
-    assert!(finding.binary.as_str().ends_with("bin/postgres"));
+    assert_eq!(finding.binary.file_name(), Some("postgres"));
     assert_eq!(finding.missing, ["libxml2.so.2", "libicuuc.so.74"]);
     let message = err.to_string();
     for needle in [
-        "bin/postgres",
+        "postgres",
         "libxml2.so.2",
         "libicuuc.so.74",
         "Ubuntu 26.04.1 LTS",
