@@ -63,7 +63,7 @@ fn os_release_field(contents: &str, key: &str) -> Option<String> {
     })
 }
 
-/// Summarizes the loader cache as its size and modification time in seconds.
+/// Summarizes the loader cache as its size and modification time in nanoseconds.
 ///
 /// A host without a cache (a minimal image before `ldconfig` has run) yields
 /// `none`, which differs from any host that has one.
@@ -71,10 +71,10 @@ pub(crate) fn loader_cache_signature(path: &Path) -> String {
     let Ok(metadata) = fs::metadata(path) else {
         return "none".to_owned();
     };
-    let seconds = metadata
+    let nanos = metadata
         .modified()
         .ok()
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |elapsed| elapsed.as_secs());
-    format!("{}-{seconds}", metadata.len())
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    format!("{}-{nanos}", metadata.len())
 }

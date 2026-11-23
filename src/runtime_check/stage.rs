@@ -174,8 +174,20 @@ pub(super) fn explain_setup_failure_with<R: SharedLibraryResolver>(
 pub(crate) async fn check_staged_executables_async(
     bootstrap: &TestBootstrapSettings,
 ) -> BootstrapResult<()> {
+    check_staged_executables_async_with(LddResolver::new(), bootstrap).await
+}
+
+/// [`check_staged_executables_async`] through an explicit resolver.
+#[cfg(feature = "async-api")]
+pub(super) async fn check_staged_executables_async_with<R>(
+    resolver: R,
+    bootstrap: &TestBootstrapSettings,
+) -> BootstrapResult<()>
+where
+    R: SharedLibraryResolver + Send + 'static,
+{
     let owned = bootstrap.clone();
-    tokio::task::spawn_blocking(move || check_staged_executables(&owned))
+    tokio::task::spawn_blocking(move || check_staged_executables_with(&resolver, &owned))
         .await
         .unwrap_or_else(|err| Err(blocking_task_failed(err)))
 }

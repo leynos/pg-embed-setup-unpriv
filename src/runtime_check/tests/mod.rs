@@ -4,6 +4,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     fs,
+    time::Duration,
 };
 
 use camino::Utf8Path;
@@ -227,6 +228,25 @@ fn the_loader_cache_signature_changes_with_the_cache() {
     fs::write(&cache, b"one").expect("write cache");
     let before = loader_cache_signature(&cache);
     fs::write(&cache, b"one and more").expect("rewrite cache");
+
+    assert_ne!(loader_cache_signature(&cache), before);
+}
+
+#[test]
+fn the_loader_cache_signature_sees_a_same_size_rewrite() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cache = dir.path().join("ld.so.cache");
+    fs::write(&cache, b"same").expect("write cache");
+    let file = fs::File::options()
+        .write(true)
+        .open(&cache)
+        .expect("open cache");
+    let epoch = std::time::SystemTime::UNIX_EPOCH;
+    file.set_modified(epoch + Duration::from_millis(1_000))
+        .expect("set time");
+    let before = loader_cache_signature(&cache);
+    file.set_modified(epoch + Duration::from_millis(1_001))
+        .expect("set time");
 
     assert_ne!(loader_cache_signature(&cache), before);
 }

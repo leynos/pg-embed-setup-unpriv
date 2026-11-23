@@ -146,3 +146,63 @@ fn installed_extension_libraries_are_checked() {
         [utf8(&staged.path().join("lib/vector.so")).to_string()]
     );
 }
+
+#[cfg(feature = "async-api")]
+mod async_runtime {
+    //! The async check must leave the runtime free while the resolver blocks.
+
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
+
+    use super::*;
+    use crate::runtime_check::stage::check_staged_executables_async_with;
+
+    /// A resolver that blocks its thread, as a slow `ldd` would.
+    struct BlockingResolver(Duration);
+
+    impl SharedLibraryResolver for BlockingResolver {
+        fn unresolved(&self, _object: &Utf8Path) -> Result<Vec<String>, ResolverUnavailable> {
+            std::thread::sleep(self.0);
+            Ok(Vec::new())
+        }
+    }
+
+    /// Counts a tick every 10 ms for as long as the runtime lets it run.
+    fn spawn_ticker(ticks: Arc<AtomicUsize>) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                ticks.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn another_task_progresses_while_the_resolver_blocks() {
+        let staged = staged_tree();
+        let bootstrap = bootstrap_for(&staged);
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticker = spawn_ticker(Arc::clone(&ticks));
+
+        // Three executables at 100 ms each block a thread for 300 ms. Run
+        // inline, that thread is the only one and the ticker never runs.
+        check_staged_executables_async_with(
+            BlockingResolver(Duration::from_millis(100)),
+            &bootstrap,
+        )
+        .await
+        .expect("the check passes");
+        ticker.abort();
+
+        assert!(
+            ticks.load(Ordering::SeqCst) >= 5,
+            "the runtime thread was blocked: {} ticks",
+            ticks.load(Ordering::SeqCst)
+        );
+    }
+}

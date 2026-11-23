@@ -59,7 +59,8 @@ runs at three points:
   `initdb` fails first on an incompatible host. The preflight then inspects the
   freshly staged tree and replaces that opaque failure with the explanation
   below. A first run on an incompatible host therefore fails at `initdb` and is
-  then explained; every later run fails before `initdb`.
+  then explained. Later runs check before `initdb`, unless a recorded pass
+  (below) skips the check.
 - After the extension hook, for the extension libraries it installed.
 
 A pass is remembered in a marker file inside the staged installation directory,
