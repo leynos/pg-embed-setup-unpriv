@@ -21,6 +21,11 @@ use tempfile::TempDir;
 struct CwdGuard(PathBuf);
 
 impl CwdGuard {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the zero-config loader reads the working directory; migrate to a subprocess \
+                  with Command::current_dir"
+    )]
     fn enter(dir: &std::path::Path) -> Result<Self> {
         let previous = std::env::current_dir()?;
         std::env::set_current_dir(dir)?;
@@ -29,6 +34,11 @@ impl CwdGuard {
 }
 
 impl Drop for CwdGuard {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "restores the working directory entered above; goes with it when the test moves \
+                  to a subprocess"
+    )]
     fn drop(&mut self) {
         // Best effort: a failure here cannot be reported from `drop`, and the
         // test process is about to end or enter another isolated test.

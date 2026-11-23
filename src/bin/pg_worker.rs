@@ -336,6 +336,11 @@ async fn execute_stop(pg: &mut PostgreSQL) -> Result<(), WorkerError> {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the single-threaded worker process applies its environment before starting \
+              PostgreSQL; production code, not a test"
+)]
 fn apply_worker_environment(environment: &[(String, Option<PlainSecret>)]) {
     for (key, value) in environment {
         // SAFETY: worker is single-threaded; environment updates cannot race.

@@ -281,6 +281,11 @@ fn set_env_var_locked(key: &OsStr, value: &OsStr) {
 }
 
 /// Set an environment variable when the caller already holds `ENV_LOCK`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "exercises the library's own environment scope under ENV_LOCK; migrate to an \
+              injected environment"
+)]
 fn set_env_var_unlocked(key: &OsStr, value: &OsStr) {
     unsafe {
         // SAFETY: These helpers are only called from #[serial] tests, all
@@ -293,6 +298,11 @@ fn set_env_var_unlocked(key: &OsStr, value: &OsStr) {
 }
 
 /// Remove an environment variable when the caller already holds `ENV_LOCK`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "exercises the library's own environment scope under ENV_LOCK; migrate to an \
+              injected environment"
+)]
 fn remove_env_var_unlocked(key: &OsStr) {
     unsafe {
         // SAFETY: These helpers are only called from #[serial] tests, all
