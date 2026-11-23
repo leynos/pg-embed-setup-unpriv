@@ -127,7 +127,12 @@ fn parse_program_header_types<R: Read + Seek>(reader: &mut R) -> Option<Vec<u32>
     }
     (0..entry_count)
         .map(|index| {
-            let p_type = field(reader, table_at + index * entry_size, 4)?;
+            let entry_at = table_at + index * entry_size;
+            // Read the whole entry, so a table cut short after the type
+            // field is malformed rather than accepted.
+            let entry_end = entry_at + entry_size - 1;
+            field(reader, entry_end, 1)?;
+            let p_type = field(reader, entry_at, 4)?;
             u32::try_from(p_type).ok()
         })
         .collect()
@@ -220,6 +225,14 @@ mod elf_tests {
             let cut: Vec<u8> = whole.iter().copied().take(length).collect();
             assert!(!is_static_elf(&mut Cursor::new(cut)), "length {length}");
         }
+    }
+
+    #[test]
+    fn a_program_header_cut_short_after_its_type_is_not_static() {
+        let whole = elf64(&[1]);
+        let cut: Vec<u8> = whole.iter().copied().take(68).collect();
+
+        assert!(!is_static_elf(&mut Cursor::new(cut)));
     }
 
     #[test]
