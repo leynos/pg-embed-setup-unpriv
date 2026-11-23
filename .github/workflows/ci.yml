@@ -18,13 +18,15 @@ jobs:
     # (`No space left on device`, run 36565376334).
     # The hosted fallback is ubuntu-24.04, not ubuntu-latest: the prebuilt
     # PostgreSQL archives need libxml2.so.2, which ubuntu-latest (26.04) lacks
-    # (#427). Dependabot pull requests run on the hosted pool too (free on a public
+    # (#427). The Ubicloud label names 24.04 explicitly, as documented at
+    # https://ubicloud.com/docs/github-actions-integration/runner-types, so a
+    # change of Ubicloud's default image cannot move this lane. Dependabot pull requests run on the hosted pool too (free on a public
     # repository). The author is tested, not the actor, which changes when
     # someone else pushes to the branch.
     runs-on: >-
       ${{ (github.event.pull_request.head.repo.fork
       || github.event.pull_request.user.login == 'dependabot[bot]')
-      && 'ubuntu-24.04' || 'ubicloud-standard-4' }}
+      && 'ubuntu-24.04' || 'ubicloud-standard-4-ubuntu-2404' }}
     # Above the 1,800 s cargo watchdog on the coverage step plus the work
     # either side of it, which reached 830 s on run 33982759833. The job
     # had no ceiling before this and so inherited GitHub's six-hour
