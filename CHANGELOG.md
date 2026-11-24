@@ -3,11 +3,17 @@
 All notable changes to this crate are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.8.0-beta1
+## 0.8.0
 
-This is a prerelease. It is breaking for callers that build
-`TestBootstrapSettings` with a struct literal: set the new `runtime_preflight`
-field.
+This release is breaking for callers that build `TestBootstrapSettings` with a
+struct literal: set the new `runtime_preflight` field. It folds in
+`0.8.0-beta1`, a prerelease that carried the same changes apart from the
+test-isolation work below.
+
+### Dependencies
+
+- The crate requires `ortho_config` 0.11.0 (it was 0.9.0), so a project that
+  pins `ortho_config` itself must move to 0.11 to share one copy.
 
 ### Test-environment isolation
 

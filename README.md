@@ -32,7 +32,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-pg-embed-setup-unpriv = "0.7.0"
+pg-embed-setup-unpriv = "0.8.0"
 rstest = "0.26"
 ```
 

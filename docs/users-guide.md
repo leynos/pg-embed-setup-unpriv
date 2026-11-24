@@ -108,6 +108,9 @@ let config = TestBootstrapConfig::new(PgEnvCfg::default())
 
 The opt-out is a builder option and not an environment variable.
 
+The [v0.8.0 migration guide](v0-8-0-migration-guide.md) lists what changes for
+an existing consumer.
+
 ### Supported host images
 
 | Host image   | Status                                | Runtime packages                          |
@@ -457,7 +460,7 @@ Enable the feature in your `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-pg-embed-setup-unpriv = { version = "0.7.0", features = ["async-api"] }
+pg-embed-setup-unpriv = { version = "0.8.0", features = ["async-api"] }
 ```
 
 Then use `start_async()` and `stop_async()` in your async tests:
