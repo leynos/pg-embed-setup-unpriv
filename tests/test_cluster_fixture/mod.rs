@@ -19,6 +19,7 @@ mod serial;
 #[path = "../support/skip.rs"]
 mod skip;
 
+mod env_reset;
 mod process_utils;
 mod steps;
 mod unit_tests;

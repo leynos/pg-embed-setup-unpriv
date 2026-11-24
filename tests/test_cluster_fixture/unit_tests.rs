@@ -6,7 +6,7 @@ use rstest::rstest;
 
 use super::{
     TestSandbox,
-    env_isolation::{EnvIsolationGuard, set_env_var},
+    env_reset::{EnvIsolationGuard, set_env_var},
     process_utils::{
         read_postmaster_pid,
         sandbox_root_path,

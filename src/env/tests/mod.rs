@@ -10,7 +10,6 @@ use std::{
 };
 
 use rstest::rstest;
-use serial_test::serial;
 
 use super::{
     ScopedEnv,
@@ -20,10 +19,12 @@ use super::{
 #[cfg(feature = "cluster-unit-tests")]
 use crate::test_support::capture_info_logs;
 
+mod child;
 mod corruption;
 mod thread_helpers;
 mod validation;
 
+use child::in_child_process;
 use corruption::{
     CorruptionCase,
     apply_invalid_scope_exit,
@@ -40,13 +41,16 @@ use thread_helpers::{
     ThreadAChannels,
     ThreadBChannels,
     join_guard_thread,
+    set_env_var_locked,
     spawn_inner_guard_thread,
     spawn_outer_guard_thread,
 };
 
 #[test]
-#[serial]
-fn recovers_from_poisoned_lock() {
+fn recovers_from_poisoned_lock() { in_child_process(poisoned_lock_recovers); }
+
+/// Body of `recovers_from_poisoned_lock`, run in a child process.
+fn poisoned_lock_recovers() {
     assert!(
         panic::catch_unwind(|| {
             let _guard =
@@ -64,8 +68,10 @@ fn recovers_from_poisoned_lock() {
 
 /// Verifies nested scopes restore the outer value after the inner drops.
 #[test]
-#[serial]
-fn allows_reentrant_scopes() {
+fn allows_reentrant_scopes() { in_child_process(reentrant_scopes_restore_outer_value); }
+
+/// Body of `allows_reentrant_scopes`, run in a child process.
+fn reentrant_scopes_restore_outer_value() {
     let outer = ScopedEnv::apply(&[(String::from("NESTED_TEST"), Some(String::from("outer")))]);
     assert_eq!(env::var("NESTED_TEST").as_deref(), Ok("outer"));
 
@@ -82,8 +88,10 @@ fn allows_reentrant_scopes() {
 
 /// Verifies the process lock remains held until the final nested scope exits.
 #[test]
-#[serial]
-fn keeps_lock_until_last_scope_drops() {
+fn keeps_lock_until_last_scope_drops() { in_child_process(lock_is_held_until_last_scope_drops); }
+
+/// Body of `keeps_lock_until_last_scope_drops`, run in a child process.
+fn lock_is_held_until_last_scope_drops() {
     let outer = ScopedEnv::apply(&[(String::from("SCOPE_TEST"), Some(String::from("outer")))]);
     let inner = ScopedEnv::apply(&[(String::from("SCOPE_TEST"), Some(String::from("inner")))]);
 
@@ -101,7 +109,8 @@ fn keeps_lock_until_last_scope_drops() {
 
     drop(inner);
     // Acquire as its own statement and assert on the outcome: Whitaker treats
-    // `#[serial]` tests as production code, so `expect` here would be a
+    // a body run through `in_child_process` as production code, because it is
+    // not itself a `#[test]` function, so `expect` here would be a
     // finding, and burying the fallible call inside `assert!` would hide it.
     let free = ENV_LOCK.try_lock();
     assert!(free.is_ok(), "mutex should release after final scope drops");
@@ -111,10 +120,10 @@ fn keeps_lock_until_last_scope_drops() {
 
 /// Build the failure returned when a cross-thread expectation is not met.
 ///
-/// `#[serial]` erases the `#[test]` marker before either lint sees the
-/// function, so the body must neither call `expect`, which Whitaker rejects,
-/// nor assert, which trips `clippy::panic_in_result_fn` in a fallible
-/// function. Expectations are reported as errors instead.
+/// The body runs through `in_child_process` rather than as a `#[test]`
+/// function, so it must neither call `expect`, which Whitaker rejects, nor
+/// assert, which trips `clippy::panic_in_result_fn` in a fallible function.
+/// Expectations are reported as errors instead.
 fn scenario_failure(message: impl Into<String>) -> Box<dyn std::error::Error> {
     Box::<dyn std::error::Error>::from(message.into())
 }
@@ -123,12 +132,20 @@ fn scenario_failure(message: impl Into<String>) -> Box<dyn std::error::Error> {
 ///
 /// # Errors
 ///
-/// Returns the first coordination failure or unmet expectation. The test is
-/// fallible rather than panicking, because Whitaker cannot recognize a
-/// `#[serial]`-wrapped test and treats its body as production code.
+/// Returns the child process's failure, if any.
 #[test]
-#[serial]
 fn serializes_env_across_threads() -> Result<(), Box<dyn std::error::Error>> {
+    in_child_process(env_is_serialized_across_threads).unwrap_or(Ok(()))
+}
+
+/// Body of `serializes_env_across_threads`, run in a child process.
+///
+/// # Errors
+///
+/// Returns the first coordination failure or unmet expectation. The body is
+/// fallible rather than panicking, because Whitaker cannot recognize it as a
+/// test and treats it as production code.
+fn env_is_serialized_across_threads() -> Result<(), Box<dyn std::error::Error>> {
     let key = "THREAD_SCOPE_TEST";
     let restore_env = RestoreEnv {
         key: String::from(key),
@@ -214,8 +231,10 @@ fn serializes_env_across_threads() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Verifies invalid scope exits restore state without panicking.
 #[test]
-#[serial]
-fn thread_state_recovers_from_invalid_index() {
+fn thread_state_recovers_from_invalid_index() { in_child_process(invalid_index_is_recovered); }
+
+/// Body of `thread_state_recovers_from_invalid_index`, run in a child process.
+fn invalid_index_is_recovered() {
     let key = OsString::from("THREAD_STATE_INVALID_INDEX");
     let original = env::var_os(&key);
     let mut state = ThreadState::new();
@@ -253,8 +272,12 @@ fn thread_state_recovers_from_invalid_index() {
     corrupt_state: no_corruption,
     drop_guards: drop_guards_out_of_order,
 })]
-#[serial]
 fn scoped_env_recovers_from_corrupt_exit(#[case] case: CorruptionCase) {
+    in_child_process(|| corrupt_scope_is_recovered(case));
+}
+
+/// Body of `scoped_env_recovers_from_corrupt_exit`, run in a child process.
+fn corrupt_scope_is_recovered(case: CorruptionCase) {
     run_scoped_env_corruption_test(case.test_name, |key| {
         let original = env::var_os(key);
         let guards = (case.setup_guards)(key);
@@ -270,48 +293,6 @@ fn scoped_env_recovers_from_corrupt_exit(#[case] case: CorruptionCase) {
         assert_thread_state_reset();
         assert_env_lock_released();
     });
-}
-
-/// Set an environment variable while holding `ENV_LOCK`.
-fn set_env_var_locked(key: &OsStr, value: &OsStr) {
-    let _guard = ENV_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    set_env_var_unlocked(key, value);
-}
-
-/// Set an environment variable when the caller already holds `ENV_LOCK`.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "exercises the library's own environment scope under ENV_LOCK; migrate to an \
-              injected environment"
-)]
-fn set_env_var_unlocked(key: &OsStr, value: &OsStr) {
-    unsafe {
-        // SAFETY: These helpers are only called from #[serial] tests, all
-        // process environment mutations in this module are serialized via
-        // ENV_LOCK, and callers such as RestoreEnv restore original values on
-        // drop. Given these invariants and the caller-held lock, calling
-        // env::set_var here is safe.
-        env::set_var(key, value);
-    }
-}
-
-/// Remove an environment variable when the caller already holds `ENV_LOCK`.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "exercises the library's own environment scope under ENV_LOCK; migrate to an \
-              injected environment"
-)]
-fn remove_env_var_unlocked(key: &OsStr) {
-    unsafe {
-        // SAFETY: These helpers are only called from #[serial] tests, all
-        // process environment mutations in this module are serialized via
-        // ENV_LOCK, and callers such as RestoreEnv restore original values on
-        // drop. Given these invariants and the caller-held lock, calling
-        // env::remove_var here is safe.
-        env::remove_var(key);
-    }
 }
 
 /// Assert that thread-local scoped environment state has fully reset.
@@ -348,8 +329,11 @@ fn assert_env_lock_released() {
 /// Verifies scoped environment application and restoration logs are emitted.
 #[cfg(feature = "cluster-unit-tests")]
 #[test]
-#[serial]
-fn logs_application_and_restoration() {
+fn logs_application_and_restoration() { in_child_process(application_and_restoration_are_logged); }
+
+/// Body of `logs_application_and_restoration`, run in a child process.
+#[cfg(feature = "cluster-unit-tests")]
+fn application_and_restoration_are_logged() {
     let (logs, ()) = capture_info_logs(|| {
         let guard = ScopedEnv::apply(&[
             (String::from("OBS_ENV_APPLY"), Some(String::from("one"))),

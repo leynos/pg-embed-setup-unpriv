@@ -5,6 +5,16 @@ All notable changes to this crate are recorded here. The format follows
 
 ## Unreleased
 
+### Test-environment isolation
+
+- The `ScopedEnv` tests in `src/env/tests` now run each body in a child copy of
+  the test binary, so the library's own tests no longer change the test
+  process's environment and need no `#[serial]` marker. The one remaining
+  integration-test environment writer (the fixture's snapshot guard and leak
+  probe) now lives in `tests/test_cluster_fixture/env_reset.rs`, and the helper
+  smoke test that mutated the process environment in every integration binary
+  is removed. No public API changes.
+
 ### Runtime-compatibility preflight
 
 - The bootstrap now checks the staged `postgres`, `initdb` and `pg_ctl`

@@ -3,9 +3,14 @@
 use std::{ffi::OsString, panic};
 
 use rstest::rstest;
-use serial_test::serial;
 
-use super::{ScopedEnv, ThreadState, assert_env_lock_released, assert_thread_state_reset};
+use super::{
+    ScopedEnv,
+    ThreadState,
+    assert_env_lock_released,
+    assert_thread_state_reset,
+    in_child_process,
+};
 
 /// Verifies `apply_os` rejects invalid environment input before locking.
 #[rstest]
@@ -25,11 +30,15 @@ use super::{ScopedEnv, ThreadState, assert_env_lock_released, assert_thread_stat
     vec![(OsString::from("INVALID_VALUE"), Some(OsString::from("bad\0value")))],
     "environment values containing NUL",
 )]
-#[serial]
 fn apply_os_rejects_invalid_input_before_lock(
     #[case] vars: Vec<(OsString, Option<OsString>)>,
     #[case] reason: &str,
 ) {
+    in_child_process(|| apply_os_rejects(vars, reason));
+}
+
+/// Body of `apply_os_rejects_invalid_input_before_lock`, run in a child process.
+fn apply_os_rejects(vars: Vec<(OsString, Option<OsString>)>, reason: &str) {
     let result = panic::catch_unwind(|| {
         let _guard = ScopedEnv::apply_os(vars);
     });
@@ -57,8 +66,13 @@ fn apply_os_rejects_invalid_input_before_lock(
     OsString::from("THREAD_STATE_INVALID_VALUE"),
     Some(OsString::from("bad\0value")),
 )])]
-#[serial]
 fn thread_state_rejects_invalid_input_before_lock(#[case] vars: Vec<(OsString, Option<OsString>)>) {
+    in_child_process(|| thread_state_rejects(vars));
+}
+
+/// Body of `thread_state_rejects_invalid_input_before_lock`, run in a child
+/// process.
+fn thread_state_rejects(vars: Vec<(OsString, Option<OsString>)>) {
     let mut state = ThreadState::new();
 
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {

@@ -13,7 +13,51 @@ use std::{
 
 use thiserror::Error;
 
-use super::{ENV_LOCK, ScopedEnv, remove_env_var_unlocked, set_env_var_unlocked};
+use super::{ENV_LOCK, ScopedEnv};
+
+/// Set an environment variable while holding `ENV_LOCK`.
+pub(super) fn set_env_var_locked(key: &OsStr, value: &OsStr) {
+    let _guard = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    set_env_var_unlocked(key, value);
+}
+
+/// Set an environment variable when the caller already holds `ENV_LOCK`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "exercises the library's own environment scope under ENV_LOCK, in a child process; \
+              goes when the cluster API takes an injected environment (0.9.0)"
+)]
+fn set_env_var_unlocked(key: &OsStr, value: &OsStr) {
+    unsafe {
+        // SAFETY: These helpers only run in a child process started by
+        // in_child_process, which no other test shares, all process
+        // environment mutations in this module are serialized via ENV_LOCK,
+        // and callers such as RestoreEnv restore original values on drop.
+        // Given these invariants and the caller-held lock, calling
+        // env::set_var here is safe.
+        env::set_var(key, value);
+    }
+}
+
+/// Remove an environment variable when the caller already holds `ENV_LOCK`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "exercises the library's own environment scope under ENV_LOCK, in a child process; \
+              goes when the cluster API takes an injected environment (0.9.0)"
+)]
+fn remove_env_var_unlocked(key: &OsStr) {
+    unsafe {
+        // SAFETY: These helpers only run in a child process started by
+        // in_child_process, which no other test shares, all process
+        // environment mutations in this module are serialized via ENV_LOCK,
+        // and callers such as RestoreEnv restore original values on drop.
+        // Given these invariants and the caller-held lock, calling
+        // env::remove_var here is safe.
+        env::remove_var(key);
+    }
+}
 
 /// Coordination failure raised by a scoped-environment guard thread.
 ///
