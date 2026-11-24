@@ -31,23 +31,52 @@ in full must add the field.
 ### Before: struct literal
 
 ```rust,no_run
-let settings = TestBootstrapSettings {
-    installed_extensions: Vec::new(),
-    // ...the other fields...
-};
+use pg_embedded_setup_unpriv::TestBootstrapSettings;
+
+pub fn rebuilt(old: &TestBootstrapSettings) -> TestBootstrapSettings {
+    TestBootstrapSettings {
+        privileges: old.privileges,
+        execution_mode: old.execution_mode,
+        settings: old.settings.clone(),
+        environment: old.environment.clone(),
+        worker_binary: old.worker_binary.clone(),
+        setup_timeout: old.setup_timeout,
+        start_timeout: old.start_timeout,
+        shutdown_timeout: old.shutdown_timeout,
+        cleanup_mode: old.cleanup_mode,
+        binary_cache_dir: old.binary_cache_dir.clone(),
+        extensions: old.extensions.clone(),
+        installed_extensions: old.installed_extensions.clone(),
+    }
+}
 ```
 
 ### After: struct literal
 
 ```rust,no_run
-use pg_embedded_setup_unpriv::RuntimePreflight;
+use pg_embedded_setup_unpriv::{RuntimePreflight, TestBootstrapSettings};
 
-let settings = TestBootstrapSettings {
-    installed_extensions: Vec::new(),
-    runtime_preflight: RuntimePreflight::Check,
-    // ...the other fields...
-};
+pub fn rebuilt(old: &TestBootstrapSettings) -> TestBootstrapSettings {
+    TestBootstrapSettings {
+        privileges: old.privileges,
+        execution_mode: old.execution_mode,
+        settings: old.settings.clone(),
+        environment: old.environment.clone(),
+        worker_binary: old.worker_binary.clone(),
+        setup_timeout: old.setup_timeout,
+        start_timeout: old.start_timeout,
+        shutdown_timeout: old.shutdown_timeout,
+        cleanup_mode: old.cleanup_mode,
+        binary_cache_dir: old.binary_cache_dir.clone(),
+        extensions: old.extensions.clone(),
+        installed_extensions: old.installed_extensions.clone(),
+        runtime_preflight: RuntimePreflight::Check,
+    }
+}
 ```
+
+Both examples compile against the release they name (0.7.0 and 0.8.0), and the
+first fails to compile against 0.8.0 with the error shown below.
 
 `RuntimePreflight::Check` is the default and matches the behaviour of
 `TestBootstrapConfig`. Use `RuntimePreflight::Skip` only to keep the previous
@@ -149,8 +178,14 @@ the staged PostgreSQL 18.6.0 (archive source: <url>) cannot run on this host (<o
   /var/tmp/pg-embed-1000/install/18.6.0/bin/postgres: libxml2.so.2
 ```
 
-- **Fix:** Install the named runtime package, run on a supported host image, or
-  point `with_releases_url` at an archive built for the host (task 3).
+- **Fix:** Install the named runtime package or run on a supported host image
+  (task 3). When a compatible archive is available, point `with_releases_url`
+  at it, and also give the new source its own `binary_cache_dir` and a fresh
+  `runtime_dir`; otherwise the staged tree or cached binaries that failed are
+  reused. If an existing cluster keeps its explicit `PG_DATA_DIR`, set
+  `PG_PASSWORD` to that cluster's password when switching installation
+  directories, as the users' guide describes under
+  [Pointing `with_releases_url`](users-guide.md#pointing-with_releases_url-at-an-archive-built-for-the-host).
 
 Bootstrap error on a host without a working resolver, which begins:
 
