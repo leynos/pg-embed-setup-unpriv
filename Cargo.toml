@@ -1,6 +1,6 @@
 [package]
 name = "pg-embed-setup-unpriv"
-version = "0.8.0-beta1"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.94"
 description = "Initializes postgresql_embedded clusters with platform-appropriate setup"
