@@ -40,19 +40,17 @@ pub(super) fn in_child_process<T>(body: impl FnOnce() -> T) -> Option<T> {
     let outcome = current
         .name()
         .ok_or_else(|| String::from("the test thread has no name"))
-        .and_then(|name| rerun_in_child(name, &[]));
+        .and_then(rerun_in_child);
     assert_eq!(outcome, Ok(()), "the child run of the test failed");
     None
 }
 
-/// Re-run the test called `name` in a child process with the marker set and
-/// `extra` added to the child's environment.
-fn rerun_in_child(name: &str, extra: &[(&str, &str)]) -> Result<(), String> {
+/// Re-run the test called `name` in a child process with the marker set.
+fn rerun_in_child(name: &str) -> Result<(), String> {
     let exe = env::current_exe().map_err(|err| format!("locate the test binary: {err}"))?;
     let output = Command::new(exe)
         .args(["--exact", name, "--nocapture", "--test-threads=1"])
         .env(CHILD_MARKER, "1")
-        .envs(extra.iter().copied())
         .output()
         .map_err(|err| format!("spawn the child for {name}: {err}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -66,60 +64,57 @@ fn rerun_in_child(name: &str, extra: &[(&str, &str)]) -> Result<(), String> {
     ))
 }
 
-/// Names the variable that tells the probe test how to behave in the child.
-const PROBE_MODE: &str = "ENV_SCOPE_TEST_PROBE_MODE";
-
-/// Full libtest name of the probe test below.
-const PROBE_NAME: &str = "env::tests::child::tests::probe";
+/// Full libtest name of the passing test below.
+const PASSING_NAME: &str = "env::tests::child::tests::a_passing_child_is_reported_as_success";
 
 #[cfg(test)]
 mod tests {
-    //! Checks that the helper reports a failing child, an `Err` result and a
-    //! filter that matches no test, each as a failure of the parent.
+    //! Checks, through `in_child_process` itself, that a panicking child, an
+    //! `Err` result and a filter that matches no test each fail the parent.
+    //!
+    //! Each failing case is `#[should_panic]` on the helper's own message. In
+    //! the child the body fails with a different message, so the child fails
+    //! too, and the parent's `in_child_process` is what raises the expected
+    //! panic; a helper that stopped failing the parent would make the parent
+    //! test fail for not panicking.
 
     use super::*;
 
-    /// Test the helper runs in a child: it fails or errs on request.
-    ///
-    /// Without a mode it passes, so the ordinary run is a positive control.
+    /// A body that returns normally passes: the positive control.
     #[test]
-    fn probe() -> Result<(), String> { in_child_process(probe_outcome).unwrap_or(Ok(())) }
+    fn a_passing_child_is_reported_as_success() { in_child_process(|| ()); }
 
-    /// What the probe does in the child, as chosen by `PROBE_MODE`.
-    fn probe_outcome() -> Result<(), String> {
-        match env::var(PROBE_MODE).as_deref() {
-            Ok("panic") => {
-                panic_on_request();
-                Ok(())
-            }
-            Ok("err") => Err(String::from("probe asked to return an error")),
-            _ => Ok(()),
-        }
+    #[test]
+    fn the_control_passes_when_rerun_directly() {
+        assert_eq!(rerun_in_child(PASSING_NAME), Ok(()));
     }
 
-    /// Panics, as the probe is asked to in the `panic` mode.
-    fn panic_on_request() { panic!("probe asked to panic") }
-
+    /// The helper, not just `rerun_in_child`, names the test thread it reruns.
     #[test]
-    fn a_passing_child_is_reported_as_success() {
-        assert_eq!(rerun_in_child(PROBE_NAME, &[]), Ok(()));
+    fn the_rerun_uses_the_libtest_thread_name() {
+        let current = thread::current();
+        assert_eq!(
+            current.name(),
+            Some("env::tests::child::tests::the_rerun_uses_the_libtest_thread_name")
+        );
     }
 
     #[test]
-    fn a_panicking_child_is_reported_as_failure() {
-        let outcome = rerun_in_child(PROBE_NAME, &[(PROBE_MODE, "panic")]);
-        assert!(outcome.is_err(), "a panicking child must fail: {outcome:?}");
-    }
+    #[should_panic(expected = "the child run of the test failed")]
+    fn a_panicking_child_fails_the_parent() { in_child_process(|| panic!("the body panicked")); }
 
     #[test]
-    fn an_err_result_in_the_child_is_reported_as_failure() {
-        let outcome = rerun_in_child(PROBE_NAME, &[(PROBE_MODE, "err")]);
-        assert!(outcome.is_err(), "an Err child must fail: {outcome:?}");
+    #[should_panic(expected = "the child run of the test failed")]
+    fn an_err_result_in_the_child_fails_the_parent() {
+        let outcome = in_child_process(|| Err::<(), &str>("the body returned an error"));
+        // Only the child reaches this line: surface its `Err` as a failure
+        // whose message differs from the parent's.
+        assert_eq!(outcome, Some(Ok(())), "the body returned an error");
     }
 
     #[test]
     fn a_filter_that_matches_no_test_is_reported_as_failure() {
-        let outcome = rerun_in_child("env::tests::child::tests::no_such_test", &[]);
+        let outcome = rerun_in_child("env::tests::child::tests::no_such_test");
         assert!(outcome.is_err(), "no matching test must fail: {outcome:?}");
     }
 }
