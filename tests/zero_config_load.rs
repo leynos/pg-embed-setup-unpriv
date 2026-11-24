@@ -6,69 +6,102 @@
 //! other source contributes a field, and deserializing that into the struct
 //! fails, so the case needs its own test. A CI runner that happens to export a
 //! `PG_*` variable, or a checkout that holds a `.pg.toml`, hides the defect, so
-//! every test here clears the `PG_*` variables (which include the prefixed
-//! configuration path selector), the unprefixed `CONFIG_PATH`, the XDG and
-//! home locations, and runs from an empty directory.
+//! the in-process tests load through an injected environment that holds no
+//! `PG_*` variable (which includes the prefixed configuration path selector) or
+//! unprefixed `CONFIG_PATH`, points the XDG and home locations at an empty
+//! directory, and pins that directory as the working directory. The
+//! process-backed `load()` entry point is covered by a child process, so the
+//! test process never changes its own environment or working directory.
 
-use std::{ffi::OsString, path::PathBuf};
+use std::{io::Write, path::Path, process::Command, sync::Arc};
 
 use cap_std::{ambient_authority, fs::Dir};
 use color_eyre::eyre::{Result, eyre};
-use pg_embedded_setup_unpriv::{PgEnvCfg, test_support::scoped_env};
+use ortho_config::MapEnv;
+use pg_embedded_setup_unpriv::PgEnvCfg;
+use rstest::{fixture, rstest};
 use tempfile::TempDir;
 
-/// Restores the working directory when dropped.
-struct CwdGuard(PathBuf);
+/// Names the variable whose presence makes the test binary act as the child.
+///
+/// It must not start with `PG_`: the loader would read it as configuration and
+/// the child would no longer exercise the empty-configuration branch.
+const CHILD_MARKER: &str = "ZERO_CONFIG_LOAD_CHILD";
 
-impl CwdGuard {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the zero-config loader reads the working directory; migrate to a subprocess \
-                  with Command::current_dir"
-    )]
-    fn enter(dir: &std::path::Path) -> Result<Self> {
-        let previous = std::env::current_dir()?;
-        std::env::set_current_dir(dir)?;
-        Ok(Self(previous))
-    }
+/// Locations where `ortho_config` looks for a user-level configuration file.
+const DISCOVERY_VARS: [&str; 5] = [
+    "XDG_CONFIG_HOME",
+    "XDG_CONFIG_DIRS",
+    "HOME",
+    "APPDATA",
+    "USERPROFILE",
+];
+
+/// An environment with nothing configured, rooted at `empty`.
+///
+/// Every discovery location names `empty` (an unset `XDG_CONFIG_DIRS` would
+/// make `ortho_config` search `/etc/xdg`), so no user-level file is
+/// discovered, and `empty` is the working directory.
+fn isolated_environment(empty: &Path) -> MapEnv {
+    DISCOVERY_VARS
+        .into_iter()
+        .fold(MapEnv::new().with_current_dir(empty), |env, name| {
+            env.with_var(name, empty)
+        })
 }
 
-impl Drop for CwdGuard {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "restores the working directory entered above; goes with it when the test moves \
-                  to a subprocess"
-    )]
-    fn drop(&mut self) {
-        // Best effort: a failure here cannot be reported from `drop`, and the
-        // test process is about to end or enter another isolated test.
-        drop(std::env::set_current_dir(&self.0));
-    }
+/// An empty directory that doubles as the injected working directory.
+#[fixture]
+fn empty() -> TempDir {
+    let dir = TempDir::new().expect("create an empty working directory");
+    assert!(dir.path().is_dir(), "the working directory should exist");
+    dir
 }
 
-/// Every `PG_*` variable in the environment, set to unset, plus the XDG and
-/// home locations pointed at `empty` so no user-level file is discovered.
-fn isolated_environment(empty: &std::path::Path) -> Vec<(OsString, Option<OsString>)> {
-    let mut vars: Vec<(OsString, Option<OsString>)> = std::env::vars_os()
-        .filter(|(name, _)| name.to_string_lossy().starts_with("PG_"))
-        .map(|(name, _)| (name, None))
-        .collect();
-    for name in ["XDG_CONFIG_HOME", "HOME", "APPDATA", "USERPROFILE"] {
-        vars.push((name.into(), Some(empty.as_os_str().to_owned())));
+/// Write `.pg.toml` with `contents` into `dir`.
+fn write_pg_toml(dir: &TempDir, contents: &str) -> Result<()> {
+    let root = Dir::open_ambient_dir(dir.path(), ambient_authority())?;
+    root.write(".pg.toml", contents)?;
+    Ok(())
+}
+
+/// The injected `.pg.toml` and `PG_PORT` feed the load, and the variable wins.
+///
+/// The expected port proves the second-stage load reads the injected sources:
+/// a process-backed load would see neither.
+#[rstest]
+#[case::file_only(Some("port = 5543\n"), None, Some(5543))]
+#[case::environment_over_file(Some("port = 5543\n"), Some("5544"), Some(5544))]
+#[case::environment_only(None, Some("5544"), Some(5544))]
+fn load_reads_the_injected_sources(
+    empty: TempDir,
+    #[case] file: Option<&str>,
+    #[case] pg_port: Option<&str>,
+    #[case] expected: Option<u16>,
+) -> Result<()> {
+    if let Some(contents) = file {
+        write_pg_toml(&empty, contents)?;
     }
-    // `ortho_config` also honours the unprefixed selector.
-    vars.push(("CONFIG_PATH".into(), None));
-    vars.push(("XDG_CONFIG_DIRS".into(), None));
-    vars
+    let base = isolated_environment(empty.path());
+    let env = match pg_port {
+        Some(port) => base.with_var("PG_PORT", port),
+        None => base,
+    };
+    let cfg = PgEnvCfg::load_with_env(Arc::new(env)).map_err(|err| eyre!("{err:?}"))?;
+    if cfg.port == expected {
+        return Ok(());
+    }
+    Err(eyre!(
+        "file {file:?} with PG_PORT={pg_port:?} gave port {:?}, expected {expected:?}",
+        cfg.port
+    ))
 }
 
 /// With nothing configured anywhere, `load()` returns the default configuration.
-#[test]
-fn load_succeeds_with_no_configuration_at_all() -> Result<()> {
-    let empty = TempDir::new()?;
-    let _env = scoped_env(isolated_environment(empty.path()));
-    let _cwd = CwdGuard::enter(empty.path())?;
-    let cfg = PgEnvCfg::load().map_err(|err| eyre!("{err:?}"))?;
+#[rstest]
+fn load_succeeds_with_no_configuration_at_all(empty: TempDir) -> Result<()> {
+    let cfg = PgEnvCfg::load_with_env(Arc::new(isolated_environment(empty.path())))
+        .map_err(|err| eyre!("{err:?}"))?;
     let default = PgEnvCfg::default();
     if format!("{cfg:?}") != format!("{default:?}") {
         return Err(eyre!("expected the default configuration, got {cfg:?}"));
@@ -78,16 +111,71 @@ fn load_succeeds_with_no_configuration_at_all() -> Result<()> {
 
 /// A malformed `.pg.toml` in the working directory is a mistake the user should
 /// hear about, not an absent source: `load()` must still fail rather than fall
-/// back to the defaults.
+/// back to the defaults, and the failure must come from that file.
+#[rstest]
+fn load_still_fails_for_an_unreadable_file(empty: TempDir) -> Result<()> {
+    write_pg_toml(&empty, "= not toml")?;
+    match PgEnvCfg::load_with_env(Arc::new(isolated_environment(empty.path()))) {
+        Ok(cfg) => Err(eyre!("an unreadable file was defaulted to {cfg:?}")),
+        Err(err) => {
+            let report = format!("{err:?}");
+            if report.contains(".pg.toml") {
+                Ok(())
+            } else {
+                Err(eyre!(
+                    "the error does not name the malformed file: {report}"
+                ))
+            }
+        }
+    }
+}
+
+/// Body of the child process: run the process-backed `load()` entry point.
+///
+/// Outside the child this returns at once; the parent test below re-runs this
+/// binary with the marker set.
 #[test]
-fn load_still_fails_for_an_unreadable_file() -> Result<()> {
-    let empty = TempDir::new()?;
-    let root = Dir::open_ambient_dir(empty.path(), ambient_authority())?;
-    root.write(".pg.toml", "= not toml")?;
-    let _env = scoped_env(isolated_environment(empty.path()));
-    let _cwd = CwdGuard::enter(empty.path())?;
-    PgEnvCfg::load().map_or_else(
-        |_| Ok(()),
-        |cfg| Err(eyre!("an unreadable file was defaulted to {cfg:?}")),
-    )
+fn child_load_returns_the_default_configuration() -> Result<()> {
+    if std::env::var_os(CHILD_MARKER).is_none() {
+        return Ok(());
+    }
+    let cfg = PgEnvCfg::load().map_err(|err| eyre!("{err:?}"))?;
+    let default = PgEnvCfg::default();
+    if format!("{cfg:?}") != format!("{default:?}") {
+        return Err(eyre!("expected the default configuration, got {cfg:?}"));
+    }
+    writeln!(
+        std::io::stdout().lock(),
+        "{CHILD_MARKER}: load() returned the default configuration"
+    )?;
+    Ok(())
+}
+
+/// The process-backed `load()` yields the defaults in a clean child process
+/// whose environment names only the discovery locations.
+#[rstest]
+fn process_backed_load_returns_defaults_in_a_clean_child(empty: TempDir) -> Result<()> {
+    let mut command = Command::new(std::env::current_exe()?);
+    command
+        .args([
+            "--exact",
+            "child_load_returns_the_default_configuration",
+            "--nocapture",
+        ])
+        .env_clear()
+        .env(CHILD_MARKER, "1")
+        .current_dir(empty.path());
+    for name in DISCOVERY_VARS {
+        command.env(name, empty.path());
+    }
+    let output = command.output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if output.status.success() && stdout.contains(&format!("{CHILD_MARKER}: load() returned")) {
+        return Ok(());
+    }
+    Err(eyre!(
+        "the child did not confirm the default configuration ({}): {stdout}{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    ))
 }
