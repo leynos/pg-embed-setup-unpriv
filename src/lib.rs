@@ -398,6 +398,25 @@ impl PgEnvCfg {
     /// # Errors
     /// Returns an error when environment parsing fails or derived configuration
     /// cannot be represented using UTF-8 paths.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use ortho_config::MapEnv;
+    /// use pg_embedded_setup_unpriv::PgEnvCfg;
+    ///
+    /// let env = MapEnv::new()
+    ///     .with_current_dir(std::env::temp_dir())
+    ///     .with_var("PG_PORT", "5544");
+    /// let cfg = PgEnvCfg::load_with_env(Arc::new(env)).expect("load the configuration");
+    /// assert_eq!(
+    ///     cfg.port,
+    ///     Some(5544),
+    ///     "the injected PG_PORT should set the port"
+    /// );
+    /// ```
     pub fn load_with_env<E>(env: Arc<E>) -> ConfigResult<Self>
     where
         E: EnvSource + ScanEnvSource + 'static,
