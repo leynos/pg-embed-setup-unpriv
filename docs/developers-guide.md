@@ -167,28 +167,34 @@ duplicate keys and says nothing.
 
 ## Runner placement
 
-`ci.yml`'s `build-test` runs on `ubicloud-standard-4` and `coverage-main.yml`'s
-`coverage-upload`, main's only cache writer, on `ubicloud-standard-2`.
-`runs-on` selects the class with the runner-selection expression, shown here for
+`ci.yml`'s `build-test` runs on `ubicloud-standard-4-ubuntu-2404` and
+`coverage-main.yml`'s `coverage-upload`, main's only cache writer, on
+`ubicloud-standard-2-ubuntu-2404`. The `-ubuntu-2404` suffix pins the image, so
+the PostgreSQL lanes that run the runtime preflight see the same runtime
+libraries on every run (issue 436). The pin matters because `ubuntu-latest` now
+resolves to Ubuntu 26.04, which lacks `libxml2.so.2`, a library the PostgreSQL
+archives need; see the
+[Ubuntu 26.04 known gap](users-guide.md#known-gap-ubuntu-2604). `runs-on`
+selects the class with the runner-selection expression, shown here for
 `standard-2`:
 
 ```yaml
 runs-on: >-
   ${{ (github.event.pull_request.head.repo.fork
   || github.event.pull_request.user.login == 'dependabot[bot]')
-  && 'ubuntu-latest' || 'ubicloud-standard-2' }}
+  && 'ubuntu-24.04' || 'ubicloud-standard-2-ubuntu-2404' }}
 ```
 
 `build-test` is `standard-4` on a measured shortfall: its unprivileged leg ran
 out of disk on `standard-2` (`No space left on device`, run 36565376334). A
 pull request from a fork cannot obtain an Ubicloud runner, so it falls back to
-`ubuntu-latest`. So does a pull request Dependabot opened: hosted minutes cost
-nothing on a public repository, and Dependabot opens many pull requests. The
-expression tests the pull request's author, not `github.actor`, because the
-actor is whoever triggered the run, so a person pushing to a Dependabot branch
-would flip the runner. A push and a dispatch have no pull request, so both
-values are empty strings (falsy) and the expression selects Ubicloud; a
-Dependabot pull request therefore builds cold on the hosted pool.
+the pinned `ubuntu-24.04`. So does a pull request Dependabot opened: hosted
+minutes cost nothing on a public repository, and Dependabot opens many pull
+requests. The expression tests the pull request's author, not `github.actor`,
+because the actor is whoever triggered the run, so a person pushing to a
+Dependabot branch would flip the runner. A push and a dispatch have no pull
+request, so both values are empty strings (falsy) and the expression selects
+Ubicloud; a Dependabot pull request therefore builds cold on the hosted pool.
 
 The writer sits on Ubicloud because Ubicloud's cache proxy is scoped by ref. A
 pull request's Ubicloud lane reads a warm main scope only when a main job on

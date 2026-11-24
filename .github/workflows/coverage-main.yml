@@ -38,7 +38,7 @@ jobs:
     runs-on: >-
       ${{ (github.event.pull_request.head.repo.fork
       || github.event.pull_request.user.login == 'dependabot[bot]')
-      && 'ubuntu-latest' || 'ubicloud-standard-2' }}
+      && 'ubuntu-24.04' || 'ubicloud-standard-2-ubuntu-2404' }}
     # Kept in step with ci.yml's coverage lane: above the 1,800 s cargo
     # watchdog plus the work either side. This job's own worst was 38 s
     # outside the coverage step, on run 29784541706.
