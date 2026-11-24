@@ -61,6 +61,88 @@ fn marker_present(install_dir: &camino::Utf8Path) -> bool {
         .any(|entry| entry.path().join(MARKER).is_file() || entry.file_name() == MARKER)
 }
 
+/// How a failed cluster start is judged by this test.
+#[derive(Debug, PartialEq, Eq)]
+enum StartFailure {
+    /// The failure is the defect this test exists to catch.
+    Fail(&'static str),
+    /// The environment cannot run PostgreSQL; the test is skipped with this reason.
+    Skip(String),
+}
+
+/// Loader and resolver signatures that mean a library is missing or the
+/// preflight could not look, which a soft skip must never absorb.
+///
+/// A loader failure reads "cannot open shared object file: No such file or
+/// directory", which also matches the generic missing-file skip, so these are
+/// checked first.
+const HARD_FAILURES: &[(&str, &str)] = &[
+    (
+        "error while loading shared libraries",
+        "a staged binary could not load a shared library",
+    ),
+    (
+        "cannot open shared object file",
+        "the loader could not open a shared object",
+    ),
+    (
+        "runtime preflight unavailable",
+        "the preflight could not run",
+    ),
+];
+
+/// Classifies a failed cluster start as a hard failure or an environmental skip.
+///
+/// Hard-failure signatures win over the shared skip heuristics.
+fn classify_start_failure(message: &str, debug: &str) -> StartFailure {
+    let lowered = format!("{message}\n{debug}").to_ascii_lowercase();
+    if let Some((_, why)) = HARD_FAILURES
+        .iter()
+        .find(|(needle, _)| lowered.contains(needle))
+    {
+        return StartFailure::Fail(why);
+    }
+    cluster_skip_message(message, Some(debug))
+        .map_or(StartFailure::Fail("bootstrap failed"), StartFailure::Skip)
+}
+
+#[rstest]
+#[case::loader_missing_object(
+    "initdb: error while loading shared libraries: libxml2.so.2: cannot open shared object file: \
+     No such file or directory"
+)]
+#[case::loader_open_failure(
+    "libicu.so.74: cannot open shared object file: No such file or directory"
+)]
+#[case::loader_message_only("error while loading shared libraries: libz.so.1")]
+#[case::unavailable_resolver_with_missing_file(
+    "initdb failed: No such file or directory; runtime preflight unavailable: ldd not found"
+)]
+#[case::unavailable_resolver("runtime preflight unavailable: ldd not found")]
+#[case::unrecognised("an unrelated failure")]
+fn loader_and_resolver_failures_are_never_skipped(#[case] text: &str) {
+    assert!(
+        matches!(classify_start_failure(text, text), StartFailure::Fail(_)),
+        "{text:?} must fail"
+    );
+}
+
+#[rstest]
+fn a_loader_failure_in_the_debug_text_alone_still_fails() {
+    let outcome = classify_start_failure("setup failed", "inner: cannot open shared object file");
+    assert!(matches!(outcome, StartFailure::Fail(_)), "{outcome:?}");
+}
+
+#[rstest]
+#[case::missing_binary("No such file or directory (os error 2)")]
+#[case::missing_path("failed to read /tmp/x/bin/postgres: no such file or directory")]
+fn an_ordinary_missing_file_still_skips(#[case] text: &str) {
+    assert!(
+        matches!(classify_start_failure(text, text), StartFailure::Skip(_)),
+        "{text:?} must skip"
+    );
+}
+
 #[rstest]
 fn the_real_archive_passes_the_preflight_on_this_host(
     serial_guard: ScenarioSerialGuard,
@@ -85,21 +167,10 @@ fn the_real_archive_passes_the_preflight_on_this_host(
             );
             let message = err.to_string();
             let debug = format!("{err:?}");
-            // The preflight is the first line of defence; if a loader failure
-            // from the server itself still reaches here, it is a missing
-            // library, which this test exists to catch, not a soft skip.
-            ensure!(
-                !debug.contains("error while loading shared libraries"),
-                "a staged binary could not load a shared library: {debug}"
-            );
-            // A failed first Setup keeps its own kind and notes an unavailable
-            // resolver; that note must fail this test, not match a skip.
-            ensure!(
-                !debug.contains("runtime preflight unavailable"),
-                "the preflight could not run: {debug}"
-            );
-            let reason = cluster_skip_message(&message, Some(&debug))
-                .ok_or_else(|| eyre!("bootstrap failed: {debug}"))?;
+            let reason = match classify_start_failure(&message, &debug) {
+                StartFailure::Fail(why) => return Err(eyre!("{why}: {debug}")),
+                StartFailure::Skip(reason) => reason,
+            };
             tracing::warn!("{reason}");
             return Ok(());
         }
