@@ -3,7 +3,11 @@
 All notable changes to this crate are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.8.0-beta1
+
+This is a prerelease. It is breaking for callers that build
+`TestBootstrapSettings` with a struct literal: set the new `runtime_preflight`
+field.
 
 ### Runtime-compatibility preflight
 
