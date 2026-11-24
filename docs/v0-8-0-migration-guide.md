@@ -3,9 +3,9 @@
 ## Who should read this
 
 Read this guide if you depend on `pg-embed-setup-unpriv` 0.7.0 and move to
-0.8.0. Two changes can stop a build: a caller that builds
+0.8.0. One change can stop a build: a caller that builds
 `TestBootstrapSettings` with a struct literal must set the new
-`runtime_preflight` field, and a project that pins `ortho_config` itself must
+`runtime_preflight` field. A project that pins `ortho_config` itself should
 move to 0.11. One change alters runtime behaviour: the bootstrap now checks the
 staged `PostgreSQL` binaries for unresolved shared libraries and fails with a
 typed error on a host that cannot run them.
@@ -15,7 +15,7 @@ typed error on a host that cannot run them.
 | Priority           | Area                                   | What to do                                                          |
 | ------------------ | -------------------------------------- | ------------------------------------------------------------------- |
 | Required if called | `TestBootstrapSettings` struct literal | Set `runtime_preflight` in every literal.                           |
-| Required if called | `ortho_config` pin                     | Move a project's own `ortho_config` dependency to 0.11.             |
+| Recommended        | `ortho_config` pin                     | Move a project's own `ortho_config` dependency to 0.11.             |
 | Review if enabled  | Runtime preflight on Linux             | Check that hosts and images carry the runtime packages, or opt out. |
 | Recommended        | Dependency version                     | Raise the requirement to `0.8.0`.                                   |
 
@@ -56,9 +56,9 @@ behaviour on purpose.
 ## 2. Move a pinned `ortho_config` to 0.11
 
 The crate requires `ortho_config` 0.11.0 (it was 0.9.0). A project that pins
-`ortho_config` itself must move to 0.11 so that one copy resolves. Otherwise
-Cargo keeps two copies, and the lockfile gains the extra packages that 0.11
-brings.
+`ortho_config` itself should move to 0.11 so that one copy resolves. An older
+pin does not always break the build: Cargo can keep two copies, and the
+lockfile then gains the extra packages that 0.11 brings.
 
 ### Before: `ortho_config` pin
 
@@ -130,15 +130,33 @@ public API is unchanged.
 
 ## Common errors and fixes
 
-- **Error:** ``error[E0063]: missing field `runtime_preflight` in initializer of
-  `TestBootstrapSettings` ``
-  - **Fix:** Add `runtime_preflight: RuntimePreflight::Check` to the literal
-    (task 1).
-- **Error:** `the staged PostgreSQL 18.6.0 (archive source: …) cannot run on
-  this host (…); unresolved shared libraries:`
-  - **Fix:** Install the named runtime package, run on a supported host image,
-    or point `with_releases_url` at an archive built for the host (task 3).
-- **Error:** `cannot tell whether the staged PostgreSQL 18.6.0 (archive source:
-  …) can run on this host (…)`
-  - **Fix:** Install `libc-bin`, or opt out with `RuntimePreflight::Skip`
-    (task 3).
+Compiler error for a struct literal without the new field:
+
+```text
+error[E0063]: missing field `runtime_preflight` in initializer of `TestBootstrapSettings`
+```
+
+- **Fix:** Add `runtime_preflight: RuntimePreflight::Check` to the literal
+  (task 1).
+
+Bootstrap error on a host that lacks a library. On Ubuntu 26.04.1 LTS with the
+`PostgreSQL` 18.6.0 archive, `<url>` is
+`https://github.com/theseus-rs/postgresql-binaries` and `<os>` is
+`Ubuntu 26.04.1 LTS`:
+
+```text
+the staged PostgreSQL 18.6.0 (archive source: <url>) cannot run on this host (<os>); unresolved shared libraries:
+  /var/tmp/pg-embed-1000/install/18.6.0/bin/postgres: libxml2.so.2
+```
+
+- **Fix:** Install the named runtime package, run on a supported host image, or
+  point `with_releases_url` at an archive built for the host (task 3).
+
+Bootstrap error on a host without a working resolver, which begins:
+
+```text
+cannot tell whether the staged PostgreSQL 18.6.0 (archive source: <url>) can run on this host
+```
+
+- **Fix:** Install `libc-bin`, or opt out with `RuntimePreflight::Skip` (task
+  3).
