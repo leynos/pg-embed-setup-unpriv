@@ -108,6 +108,9 @@ let config = TestBootstrapConfig::new(PgEnvCfg::default())
 
 The opt-out is a builder option and not an environment variable.
 
+The [v0.8.0 migration guide](v0-8-0-migration-guide.md) lists what changes for
+an existing consumer.
+
 ### Supported host images
 
 | Host image   | Status                                | Runtime packages                          |
