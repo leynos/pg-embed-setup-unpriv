@@ -9,6 +9,16 @@ This is a prerelease. It is breaking for callers that build
 `TestBootstrapSettings` with a struct literal: set the new `runtime_preflight`
 field.
 
+### Test-environment isolation
+
+- The `ScopedEnv` tests in `src/env/tests` now run each body in a child copy of
+  the test binary, so those tests no longer change the test process's
+  environment and need no `#[serial]` marker. Other tests that go through
+  `scoped_env` are unchanged. The cluster-fixture tests' snapshot guard and
+  leak probe now live in `tests/test_cluster_fixture/env_reset.rs`, and the
+  helper smoke test that mutated the process environment in every integration
+  binary is removed. No public API changes.
+
 ### Runtime-compatibility preflight
 
 - The bootstrap now checks the staged `postgres`, `initdb` and `pg_ctl`

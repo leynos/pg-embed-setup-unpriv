@@ -1,73 +1,13 @@
 //! Environment helpers for isolating test scenarios.
+//!
+//! These build the variable lists handed to a scoped environment; they never
+//! change the process environment themselves.
 
-use std::{
-    collections::HashSet,
-    ffi::{OsStr, OsString},
-};
+use std::ffi::{OsStr, OsString};
 
 use camino::Utf8Path;
 
 use super::env::ScopedEnvVars;
-
-/// Captures the process environment and restores it on drop.
-pub struct EnvIsolationGuard {
-    snapshot: Vec<(OsString, OsString)>,
-}
-
-impl EnvIsolationGuard {
-    /// Records the current process environment for later restoration.
-    #[must_use]
-    pub fn capture() -> Self {
-        Self {
-            snapshot: std::env::vars_os().collect(),
-        }
-    }
-}
-
-impl Drop for EnvIsolationGuard {
-    fn drop(&mut self) {
-        let saved_keys: HashSet<OsString> =
-            self.snapshot.iter().map(|(key, _)| key.clone()).collect();
-        let current_keys: Vec<OsString> = std::env::vars_os().map(|(key, _)| key).collect();
-        for key in current_keys {
-            if !saved_keys.contains(&key) {
-                unsafe { remove_env_var(&key) };
-            }
-        }
-        for (key, value) in &self.snapshot {
-            unsafe { set_env_var(key, value) };
-        }
-    }
-}
-
-/// Sets an environment variable whilst bypassing nightly's lint.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "serialized test-environment helper; migrate callers to an injected environment or a \
-              subprocess"
-)]
-pub unsafe fn set_env_var<K, V>(key: K, value: V)
-where
-    K: AsRef<OsStr>,
-    V: AsRef<OsStr>,
-{
-    // SAFETY: callers must serialize environment mutations; enforced at call sites.
-    unsafe { std::env::set_var(key, value) };
-}
-
-/// Removes an environment variable whilst bypassing nightly's lint.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "serialized test-environment helper; migrate callers to an injected environment or a \
-              subprocess"
-)]
-pub unsafe fn remove_env_var<K>(key: K)
-where
-    K: AsRef<OsStr>,
-{
-    // SAFETY: callers must serialize environment mutations; enforced at call sites.
-    unsafe { std::env::remove_var(key) };
-}
 
 /// Overrides an environment variable entry in `vars`.
 pub fn override_env_os(vars: &mut ScopedEnvVars, key: impl AsRef<OsStr>, value: Option<OsString>) {
@@ -85,21 +25,4 @@ pub fn override_env_os(vars: &mut ScopedEnvVars, key: impl AsRef<OsStr>, value: 
 /// Overrides a UTF-8 environment variable entry in `vars`.
 pub fn override_env_path(vars: &mut ScopedEnvVars, key: impl AsRef<OsStr>, value: &Utf8Path) {
     override_env_os(vars, key, Some(OsString::from(value.as_str())));
-}
-
-#[cfg(test)]
-mod tests {
-    //! Smoke tests for the environment isolation helpers.
-    use super::*;
-
-    #[test]
-    fn env_isolation_helpers_are_reachable() {
-        let guard = EnvIsolationGuard::capture();
-        drop(guard);
-
-        unsafe {
-            set_env_var("ENV_ISOLATION_SMOKE", "value");
-            remove_env_var("ENV_ISOLATION_SMOKE");
-        }
-    }
 }
