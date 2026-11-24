@@ -407,8 +407,14 @@ impl PgEnvCfg {
     /// use ortho_config::MapEnv;
     /// use pg_embedded_setup_unpriv::PgEnvCfg;
     ///
-    /// let env = MapEnv::new()
-    ///     .with_current_dir(std::env::temp_dir())
+    /// // A fresh directory is the working directory and every discovery
+    /// // location, so no file on the host takes part.
+    /// let dir = tempfile::tempdir().expect("create a temporary directory");
+    /// let env = ["XDG_CONFIG_HOME", "XDG_CONFIG_DIRS", "HOME"]
+    ///     .into_iter()
+    ///     .fold(MapEnv::new().with_current_dir(dir.path()), |env, name| {
+    ///         env.with_var(name, dir.path())
+    ///     })
     ///     .with_var("PG_PORT", "5544");
     /// let cfg = PgEnvCfg::load_with_env(Arc::new(env)).expect("load the configuration");
     /// assert_eq!(
