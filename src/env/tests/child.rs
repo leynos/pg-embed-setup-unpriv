@@ -72,7 +72,9 @@ mod tests {
     //! Checks, through `in_child_process` itself, that a panicking child, an
     //! `Err` result and a filter that matches no test each fail the parent.
     //!
-    //! Each failing case is `#[should_panic]` on the helper's own message. In
+    //! Each of the panic and `Err` cases is `#[should_panic]` on the helper's
+    //! own message; the unmatched-filter case calls `rerun_in_child` directly,
+    //! because the helper derives the test name from its own thread. In
     //! the child the body fails with a different message, so the child fails
     //! too, and the parent's `in_child_process` is what raises the expected
     //! panic; a helper that stopped failing the parent would make the parent
