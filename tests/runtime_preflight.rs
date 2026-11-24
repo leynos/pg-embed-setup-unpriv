@@ -115,6 +115,9 @@ fn classify_start_failure(message: &str, debug: &str) -> StartFailure {
     "libicu.so.74: cannot open shared object file: No such file or directory"
 )]
 #[case::loader_message_only("error while loading shared libraries: libz.so.1")]
+#[case::loader_prefix_with_missing_file(
+    "initdb: error while loading shared libraries: libz.so.1: No such file or directory"
+)]
 #[case::unavailable_resolver_with_missing_file(
     "initdb failed: No such file or directory; runtime preflight unavailable: ldd not found"
 )]

@@ -171,8 +171,12 @@ duplicate keys and says nothing.
 `coverage-main.yml`'s `coverage-upload`, main's only cache writer, on
 `ubicloud-standard-2-ubuntu-2404`. The `-ubuntu-2404` suffix pins the image, so
 the PostgreSQL lanes that run the runtime preflight see the same runtime
-libraries on every run (issue 436). `runs-on` selects the class with the
-runner-selection expression, shown here for `standard-2`:
+libraries on every run (issue 436). The pin matters because `ubuntu-latest` now
+resolves to Ubuntu 26.04, which lacks `libxml2.so.2`, a library the PostgreSQL
+archives need; see the
+[Ubuntu 26.04 known gap](users-guide.md#known-gap-ubuntu-2604). `runs-on`
+selects the class with the runner-selection expression, shown here for
+`standard-2`:
 
 ```yaml
 runs-on: >-
