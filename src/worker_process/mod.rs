@@ -212,10 +212,6 @@ struct WorkerProcess<'a> {
 impl<'a> WorkerProcess<'a> {
     const fn new(request: &'a WorkerRequest<'a>) -> Self { Self { request } }
 
-    #[expect(
-        clippy::cognitive_complexity,
-        reason = "worker orchestration includes span setup, timeout handling, and cleanup branches"
-    )]
     fn run(&self) -> BootstrapResult<()> {
         let span = info_span!(
             target: LOG_TARGET,
@@ -274,10 +270,6 @@ impl<'a> WorkerProcess<'a> {
         Ok(command)
     }
 
-    #[expect(
-        clippy::cognitive_complexity,
-        reason = "timeout handling needs explicit branching for diagnostics"
-    )]
     fn run_command_with_timeout(&self, command: &mut Command) -> BootstrapResult<Output> {
         let mut child = match command.spawn() {
             Ok(child) => child,

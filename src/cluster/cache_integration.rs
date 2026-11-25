@@ -64,10 +64,6 @@ fn set_exact_version(settings: &mut Settings, version: &str) {
 /// Copies binaries from cache and updates installation directory.
 ///
 /// Returns the target version directory on success, or `None` on failure.
-#[expect(
-    clippy::cognitive_complexity,
-    reason = "error handling branches for UTF-8 validation and copy operation"
-)]
 fn copy_cached_binaries(
     source_dir: &Utf8PathBuf,
     version: &str,
@@ -189,10 +185,6 @@ pub(super) fn try_use_binary_cache(
 /// Attempts to populate the cache with binaries from the installation directory.
 ///
 /// This is called after a successful setup to cache the downloaded binaries for future use.
-#[expect(
-    clippy::cognitive_complexity,
-    reason = "cache population flow with lock acquisition and double-check is readable as-is"
-)]
 pub(super) fn try_populate_binary_cache(config: &BinaryCacheConfig, settings: &Settings) {
     // Find the actual installed version directory
     let Some(installed_dir) = installation::resolve_installed_dir(settings) else {
