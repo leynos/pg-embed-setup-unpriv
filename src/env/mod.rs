@@ -100,10 +100,6 @@ impl ScopedEnv {
         Self::apply_owned_with_state(owned, enter_scope_std, exit_scope_std)
     }
 
-    #[expect(
-        clippy::cognitive_complexity,
-        reason = "span entry plus bounded summary handling add structured branching"
-    )]
     fn apply_owned_with_state(
         vars: Vec<(OsString, Option<OsString>)>,
         enter_scope: EnterScopeFn,

@@ -308,7 +308,15 @@ make lint
    (`leynos/whitaker#565`), and the pinned installer cannot prune the extra
    library. Key lints include `module_max_lines` (a 400-line cap per module) and
    `no_expect_outside_tests` (bans `.expect()`/`.unwrap()` outside test-only
-   code).
+   code). Cognitive complexity is not gated by Clippy, because Clippy's
+   `cognitive_complexity` scores code after macro expansion and counts
+   branching a macro generated. Whitaker's experimental
+   `macro_aware_cognitive_complexity` gates it at `max_complexity = 9`,
+   CodeScene's ceiling; `dylint.toml` opts in through the `experimental` key in
+   its `[whitaker]` table. An older local `whitaker_suite` may not include this
+   lint, in which case `make lint` passes without checking complexity: rerun
+   `whitaker-installer` when upgrading from an older suite. Fix a finding by
+   extracting named helpers, never by raising the threshold.
 
 Attribute macros are gone by the time a Dylint lint sees HIR, so
 `no_expect_outside_tests` cannot recognize a `#[serial]`-wrapped `#[test]`
