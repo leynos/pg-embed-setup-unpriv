@@ -140,10 +140,11 @@ clean: ## Remove build artefacts
 fetch: ## Download the locked dependencies once, so nested cargo runs offline
 	$(CARGO) fetch --locked
 
-# The two nextest passes of `test` each get a trybuild warm-up first: one run of
-# the `ui` binary under the pass's own feature set and build options, outside the
-# nextest timer. A plain `--no-run` would leave trybuild's own build tree
-# (`<target>/tests/trybuild`) empty. Keep each warm-up in step with its pass.
+# The first nextest pass of `test` gets a trybuild warm-up: one run of the `ui`
+# binary under the pass's own feature set and build options, outside the nextest
+# timer. A plain `--no-run` would leave trybuild's own build tree
+# (`<target>/tests/trybuild`) empty. Keep the warm-up in step with its pass. The
+# second pass never builds `ui` (it needs `cluster-unit-tests`), so it has none.
 #
 # The documentation examples run last, through `$(MAKE) test-doc`, not as a
 # prerequisite: a prerequisite that tests would run before the warm-up, and
