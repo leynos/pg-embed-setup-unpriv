@@ -140,9 +140,21 @@ clean: ## Remove build artefacts
 fetch: ## Download the locked dependencies once, so nested cargo runs offline
 	$(CARGO) fetch --locked
 
-test: fetch test-doc ## Run tests with warnings treated as errors
+# The two nextest passes of `test` each get a trybuild warm-up first: one run of
+# the `ui` binary under the pass's own feature set and build options, outside the
+# nextest timer. A plain `--no-run` would leave trybuild's own build tree
+# (`<target>/tests/trybuild`) empty. Keep each warm-up in step with its pass.
+#
+# The documentation examples run last, through `$(MAKE) test-doc`, not as a
+# prerequisite: a prerequisite that tests would run before the warm-up, and
+# prerequisites are unordered beside the recipe.
+test: fetch ## Run tests with warnings treated as errors
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) test --no-run --all-targets --all-features $(BUILD_JOBS)
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) test --test ui --all-features $(BUILD_JOBS)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) nextest run --all-targets --all-features $(BUILD_JOBS)
+	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) test --workspace --test ui --no-default-features --features dev-worker $(BUILD_JOBS)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings $(STANDARD_RUSTFLAGS)" $(CARGO) nextest run --tests --workspace --no-default-features --features dev-worker $(BUILD_JOBS)
+	$(MAKE) test-doc
 
 # nextest cannot run documentation examples, so `make test` above never
 # compiled one: every `# Examples` block in this crate was unchecked prose
