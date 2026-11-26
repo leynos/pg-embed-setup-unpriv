@@ -84,6 +84,28 @@ for many minutes. The fix is to fetch once, before any test starts:
 Prepare a direct or offline run with `cargo fetch --locked` first. The estate
 lint rule `nested-cargo-offline-tests` checks both.
 
+## Warming the trybuild fixtures before the timed passes
+
+The `ui` test compiles its trybuild fixtures in a generated project under
+`target/tests/trybuild`. Neither `cargo test --no-run` nor nextest's own build
+fills that tree, so on a cold target the timed `ui` test paid for the fixture
+builds inside its slow-timeout allowance. `make test` pays for them first,
+outside nextest's timer: it compiles the test binaries with
+`cargo test --no-run --all-targets --all-features`, then runs the `ui` binary
+once under the first pass's feature set (`--all-features`). The second pass
+(`--no-default-features --features dev-worker`) never builds `ui`, which
+requires the `cluster-unit-tests` feature, so it needs no warm-up. The warm-up
+shares its pass's feature set and build options, so keep the two in step when
+the pass changes. The documentation examples run last, through
+`$(MAKE) test-doc`, because a `test` prerequisite that runs tests would run
+before the warm-up.
+
+The estate rule `nested-cargo-cold-build` (NC-010) reads this arrangement. It
+reports an indeterminate EN-001 for the two passes: the manifest names its test
+targets (`[[test]]`), so the reader cannot yet tell which binary compiles the
+fixtures, and it does not read `required-features`. The warm-up is real, and
+the findings record reader limits, not a cold build.
+
 ## Feature coverage in CI
 
 The default feature set keeps Diesel optional for consumers, while `make test`
