@@ -104,6 +104,8 @@ jobs:
         uses: leynos/shared-actions/.github/actions/install-whitaker@0eabb6bc07148981de5da395e30cd78d83f5c7c2
         with:
           installer-version: ${{ env.WHITAKER_INSTALLER_VERSION }}
+      - name: Install the YAML lint tools
+        uses: leynos/shared-actions/.github/actions/install-yaml-lint@a108423efa7fb83565089449f2647d34286a48a4
       - name: Lint
         if: ${{ matrix.privilege == 'unprivileged' }}
         run: make lint
