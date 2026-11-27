@@ -12,9 +12,10 @@ The scan is lexical, so a reference in a comment counts. A false
 positive is a prompt to review the binary and, if it is genuinely
 outside the tier, add it to ``CHILD_CLUSTER_EXCEPTIONS`` with a reason.
 
-The reading itself lives in ``cluster_sources.py``: ``load_test_sources``
-owns every filesystem call and reports a failure as ``SourceLoadError``,
-and ``spawning_cluster_binaries`` is a pure function of the loaded text.
+The reading itself is split across two modules: ``cluster_sources.py`` owns
+every filesystem call and reports a failure as ``SourceLoadError``, and
+``cluster_tier_inventory.py`` classifies the text that reading yields.
+``spawning_cluster_binaries`` is a pure function of the loaded text, and
 ``scan_spawning_cluster_binaries`` is the one entry point that does both.
 
 Timeout-tier membership is deliberately separate from membership in the
@@ -30,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from cluster_sources import scan_spawning_cluster_binaries
+from cluster_tier_inventory import scan_spawning_cluster_binaries
 from test_nextest_tier_contract import CLUSTER_BINARIES, SERIAL_BINARIES
 
 #: Binaries that spawn children and reference a cluster API, but are not
